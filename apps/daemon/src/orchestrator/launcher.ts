@@ -9,11 +9,20 @@ function resolveDaemonMainPath(): string {
   return fromFileUrl(new URL("../main.ts", import.meta.url));
 }
 
+type DenoCommandOptions = ConstructorParameters<typeof Deno.Command>[1];
+type CommandLike = { spawn(): { pid: number } };
+type DenoCommandFactory = (
+  command: string,
+  options: DenoCommandOptions,
+) => CommandLike;
+
 export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
   constructor(
     private readonly runtime: DaemonCliRuntime,
     private readonly denoExecPath: string = Deno.execPath(),
     private readonly daemonMainPath: string = resolveDaemonMainPath(),
+    private readonly commandFactory: DenoCommandFactory = (command, options) =>
+      new Deno.Command(command, options),
   ) {}
 
   launchDetached(): Promise<number> {
@@ -24,7 +33,7 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
       dirname(this.runtime.controlPath),
     ]);
 
-    const command = new Deno.Command(this.denoExecPath, {
+    const command = this.commandFactory(this.denoExecPath, {
       args: [
         "run",
         "--allow-read",

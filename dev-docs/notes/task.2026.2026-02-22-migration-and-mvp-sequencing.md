@@ -145,6 +145,12 @@ Recommended for MVP:
    - File rename may desync slug and filename; acceptable for MVP.
    - Runtime/internal IDs continue to default to `crypto.randomUUID()` unless explicitly overridden.
 
+## Known MVP Limitation (Accepted)
+
+1. `kato start` writes `daemonRunning: true` optimistically immediately after subprocess launch.
+2. If subprocess startup fails quickly, status may show running until stale-heartbeat detection flips state (~30s default).
+3. This is accepted for MVP and should be revisited with explicit startup acknowledgment/handshake after Step 3.
+
 ## Out of Scope (MVP)
 
 1. Native service-manager integration (`systemd`, launchd, Windows Service).

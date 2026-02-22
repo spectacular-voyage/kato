@@ -637,3 +637,33 @@ Locked decisions:
 
 Step 3 is now unblocked with explicit contracts.  
 1. If you want, I’ll start Step 3 implementation immediately with these contracts as the source of truth.
+
+# User_2026-02-22_1304_31
+
+Yes, implement step 3
+
+# User_2026-02-22_1305_57
+
+Claude had some comments on 2.6:
+
+**1. Daemon subprocess doesn't receive configured paths — real gap**
+
+`runDaemonRuntimeLoop()` ([daemon_runtime.ts](apps/daemon/src/orchestrator/daemon_runtime.ts)) still calls `resolveDefaultStatusPath()` / `resolveDefaultControlPath()` directly, which reads from env vars. The spawned `__daemon-run` process never receives the `statusPath` / `controlPath` from `RuntimeConfig`. For MVP with default paths this is invisible, but the moment a user runs `kato init` with a non-default `runtimeDir`, the daemon process will read/write the wrong files.
+
+The launcher needs to pass the resolved config paths — either as env vars or CLI args to the `__daemon-run` subprocess.
+
+**2. Silent fallback on missing config for non-`start`/non-`init` commands**
+
+[router.ts:177-193](apps/daemon/src/cli/router.ts#L177): if `config.json` is not found and the command is `status`, `stop`, `export`, or `clean`, the code silently falls through to `defaultRuntimeConfig`. `kato status` will show "daemon not running" (plausible), but `kato export` or `kato clean` will silently operate against default paths the user may not intend. A `NotFound` on config for these commands should probably output something like "no runtime config found — run `kato init` first" and exit 1, rather than silently proceeding.
+
+**3. Auto-init output on `kato start`**
+
+The test asserts `"started in background"` but nothing asserts that auto-init is communicated to the user. If `kato start` silently creates config and then launches, the user has no feedback that init happened. Should print something like "initialized runtime config at .kato/runtime/config.json" before the start message.
+
+**4. Optimistic status write race window (minor, known)**
+
+[start.ts:18-26](apps/daemon/src/cli/commands/start.ts#L18): CLI writes `daemonRunning: true` + `launchedPid` before the daemon process has confirmed startup. If the daemon crashes immediately (bad permissions, port conflict, etc.), `status.json` shows a running daemon until the stale threshold (30s). Acceptable for MVP but worth noting in the task doc as a known limitation.
+
+# gpt-5.3-codex_2026-02-22_1306_05
+
+I’ll address these 2.6 review gaps first before starting Step 3: I’m going to inspect the current launcher/router/runtime code paths, patch behavior for config-missing and auto-init messaging, and add tests plus a note for the known start race limitation.

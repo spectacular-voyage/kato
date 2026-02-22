@@ -175,6 +175,7 @@ export async function runDaemonCli(
   }
 
   let runtimeConfig = defaultRuntimeConfig;
+  let autoInitializedConfigPath: string | undefined;
   if (intent.command.name !== "init") {
     try {
       runtimeConfig = await configStore.load();
@@ -185,6 +186,14 @@ export async function runDaemonCli(
             defaultRuntimeConfig,
           );
           runtimeConfig = initialized.config;
+          if (initialized.created) {
+            autoInitializedConfigPath = initialized.path;
+          }
+        } else {
+          runtime.writeStderr(
+            `Runtime config not found at ${runtime.configPath}. Run \`kato init\` first.\n`,
+          );
+          return 1;
         }
       } else {
         throw error;
@@ -224,6 +233,12 @@ export async function runDaemonCli(
     operationalLogger,
     auditLogger,
   };
+
+  if (intent.command.name === "start" && autoInitializedConfigPath) {
+    runtime.writeStdout(
+      `initialized runtime config at ${autoInitializedConfigPath}\n`,
+    );
+  }
 
   try {
     switch (intent.command.name) {
