@@ -5,17 +5,7 @@ export async function runStatusCommand(
   ctx: DaemonCliCommandContext,
   asJson: boolean,
 ): Promise<void> {
-  const state = await ctx.stateStore.load();
-  const snapshot: DaemonStatusSnapshot = {
-    generatedAt: ctx.runtime.now().toISOString(),
-    daemonRunning: state.daemonRunning,
-    ...(state.daemonPid !== undefined ? { daemonPid: state.daemonPid } : {}),
-    providers: [],
-    recordings: {
-      activeRecordings: 0,
-      destinations: 0,
-    },
-  };
+  const snapshot: DaemonStatusSnapshot = await ctx.statusStore.load();
 
   await ctx.operationalLogger.info(
     "daemon.status",
@@ -24,6 +14,7 @@ export async function runStatusCommand(
       asJson,
       daemonRunning: snapshot.daemonRunning,
       daemonPid: snapshot.daemonPid,
+      statusPath: ctx.runtime.statusPath,
     },
   );
   await ctx.auditLogger.command("status", { asJson });
@@ -39,6 +30,8 @@ export async function runStatusCommand(
 
   ctx.runtime.writeStdout(`daemon: ${daemonText}\n`);
   ctx.runtime.writeStdout(`generatedAt: ${snapshot.generatedAt}\n`);
-  ctx.runtime.writeStdout("providers: 0\n");
-  ctx.runtime.writeStdout("recordings: 0\n");
+  ctx.runtime.writeStdout(`providers: ${snapshot.providers.length}\n`);
+  ctx.runtime.writeStdout(
+    `recordings: ${snapshot.recordings.activeRecordings} active (${snapshot.recordings.destinations} destinations)\n`,
+  );
 }

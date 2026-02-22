@@ -2,7 +2,7 @@
 id: 5z1m4pgm4tlr95vpyw0z8ge
 title: 2026 02 22 migration and mvp sequencing
 desc: ''
-updated: 1771782826058
+updated: 1771787830205
 created: 1771795200000
 ---
 
@@ -25,6 +25,20 @@ Sequence migration and MVP implementation so foundational contracts and dependen
 4. Establish telemetry contract (logs + traces + event attributes).
 5. Implement OpenFeature baseline in MVP (evaluation contract + local provider defaults).
 6. Update documentation and, if needed, security-baseline exceptions.
+
+## Execution Checklist
+
+- [x] CLI parser/router scaffold with strict grammar (`start`, `stop`, `status`, `export`, `clean`).
+- [x] Logging baseline scaffold (`StructuredLogger` + `AuditLogger`, split channels).
+- [x] File watching baseline (`Deno.watchFs` debounce/settle utility).
+- [x] Step 1: status/control control-plane files + CLI wiring to control-plane stores.
+- [ ] Step 2: command detection and fail-closed path-policy decision gate.
+- [ ] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
+- [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
+- [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:
+  - [[dev.general-guidance]]
+  - [[dev.codebase-overview]]
+  - [[dev.decision-log]]
 
 ## Highest-Impact Opportunities (from `stenobot` Audit)
 

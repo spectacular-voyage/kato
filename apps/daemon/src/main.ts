@@ -1,16 +1,9 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
 import { runDaemonCli } from "./cli/mod.ts";
+import { createDefaultStatusSnapshot } from "./orchestrator/mod.ts";
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
-  return {
-    generatedAt: new Date().toISOString(),
-    daemonRunning: false,
-    providers: [],
-    recordings: {
-      activeRecordings: 0,
-      destinations: 0,
-    },
-  };
+  return createDefaultStatusSnapshot(new Date());
 }
 
 export function describeDaemonEntryPoint(): string {

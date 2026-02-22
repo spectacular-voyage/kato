@@ -356,3 +356,40 @@ That's okay on Gemini, unless you have burning thoughts you need to get in there
 # gpt-5.3-codex_2026-02-22_1105_14
 
 Proceeding with Step 1 now: I’ll add a minimal orchestrator control-plane using atomic `status.json` plus a `control` request queue file, then wire `kato status` to read that real snapshot instead of scaffold state. I’m inspecting the current daemon/CLI code first so the integration is clean.
+
+# User_2026-02-22_1108_59
+
+Should we add `[ ]`-style items in [task.2026.2026-02-22-migration-and-mvp-sequencing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md) so we can keep track of what's done and what's left?
+
+# gpt-5.3-codex_2026-02-22_1109_06
+
+Yes, that’s the right move. I’ll add a compact checklist section to `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md` with `done / in-progress / next` items so we can track Step 1 and upcoming phases cleanly while I finish this implementation pass.
+
+# gpt-5.3-codex_2026-02-22_1114_09
+
+Yes, and I already added it.
+
+- Checklist section added in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:29`.
+- Step 1 is now marked complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:34`.
+
+Step 1 implementation is also in place:
+
+- New control-plane stores (atomic `status.json` + control request queue file): `apps/daemon/src/orchestrator/control_plane.ts:1`
+- Orchestrator exports: `apps/daemon/src/orchestrator/mod.ts:1`
+- CLI runtime wired to status/control paths and stores: `apps/daemon/src/cli/router.ts:27`
+- `status` now reads real snapshots: `apps/daemon/src/cli/commands/status.ts:8`
+- `start`/`stop`/`export`/`clean` now enqueue control requests:  
+  `apps/daemon/src/cli/commands/start.ts:6`  
+  `apps/daemon/src/cli/commands/stop.ts:6`  
+  `apps/daemon/src/cli/commands/export.ts:8`  
+  `apps/daemon/src/cli/commands/clean.ts:14`
+- Legacy scaffold state store removed: `apps/daemon/src/cli/state_store.ts`
+- Tests updated/added: `tests/daemon-cli_test.ts:1`, `tests/daemon-control-plane_test.ts:1`
+- Test task updated for file-backed tests: `deno.json:12`
+
+Validation status:
+
+- `deno task test` passed (36/36).
+- `deno task ci` passed (fmt/lint/check/test all green).
+
+1. Next highest-value move is Step 2: implement the fail-closed command/path policy gate and wire policy decision audit events.

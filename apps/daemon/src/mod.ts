@@ -8,16 +8,27 @@ export {
   type DaemonCliCommandName,
   type DaemonCliIntent,
   type DaemonCliRuntime,
-  type DaemonControlState,
-  DaemonControlStateStore,
-  type DaemonControlStateStoreLike,
   getCommandUsage,
   getGlobalUsage,
   parseDaemonCliArgs,
-  resolveDefaultStatePath,
   runDaemonCli,
   type RunDaemonCliOptions,
 } from "./cli/mod.ts";
+export type {
+  DaemonControlCommand,
+  DaemonControlRequest,
+  DaemonControlRequestDraft,
+  DaemonControlRequestStoreLike,
+  DaemonStatusSnapshotStoreLike,
+} from "./orchestrator/mod.ts";
+export {
+  createDefaultStatusSnapshot,
+  DaemonControlRequestFileStore,
+  DaemonStatusSnapshotFileStore,
+  resolveDefaultControlPath,
+  resolveDefaultRuntimeDir,
+  resolveDefaultStatusPath,
+} from "./orchestrator/mod.ts";
 export {
   AuditLogger,
   JsonLineFileSink,

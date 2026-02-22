@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1771730298605
+updated: 1771787610807
 created: 1771724621833
 ---
 
@@ -12,11 +12,13 @@ This note defines day-to-day developer guidance for Kato.
 
 IMPORTANT: This project must use modern Deno best practices and, whenevre possible, Deno-supporting libraries. LLMs often try to use Node libraries and conventions, so watch out for that!
 
-[[dev.security-baseline]] is the normative security contract.
 
 ## Working Rules
 
-- Documentation must be continuously verified and updated
+- Documentation must be continuously verified and updated, especially:
+  - this file [[dev.general-guidance]]
+  - [[dev.codebase-overview]]
+  - [[dev.decision-log]]
 - Keep changes small, reviewable, and test-backed.
 - Run `deno task ci` before opening or updating a PR.
 - Treat `stenobot/` as a reference snapshot of the now-obsolete POC; don't change it
@@ -26,6 +28,7 @@ IMPORTANT: This project must use modern Deno best practices and, whenevre possib
   - `apps/cloud` for centralized config/aggregation services
   - `shared/src` for contracts and types used by 2+ apps
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
+- [[dev.security-baseline]] is the normative security contract.
 
 ## Development Loop
 

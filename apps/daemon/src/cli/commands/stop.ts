@@ -3,29 +3,27 @@ import type { DaemonCliCommandContext } from "./context.ts";
 export async function runStopCommand(
   ctx: DaemonCliCommandContext,
 ): Promise<void> {
-  const state = await ctx.stateStore.load();
-  if (!state.daemonRunning) {
-    ctx.runtime.writeStdout(
-      "kato daemon is not currently marked as running.\n",
-    );
-    return;
-  }
-
-  const nowIso = ctx.runtime.now().toISOString();
-  await ctx.stateStore.save({
-    daemonRunning: false,
-    updatedAt: nowIso,
+  const request = await ctx.controlStore.enqueue({
+    command: "stop",
+    payload: {
+      requestedByPid: ctx.runtime.pid,
+    },
   });
 
   await ctx.operationalLogger.info(
     "daemon.stop",
-    "Daemon stop requested from CLI",
+    "Daemon stop enqueued from CLI",
     {
-      previousPid: state.daemonPid,
-      statePath: ctx.runtime.statePath,
+      requestId: request.requestId,
+      requestedByPid: ctx.runtime.pid,
+      controlPath: ctx.runtime.controlPath,
     },
   );
-  await ctx.auditLogger.command("stop");
+  await ctx.auditLogger.command("stop", {
+    requestId: request.requestId,
+  });
 
-  ctx.runtime.writeStdout("kato daemon marked as stopped.\n");
+  ctx.runtime.writeStdout(
+    `kato daemon stop request queued (requestId: ${request.requestId}).\n`,
+  );
 }

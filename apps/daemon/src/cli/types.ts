@@ -23,7 +23,9 @@ export type DaemonCliIntent =
   | { kind: "command"; command: DaemonCliCommand };
 
 export interface DaemonCliRuntime {
-  statePath: string;
+  runtimeDir: string;
+  statusPath: string;
+  controlPath: string;
   now: () => Date;
   pid: number;
   writeStdout: (text: string) => void;

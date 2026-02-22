@@ -1,13 +1,16 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import type { DaemonStatusSnapshot } from "@kato/shared";
 import {
   CliUsageError,
-  type DaemonControlState,
-  type DaemonControlStateStoreLike,
+  type DaemonControlRequest,
+  type DaemonControlRequestDraft,
+  type DaemonControlRequestStoreLike,
+  type DaemonStatusSnapshotStoreLike,
   parseDaemonCliArgs,
   runDaemonCli,
 } from "../apps/daemon/src/mod.ts";
 
-function makeRuntimeHarness(statePath: string) {
+function makeRuntimeHarness(runtimeDir: string) {
   const stdout: string[] = [];
   const stderr: string[] = [];
 
@@ -15,7 +18,9 @@ function makeRuntimeHarness(statePath: string) {
     stdout,
     stderr,
     runtime: {
-      statePath,
+      runtimeDir,
+      statusPath: `${runtimeDir}/status.json`,
+      controlPath: `${runtimeDir}/control.json`,
       now: () => new Date("2026-02-22T10:00:00.000Z"),
       pid: 4242,
       writeStdout: (text: string) => {
@@ -28,20 +33,73 @@ function makeRuntimeHarness(statePath: string) {
   };
 }
 
-function makeInMemoryStateStore(
-  initial: DaemonControlState = {
+function makeInMemoryStatusStore(
+  initial: DaemonStatusSnapshot = {
+    generatedAt: "2026-02-22T10:00:00.000Z",
     daemonRunning: false,
-    updatedAt: "2026-02-22T10:00:00.000Z",
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
   },
-): DaemonControlStateStoreLike {
-  let state = { ...initial };
+): DaemonStatusSnapshotStoreLike {
+  let state = {
+    ...initial,
+    providers: [...initial.providers],
+    recordings: { ...initial.recordings },
+  };
   return {
     load() {
-      return Promise.resolve({ ...state });
+      return Promise.resolve({
+        ...state,
+        providers: [...state.providers],
+        recordings: { ...state.recordings },
+      });
     },
-    save(next: DaemonControlState) {
-      state = { ...next };
+    save(next: DaemonStatusSnapshot) {
+      state = {
+        ...next,
+        providers: [...next.providers],
+        recordings: { ...next.recordings },
+      };
       return Promise.resolve();
+    },
+  };
+}
+
+function makeInMemoryControlStore(): {
+  requests: DaemonControlRequest[];
+  store: DaemonControlRequestStoreLike;
+} {
+  const requests: DaemonControlRequest[] = [];
+  let requestCounter = 0;
+
+  return {
+    requests,
+    store: {
+      list() {
+        return Promise.resolve(
+          requests.map((request) => ({
+            ...request,
+            ...(request.payload ? { payload: { ...request.payload } } : {}),
+          })),
+        );
+      },
+      enqueue(draft: DaemonControlRequestDraft) {
+        requestCounter += 1;
+        const next: DaemonControlRequest = {
+          requestId: `req-${requestCounter}`,
+          requestedAt: "2026-02-22T10:00:00.000Z",
+          command: draft.command,
+          ...(draft.payload ? { payload: { ...draft.payload } } : {}),
+        };
+        requests.push(next);
+        return Promise.resolve({
+          ...next,
+          ...(next.payload ? { payload: { ...next.payload } } : {}),
+        });
+      },
     },
   };
 }
@@ -85,46 +143,104 @@ Deno.test("cli parser accepts status --json", () => {
   assertEquals(parsed.command.asJson, true);
 });
 
-Deno.test("runDaemonCli start/status/stop round-trip", async () => {
-  const stateStore = makeInMemoryStateStore();
-  const statePath = ".kato/test-state.json";
+Deno.test("runDaemonCli uses control queue and status snapshot stores", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore({
+    generatedAt: "2026-02-22T10:05:00.000Z",
+    daemonRunning: true,
+    daemonPid: 31337,
+    providers: [],
+    recordings: {
+      activeRecordings: 3,
+      destinations: 2,
+    },
+  });
+  const runtimeDir = ".kato/test-runtime";
 
-  const startHarness = makeRuntimeHarness(statePath);
+  const startHarness = makeRuntimeHarness(runtimeDir);
   const startCode = await runDaemonCli(["start"], {
     runtime: startHarness.runtime,
-    stateStore,
+    statusStore,
+    controlStore: controlStore.store,
   });
   assertEquals(startCode, 0);
-  assertStringIncludes(startHarness.stdout.join(""), "marked as running");
+  assertStringIncludes(startHarness.stdout.join(""), "start request queued");
+  assertEquals(controlStore.requests[0]?.command, "start");
 
-  const statusHarness = makeRuntimeHarness(statePath);
+  const statusHarness = makeRuntimeHarness(runtimeDir);
   const statusCode = await runDaemonCli(["status", "--json"], {
     runtime: statusHarness.runtime,
-    stateStore,
+    statusStore,
+    controlStore: controlStore.store,
   });
   assertEquals(statusCode, 0);
 
   const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
     daemonRunning: boolean;
     daemonPid?: number;
+    recordings: { activeRecordings: number };
   };
   assertEquals(statusPayload.daemonRunning, true);
-  assertEquals(statusPayload.daemonPid, 4242);
+  assertEquals(statusPayload.daemonPid, 31337);
+  assertEquals(statusPayload.recordings.activeRecordings, 3);
 
-  const stopHarness = makeRuntimeHarness(statePath);
+  const stopHarness = makeRuntimeHarness(runtimeDir);
   const stopCode = await runDaemonCli(["stop"], {
     runtime: stopHarness.runtime,
-    stateStore,
+    statusStore,
+    controlStore: controlStore.store,
   });
   assertEquals(stopCode, 0);
-  assertStringIncludes(stopHarness.stdout.join(""), "marked as stopped");
+  assertStringIncludes(stopHarness.stdout.join(""), "stop request queued");
+  assertEquals(controlStore.requests[1]?.command, "stop");
+});
+
+Deno.test("runDaemonCli queues export and clean one-off operations", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore();
+  const runtimeDir = ".kato/test-runtime";
+
+  const exportHarness = makeRuntimeHarness(runtimeDir);
+  const exportCode = await runDaemonCli(
+    ["export", "session-42", "--output", "exports/session-42.md"],
+    {
+      runtime: exportHarness.runtime,
+      statusStore,
+      controlStore: controlStore.store,
+    },
+  );
+  assertEquals(exportCode, 0);
+  assertStringIncludes(exportHarness.stdout.join(""), "export request queued");
+  assertEquals(controlStore.requests[0]?.command, "export");
+  assertEquals(
+    controlStore.requests[0]?.payload?.["sessionId"],
+    "session-42",
+  );
+
+  const cleanHarness = makeRuntimeHarness(runtimeDir);
+  const cleanCode = await runDaemonCli([
+    "clean",
+    "--recordings",
+    "14",
+    "--dry-run",
+  ], {
+    runtime: cleanHarness.runtime,
+    statusStore,
+    controlStore: controlStore.store,
+  });
+  assertEquals(cleanCode, 0);
+  assertStringIncludes(cleanHarness.stdout.join(""), "clean request queued");
+  assertEquals(controlStore.requests[1]?.command, "clean");
+  assertEquals(controlStore.requests[1]?.payload?.["recordingsDays"], 14);
+  assertEquals(controlStore.requests[1]?.payload?.["dryRun"], true);
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {
-  const harness = makeRuntimeHarness(".kato/test-state.json");
+  const harness = makeRuntimeHarness(".kato/test-runtime");
   const code = await runDaemonCli(["start", "--bad-flag"], {
     runtime: harness.runtime,
-    stateStore: makeInMemoryStateStore(),
+    statusStore: makeInMemoryStatusStore(),
+    controlStore: makeInMemoryControlStore().store,
   });
 
   assertEquals(code, 2);

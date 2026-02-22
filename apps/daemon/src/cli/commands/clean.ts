@@ -11,17 +11,35 @@ export async function runCleanCommand(
   ctx: DaemonCliCommandContext,
   options: CleanCommandOptions,
 ): Promise<void> {
+  const request = await ctx.controlStore.enqueue({
+    command: "clean",
+    payload: {
+      all: options.all,
+      dryRun: options.dryRun,
+      ...(options.recordingsDays !== undefined
+        ? { recordingsDays: options.recordingsDays }
+        : {}),
+      ...(options.sessionsDays !== undefined
+        ? { sessionsDays: options.sessionsDays }
+        : {}),
+      requestedByPid: ctx.runtime.pid,
+    },
+  });
+
   await ctx.operationalLogger.info(
     "clean.requested",
-    "Cleanup requested from CLI",
+    "Cleanup enqueued from CLI",
     {
+      requestId: request.requestId,
       all: options.all,
       dryRun: options.dryRun,
       recordingsDays: options.recordingsDays,
       sessionsDays: options.sessionsDays,
+      controlPath: ctx.runtime.controlPath,
     },
   );
   await ctx.auditLogger.command("clean", {
+    requestId: request.requestId,
     all: options.all,
     dryRun: options.dryRun,
     recordingsDays: options.recordingsDays,
@@ -29,7 +47,7 @@ export async function runCleanCommand(
   });
 
   const mode = options.dryRun ? "dry-run" : "execute";
-  const parts: string[] = [`clean mode=${mode}`];
+  const parts: string[] = [`clean request queued mode=${mode}`];
   if (options.all) {
     parts.push("all=true");
   }
@@ -39,6 +57,7 @@ export async function runCleanCommand(
   if (options.sessionsDays !== undefined) {
     parts.push(`sessions=${options.sessionsDays}d`);
   }
+  parts.push(`requestId=${request.requestId}`);
 
-  ctx.runtime.writeStdout(`${parts.join(" ")} (scaffold mode)\n`);
+  ctx.runtime.writeStdout(`${parts.join(" ")}\n`);
 }

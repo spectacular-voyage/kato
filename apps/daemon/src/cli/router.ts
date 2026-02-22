@@ -3,10 +3,14 @@ import { parseDaemonCliArgs } from "./parser.ts";
 import { getCommandUsage, getGlobalUsage } from "./usage.ts";
 import type { DaemonCliRuntime } from "./types.ts";
 import {
-  DaemonControlStateStore,
-  type DaemonControlStateStoreLike,
-  resolveDefaultStatePath,
-} from "./state_store.ts";
+  DaemonControlRequestFileStore,
+  type DaemonControlRequestStoreLike,
+  DaemonStatusSnapshotFileStore,
+  type DaemonStatusSnapshotStoreLike,
+  resolveDefaultControlPath,
+  resolveDefaultRuntimeDir,
+  resolveDefaultStatusPath,
+} from "../orchestrator/mod.ts";
 import {
   AuditLogger,
   NoopSink,
@@ -22,7 +26,8 @@ import {
 
 export interface RunDaemonCliOptions {
   runtime?: Partial<DaemonCliRuntime>;
-  stateStore?: DaemonControlStateStoreLike;
+  statusStore?: DaemonStatusSnapshotStoreLike;
+  controlStore?: DaemonControlRequestStoreLike;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -36,8 +41,11 @@ function writeToStream(
 }
 
 export function createDefaultCliRuntime(): DaemonCliRuntime {
+  const runtimeDir = resolveDefaultRuntimeDir();
   return {
-    statePath: resolveDefaultStatePath(),
+    runtimeDir,
+    statusPath: resolveDefaultStatusPath(runtimeDir),
+    controlPath: resolveDefaultControlPath(runtimeDir),
     now: () => new Date(),
     pid: Deno.pid,
     writeStdout: (text) => writeToStream(Deno.stdout, text),
@@ -67,11 +75,10 @@ export async function runDaemonCli(
   options: RunDaemonCliOptions = {},
 ): Promise<number> {
   const runtime = buildRuntime(options.runtime);
-  const stateStore = options.stateStore ??
-    new DaemonControlStateStore(
-      runtime.statePath,
-      runtime.now,
-    );
+  const statusStore = options.statusStore ??
+    new DaemonStatusSnapshotFileStore(runtime.statusPath, runtime.now);
+  const controlStore = options.controlStore ??
+    new DaemonControlRequestFileStore(runtime.controlPath, runtime.now);
 
   const operationalLogger = options.operationalLogger ??
     new StructuredLogger([new NoopSink()], {
@@ -108,7 +115,8 @@ export async function runDaemonCli(
 
   const commandContext = {
     runtime,
-    stateStore,
+    statusStore,
+    controlStore,
     operationalLogger,
     auditLogger,
   };
