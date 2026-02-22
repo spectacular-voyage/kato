@@ -571,3 +571,69 @@ Current repo state:
 - Other Step 2.6 files already match current HEAD (`b0f6c84`).
 
 1. Proceed to Step 3 now (writer pipeline, starting with rotation ordering + dedupe append guard)?
+
+# User_2026-02-22_1302_02
+
+Claude suggests three things to decide before Codex starts Step 3 :
+
+**1. Recording identity model**
+
+`RecordingStatus` has `activeRecordings: number` and `destinations: number` counts, but no IDs. The `export` command takes a `sessionId` but the writer pipeline in `ipc.ts` uses a `recordingId`. How are recordings keyed? Options:
+
+- **Provider session ID = recording ID** (1:1, simplest)
+- **`::record` command starts a recording with a generated ID**, bound to a (sessionId, destinationPath) pair
+- **Something else**
+
+This determines how rotation works and how the orchestrator runtime will dispatch `export` requests.
+
+**2. `::record` vs `::capture` behavioral contract in the writer**
+
+From stenobot's exporter, the distinction is:
+- `::record path` → open/maintain an ongoing stream writer to `path` (append as new messages arrive)
+- `::capture path` → one-shot dump of all messages seen so far to `path`, then continue with existing record target
+
+The writer needs to handle these differently. Should Kato preserve this distinction, or simplify it?
+
+**3. Frontmatter ID format**
+
+Stenobot uses `nanoid(10)` (compact, human-friendly, appears in user-facing `.md` files used by Dendron). Library substitutions say prefer `crypto.randomUUID()` unless compact IDs are explicitly required. Frontmatter IDs *are* a case where compact matters (36-char UUIDs are ugly in Dendron). Recommend: allow a small local `nanoid`-style utility (just alphanumeric random, no dependency needed), or explicitly accept UUIDs.
+
+---
+
+**Everything else in Step 3 can proceed with clear defaults:**
+- Output format: Markdown (same as stenobot, no change)
+- Dedupe tail guard: carry forward the `existingTrimmed.endsWith(content)` check from stenobot
+- Date formatting: native `Intl` (already decided in library substitutions, replacing `date-fns-tz`)
+- Speaker names / tool call / thinking config: defer to Step 4 (config/OpenFeature boundary)
+
+Once you answer those three, Step 3 is unblocked.
+
+---
+
+I would suggest not using the provider session ID for the recording ID because a single session might have more than one recordsing.
+
+Kato needs to preserve the record vs capture distinction
+
+For the frontmatter IDs, I suggest a brief slugification of the session name/filename with some random uniqueness plopped on the end. This means that renaming notes risks inconsistency between id and filename, but I think that's okay.
+
+# gpt-5.3-codex_2026-02-22_1302_23
+
+I agree with your direction. I’m going to lock these three decisions into the task/decision docs so Step 3 is unblocked with explicit defaults, then I’ll summarize the exact contract choices we’ll implement.
+
+# gpt-5.3-codex_2026-02-22_1303_27
+
+Agreed. Your three choices are the right MVP defaults, and I’ve now locked them in docs.
+
+- Step checklist updated with a new pre-decision gate in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:45`.
+- Full Step 3 pre-decision contract added in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:132`.
+- Library substitution note clarified for IDs in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:84`.
+- Decision log entries added for writer identity/semantics and frontmatter IDs in `dev-docs/notes/dev.decision-log.md:134` and `dev-docs/notes/dev.decision-log.md:153`.
+
+Locked decisions:
+
+1. `recordingId` is generated per recording stream, not equal to provider `sessionId`.
+2. `::record` and `::capture` remain distinct (`record` ongoing stream, `capture` one-shot snapshot, no active-stream replacement).
+3. Frontmatter IDs use compact `<slug>-<randomSuffix>` for user-facing notes; runtime/internal IDs stay UUID by default.
+
+Step 3 is now unblocked with explicit contracts.  
+1. If you want, I’ll start Step 3 implementation immediately with these contracts as the source of truth.

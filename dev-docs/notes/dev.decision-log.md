@@ -130,3 +130,37 @@ created: 1771779490894
 - Follow-up tasks:
   - Expand runtime config contract in Step 4 with OpenFeature/provider settings.
   - Add boundary validation hardening for config overrides and invalid schema migration paths.
+
+### Writer Identity And Command Semantics
+
+- Decision:
+  - Use generated `recordingId` per recording stream (not provider `sessionId`), so one session can drive multiple recordings.
+  - Preserve `::record` and `::capture` as distinct behaviors:
+    - `::record`: ongoing stream append target.
+    - `::capture`: one-shot snapshot export that does not replace active recording stream.
+- Owner: Kato engineering
+- Date: 2026-02-22
+- Why:
+  - `stenobot` behavior depends on `record` vs `capture` distinction.
+  - Session IDs are provider identities and should not collapse multiple destination streams.
+- Tradeoffs:
+  - Adds routing/state complexity in writer orchestration (stream identity + session identity).
+  - Requires explicit tests to avoid accidental conflation.
+- Follow-up tasks:
+  - Add writer routing contract for `(provider, sessionId) -> active recording streams`.
+  - Add tests for multiple recording streams per session and capture-without-rotation behavior.
+
+### Frontmatter ID Format
+
+- Decision: Use compact frontmatter IDs for user-facing note files: `<slug>-<randomSuffix>` using an in-repo utility (no extra dependency).
+- Owner: Kato engineering
+- Date: 2026-02-22
+- Why:
+  - Better readability in note-centric workflows than full UUIDs.
+  - Keeps dependency surface minimal while satisfying uniqueness/readability needs.
+- Tradeoffs:
+  - ID slug may drift from filename after renames; accepted for MVP.
+  - Compact suffix has higher (still low) collision risk vs UUID; must size suffix accordingly.
+- Follow-up tasks:
+  - Implement local slug+suffix ID utility and collision tests.
+  - Keep runtime/internal IDs on `crypto.randomUUID()` unless explicitly user-facing.

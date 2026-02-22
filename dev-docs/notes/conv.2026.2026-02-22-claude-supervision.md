@@ -183,3 +183,62 @@ Stenobot uses `nanoid(10)` (compact, human-friendly, appears in user-facing `.md
 - Speaker names / tool call / thinking config: defer to Step 4 (config/OpenFeature boundary)
 
 Once you answer those three, Step 3 is unblocked.
+
+# User_2026-02-22_1254_46
+
+We added a step 2.6 for runtime config bootstrap. Could you review?
+
+# claude-sonnet-4.6_2026-02-22_1255_18
+
+Let me check a couple more things before reviewing.
+
+# claude-sonnet-4.6_2026-02-22_1256_22
+
+Step 2.6 is well-constructed overall. Here's the review.
+
+---
+
+## Step 2.6 Review
+
+### What's solid
+
+- `RuntimeConfig.allowedWriteRoots` is correctly wired to `WritePathPolicyGate` at [router.ts:210-213](apps/daemon/src/cli/router.ts#L210) — no more env-var double-read. The config is now the authoritative source post-load.
+- `effectiveRuntime` at [router.ts:195-200](apps/daemon/src/cli/router.ts#L195) properly overrides runtime paths from loaded config, so config drives paths downstream.
+- `kato init` / `ensureInitialized()` interface is clean. Idempotent with distinct output (`created` vs `already exists`).
+- `start.ts` checking stale status before launching is correct — prevents double-starts.
+- `schemaVersion: 1` as a literal type on `RuntimeConfig` is stricter than `DaemonStatusSnapshot.schemaVersion: number` — should align the latter.
+
+---
+
+### Issues
+
+**1. Daemon subprocess doesn't receive configured paths — real gap**
+
+`runDaemonRuntimeLoop()` ([daemon_runtime.ts](apps/daemon/src/orchestrator/daemon_runtime.ts)) still calls `resolveDefaultStatusPath()` / `resolveDefaultControlPath()` directly, which reads from env vars. The spawned `__daemon-run` process never receives the `statusPath` / `controlPath` from `RuntimeConfig`. For MVP with default paths this is invisible, but the moment a user runs `kato init` with a non-default `runtimeDir`, the daemon process will read/write the wrong files.
+
+The launcher needs to pass the resolved config paths — either as env vars or CLI args to the `__daemon-run` subprocess.
+
+**2. Silent fallback on missing config for non-`start`/non-`init` commands**
+
+[router.ts:177-193](apps/daemon/src/cli/router.ts#L177): if `config.json` is not found and the command is `status`, `stop`, `export`, or `clean`, the code silently falls through to `defaultRuntimeConfig`. `kato status` will show "daemon not running" (plausible), but `kato export` or `kato clean` will silently operate against default paths the user may not intend. A `NotFound` on config for these commands should probably output something like "no runtime config found — run `kato init` first" and exit 1, rather than silently proceeding.
+
+**3. Auto-init output on `kato start`**
+
+The test asserts `"started in background"` but nothing asserts that auto-init is communicated to the user. If `kato start` silently creates config and then launches, the user has no feedback that init happened. Should print something like "initialized runtime config at .kato/runtime/config.json" before the start message.
+
+**4. Optimistic status write race window (minor, known)**
+
+[start.ts:18-26](apps/daemon/src/cli/commands/start.ts#L18): CLI writes `daemonRunning: true` + `launchedPid` before the daemon process has confirmed startup. If the daemon crashes immediately (bad permissions, port conflict, etc.), `status.json` shows a running daemon until the stale threshold (30s). Acceptable for MVP but worth noting in the task doc as a known limitation.
+
+---
+
+### Priority
+
+| | |
+|---|---|
+| Fix before Step 3 | Daemon subprocess path propagation (gap #1) |
+| Discuss | Silent fallback for `stop`/`export`/`clean` on missing config (gap #2) |
+| Low | Auto-init print in `kato start` output (gap #3) |
+| Note | Optimistic status race window (gap #4) |
+
+The path propagation gap (#1) is the one most likely to cause silent misbehavior once anyone uses a non-default runtime dir.
