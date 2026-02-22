@@ -32,7 +32,7 @@ Sequence migration and MVP implementation so foundational contracts and dependen
 - [x] Logging baseline scaffold (`StructuredLogger` + `AuditLogger`, split channels).
 - [x] File watching baseline (`Deno.watchFs` debounce/settle utility).
 - [x] Step 1: status/control control-plane files + CLI wiring to control-plane stores.
-- [ ] Step 2: command detection and fail-closed path-policy decision gate.
+- [x] Step 2: command detection and fail-closed path-policy decision gate.
 - [ ] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
 - [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
 - [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:

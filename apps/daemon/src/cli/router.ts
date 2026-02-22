@@ -12,6 +12,11 @@ import {
   resolveDefaultStatusPath,
 } from "../orchestrator/mod.ts";
 import {
+  resolveDefaultAllowedWriteRoots,
+  WritePathPolicyGate,
+  type WritePathPolicyGateLike,
+} from "../policy/mod.ts";
+import {
   AuditLogger,
   NoopSink,
   StructuredLogger,
@@ -28,6 +33,7 @@ export interface RunDaemonCliOptions {
   runtime?: Partial<DaemonCliRuntime>;
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
+  pathPolicyGate?: WritePathPolicyGateLike;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -79,6 +85,10 @@ export async function runDaemonCli(
     new DaemonStatusSnapshotFileStore(runtime.statusPath, runtime.now);
   const controlStore = options.controlStore ??
     new DaemonControlRequestFileStore(runtime.controlPath, runtime.now);
+  const pathPolicyGate = options.pathPolicyGate ??
+    new WritePathPolicyGate({
+      allowedRoots: resolveDefaultAllowedWriteRoots(),
+    });
 
   const operationalLogger = options.operationalLogger ??
     new StructuredLogger([new NoopSink()], {
@@ -117,6 +127,7 @@ export async function runDaemonCli(
     runtime,
     statusStore,
     controlStore,
+    pathPolicyGate,
     operationalLogger,
     auditLogger,
   };

@@ -393,3 +393,45 @@ Validation status:
 - `deno task ci` passed (fmt/lint/check/test all green).
 
 1. Next highest-value move is Step 2: implement the fail-closed command/path policy gate and wire policy decision audit events.
+
+# User_2026-02-22_1118_08
+
+OK, proceed to step 2
+
+# gpt-5.3-codex_2026-02-22_1118_17
+
+Proceeding with Step 2 now. I’ll inspect the current command parsing and write-path handling in `apps/daemon` and then add a fail-closed path-policy gate with tests, including fenced-code-block command suppression.
+
+# gpt-5.3-codex_2026-02-22_1124_06
+
+Step 2 is complete.
+
+- Added strict in-chat command detection with fenced-code suppression and fail-closed errors in `apps/daemon/src/policy/command_detection.ts:1`.
+- Added canonical write-path policy gate (allowlist roots + traversal/symlink escape denial) in `apps/daemon/src/policy/path_policy.ts:1`.
+- Wired policy gate into CLI runtime/options in `apps/daemon/src/cli/router.ts:32` and command context in `apps/daemon/src/cli/commands/context.ts:9`.
+- Enforced policy before queuing `export`, with `policy.decision` audit events and hard deny on failure in `apps/daemon/src/cli/commands/export.ts:8`.
+- Exported policy APIs from `apps/daemon/src/policy/mod.ts:1` and `apps/daemon/src/mod.ts:32`.
+- Added tests:
+  - Command detection: `tests/command-detection_test.ts:1`
+  - Path policy: `tests/path-policy_test.ts:1`
+  - CLI deny-path behavior: `tests/daemon-cli_test.ts:259`
+- Marked Step 2 complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:35`.
+
+Validation:
+- `deno task test` passed.
+- `deno task ci` passed.
+
+Policy config defaults now:
+- `KATO_ALLOWED_WRITE_ROOTS_JSON` (JSON string array) if set.
+- Else `KATO_ALLOWED_WRITE_ROOT`.
+- Else fallback root `"."` (repo cwd).
+
+1. Next up is Step 3: writer pipeline + destination rotation + dedupe append guard.
+
+# User_2026-02-22_1142_04
+
+I asked Claude to review your work in [conv.2026.2026-02-22-claude-supervision.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-22-claude-supervision.md) -- please review that and let's discuss.
+
+# gpt-5.3-codex_2026-02-22_1142_04
+
+I’ve verified Claude’s points against current code. I’ll give you a tight “agree/adjust” readout and then propose the exact decisions we should lock before Step 3.

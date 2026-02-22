@@ -8,6 +8,7 @@ import {
   type DaemonStatusSnapshotStoreLike,
   parseDaemonCliArgs,
   runDaemonCli,
+  type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 
 function makeRuntimeHarness(runtimeDir: string) {
@@ -100,6 +101,23 @@ function makeInMemoryControlStore(): {
           ...(next.payload ? { payload: { ...next.payload } } : {}),
         });
       },
+    },
+  };
+}
+
+function makePathPolicyGate(
+  decision: "allow" | "deny",
+): WritePathPolicyGateLike {
+  return {
+    evaluateWritePath(targetPath: string) {
+      return Promise.resolve({
+        decision,
+        targetPath,
+        reason: decision === "allow" ? "allowed-for-test" : "denied-for-test",
+        canonicalTargetPath: decision === "allow"
+          ? `/canonical/${targetPath}`
+          : undefined,
+      });
     },
   };
 }
@@ -199,6 +217,7 @@ Deno.test("runDaemonCli queues export and clean one-off operations", async () =>
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore();
   const runtimeDir = ".kato/test-runtime";
+  const allowPathPolicy = makePathPolicyGate("allow");
 
   const exportHarness = makeRuntimeHarness(runtimeDir);
   const exportCode = await runDaemonCli(
@@ -207,6 +226,7 @@ Deno.test("runDaemonCli queues export and clean one-off operations", async () =>
       runtime: exportHarness.runtime,
       statusStore,
       controlStore: controlStore.store,
+      pathPolicyGate: allowPathPolicy,
     },
   );
   assertEquals(exportCode, 0);
@@ -227,12 +247,35 @@ Deno.test("runDaemonCli queues export and clean one-off operations", async () =>
     runtime: cleanHarness.runtime,
     statusStore,
     controlStore: controlStore.store,
+    pathPolicyGate: allowPathPolicy,
   });
   assertEquals(cleanCode, 0);
   assertStringIncludes(cleanHarness.stdout.join(""), "clean request queued");
   assertEquals(controlStore.requests[1]?.command, "clean");
   assertEquals(controlStore.requests[1]?.payload?.["recordingsDays"], 14);
   assertEquals(controlStore.requests[1]?.payload?.["dryRun"], true);
+});
+
+Deno.test("runDaemonCli denies export when path policy rejects output path", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore();
+  const runtimeDir = ".kato/test-runtime";
+  const denyPathPolicy = makePathPolicyGate("deny");
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(
+    ["export", "session-42", "--output", "../outside.md"],
+    {
+      runtime: harness.runtime,
+      statusStore,
+      controlStore: controlStore.store,
+      pathPolicyGate: denyPathPolicy,
+    },
+  );
+
+  assertEquals(code, 1);
+  assertEquals(controlStore.requests.length, 0);
+  assertStringIncludes(harness.stderr.join(""), "Export path denied by policy");
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {

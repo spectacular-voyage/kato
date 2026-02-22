@@ -29,6 +29,19 @@ export {
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
 } from "./orchestrator/mod.ts";
+export type {
+  InChatControlCommand,
+  InChatControlCommandError,
+  InChatControlCommandName,
+  InChatControlDetectionResult,
+  WritePathPolicyDecision,
+  WritePathPolicyGateLike,
+} from "./policy/mod.ts";
+export {
+  detectInChatControlCommands,
+  resolveDefaultAllowedWriteRoots,
+  WritePathPolicyGate,
+} from "./policy/mod.ts";
 export {
   AuditLogger,
   JsonLineFileSink,
