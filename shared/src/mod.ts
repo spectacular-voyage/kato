@@ -13,6 +13,7 @@ export type {
 } from "./contracts/ipc.ts";
 export type {
   ConfigSource,
+  RuntimeConfig,
   RuntimeConfigMetadata,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";

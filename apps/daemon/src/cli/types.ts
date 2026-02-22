@@ -1,4 +1,5 @@
 export type DaemonCliCommandName =
+  | "init"
   | "start"
   | "stop"
   | "status"
@@ -6,6 +7,7 @@ export type DaemonCliCommandName =
   | "clean";
 
 export type DaemonCliCommand =
+  | { name: "init" }
   | { name: "start" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean }
@@ -24,6 +26,7 @@ export type DaemonCliIntent =
 
 export interface DaemonCliRuntime {
   runtimeDir: string;
+  configPath: string;
   statusPath: string;
   controlPath: string;
   now: () => Date;

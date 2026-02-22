@@ -125,3 +125,61 @@ Codex added your suggestions as step 2.5, now complete. Are we ready for Step 3?
 # claude-sonnet-4.6_2026-02-22_1200_16
 
 Good progress — Step 2.5 resolved all four items I flagged. Let me check the remaining unknowns before endorsing Step 3.
+
+# claude-sonnet-4.6_2026-02-22_1201_14
+
+Step 2.5 resolved all the issues I flagged. The contract hardening is solid. But there are 3 things that will cause writer rework if not decided first.
+
+---
+
+## Ready for Step 3? — Mostly Yes, With 3 Pre-decisions
+
+### What's been fixed correctly
+
+- `ProviderCursor` tagged union (`byte-offset` | `item-index` | `opaque`) — clean
+- `schemaVersion` + `heartbeatAt` on status, `isStatusSnapshotStale()` — clean
+- `markProcessed()` + `MAX_CONTROL_QUEUE_LENGTH` + fail-closed on corrupt control queue — clean
+- Detached launcher + `__daemon-run` internal mode — clean
+- `stop` handles stale-running status without enqueuing — clean
+
+---
+
+### One lingering issue to note
+
+`DaemonStatusSnapshotFileStore.load()` at [control_plane.ts:280-290](apps/daemon/src/orchestrator/control_plane.ts#L280) still silently falls back to a default snapshot on invalid JSON (while the control queue now correctly throws). This is arguably acceptable for display purposes — you always want to show *something* — but it's inconsistent with "fail-closed." Not blocking Step 3, just worth knowing.
+
+---
+
+### Three things to decide before Codex starts Step 3
+
+**1. Recording identity model**
+
+`RecordingStatus` has `activeRecordings: number` and `destinations: number` counts, but no IDs. The `export` command takes a `sessionId` but the writer pipeline in `ipc.ts` uses a `recordingId`. How are recordings keyed? Options:
+
+- **Provider session ID = recording ID** (1:1, simplest)
+- **`::record` command starts a recording with a generated ID**, bound to a (sessionId, destinationPath) pair
+- **Something else**
+
+This determines how rotation works and how the orchestrator runtime will dispatch `export` requests.
+
+**2. `::record` vs `::capture` behavioral contract in the writer**
+
+From stenobot's exporter, the distinction is:
+- `::record path` → open/maintain an ongoing stream writer to `path` (append as new messages arrive)
+- `::capture path` → one-shot dump of all messages seen so far to `path`, then continue with existing record target
+
+The writer needs to handle these differently. Should Kato preserve this distinction, or simplify it?
+
+**3. Frontmatter ID format**
+
+Stenobot uses `nanoid(10)` (compact, human-friendly, appears in user-facing `.md` files used by Dendron). Library substitutions say prefer `crypto.randomUUID()` unless compact IDs are explicitly required. Frontmatter IDs *are* a case where compact matters (36-char UUIDs are ugly in Dendron). Recommend: allow a small local `nanoid`-style utility (just alphanumeric random, no dependency needed), or explicitly accept UUIDs.
+
+---
+
+**Everything else in Step 3 can proceed with clear defaults:**
+- Output format: Markdown (same as stenobot, no change)
+- Dedupe tail guard: carry forward the `existingTrimmed.endsWith(content)` check from stenobot
+- Date formatting: native `Intl` (already decided in library substitutions, replacing `date-fns-tz`)
+- Speaker names / tool call / thinking config: defer to Step 4 (config/OpenFeature boundary)
+
+Once you answer those three, Step 3 is unblocked.

@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import type { DaemonStatusSnapshot } from "@kato/shared";
+import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
   type DaemonControlRequest,
@@ -9,6 +9,7 @@ import {
   type DaemonStatusSnapshotStoreLike,
   parseDaemonCliArgs,
   runDaemonCli,
+  type RuntimeConfigStoreLike,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 
@@ -21,6 +22,7 @@ function makeRuntimeHarness(runtimeDir: string) {
     stderr,
     runtime: {
       runtimeDir,
+      configPath: `${runtimeDir}/config.json`,
       statusPath: `${runtimeDir}/status.json`,
       controlPath: `${runtimeDir}/control.json`,
       now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -30,6 +32,70 @@ function makeRuntimeHarness(runtimeDir: string) {
       },
       writeStderr: (text: string) => {
         stderr.push(text);
+      },
+    },
+  };
+}
+
+function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
+  return {
+    schemaVersion: 1,
+    runtimeDir,
+    statusPath: `${runtimeDir}/status.json`,
+    controlPath: `${runtimeDir}/control.json`,
+    allowedWriteRoots: [runtimeDir],
+  };
+}
+
+function makeInMemoryConfigStore(initial?: RuntimeConfig): {
+  ensureCalls: { value: number };
+  store: RuntimeConfigStoreLike;
+} {
+  let state = initial
+    ? {
+      ...initial,
+      allowedWriteRoots: [...initial.allowedWriteRoots],
+    }
+    : undefined;
+  const ensureCalls = { value: 0 };
+
+  return {
+    ensureCalls,
+    store: {
+      load() {
+        if (!state) {
+          return Promise.reject(new Deno.errors.NotFound("missing config"));
+        }
+        return Promise.resolve({
+          ...state,
+          allowedWriteRoots: [...state.allowedWriteRoots],
+        });
+      },
+      ensureInitialized(defaultConfig: RuntimeConfig) {
+        ensureCalls.value += 1;
+        if (!state) {
+          state = {
+            ...defaultConfig,
+            allowedWriteRoots: [...defaultConfig.allowedWriteRoots],
+          };
+          return Promise.resolve({
+            created: true,
+            config: {
+              ...state,
+              allowedWriteRoots: [...state.allowedWriteRoots],
+            },
+            path: `${state.runtimeDir}/config.json`,
+          });
+        }
+
+        return Promise.resolve({
+          created: false,
+          config: {
+            ...state,
+            allowedWriteRoots: [...state.allowedWriteRoots],
+          },
+          path: `${state.runtimeDir}/config.json`,
+        });
       },
     },
   };
@@ -191,6 +257,78 @@ Deno.test("cli parser accepts status --json", () => {
   assertEquals(parsed.command.asJson, true);
 });
 
+Deno.test("cli parser accepts init", () => {
+  const parsed = parseDaemonCliArgs(["init"]);
+  assertEquals(parsed.kind, "command");
+  if (parsed.kind !== "command") {
+    return;
+  }
+
+  assertEquals(parsed.command.name, "init");
+});
+
+Deno.test("runDaemonCli init creates runtime config when missing", async () => {
+  const runtimeDir = ".kato/test-runtime";
+  const harness = makeRuntimeHarness(runtimeDir);
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+  const statusStore = makeInMemoryStatusStore();
+  const controlStore = makeInMemoryControlStore();
+
+  const firstCode = await runDaemonCli(["init"], {
+    runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore: controlStore.store,
+  });
+  assertEquals(firstCode, 0);
+  assertStringIncludes(
+    harness.stdout.join(""),
+    `created runtime config at ${runtimeDir}/config.json`,
+  );
+  assertEquals(ensureCalls.value, 1);
+
+  const secondHarness = makeRuntimeHarness(runtimeDir);
+  const secondCode = await runDaemonCli(["init"], {
+    runtime: secondHarness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore: controlStore.store,
+  });
+  assertEquals(secondCode, 0);
+  assertStringIncludes(secondHarness.stdout.join(""), "already exists");
+  assertEquals(ensureCalls.value, 2);
+});
+
+Deno.test(
+  "runDaemonCli start auto-initializes runtime config when missing",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+    const daemonLauncher = makeDaemonLauncher(31337);
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+
+    const code = await runDaemonCli(["start"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+      daemonLauncher: daemonLauncher.launcher,
+      autoInitOnStart: true,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "started in background");
+    assertEquals(ensureCalls.value, 1);
+  },
+);
+
 Deno.test("runDaemonCli uses control queue and status snapshot stores", async () => {
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore({
@@ -206,10 +344,14 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   });
   const daemonLauncher = makeDaemonLauncher(31337);
   const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
   const startHarness = makeRuntimeHarness(runtimeDir);
   const startCode = await runDaemonCli(["start"], {
     runtime: startHarness.runtime,
+    defaultRuntimeConfig,
+    configStore,
     statusStore,
     controlStore: controlStore.store,
     daemonLauncher: daemonLauncher.launcher,
@@ -222,6 +364,8 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   const statusHarness = makeRuntimeHarness(runtimeDir);
   const statusCode = await runDaemonCli(["status", "--json"], {
     runtime: statusHarness.runtime,
+    defaultRuntimeConfig,
+    configStore,
     statusStore,
     controlStore: controlStore.store,
   });
@@ -243,6 +387,8 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   const stopHarness = makeRuntimeHarness(runtimeDir);
   const stopCode = await runDaemonCli(["stop"], {
     runtime: stopHarness.runtime,
+    defaultRuntimeConfig,
+    configStore,
     statusStore,
     controlStore: controlStore.store,
   });
@@ -256,12 +402,16 @@ Deno.test("runDaemonCli queues export and clean one-off operations", async () =>
   const statusStore = makeInMemoryStatusStore();
   const runtimeDir = ".kato/test-runtime";
   const allowPathPolicy = makePathPolicyGate("allow");
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
   const exportHarness = makeRuntimeHarness(runtimeDir);
   const exportCode = await runDaemonCli(
     ["export", "session-42", "--output", "exports/session-42.md"],
     {
       runtime: exportHarness.runtime,
+      defaultRuntimeConfig,
+      configStore,
       statusStore,
       controlStore: controlStore.store,
       pathPolicyGate: allowPathPolicy,
@@ -283,6 +433,8 @@ Deno.test("runDaemonCli queues export and clean one-off operations", async () =>
     "--dry-run",
   ], {
     runtime: cleanHarness.runtime,
+    defaultRuntimeConfig,
+    configStore,
     statusStore,
     controlStore: controlStore.store,
     pathPolicyGate: allowPathPolicy,
@@ -299,12 +451,16 @@ Deno.test("runDaemonCli denies export when path policy rejects output path", asy
   const statusStore = makeInMemoryStatusStore();
   const runtimeDir = ".kato/test-runtime";
   const denyPathPolicy = makePathPolicyGate("deny");
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
   const harness = makeRuntimeHarness(runtimeDir);
   const code = await runDaemonCli(
     ["export", "session-42", "--output", "../outside.md"],
     {
       runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
       statusStore,
       controlStore: controlStore.store,
       pathPolicyGate: denyPathPolicy,
@@ -330,10 +486,15 @@ Deno.test("runDaemonCli stop resets stale running status without queueing", asyn
       destinations: 0,
     },
   });
+  const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const harness = makeRuntimeHarness(runtimeDir);
   const code = await runDaemonCli(["stop"], {
     runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
     statusStore,
     controlStore: controlStore.store,
   });

@@ -77,6 +77,20 @@ function parseStart(rest: string[]): DaemonCliIntent {
   return { kind: "command", command: { name: "start" } };
 }
 
+function parseInit(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "init" };
+  }
+
+  requireNoPositionals("init", toPositionals(parsed));
+  return { kind: "command", command: { name: "init" } };
+}
+
 function parseStop(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
@@ -195,6 +209,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     if (rest.length === 1) {
       const topic = rest[0];
       if (
+        topic === "init" ||
         topic === "start" ||
         topic === "stop" ||
         topic === "status" ||
@@ -206,10 +221,13 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     }
 
     throw new CliUsageError(
-      "Usage: kato help [start|stop|status|export|clean]",
+      "Usage: kato help [init|start|stop|status|export|clean]",
     );
   }
 
+  if (commandName === "init") {
+    return parseInit(rest);
+  }
   if (commandName === "start") {
     return parseStart(rest);
   }

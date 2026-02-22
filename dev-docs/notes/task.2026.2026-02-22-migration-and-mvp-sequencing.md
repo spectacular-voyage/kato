@@ -38,6 +38,10 @@ Sequence migration and MVP implementation so foundational contracts and dependen
   - Provider IPC cursor changed from byte-offset-only to tagged provider cursor.
   - Status snapshot schema version + heartbeat for stale liveness detection.
   - Control queue compaction via `markProcessed` plus bounded queue length.
+- [x] Step 2.6: runtime config bootstrap before writer work:
+  - Add `kato init` to create default `config.json` when missing.
+  - Add runtime config store/load wiring in CLI router.
+  - Add optional `kato start` auto-bootstrap behavior (`KATO_AUTO_INIT_ON_START`, default `true`).
 - [ ] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
 - [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
 - [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:

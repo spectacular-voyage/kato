@@ -4,27 +4,33 @@ const GLOBAL_USAGE = [
   "Usage: kato <command> [options]",
   "",
   "Commands:",
-  "  start                 Mark daemon as running (scaffold mode)",
-  "  stop                  Mark daemon as stopped",
+  "  init                  Create default runtime config if missing",
+  "  start                 Start daemon in detached background mode",
+  "  stop                  Queue daemon stop request (or reset stale status)",
   "  status [--json]       Show daemon status",
   "  export <session-id> [--output <path>]",
-  "                        Queue one-off export request (scaffold mode)",
+  "                        Queue one-off export request",
   "  clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
-  "                        Queue cleanup request (scaffold mode)",
+  "                        Queue cleanup request",
   "",
   "Run `kato help <command>` for command-specific usage.",
 ].join("\n");
 
 const COMMAND_USAGE: Record<DaemonCliCommandName, string> = {
+  init: [
+    "Usage: kato init",
+    "",
+    "Creates a default local runtime config at .kato/config.json when missing.",
+  ].join("\n"),
   start: [
     "Usage: kato start",
     "",
-    "Marks daemon state as running for initial migration scaffolding.",
+    "Starts daemon runtime in detached background mode.",
   ].join("\n"),
   stop: [
     "Usage: kato stop",
     "",
-    "Marks daemon state as stopped for initial migration scaffolding.",
+    "Queues daemon stop request or resets stale running status.",
   ].join("\n"),
   status: [
     "Usage: kato status [--json]",
@@ -34,7 +40,7 @@ const COMMAND_USAGE: Record<DaemonCliCommandName, string> = {
   export: [
     "Usage: kato export <session-id> [--output <path>]",
     "",
-    "Queues a one-off export request (export pipeline not implemented yet).",
+    "Queues a one-off export request.",
   ].join("\n"),
   clean: [
     "Usage: kato clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",

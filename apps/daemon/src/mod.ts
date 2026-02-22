@@ -34,6 +34,15 @@ export {
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
 export type {
+  EnsureRuntimeConfigResult,
+  RuntimeConfigStoreLike,
+} from "./config/mod.ts";
+export {
+  createDefaultRuntimeConfig,
+  resolveDefaultConfigPath,
+  RuntimeConfigFileStore,
+} from "./config/mod.ts";
+export type {
   InChatControlCommand,
   InChatControlCommandError,
   InChatControlCommandName,

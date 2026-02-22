@@ -521,3 +521,29 @@ Task note updated:
 - Step 2.5 recorded as complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:36`.
 
 1. If you want, next I’ll move directly into Step 3 (writer pipeline + destination rotation + dedupe guard).
+
+# User_2026-02-22_1200_50
+
+stenobot had functionality to create a default config if one wasn't already present. Should we implement that beore step 3?
+
+# gpt-5.3-codex_2026-02-22_1201_09
+
+Yes, I’d do that before Step 3.
+
+Reason: Step 3 (writer pipeline + rotation + policy) needs stable config inputs (allowed roots, runtime paths, writer defaults). If we skip config bootstrap, we’ll keep hardcoding and then rework.
+
+Recommendation:
+1. Implement a small Step 2.6 now: config bootstrap + load.
+2. Use safe defaults, but keep behavior fail-closed on malformed existing config.
+3. Prefer explicit bootstrap (`kato init`) over silent auto-write on every command.
+4. If you want stenobot-like behavior, make `kato start` auto-create only when missing, then continue.
+
+If you want, I’ll implement Step 2.6 now with `kato init` + optional `start` auto-bootstrap toggle.
+
+# User_2026-02-22_1242_34
+
+yes please
+
+# gpt-5.3-codex_2026-02-22_1242_34
+
+I’ll implement Step 2.6 now with `kato init` plus startup bootstrap behavior for missing config, then wire tests and update the migration checklist before re-running CI. I’m first reading the current config contract and CLI parser/usage paths to slot this cleanly.

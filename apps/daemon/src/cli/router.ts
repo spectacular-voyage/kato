@@ -2,6 +2,7 @@ import { CliUsageError } from "./errors.ts";
 import { parseDaemonCliArgs } from "./parser.ts";
 import { getCommandUsage, getGlobalUsage } from "./usage.ts";
 import type { DaemonCliRuntime } from "./types.ts";
+import type { RuntimeConfig } from "@kato/shared";
 import {
   DaemonControlRequestFileStore,
   type DaemonControlRequestStoreLike,
@@ -13,6 +14,12 @@ import {
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
 } from "../orchestrator/mod.ts";
+import {
+  createDefaultRuntimeConfig,
+  resolveDefaultConfigPath,
+  RuntimeConfigFileStore,
+  type RuntimeConfigStoreLike,
+} from "../config/mod.ts";
 import {
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
@@ -26,6 +33,7 @@ import {
 import {
   runCleanCommand,
   runExportCommand,
+  runInitCommand,
   runStartCommand,
   runStatusCommand,
   runStopCommand,
@@ -33,10 +41,13 @@ import {
 
 export interface RunDaemonCliOptions {
   runtime?: Partial<DaemonCliRuntime>;
+  configStore?: RuntimeConfigStoreLike;
+  defaultRuntimeConfig?: RuntimeConfig;
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
   daemonLauncher?: DaemonProcessLauncherLike;
   pathPolicyGate?: WritePathPolicyGateLike;
+  autoInitOnStart?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -53,6 +64,7 @@ export function createDefaultCliRuntime(): DaemonCliRuntime {
   const runtimeDir = resolveDefaultRuntimeDir();
   return {
     runtimeDir,
+    configPath: resolveDefaultConfigPath(runtimeDir),
     statusPath: resolveDefaultStatusPath(runtimeDir),
     controlPath: resolveDefaultControlPath(runtimeDir),
     now: () => new Date(),
@@ -66,9 +78,18 @@ function buildRuntime(
   overrides: Partial<DaemonCliRuntime> | undefined,
 ): DaemonCliRuntime {
   const defaults = createDefaultCliRuntime();
+  if (!overrides) {
+    return defaults;
+  }
+
+  const runtimeDir = overrides.runtimeDir ?? defaults.runtimeDir;
   return {
     ...defaults,
     ...overrides,
+    runtimeDir,
+    configPath: overrides.configPath ?? resolveDefaultConfigPath(runtimeDir),
+    statusPath: overrides.statusPath ?? resolveDefaultStatusPath(runtimeDir),
+    controlPath: overrides.controlPath ?? resolveDefaultControlPath(runtimeDir),
   };
 }
 
@@ -79,21 +100,46 @@ function renderUsage(topic?: Parameters<typeof getCommandUsage>[0]): string {
   return getGlobalUsage();
 }
 
+function resolveAutoInitOnStartDefault(): boolean {
+  try {
+    const raw = Deno.env.get("KATO_AUTO_INIT_ON_START");
+    if (raw === undefined) {
+      return true;
+    }
+
+    const value = raw.trim().toLowerCase();
+    if (value === "0" || value === "false" || value === "no") {
+      return false;
+    }
+    if (value === "1" || value === "true" || value === "yes") {
+      return true;
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotCapable) {
+      return true;
+    }
+    throw error;
+  }
+}
+
 export async function runDaemonCli(
   args: string[],
   options: RunDaemonCliOptions = {},
 ): Promise<number> {
   const runtime = buildRuntime(options.runtime);
-  const statusStore = options.statusStore ??
-    new DaemonStatusSnapshotFileStore(runtime.statusPath, runtime.now);
-  const controlStore = options.controlStore ??
-    new DaemonControlRequestFileStore(runtime.controlPath, runtime.now);
-  const daemonLauncher = options.daemonLauncher ??
-    new DenoDetachedDaemonLauncher(runtime);
-  const pathPolicyGate = options.pathPolicyGate ??
-    new WritePathPolicyGate({
-      allowedRoots: resolveDefaultAllowedWriteRoots(),
+  const autoInitOnStart = options.autoInitOnStart ??
+    resolveAutoInitOnStartDefault();
+
+  const defaultRuntimeConfig = options.defaultRuntimeConfig ??
+    createDefaultRuntimeConfig({
+      runtimeDir: runtime.runtimeDir,
+      statusPath: runtime.statusPath,
+      controlPath: runtime.controlPath,
+      allowedWriteRoots: resolveDefaultAllowedWriteRoots(),
     });
+  const configStore = options.configStore ??
+    new RuntimeConfigFileStore(runtime.configPath);
 
   const operationalLogger = options.operationalLogger ??
     new StructuredLogger([new NoopSink()], {
@@ -128,8 +174,49 @@ export async function runDaemonCli(
     return 0;
   }
 
+  let runtimeConfig = defaultRuntimeConfig;
+  if (intent.command.name !== "init") {
+    try {
+      runtimeConfig = await configStore.load();
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        if (intent.command.name === "start" && autoInitOnStart) {
+          const initialized = await configStore.ensureInitialized(
+            defaultRuntimeConfig,
+          );
+          runtimeConfig = initialized.config;
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  const effectiveRuntime: DaemonCliRuntime = {
+    ...runtime,
+    runtimeDir: runtimeConfig.runtimeDir,
+    statusPath: runtimeConfig.statusPath,
+    controlPath: runtimeConfig.controlPath,
+  };
+  const statusStore = options.statusStore ??
+    new DaemonStatusSnapshotFileStore(effectiveRuntime.statusPath, runtime.now);
+  const controlStore = options.controlStore ??
+    new DaemonControlRequestFileStore(
+      effectiveRuntime.controlPath,
+      runtime.now,
+    );
+  const daemonLauncher = options.daemonLauncher ??
+    new DenoDetachedDaemonLauncher(effectiveRuntime);
+  const pathPolicyGate = options.pathPolicyGate ??
+    new WritePathPolicyGate({
+      allowedRoots: runtimeConfig.allowedWriteRoots,
+    });
+
   const commandContext = {
-    runtime,
+    runtime: effectiveRuntime,
+    configStore,
+    runtimeConfig,
+    defaultRuntimeConfig,
     statusStore,
     controlStore,
     daemonLauncher,
@@ -140,6 +227,9 @@ export async function runDaemonCli(
 
   try {
     switch (intent.command.name) {
+      case "init":
+        await runInitCommand(commandContext);
+        return 0;
       case "start":
         await runStartCommand(commandContext);
         return 0;

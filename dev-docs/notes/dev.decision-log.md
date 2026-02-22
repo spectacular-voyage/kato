@@ -115,3 +115,18 @@ created: 1771779490894
   - Define feature flag contract in `shared/src/contracts/config.ts`.
   - Add a local/offline provider default for MVP and keep network dependency optional.
   - Add tests for deterministic fallback behavior when remote flag providers are unavailable.
+
+### Runtime Config Bootstrap
+
+- Decision: Add explicit runtime config bootstrap via `kato init`, with optional auto-bootstrap on `kato start` controlled by `KATO_AUTO_INIT_ON_START` (default `true`).
+- Owner: Kato engineering
+- Date: 2026-02-22
+- Why:
+  - Preserves `stenobot`-style first-run ergonomics while keeping explicit config materialized on disk.
+  - Keeps startup behavior deterministic for CLI, daemon launch paths, and path-policy configuration.
+- Tradeoffs:
+  - Adds one additional CLI command and config lifecycle surface.
+  - Auto-bootstrap behavior can mask missing manual setup unless disabled.
+- Follow-up tasks:
+  - Expand runtime config contract in Step 4 with OpenFeature/provider settings.
+  - Add boundary validation hardening for config overrides and invalid schema migration paths.
