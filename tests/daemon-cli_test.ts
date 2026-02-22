@@ -5,6 +5,7 @@ import {
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
   type DaemonControlRequestStoreLike,
+  type DaemonProcessLauncherLike,
   type DaemonStatusSnapshotStoreLike,
   parseDaemonCliArgs,
   runDaemonCli,
@@ -36,7 +37,9 @@ function makeRuntimeHarness(runtimeDir: string) {
 
 function makeInMemoryStatusStore(
   initial: DaemonStatusSnapshot = {
+    schemaVersion: 1,
     generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
     daemonRunning: false,
     providers: [],
     recordings: {
@@ -101,6 +104,15 @@ function makeInMemoryControlStore(): {
           ...(next.payload ? { payload: { ...next.payload } } : {}),
         });
       },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
     },
   };
 }
@@ -118,6 +130,24 @@ function makePathPolicyGate(
           ? `/canonical/${targetPath}`
           : undefined,
       });
+    },
+  };
+}
+
+function makeDaemonLauncher(
+  launchedPid: number,
+): {
+  launchedCount: { value: number };
+  launcher: DaemonProcessLauncherLike;
+} {
+  const launchedCount = { value: 0 };
+  return {
+    launchedCount,
+    launcher: {
+      launchDetached() {
+        launchedCount.value += 1;
+        return Promise.resolve(launchedPid);
+      },
     },
   };
 }
@@ -164,15 +194,17 @@ Deno.test("cli parser accepts status --json", () => {
 Deno.test("runDaemonCli uses control queue and status snapshot stores", async () => {
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
     generatedAt: "2026-02-22T10:05:00.000Z",
-    daemonRunning: true,
-    daemonPid: 31337,
+    heartbeatAt: "2026-02-22T10:05:00.000Z",
+    daemonRunning: false,
     providers: [],
     recordings: {
       activeRecordings: 3,
       destinations: 2,
     },
   });
+  const daemonLauncher = makeDaemonLauncher(31337);
   const runtimeDir = ".kato/test-runtime";
 
   const startHarness = makeRuntimeHarness(runtimeDir);
@@ -180,10 +212,12 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
     runtime: startHarness.runtime,
     statusStore,
     controlStore: controlStore.store,
+    daemonLauncher: daemonLauncher.launcher,
   });
   assertEquals(startCode, 0);
-  assertStringIncludes(startHarness.stdout.join(""), "start request queued");
-  assertEquals(controlStore.requests[0]?.command, "start");
+  assertStringIncludes(startHarness.stdout.join(""), "started in background");
+  assertEquals(daemonLauncher.launchedCount.value, 1);
+  assertEquals(controlStore.requests.length, 0);
 
   const statusHarness = makeRuntimeHarness(runtimeDir);
   const statusCode = await runDaemonCli(["status", "--json"], {
@@ -194,12 +228,16 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   assertEquals(statusCode, 0);
 
   const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
+    schemaVersion: number;
     daemonRunning: boolean;
+    heartbeatAt: string;
     daemonPid?: number;
     recordings: { activeRecordings: number };
   };
+  assertEquals(statusPayload.schemaVersion, 1);
   assertEquals(statusPayload.daemonRunning, true);
   assertEquals(statusPayload.daemonPid, 31337);
+  assertEquals(statusPayload.heartbeatAt, "2026-02-22T10:00:00.000Z");
   assertEquals(statusPayload.recordings.activeRecordings, 3);
 
   const stopHarness = makeRuntimeHarness(runtimeDir);
@@ -210,7 +248,7 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   });
   assertEquals(stopCode, 0);
   assertStringIncludes(stopHarness.stdout.join(""), "stop request queued");
-  assertEquals(controlStore.requests[1]?.command, "stop");
+  assertEquals(controlStore.requests[0]?.command, "stop");
 });
 
 Deno.test("runDaemonCli queues export and clean one-off operations", async () => {
@@ -276,6 +314,33 @@ Deno.test("runDaemonCli denies export when path policy rejects output path", asy
   assertEquals(code, 1);
   assertEquals(controlStore.requests.length, 0);
   assertStringIncludes(harness.stderr.join(""), "Export path denied by policy");
+});
+
+Deno.test("runDaemonCli stop resets stale running status without queueing", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T09:00:00.000Z",
+    heartbeatAt: "2026-02-22T09:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 9999,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
+
+  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const code = await runDaemonCli(["stop"], {
+    runtime: harness.runtime,
+    statusStore,
+    controlStore: controlStore.store,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(controlStore.requests.length, 0);
+  assertStringIncludes(harness.stdout.join(""), "status was stale");
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {

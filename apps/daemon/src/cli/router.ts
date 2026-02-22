@@ -5,8 +5,10 @@ import type { DaemonCliRuntime } from "./types.ts";
 import {
   DaemonControlRequestFileStore,
   type DaemonControlRequestStoreLike,
+  type DaemonProcessLauncherLike,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
+  DenoDetachedDaemonLauncher,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
@@ -33,6 +35,7 @@ export interface RunDaemonCliOptions {
   runtime?: Partial<DaemonCliRuntime>;
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
+  daemonLauncher?: DaemonProcessLauncherLike;
   pathPolicyGate?: WritePathPolicyGateLike;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -85,6 +88,8 @@ export async function runDaemonCli(
     new DaemonStatusSnapshotFileStore(runtime.statusPath, runtime.now);
   const controlStore = options.controlStore ??
     new DaemonControlRequestFileStore(runtime.controlPath, runtime.now);
+  const daemonLauncher = options.daemonLauncher ??
+    new DenoDetachedDaemonLauncher(runtime);
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
       allowedRoots: resolveDefaultAllowedWriteRoots(),
@@ -127,6 +132,7 @@ export async function runDaemonCli(
     runtime,
     statusStore,
     controlStore,
+    daemonLauncher,
     pathPolicyGate,
     operationalLogger,
     auditLogger,

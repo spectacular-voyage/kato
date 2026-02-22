@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   DaemonControlRequestFileStore,
@@ -30,11 +30,15 @@ Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async ()
     );
 
     const missing = await store.load();
+    assertEquals(missing.schemaVersion, 1);
     assertEquals(missing.daemonRunning, false);
     assertEquals(missing.generatedAt, "2026-02-22T12:00:00.000Z");
+    assertEquals(missing.heartbeatAt, "2026-02-22T12:00:00.000Z");
 
     const snapshot = {
+      schemaVersion: 1,
       generatedAt: "2026-02-22T12:05:00.000Z",
+      heartbeatAt: "2026-02-22T12:05:00.000Z",
       daemonRunning: true,
       daemonPid: 9876,
       providers: [{ provider: "claude", activeSessions: 2 }],
@@ -58,7 +62,9 @@ Deno.test("DaemonStatusSnapshotFileStore falls back on invalid JSON", async () =
     );
 
     const fallback = await store.load();
+    assertEquals(fallback.schemaVersion, 1);
     assertEquals(fallback.generatedAt, "2026-02-22T12:10:00.000Z");
+    assertEquals(fallback.heartbeatAt, "2026-02-22T12:10:00.000Z");
     assertEquals(fallback.daemonRunning, false);
   });
 });
@@ -99,10 +105,15 @@ Deno.test("DaemonControlRequestFileStore appends and lists requests", async () =
     };
     assertExists(raw.requests);
     assertEquals(raw.requests.length, 2);
+
+    await store.markProcessed("req-1");
+    const afterFirstProcess = await store.list();
+    assertEquals(afterFirstProcess.length, 1);
+    assertEquals(afterFirstProcess[0]?.requestId, "req-2");
   });
 });
 
-Deno.test("DaemonControlRequestFileStore resets invalid queue files", async () => {
+Deno.test("DaemonControlRequestFileStore fails closed on invalid queue files", async () => {
   await withTempRuntimeDir(async (runtimeDir) => {
     const controlPath = join(runtimeDir, "control.json");
     await Deno.writeTextFile(
@@ -114,7 +125,28 @@ Deno.test("DaemonControlRequestFileStore resets invalid queue files", async () =
     );
 
     const store = new DaemonControlRequestFileStore(controlPath);
-    const listed = await store.list();
-    assertEquals(listed, []);
+    await assertRejects(
+      () => store.list(),
+      Error,
+      "unsupported schema",
+    );
+  });
+});
+
+Deno.test("DaemonControlRequestFileStore rejects unknown markProcessed request", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    const store = new DaemonControlRequestFileStore(controlPath);
+
+    await store.enqueue({
+      command: "start",
+      payload: { requestedByPid: 1111 },
+    });
+
+    await assertRejects(
+      () => store.markProcessed("missing-request-id"),
+      Error,
+      "not found",
+    );
   });
 });

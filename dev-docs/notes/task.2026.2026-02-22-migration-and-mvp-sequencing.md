@@ -33,6 +33,11 @@ Sequence migration and MVP implementation so foundational contracts and dependen
 - [x] File watching baseline (`Deno.watchFs` debounce/settle utility).
 - [x] Step 1: status/control control-plane files + CLI wiring to control-plane stores.
 - [x] Step 2: command detection and fail-closed path-policy decision gate.
+- [x] Step 2.5: contract hardening before writer work:
+  - Detached launcher path for `kato start` with internal daemon runtime loop.
+  - Provider IPC cursor changed from byte-offset-only to tagged provider cursor.
+  - Status snapshot schema version + heartbeat for stale liveness detection.
+  - Control queue compaction via `markProcessed` plus bounded queue length.
 - [ ] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
 - [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
 - [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:

@@ -1,8 +1,13 @@
+export type ProviderCursor =
+  | { kind: "byte-offset"; value: number }
+  | { kind: "item-index"; value: number }
+  | { kind: "opaque"; value: string };
+
 export type ProviderMessageEnvelope = {
   kind: "provider.message";
   provider: string;
   sessionId: string;
-  offset: number;
+  cursor: ProviderCursor;
   payload: unknown;
 };
 

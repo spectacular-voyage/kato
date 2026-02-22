@@ -19,15 +19,19 @@ export type {
   DaemonControlRequest,
   DaemonControlRequestDraft,
   DaemonControlRequestStoreLike,
+  DaemonProcessLauncherLike,
   DaemonStatusSnapshotStoreLike,
 } from "./orchestrator/mod.ts";
 export {
   createDefaultStatusSnapshot,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  DenoDetachedDaemonLauncher,
+  isStatusSnapshotStale,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
+  runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
 export type {
   InChatControlCommand,

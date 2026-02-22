@@ -117,3 +117,11 @@ Is there anything from the review you'd like to dig into or act on? The daemon s
 Ignoring control command per [dev.general-guidance.md](dev-docs/notes/dev.general-guidance.md#L87).
 
 Looks like Codex just completed Step 2 — `command_detection.ts` and `path_policy.ts` are now confirmed as its work (not pre-existing). That resolves the checklist accuracy issue I raised. My review items still stand, particularly the daemon startup mechanism question before Step 3 begins. Want to discuss that now?
+
+# User_2026-02-22_1159_43
+
+Codex added your suggestions as step 2.5, now complete. Are we ready for Step 3?
+
+# claude-sonnet-4.6_2026-02-22_1200_16
+
+Good progress — Step 2.5 resolved all four items I flagged. Let me check the remaining unknowns before endorsing Step 3.

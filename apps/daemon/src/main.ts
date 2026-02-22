@@ -1,6 +1,9 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
 import { runDaemonCli } from "./cli/mod.ts";
-import { createDefaultStatusSnapshot } from "./orchestrator/mod.ts";
+import {
+  createDefaultStatusSnapshot,
+  runDaemonRuntimeLoop,
+} from "./orchestrator/mod.ts";
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
   return createDefaultStatusSnapshot(new Date());
@@ -11,6 +14,11 @@ export function describeDaemonEntryPoint(): string {
 }
 
 if (import.meta.main) {
+  if (Deno.args[0] === "__daemon-run") {
+    await runDaemonRuntimeLoop();
+    Deno.exit(0);
+  }
+
   const exitCode = await runDaemonCli(Deno.args);
   Deno.exit(exitCode);
 }

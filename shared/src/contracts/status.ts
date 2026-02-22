@@ -10,7 +10,9 @@ export interface RecordingStatus {
 }
 
 export interface DaemonStatusSnapshot {
+  schemaVersion: number;
   generatedAt: string;
+  heartbeatAt: string;
   daemonRunning: boolean;
   daemonPid?: number;
   providers: ProviderStatus[];

@@ -435,3 +435,89 @@ I asked Claude to review your work in [conv.2026.2026-02-22-claude-supervision.m
 # gpt-5.3-codex_2026-02-22_1142_04
 
 I’ve verified Claude’s points against current code. I’ll give you a tight “agree/adjust” readout and then propose the exact decisions we should lock before Step 3.
+
+# gpt-5.3-codex_2026-02-22_1142_28
+
+Claude’s review is strong, and I mostly agree.
+
+**Already Resolved**
+- `policy.decision` audit events are already emitted on export path checks in `apps/daemon/src/cli/commands/export.ts:13`.
+- Step 2 checklist is now marked complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:35`.
+
+**I Agree We Should Discuss Now**
+1. Daemon startup semantics are still undefined.  
+`start` currently only enqueues a request in `apps/daemon/src/cli/commands/start.ts:6`.
+2. Provider cursor contract should change before Gemini.  
+`offset: number` is still in `shared/src/contracts/ipc.ts:5`.
+3. Control queue consumption semantics are missing.  
+Only append/list exists in `apps/daemon/src/orchestrator/control_plane.ts:297`.
+4. Status liveness/staleness needs explicit handling.  
+Status has no heartbeat/version in `shared/src/contracts/status.ts:12`.
+
+**My Recommended Decisions**
+1. Startup mode: make `kato start` run daemon in foreground for MVP (simplest, deterministic).  
+Post-MVP: add background/detached launcher.
+2. Control queue semantics: append-only queue + separate consumer cursor (`lastProcessedRequestId`), not consume-clear rewrites.
+3. IPC cursor contract: replace `offset: number` with provider cursor type now (at least `string | number`, preferably tagged).
+4. Status contract: add `schemaVersion` + `heartbeatAt`, and mark status stale when heartbeat age exceeds threshold.
+
+If you want, I can implement these as a focused “Step 2.5 contract hardening” pass before Step 3.
+
+# User_2026-02-22_1148_04
+
+1. stenobot had background/detached launcher. Shouldn't be to hard to do something similar in Deno?
+
+2. Is the queue in-memory-only? Don't we need something to contain growth?
+
+3. yes
+
+4. OK.
+
+Yes, let's do a step 2.5 now please.
+
+# gpt-5.3-codex_2026-02-22_1149_09
+
+I’m implementing Step 2.5 in five pieces: contracts first, then queue hardening, then detached launcher/runtime loop, then CLI behavior, then full validation and note updates. I’ve started with the shared contract updates.
+
+# gpt-5.3-codex_2026-02-22_1154_51
+
+Reviewed and agreed. I implemented Step 2.5 now.
+
+On your 4 points:
+
+1. Detached launcher: implemented.
+- `kato start` now launches a detached background daemon process via `Deno.Command` in `apps/daemon/src/orchestrator/launcher.ts:12`.
+- Internal daemon mode is wired through `__daemon-run` in `apps/daemon/src/main.ts:17`.
+- CLI wiring for launcher injection/default is in `apps/daemon/src/cli/router.ts:91`.
+- `start` now launches instead of queueing a start request in `apps/daemon/src/cli/commands/start.ts:18`.
+
+2. Queue growth: handled.
+- Queue is file-backed (`control.json`), not memory-only.
+- Added `markProcessed()` compaction and `lastProcessedRequestId` in `apps/daemon/src/orchestrator/control_plane.ts:24`.
+- Added hard queue cap (`MAX_CONTROL_QUEUE_LENGTH`) in `apps/daemon/src/orchestrator/control_plane.ts:9`.
+- Invalid control queue now fails closed (throws) instead of silently resetting in `apps/daemon/src/orchestrator/control_plane.ts:329`.
+
+3. Provider cursor: done.
+- Replaced `offset: number` with tagged provider cursor in `shared/src/contracts/ipc.ts:1`.
+
+4. Status schema + liveness: done.
+- Added `schemaVersion` and `heartbeatAt` to status contract in `shared/src/contracts/status.ts:12`.
+- Added stale detection helper in `apps/daemon/src/orchestrator/control_plane.ts:228`.
+- `status` now reports schema/heartbeat and stale state in `apps/daemon/src/cli/commands/status.ts:37`.
+- `stop` handles stale-running status without enqueueing unbounded stop requests in `apps/daemon/src/cli/commands/stop.ts:15`.
+
+Also added minimal daemon runtime loop:
+- `apps/daemon/src/orchestrator/daemon_runtime.ts:55`
+- It heartbeats status, consumes control requests, compacts queue via `markProcessed`, and exits on `stop`.
+
+Tests/validation:
+- Added/updated tests in:
+  - `tests/daemon-runtime_test.ts:1`
+  - `tests/daemon-control-plane_test.ts:24`
+  - `tests/daemon-cli_test.ts:194`
+- `deno task test` and `deno task ci` both pass (47 tests total).
+
+Task note updated:
+- Step 2.5 recorded as complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:36`.
+
+1. If you want, next I’ll move directly into Step 3 (writer pipeline + destination rotation + dedupe guard).

@@ -6,6 +6,7 @@ export type {
 export type {
   DaemonEnvelope,
   PolicyDecisionEnvelope,
+  ProviderCursor,
   ProviderMessageEnvelope,
   WorkerHealthEnvelope,
   WriterAppendEnvelope,

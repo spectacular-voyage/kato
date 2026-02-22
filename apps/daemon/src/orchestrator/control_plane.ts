@@ -4,7 +4,10 @@ import { dirname, join } from "@std/path";
 const DEFAULT_RUNTIME_DIR = ".kato/runtime";
 const STATUS_FILENAME = "status.json";
 const CONTROL_FILENAME = "control.json";
+const STATUS_SCHEMA_VERSION = 1;
 const CONTROL_SCHEMA_VERSION = 1;
+const MAX_CONTROL_QUEUE_LENGTH = 10_000;
+const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 30_000;
 
 export type DaemonControlCommand = "start" | "stop" | "export" | "clean";
 
@@ -21,6 +24,7 @@ export interface DaemonControlRequest extends DaemonControlRequestDraft {
 interface DaemonControlQueueDocument {
   schemaVersion: number;
   requests: DaemonControlRequest[];
+  lastProcessedRequestId?: string;
 }
 
 export interface DaemonStatusSnapshotStoreLike {
@@ -31,6 +35,7 @@ export interface DaemonStatusSnapshotStoreLike {
 export interface DaemonControlRequestStoreLike {
   list(): Promise<DaemonControlRequest[]>;
   enqueue(request: DaemonControlRequestDraft): Promise<DaemonControlRequest>;
+  markProcessed(requestId: string): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,7 +91,13 @@ function isDaemonStatusSnapshot(value: unknown): value is DaemonStatusSnapshot {
   if (!isRecord(value)) {
     return false;
   }
+  if (value["schemaVersion"] !== STATUS_SCHEMA_VERSION) {
+    return false;
+  }
   if (typeof value["generatedAt"] !== "string") {
+    return false;
+  }
+  if (typeof value["heartbeatAt"] !== "string") {
     return false;
   }
   if (typeof value["daemonRunning"] !== "boolean") {
@@ -153,6 +164,14 @@ function isDaemonControlQueueDocument(
   ) {
     return false;
   }
+
+  const lastProcessedRequestId = value["lastProcessedRequestId"];
+  if (
+    lastProcessedRequestId !== undefined &&
+    typeof lastProcessedRequestId !== "string"
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -192,8 +211,11 @@ async function writeJsonAtomically(path: string, data: unknown): Promise<void> {
 export function createDefaultStatusSnapshot(
   now: Date = new Date(),
 ): DaemonStatusSnapshot {
+  const nowIso = now.toISOString();
   return {
-    generatedAt: now.toISOString(),
+    schemaVersion: STATUS_SCHEMA_VERSION,
+    generatedAt: nowIso,
+    heartbeatAt: nowIso,
     daemonRunning: false,
     providers: [],
     recordings: {
@@ -201,6 +223,23 @@ export function createDefaultStatusSnapshot(
       destinations: 0,
     },
   };
+}
+
+export function isStatusSnapshotStale(
+  snapshot: DaemonStatusSnapshot,
+  now: Date = new Date(),
+  staleHeartbeatThresholdMs: number = DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS,
+): boolean {
+  if (!snapshot.daemonRunning) {
+    return false;
+  }
+
+  const heartbeatTimeMs = Date.parse(snapshot.heartbeatAt);
+  if (!Number.isFinite(heartbeatTimeMs)) {
+    return true;
+  }
+
+  return now.getTime() - heartbeatTimeMs > staleHeartbeatThresholdMs;
 }
 
 export function resolveDefaultRuntimeDir(): string {
@@ -288,10 +327,9 @@ export class DaemonControlRequestFileStore
         return parsed;
       }
     } catch {
-      // invalid data falls back to an empty request queue
+      throw new Error("Control queue file contains invalid JSON");
     }
-
-    return this.makeDefaultDocument();
+    throw new Error("Control queue file has unsupported schema");
   }
 
   async list(): Promise<DaemonControlRequest[]> {
@@ -303,6 +341,12 @@ export class DaemonControlRequestFileStore
     request: DaemonControlRequestDraft,
   ): Promise<DaemonControlRequest> {
     const document = await this.loadDocument();
+    if (document.requests.length >= MAX_CONTROL_QUEUE_LENGTH) {
+      throw new Error(
+        `Control queue length exceeds limit (${MAX_CONTROL_QUEUE_LENGTH})`,
+      );
+    }
+
     const queueRequest: DaemonControlRequest = {
       requestId: this.makeRequestId(),
       requestedAt: this.now().toISOString(),
@@ -314,5 +358,20 @@ export class DaemonControlRequestFileStore
     await writeJsonAtomically(this.controlPath, document);
 
     return cloneRequest(queueRequest);
+  }
+
+  async markProcessed(requestId: string): Promise<void> {
+    const document = await this.loadDocument();
+    const index = document.requests.findIndex((request) =>
+      request.requestId === requestId
+    );
+
+    if (index < 0) {
+      throw new Error(`Control queue request not found: ${requestId}`);
+    }
+
+    document.requests = document.requests.slice(index + 1);
+    document.lastProcessedRequestId = requestId;
+    await writeJsonAtomically(this.controlPath, document);
   }
 }
