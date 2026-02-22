@@ -547,3 +547,27 @@ yes please
 # gpt-5.3-codex_2026-02-22_1242_34
 
 I’ll implement Step 2.6 now with `kato init` plus startup bootstrap behavior for missing config, then wire tests and update the migration checklist before re-running CI. I’m first reading the current config contract and CLI parser/usage paths to slot this cleanly.
+
+# gpt-5.3-codex_2026-02-22_1253_51
+
+Step 2.6 is implemented and validated.
+
+- Added runtime config contract + file store with schema guards and atomic initialize/load in `apps/daemon/src/config/runtime_config.ts:7` and `shared/src/contracts/config.ts:3`.
+- Added `kato init` end-to-end in `apps/daemon/src/cli/commands/init.ts:3`, parser/help wiring in `apps/daemon/src/cli/parser.ts:80` and `apps/daemon/src/cli/usage.ts:7`, and command typing/runtime path support in `apps/daemon/src/cli/types.ts:1`.
+- Wired config loading/bootstrap in CLI router, including `KATO_AUTO_INIT_ON_START` (default `true`) in `apps/daemon/src/cli/router.ts:103` and load/ensure logic in `apps/daemon/src/cli/router.ts:177`.
+- Updated detached launcher to propagate config env + derived write roots in `apps/daemon/src/orchestrator/launcher.ts:19`.
+- Marked Step 2.6 complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:41`.
+- Recorded the decision in `dev-docs/notes/dev.decision-log.md:119`.
+- Expanded tests for `init`/auto-bootstrap in `tests/daemon-cli_test.ts:260`.
+- Added dedicated runtime-config store tests in `tests/runtime-config_test.ts:12`.
+
+Validation run results:
+- `deno task fmt`: pass
+- `deno task test`: pass (52 tests)
+- `deno task ci`: pass
+
+Current repo state:
+- Only untracked file remains: `tests/runtime-config_test.ts`.
+- Other Step 2.6 files already match current HEAD (`b0f6c84`).
+
+1. Proceed to Step 3 now (writer pipeline, starting with rotation ordering + dedupe append guard)?
