@@ -37,6 +37,17 @@ Sequence migration and MVP implementation so foundational contracts and dependen
 6. Enforce deterministic source timestamps and fail-closed config/state loading.
 7. Reduce dependency surface and prefer Deno-native primitives.
 
+## Integrate Now (from Claude Analysis)
+
+1. Preserve parser invariants as explicit migration acceptance criteria:
+   - Claude turn aggregation + pending tool result linking.
+   - Codex `final_answer` preference, fallback handling, and offset resume behavior.
+2. Carry forward exporter append dedupe guard (prevent duplicate tail writes during repeated polls).
+3. Harden command detection to ignore fenced code blocks, not only inline backtick spans.
+4. Treat provider checkpoints as provider-defined cursors, not byte offsets only (supports non-JSONL providers).
+5. Add explicit writer rotation ordering: evaluate path policy first, then rotate/start destination writer.
+6. Keep `decodeProjectDir` out of Kato migration scope (legacy heuristic intentionally left behind).
+
 ## Library Substitutions (MVP-Safe)
 
 1. CLI: use `@std/cli` + in-repo command router (no Cliffy in MVP).
@@ -46,6 +57,22 @@ Sequence migration and MVP implementation so foundational contracts and dependen
 5. IDs/frontmatter IDs: prefer `crypto.randomUUID()` unless compact IDs are explicitly required.
 6. Config loading: schema-validated config with fail-closed startup behavior.
 7. Streams/parsing: use `@std/streams` (`TextLineStream`) for file processing.
+
+## Validation Strategy (Framed Decision)
+
+Decision question:
+- Should runtime validation in MVP use `zod` broadly or be limited to boundary surfaces with inline guards internally?
+
+Options:
+1. `zod` everywhere.
+2. Inline guards everywhere.
+3. Hybrid: `zod` at external trust boundaries, inline guards in internal/hot paths.
+
+Recommended for MVP:
+1. Hybrid approach.
+2. Use `zod` for config/env loading and other external payload boundaries.
+3. Use inline guards/type predicates in parser loops and small internal envelopes.
+4. Keep validation fail-closed at all boundary entry points.
 
 ## Rearchitecture Shape (Explicit CLI Role)
 
@@ -62,6 +89,13 @@ Sequence migration and MVP implementation so foundational contracts and dependen
    - read-only status surfaces from daemon snapshots only.
 4. `apps/cloud`:
    - aggregation, centralized policy/config integration, and fleet-level status rollups.
+
+## IPC Distinction (MVP)
+
+1. Distinguish worker IPC (provider/writer/orchestrator) from CLI control-plane IPC.
+2. For MVP, prefer atomic status/control files for CLI read paths and simple control signaling.
+3. Defer Unix domain socket control-plane transport to post-MVP portability hardening.
+4. If Windows control-plane transport is needed later, evaluate named pipes as the Windows-first option.
 
 ## Decisions To Keep Aligned
 

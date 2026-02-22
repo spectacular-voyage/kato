@@ -6,13 +6,13 @@ updated: 1771730707676
 created: 1771730707676
 ---
 
-# User_2026-02-22_0811_32
+# User_2026-02-22_1034_12
 
 Let's Decide CLI + logging libraries first, with MVP-safe defaults and rationale recorded in the note: @mvp
 
 ::record [conv.2026.2026-02-21_1924-mvp-and-library-selection.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md)
 
-# gpt-5.3-codex_2026-02-22_0811_32
+# gpt-5.3-codex_2026-02-22_1034_12
 
 Locked for MVP and recorded.
 
@@ -33,11 +33,11 @@ No tests were run (docs-only changes).
 1. If you want, I can now scaffold `apps/daemon/src/cli` to match the chosen CLI default.
 2. I can also scaffold `apps/daemon/src/observability/logger.ts` + `audit_logger.ts` with the JSONL schemas.
 
-# User_2026-02-22_0811_32
+# User_2026-02-22_1034_12
 
 Let's also analyze the old code base under /stenobot and look for other opportunities to improve or simplify our approach. Nothing is off limits in terms of rearchitecture: given we have a new approach with other applications in the mix and other libraries to substitue.
 
-# gpt-5.3-codex_2026-02-22_0811_32
+# gpt-5.3-codex_2026-02-22_1034_12
 
 Strong call. The old `stenobot` code shows several clear simplification opportunities for Kato.
 
@@ -79,19 +79,15 @@ This aligns with your MVP direction: std CLI + in-repo structured logging.
 
 If you want, I can convert this into a concrete “Phase 1/2 migration blueprint” note under `dev-docs/notes/` with implementation slices and test gates.
 
-# User_2026-02-22_0811_32
+# User_2026-02-22_1034_12
 
 ::capture [conv.2026.2026-02-21_1924-mvp-and-library-selection.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md)
 
-# gpt-5.3-codex_2026-02-22_0811_52
-
-I’ll treat this as a capture command and append the latest exchange into `dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md` using the same conversation-note format already in that file. I’m checking the file contents first so the entry is consistent.
-
-# gpt-5.3-codex_2026-02-22_0812_04
+# gpt-5.3-codex_2026-02-22_1034_12
 
 Captured. The command and this response are now recorded in `dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md`.
 
-# User_2026-02-22_0940_36
+# User_2026-02-22_1034_12
 
 Have you read [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md) ? You're supposed to ignore commands. (ie., I have stenobot running already).
 
@@ -101,11 +97,7 @@ If "service mode" refers to running as Windows Service or System.d or whatever, 
 
 With OpenFeature, I think we might as well do that from the start?
 
-# gpt-5.3-codex_2026-02-22_0940_36
-
-I read it, and you’re right about the in-chat command handling rule. I’m updating the MVP task note now to close those two open questions with your decisions: service mode deferred and OpenFeature included from MVP start.
-
-# gpt-5.3-codex_2026-02-22_0941_15
+# gpt-5.3-codex_2026-02-22_1034_12
 
 Yes. You’re correct on `dev.general-guidance.md`, and I’ll ignore control-command lines (`::capture`, `::record`, etc.) unless you ask to discuss command behavior.
 
@@ -124,17 +116,13 @@ Updated docs:
 
 No tests were run (docs-only changes).
 
-# User_2026-02-22_0952_36
+# User_2026-02-22_1034_12
 
 I renamed the "mvp" task file to [task.2026.2026-02-22-migration-and-mvp-sequencing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md) You can add your "Highest-impact opportunities" and library substitutions there.
 
 Regarding the rearchitecture,  you don't mention the CLI, which is used to control the daemon and do one-off stuff like status, export and clean.
 
-# gpt-5.3-codex_2026-02-22_0952_36
-
-I’m editing the sequencing note now: adding the `stenobot`-audit “Highest-impact opportunities,” adding library substitutions, and adding a rearchitecture section that explicitly defines the CLI as daemon control plus one-off command surface.
-
-# gpt-5.3-codex_2026-02-22_0953_03
+# gpt-5.3-codex_2026-02-22_1034_12
 
 You’re right on both points.
 
@@ -147,3 +135,224 @@ I updated `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md` 
 I also tightened sequencing so CLI wiring is a first-class step (`dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:22`).
 
 No tests were run (docs-only change).
+
+# User_2026-02-22_1034_12
+
+Are we ready to start the migration/initial implementation?
+
+# gpt-5.3-codex_2026-02-22_1034_12
+
+Yes, we’re ready to start.
+
+Current readiness is solid in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:20` and `dev-docs/notes/dev.decision-log.md:18`:
+- CLI/logging/file-watching/config/OpenFeature decisions are set.
+- Service mode is explicitly deferred.
+- CLI role is explicit (`start`, `stop`, `status`, `export`, `clean`).
+
+Only unresolved item is Sentry scope (`dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:73`), but it’s not a blocker for migration/initial implementation.
+
+If you want, I can start now with tranche 1:
+1. `apps/daemon/src/cli` router + command handlers (`start|stop|status|export|clean`)
+2. `apps/daemon/src/observability` logger + audit logger
+3. `apps/daemon/src/core/watcher.ts` (`Deno.watchFs` + debounce)
+4. baseline tests for CLI parsing and fail-closed behavior
+
+# User_2026-02-22_1034_12
+
+Sentry comes later. Please proceed.
+
+# gpt-5.3-codex_2026-02-22_1034_12
+
+I hit a permission mismatch: your `deno task test` is read-only, while my first CLI round-trip tests wrote temp state files. I’m switching those tests to an injected in-memory state store so we keep your stricter test permissions unchanged.
+
+# User_2026-02-22_1034_12
+
+::capture [conv.2026.2026-02-21_1924-mvp-and-library-selection.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md)
+
+# gpt-5.3-codex_2026-02-22_1034_20
+
+Ignoring that control-command line per `dev.general-guidance.md` and continuing implementation/verification. I just finished converting CLI tests to in-memory state; next I’ll rerun the full test/CI pass.
+
+# gpt-5.3-codex_2026-02-22_1036_10
+
+Implemented tranche 1 and kept Sentry out of scope.
+
+**What’s now in place**
+1. CLI scaffolding with strict, fail-closed parsing and routing for `start|stop|status|export|clean`.
+`apps/daemon/src/cli/parser.ts:14`  
+`apps/daemon/src/cli/router.ts:65`  
+`apps/daemon/src/cli/commands/start.ts:3`  
+`apps/daemon/src/cli/commands/stop.ts:3`  
+`apps/daemon/src/cli/commands/status.ts:4`  
+`apps/daemon/src/cli/commands/export.ts:3`  
+`apps/daemon/src/cli/commands/clean.ts:10`
+
+2. In-repo observability baseline with structured JSONL logger + audit logger abstractions.
+`apps/daemon/src/observability/logger.ts:1`  
+`apps/daemon/src/observability/audit_logger.ts:1`
+
+3. Deno-native watcher utility with debounce accumulator.
+`apps/daemon/src/core/watcher.ts:1`
+
+4. Daemon main entry now executes CLI.
+`apps/daemon/src/main.ts:20`
+
+5. Module exports wired for new CLI/observability/watcher surfaces.
+`apps/daemon/src/mod.ts:1`
+
+6. Added `@std/cli` import and lock update.
+`deno.json:15`  
+`deno.lock`
+
+7. Baseline tests for CLI fail-closed behavior and watcher debounce logic.
+`tests/daemon-cli_test.ts:1`  
+`tests/daemon-watcher_test.ts:1`
+
+**Validation**
+- `deno task ci` passed.
+- Test result: `31 passed, 0 failed`.
+
+I also ignored the `::capture ...` line per `dev.general-guidance.md` command-handling rules.
+
+I noticed unrelated working-tree edits in docs (`dev-docs/notes/dev.product-vision.md`, `dev-docs/notes/conv.2026.2026-02-21_1924-mvp-and-library-selection.md`) and left them untouched.
+
+# User_2026-02-22_1047_15
+
+Before proceeding, please review [conv.2026.2026-02-22-claude-stenobot-codebase-analysis.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-22-claude-stenobot-codebase-analysis.md) and let me know if there's anything in there worth discussing or integrating into [task.2026.2026-02-22-migration-and-mvp-sequencing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md)
+
+# gpt-5.3-codex_2026-02-22_1047_15
+
+I’ll review that Claude analysis note against the current migration/MVP sequencing task and call out concrete items that should be integrated, plus any points that are better left as discussion first. I’m reading both notes side-by-side now.
+
+# gpt-5.3-codex_2026-02-22_1047_27
+
+Yes. There are several items in `dev-docs/notes/conv.2026.2026-02-22-claude-stenobot-codebase-analysis.md` worth integrating into `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md`.
+
+**Integrate now**
+- Preserve parser invariants explicitly as migration acceptance criteria (Claude/Codex behaviors called out around `conv...md:33-37`).
+- Add command-detector hardening item: skip fenced code blocks, not just inline backticks (`conv...md:74-75`).
+- Add explicit MVP CLI/Web status transport choice: atomic status file first (`conv...md:102-107`).
+- Add provider-checkpoint abstraction note: allow non-byte offsets (Gemini JSON array index model) (`conv...md:182-184`).
+- Add writer-rotation ordering requirement: policy decision before starting new writer (`conv...md:108-109`).
+- Add exporter dedupe guard as a carry-forward behavior (`conv...md:42`).
+
+**Worth discussing first**
+- `zod` vs inline guards conflict (`conv...md:96` vs locked decision in `dev-docs/notes/dev.decision-log.md:76`).
+- Parser-first migration order (`conv...md:114-127`) vs your current sequencing and work already started in `task...md:22-27`.
+
+**Probably skip/outdated**
+- “tests import providers that don’t exist yet” is stale (`conv...md:116`) because parser/provider scaffolding is already present in this repo.
+- `decodeProjectDir` issue is mostly legacy unless we re-port that specific logic directly (`conv...md:67`).
+
+If you want, I can patch `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md` now with a short “Imported from Claude analysis” section containing the integrate-now items.
+
+# User_2026-02-22_1048_43
+
+Let's definitely leave out decodeProjectDir, that should be unneeded and left behind.
+
+Please frame the zod vs inline guards discussion.
+
+# gpt-5.3-codex_2026-02-22_1049_06
+
+Agreed on `decodeProjectDir`: we should leave it behind and not port it.
+
+For `zod` vs inline guards, here’s a clean decision frame:
+
+**Decision Question**
+- Where do we want runtime schema validation in MVP: external boundaries only, or throughout internal code paths?
+
+**Non-Negotiables**
+- `dev.security-baseline` requires schema-validated config/state load and fail-closed behavior.
+- Keep dependency surface minimal.
+- Keep parser hot paths fast/simple.
+
+**Options**
+1. `zod` everywhere  
+- Pros: consistent API, rich errors, strong inferred types.  
+- Cons: broader dependency footprint, overkill in hot parser loops.
+
+2. Inline guards everywhere  
+- Pros: zero extra dependency, very explicit, fast.  
+- Cons: repetitive, inconsistent errors, harder to maintain as schemas grow.
+
+3. Hybrid (recommended)  
+- Use `zod` at external trust boundaries (config/env, optional cloud/remote payloads).  
+- Use inline guards/type predicates in parser hot paths and small internal envelopes.
+
+**Recommended MVP Decision**
+- Adopt hybrid.
+- Keep `zod` for config/env validation only in Phase 1.
+- Do not use `zod` in Claude/Codex parser loops.
+- Add a single `validation/` module so guard logic is centralized, not scattered.
+
+If you want, I can add this as a short “Validation Strategy” section in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md` and mirror it in `dev-docs/notes/dev.decision-log.md`.
+
+# User_2026-02-22_1054_00
+
+Yes, please add the validation strategy and the "integrate now" stuff. For IPC distinction, Unix domain sockets might not work in Windows? What does IPC stand for?
+
+# gpt-5.3-codex_2026-02-22_1054_19
+
+I’ll update the migration sequencing note with two additions: a concrete “Integrate Now” section from the Claude audit and a “Validation Strategy” section framed as we discussed. I’ll also answer the IPC question directly, including Windows portability notes for Unix domain sockets.
+
+# gpt-5.3-codex_2026-02-22_1054_50
+
+Added both requested sections to `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md`:
+
+- `Integrate Now (from Claude Analysis)` at `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:40`
+- `Validation Strategy (Framed Decision)` at `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:61`
+
+Also added an explicit `IPC Distinction (MVP)` section at `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:93`, including your `decodeProjectDir` direction to leave it behind (`...:49`).
+
+`IPC` stands for **Inter-Process Communication**.
+
+On Unix domain sockets and Windows: yes, portability is a real concern. Even where supported, behavior/tooling differs enough that they’re a weak cross-platform MVP baseline. The note now treats them as post-MVP and points to file-based control/status first, with named pipes as the Windows-first option later.
+
+# User_2026-02-22_1059_31
+
+Great. What next?
+
+# gpt-5.3-codex_2026-02-22_1059_52
+
+Next high-impact tranche is to move from CLI scaffolding to real control flow.
+
+1. Implement daemon control-plane file contract (MVP IPC)
+- Add atomic `status.json` + `control` request file handling in `apps/daemon/src/orchestrator`.
+- Make `kato status` read real status snapshots (not scaffold placeholders).
+
+2. Implement command + path policy gate
+- Port detector logic with fenced-code-block skip.
+- Add canonicalize/allowlist checks before any write.
+- Emit `policy.decision` audit events for allow/deny.
+
+3. Implement writer pipeline
+- Port exporter behavior including dedupe tail guard.
+- Add destination writer rotation rules (`::record`/`::capture`) with policy check before rotate.
+
+4. Wire validation strategy
+- `zod` at config/env boundaries.
+- Inline guards in parser/hot paths.
+- Fail-closed on invalid config/state.
+
+5. Then add Gemini provider spike
+- Use provider-defined cursor semantics (index-based, not byte-offset-only) per your note.
+
+If you want, I’ll start now with step 1 (status/control file + orchestrator stub + tests).
+
+# User_2026-02-22_1104_07
+
+Great. FYI, I added Claude's gemini info into a new task: [task.2026.2026-02-22-gemini-provider.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-gemini-provider.md)
+
+# gpt-5.3-codex_2026-02-22_1104_15
+
+Noted. I’ll use `dev-docs/notes/task.2026.2026-02-22-gemini-provider.md` as the source of truth for the Gemini provider tranche and keep it sequenced after control-plane/policy/writer basics from `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md`.
+
+If you want, I can review that Gemini task next and normalize it into concrete implementation steps/acceptance criteria.
+
+# User_2026-02-22_1105_02
+
+That's okay on Gemini, unless you have burning thoughts you need to get in there now. Please proceed with Step 1.
+
+# gpt-5.3-codex_2026-02-22_1105_14
+
+Proceeding with Step 1 now: I’ll add a minimal orchestrator control-plane using atomic `status.json` plus a `control` request queue file, then wire `kato status` to read that real snapshot instead of scaffold state. I’m inspecting the current daemon/CLI code first so the integration is clean.

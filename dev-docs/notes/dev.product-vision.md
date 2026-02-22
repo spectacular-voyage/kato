@@ -2,7 +2,7 @@
 id: 4tvkvybigqrxc5yehscco6o
 title: Product Vision
 desc: ''
-updated: 1771782743074
+updated: 1771785147279
 created: 1771728320207
 ---
 
@@ -83,9 +83,8 @@ Agents and processes are granted:
 
 Kato must:
 
-* Work across Claude Code, Codex, Gemini, and future tools
+* Work across Claude Code, Codex, and future tools
 * Operate as CLI or daemon
-* Integrate into larger systems (e.g., Semantic Flow, Stagecraft)
 
 ### 4.4 Durable Structure
 
@@ -113,13 +112,12 @@ It must be enforced by runtime boundaries.
 * A boundary enforcer
 * A structured export pipeline
 * A foundation for future AI-native systems
+* Eventually: have an optional cloud SaaS for configuration management and centralized storage of conversations
 
 ### Kato Is Not:
 
-* A cloud SaaS
 * A chat UI
 * A wrapper around one vendor
-* A surveillance tool
 * A marketing analytics platform
 
 ---
@@ -137,12 +135,8 @@ It must be enforced by runtime boundaries.
 * Enterprises with compliance requirements
 * Researchers building long-lived AI workflows
 * Creators building AI-assisted knowledge systems
-
-### Phase 3 (Long-Term Vision)
-
-* Stagecraft runtime users (running bounded agents)
-* Semantic Flow ecosystem users
 * AI-native application developers
+
 
 ---
 
@@ -178,36 +172,9 @@ This allows enforceable guarantees, not just documentation claims.
 
 ---
 
-## 8. Roadmap Shape
+## 8. Roadmap
 
-### Phase 1 — Secure Capture Core
-
-* CLI export
-* Background monitor
-* Scoped permission enforcement
-* Deterministic Markdown export
-* Structured JSON export
-
-### Phase 2 — Multi-Agent Boundaries
-
-* Per-agent sandboxing
-* Explicit capability grants
-* Policy config per session
-* Permission visualization
-
-### Phase 3 — Artifact Graph
-
-* Structured conversation objects
-* Metadata indexing
-* Hooks for semantic modeling
-* Integration path to Semantic Flow
-
-### Phase 4 — Safe Execution Substrate
-
-* Sandboxed plugin model
-* WASM or microVM integration
-* Code execution containment
-* Stagecraft alignment
+See [[dev.feature-ideas]]
 
 ---
 
@@ -220,7 +187,6 @@ Security posture must not block early usability.
 ### 9.2 Illusion of Security
 
 Permission flags are not equivalent to full sandbox isolation.
-Future arbitrary-code execution requires deeper isolation (e.g., microVMs).
 
 ### 9.3 Rewrite Fatigue
 
@@ -241,21 +207,8 @@ Kato succeeds when:
 
 ---
 
-## 11. Strategic Alignment
+## 11. Positioning Statement
 
-Kato is:
-
-* The security foundation for Stagecraft
-* The capture substrate for Semantic Flow
-* The boundary layer between AI agents and user data
-
-If Stagecraft will one day execute arbitrary code,
-Kato must establish the security philosophy now.
-
----
-
-## 12. Positioning Statement
-
-> Kato is the secure, local-first control layer for AI conversations.
+> Kato is the secure, local-first capture-control layer for AI conversations.
 > Install Kato. Own your AI conversations.
 

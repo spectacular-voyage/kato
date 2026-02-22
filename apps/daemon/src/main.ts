@@ -1,4 +1,5 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
+import { runDaemonCli } from "./cli/mod.ts";
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
   return {
@@ -17,5 +18,6 @@ export function describeDaemonEntryPoint(): string {
 }
 
 if (import.meta.main) {
-  console.log(describeDaemonEntryPoint());
+  const exitCode = await runDaemonCli(Deno.args);
+  Deno.exit(exitCode);
 }
