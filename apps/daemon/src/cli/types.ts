@@ -29,6 +29,7 @@ export interface DaemonCliRuntime {
   configPath: string;
   statusPath: string;
   controlPath: string;
+  allowedWriteRoots?: string[];
   now: () => Date;
   pid: number;
   writeStdout: (text: string) => void;

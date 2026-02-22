@@ -206,6 +206,7 @@ export async function runDaemonCli(
     runtimeDir: runtimeConfig.runtimeDir,
     statusPath: runtimeConfig.statusPath,
     controlPath: runtimeConfig.controlPath,
+    allowedWriteRoots: [...runtimeConfig.allowedWriteRoots],
   };
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(effectiveRuntime.statusPath, runtime.now);

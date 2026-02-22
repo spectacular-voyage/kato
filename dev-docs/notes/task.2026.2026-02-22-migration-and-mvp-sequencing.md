@@ -2,7 +2,7 @@
 id: 5z1m4pgm4tlr95vpyw0z8ge
 title: 2026 02 22 migration and mvp sequencing
 desc: ''
-updated: 1771787830205
+updated: 1771795326926
 created: 1771795200000
 ---
 
@@ -57,6 +57,7 @@ Sequence migration and MVP implementation so foundational contracts and dependen
   - [[dev.general-guidance]]
   - [[dev.codebase-overview]]
   - [[dev.decision-log]]
+- [ ] Step 6: Fill out README.md with user-oriented usage instructions
 
 ## Highest-Impact Opportunities (from `stenobot` Audit)
 
@@ -155,6 +156,8 @@ Recommended for MVP:
 1. `kato start` writes `daemonRunning: true` optimistically immediately after subprocess launch.
 2. If subprocess startup fails quickly, status may show running until stale-heartbeat detection flips state (~30s default).
 3. This is accepted for MVP and should be revisited with explicit startup acknowledgment/handshake after Step 3.
+4. Daemon-side `export` processing currently requires a wired `loadSessionMessages` source; until provider ingestion is connected, runtime logs and skips exports.
+5. Daemon-side export audit metadata currently uses `provider: "unknown"` until Step 4 adds explicit session-to-provider mapping.
 
 ## Out of Scope (MVP)
 

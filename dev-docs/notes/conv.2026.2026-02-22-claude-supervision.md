@@ -246,3 +246,73 @@ The path propagation gap (#1) is the one most likely to cause silent misbehavior
 # User_2026-02-22_1320_12
 
 OK, I believe your suggestions were addressed, and step 3 has been implemented. Please review
+
+# claude-sonnet-4.6_2026-02-22_1322_25
+
+Step 3 is well implemented. Tests exist and are substantive. Here's the review.
+
+---
+
+## Step 3 Review
+
+### What's solid
+
+- **Policy-before-write ordering** — `evaluatePathPolicy()` is called first in every path-writing method before the writer is touched. The `recording-pipeline_test.ts` explicitly verifies this ordering with a call-order array.
+- **Denied rotation leaves existing recording intact** — if policy denies a rotation target, `evaluatePathPolicy` throws before `this.recordings.set()` is reached, so the old recording survives. The test confirms this.
+- **Dedupe guard** — `existingTrimmed.endsWith(content)` correctly carried forward from stenobot. Tested in `writer-markdown_test.ts`.
+- **`captureSnapshot` doesn't touch the active recording** — the capture test confirms the active recording's `outputPath` is unchanged after a `::capture` to a different path.
+- **Frontmatter** — compact slug + 6-char alphanumeric suffix, no external dependency, `crypto.getRandomValues()` based. Existing frontmatter preserved on overwrite.
+- **Separator logic** — triple-case separator (empty / `\n` / `\n\n`) matches stenobot exactly.
+- **Audit events on all policy decisions** — `auditLogger.policyDecision()` fires from `evaluatePathPolicy()` for every command type including deny.
+
+---
+
+### Issues
+
+**1. `appendToActiveRecording` has no tests**
+
+This is the hot path — it fires for every new message the daemon ingests during an active recording. The critical behaviors that need tests:
+- Returns `{appended: false, deduped: false}` when no active recording exists
+- `lastWriteAt` updates on a successful write, doesn't update on a dedupe
+- The writer's dedupe guard actually fires through the pipeline
+
+Given that `dev.general-guidance.md` says "new behavior should include tests, especially parsing and path-policy behavior," this gap matters.
+
+**2. `now` is not propagated from pipeline through to writer/frontmatter**
+
+In `startOrRotateRecording` and `appendToActiveRecording`, the writer calls don't forward `this.now` in the options:
+
+```ts
+await this.writer.appendMessages(outputPath, input.seedMessages ?? [], {
+  title: input.title,
+  // now not passed
+});
+```
+
+`renderFrontmatter` then falls back to `new Date()` instead of the injected clock. This means frontmatter `created`/`updated` timestamps are non-deterministic even in controlled-time test setups. Low impact on correctness, but makes test assertions against timestamps impossible.
+
+**3. Carry-forward: daemon subprocess ignores `RuntimeConfig` paths/roots**
+
+`daemon_runtime.ts` at lines 64-79 still resolves status path, control path, and allowed write roots from env vars (`resolveDefaultStatusPath()`, `resolveDefaultControlPath()`, `resolveDefaultAllowedWriteRoots()`). The `RecordingPipeline` inside the daemon process therefore doesn't honor `RuntimeConfig.allowedWriteRoots` if a user has configured non-default roots via `kato init`. This was flagged in Step 2.6 and is still present.
+
+**4. `loadSessionMessages` is always `undefined` in production — export is currently a no-op**
+
+[daemon_runtime.ts:195-205] logs a warning and skips when `loadSessionMessages` is undefined. In the `__daemon-run` subprocess, `options.loadSessionMessages` is never set (no provider ingestion yet). `kato export <id>` silently does nothing at runtime. Expected for now (Step 4), but worth a comment in the code or a note in the task doc so it's not forgotten.
+
+**5. `provider: "unknown"` in export audit log**
+
+[daemon_runtime.ts:209]: `provider: "unknown"` is passed to `exportSnapshot`. This shows up in audit events. The CLI export request carries a `sessionId` but no provider association. When provider ingestion is wired in, the session-to-provider mapping will need to be carried through to this call.
+
+---
+
+### Summary
+
+| | |
+|---|---|
+| Add now | `appendToActiveRecording` tests (hot path, no coverage) |
+| Fix soon | Propagate `this.now` through to writer options |
+| Fix before non-default config matters | Daemon subprocess path/roots from `RuntimeConfig` (carry-forward #3) |
+| Note in task doc | `loadSessionMessages` always undefined until Step 4 |
+| Deferred to Step 4 | `provider: "unknown"` in export — needs session-provider mapping |
+
+Ready for Step 4 once the `appendToActiveRecording` test gap is addressed. The rest can trail.

@@ -233,6 +233,8 @@ async function handleControlRequest(
         },
       );
     } else if (!loadSessionMessages) {
+      // Step 4 wiring: export requests are deferred until provider ingestion
+      // supplies a session message loader in the daemon runtime.
       await operationalLogger.warn(
         "daemon.control.export.unhandled",
         "Export request skipped because session message loader is unavailable",

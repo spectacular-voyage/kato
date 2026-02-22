@@ -27,6 +27,7 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
 
   launchDetached(): Promise<number> {
     const writeRoots = new Set<string>([
+      ...(this.runtime.allowedWriteRoots ?? []),
       this.runtime.runtimeDir,
       dirname(this.runtime.configPath),
       dirname(this.runtime.statusPath),
@@ -50,6 +51,9 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
         KATO_CONFIG_PATH: this.runtime.configPath,
         KATO_DAEMON_STATUS_PATH: this.runtime.statusPath,
         KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
+        KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
+          this.runtime.allowedWriteRoots ?? [],
+        ),
       },
     });
     const child = command.spawn();

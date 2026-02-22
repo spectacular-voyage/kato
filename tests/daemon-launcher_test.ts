@@ -8,6 +8,7 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
     configPath: ".kato/custom/config.json",
     statusPath: ".kato/custom/status/status.json",
     controlPath: ".kato/custom/control/control.json",
+    allowedWriteRoots: ["./notes", "./exports"],
     now: () => new Date("2026-02-22T10:00:00.000Z"),
     pid: 4242,
     writeStdout: (_text: string) => {},
@@ -56,10 +57,16 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
   assertEquals(allowWriteRoots.includes(dirname(runtime.configPath)), true);
   assertEquals(allowWriteRoots.includes(dirname(runtime.statusPath)), true);
   assertEquals(allowWriteRoots.includes(dirname(runtime.controlPath)), true);
+  assertEquals(allowWriteRoots.includes("./notes"), true);
+  assertEquals(allowWriteRoots.includes("./exports"), true);
 
   const env = capturedOptions?.env ?? {};
   assertEquals(env["KATO_RUNTIME_DIR"], runtime.runtimeDir);
   assertEquals(env["KATO_CONFIG_PATH"], runtime.configPath);
   assertEquals(env["KATO_DAEMON_STATUS_PATH"], runtime.statusPath);
   assertEquals(env["KATO_DAEMON_CONTROL_PATH"], runtime.controlPath);
+  assertEquals(
+    env["KATO_ALLOWED_WRITE_ROOTS_JSON"],
+    JSON.stringify(runtime.allowedWriteRoots),
+  );
 });

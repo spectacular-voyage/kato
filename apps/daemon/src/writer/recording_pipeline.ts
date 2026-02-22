@@ -175,6 +175,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         input.seedMessages ?? [],
         {
           title: input.title,
+          now: this.now,
         },
       );
       if (result.wrote) {
@@ -214,6 +215,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       input.messages,
       {
         title: input.title,
+        now: this.now,
       },
     );
 
@@ -249,6 +251,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       input.messages,
       {
         title: input.title,
+        now: this.now,
       },
     );
 
@@ -286,6 +289,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       input.messages,
       {
         title: input.title,
+        now: this.now,
       },
     );
     if (writeResult.wrote) {

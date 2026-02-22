@@ -750,3 +750,72 @@ Step 3 is implemented.
 Unrelated local note changes already in your workspace (`dev-docs/notes/conv...` and `dev-docs/notes/dev.feature-ideas.md`) were left untouched.
 
 1. Next high-impact step is Step 4: wire real session message loading from providers into `runDaemonRuntimeLoop` so queued exports execute end-to-end without test hooks.
+
+# User_2026-02-22_1326_19
+
+Claude's feedback:
+
+Issues
+1. appendToActiveRecording has no tests
+
+This is the hot path — it fires for every new message the daemon ingests during an active recording. The critical behaviors that need tests:
+
+Returns {appended: false, deduped: false} when no active recording exists
+lastWriteAt updates on a successful write, doesn't update on a dedupe
+The writer's dedupe guard actually fires through the pipeline
+Given that dev.general-guidance.md says "new behavior should include tests, especially parsing and path-policy behavior," this gap matters.
+
+2. now is not propagated from pipeline through to writer/frontmatter
+
+In startOrRotateRecording and appendToActiveRecording, the writer calls don't forward this.now in the options:
+
+await this.writer.appendMessages(outputPath, input.seedMessages ?? [], {
+  title: input.title,
+  // now not passed
+});
+renderFrontmatter then falls back to new Date() instead of the injected clock. This means frontmatter created/updated timestamps are non-deterministic even in controlled-time test setups. Low impact on correctness, but makes test assertions against timestamps impossible.
+
+3. Carry-forward: daemon subprocess ignores RuntimeConfig paths/roots
+
+daemon_runtime.ts at lines 64-79 still resolves status path, control path, and allowed write roots from env vars (resolveDefaultStatusPath(), resolveDefaultControlPath(), resolveDefaultAllowedWriteRoots()). The RecordingPipeline inside the daemon process therefore doesn't honor RuntimeConfig.allowedWriteRoots if a user has configured non-default roots via kato init. This was flagged in Step 2.6 and is still present.
+
+4. loadSessionMessages is always undefined in production — export is currently a no-op
+
+[daemon_runtime.ts:195-205] logs a warning and skips when loadSessionMessages is undefined. In the __daemon-run subprocess, options.loadSessionMessages is never set (no provider ingestion yet). kato export <id> silently does nothing at runtime. Expected for now (Step 4), but worth a comment in the code or a note in the task doc so it's not forgotten.
+
+5. provider: "unknown" in export audit log
+
+[daemon_runtime.ts:209]: provider: "unknown" is passed to exportSnapshot. This shows up in audit events. The CLI export request carries a sessionId but no provider association. When provider ingestion is wired in, the session-to-provider mapping will need to be carried through to this call.
+
+Summary
+Add now	appendToActiveRecording tests (hot path, no coverage)
+Fix soon	Propagate this.now through to writer options
+Fix before non-default config matters	Daemon subprocess path/roots from RuntimeConfig (carry-forward #3)
+Note in task doc	loadSessionMessages always undefined until Step 4
+Deferred to Step 4	provider: "unknown" in export — needs session-provider mapping
+Ready for Step 4 once the appendToActiveRecording test gap is addressed. The rest can trail.
+
+# gpt-5.3-codex_2026-02-22_1327_01
+
+I’m implementing these fixes directly: append hot-path tests, clock propagation into writer/frontmatter, runtime allowed-write-roots propagation into the detached daemon env, and explicit Step 4 notes for the current export/session-loader limitations. I’ll patch code first, then run full CI.
+
+# gpt-5.3-codex_2026-02-22_1330_34
+
+Implemented Claude’s feedback items and validated them.
+
+1. `appendToActiveRecording` hot-path tests are now in place in `tests/recording-pipeline_test.ts:236` and `tests/recording-pipeline_test.ts:261`.
+2. Deterministic clock propagation is fixed by passing `now: this.now` through all writer calls in `apps/daemon/src/writer/recording_pipeline.ts:178`, `apps/daemon/src/writer/recording_pipeline.ts:218`, `apps/daemon/src/writer/recording_pipeline.ts:254`, and `apps/daemon/src/writer/recording_pipeline.ts:292`.
+3. Runtime-configured write roots are now carried into the detached daemon subprocess:
+   - Runtime type carries roots: `apps/daemon/src/cli/types.ts:32`
+   - Router forwards config roots: `apps/daemon/src/cli/router.ts:209`
+   - Launcher includes them in `--allow-write` and env (`KATO_ALLOWED_WRITE_ROOTS_JSON`): `apps/daemon/src/orchestrator/launcher.ts:30`, `apps/daemon/src/orchestrator/launcher.ts:54`
+   - Launcher test asserts both: `tests/daemon-launcher_test.ts:60`, `tests/daemon-launcher_test.ts:69`
+4. The export-loader gap is now explicitly documented in code and task notes:
+   - Runtime comment: `apps/daemon/src/orchestrator/daemon_runtime.ts:236`
+   - Task doc note: `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:159`
+5. `provider: "unknown"` remains intentionally deferred to Step 4 and is now called out in the task note (`dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:160`).
+
+Validation:
+- `deno task fmt` passed
+- `deno task test` passed (`65 passed, 0 failed`)
+- `deno task ci` passed
