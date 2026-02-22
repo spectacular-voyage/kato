@@ -1,0 +1,6 @@
+{"type":"session_meta","payload":{"id":"sess-cli-001","source":"cli","cwd":"/home/user/other-project","cli_version":"0.89.0"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"How do I use async/await in JavaScript?"}}
+{"type":"response_item","payload":{"type":"function_call","name":"search","arguments":"{\"query\":\"async await javascript\"}","call_id":"call-legacy-001"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-legacy-001","output":"async/await is a syntax for handling promises..."}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"User wants to learn async/await basics."}],"encrypted_content":"opaque"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Async/await is a modern JavaScript feature that makes asynchronous code look and behave more like synchronous code."}}

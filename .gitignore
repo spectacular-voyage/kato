@@ -1,0 +1,10 @@
+# Deno cache and coverage artifacts
+.deno/
+coverage/
+
+# Editor and OS artifacts
+.DS_Store
+*.swp
+
+# Embedded reference repo
+stenobot/

@@ -1,0 +1,15 @@
+{"type":"session_meta","payload":{"id":"sess-vscode-001","source":"vscode","cwd":"/home/user/project","cli_version":"0.104.0-alpha.1"}}
+{"type":"turn_context","payload":{"model":"gpt-5.3-codex","usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-001"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\n## Active file: src/auth.ts\n## My request for Codex:\n::record @documentation/notes/test.md\nHelp me set up authentication"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls src/\"}","call_id":"call-001"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-001","output":"auth.ts\nindex.ts\n"}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"The user wants to set up authentication. I'll check the project structure first."}],"encrypted_content":"opaque-data-here"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"I'm analyzing your project structure..."}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Let me check the existing code."}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"text","text":"I'll help you set up authentication. Based on your project structure, I recommend using JWT tokens with a middleware approach."}]}}
+{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"I'll help you set up authentication. Based on your project structure, I recommend using JWT tokens with a middleware approach."}}
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-002"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Can you also add OAuth?"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"text","text":"Sure, I'll add OAuth 2.0 support using the Authorization Code flow."}]}}
+{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"Sure, I'll add OAuth 2.0 support using the Authorization Code flow."}}
