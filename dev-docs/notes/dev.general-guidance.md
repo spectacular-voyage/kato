@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1771728298697
+updated: 1771730298605
 created: 1771724621833
 ---
 
@@ -16,6 +16,7 @@ IMPORTANT: This project must use modern Deno best practices and, whenevre possib
 
 ## Working Rules
 
+- Documentation must be continuously verified and updated
 - Keep changes small, reviewable, and test-backed.
 - Run `deno task ci` before opening or updating a PR.
 - Treat `stenobot/` as a reference snapshot of the now-obsolete POC; don't change it

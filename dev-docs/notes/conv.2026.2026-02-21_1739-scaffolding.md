@@ -237,3 +237,84 @@ Create `apps/daemon/src/cli/{start,stop,status,export,clean}` with shared contra
 You currently have a large staged-worthy set of scaffold changes (apps/shared/tasks/docs). Commit that as a clean baseline.
 
 If you want, I can start immediately with step 1 (parser behavior port).
+
+# User_2026-02-21_1912_48
+
+OK, I guess we can finish the parser port. Is parser.test.s for Claude? If so, we should rename to claude-parser, right?
+
+# gpt-5.3-codex_2026-02-21_1912_48
+
+I’ve confirmed the old Claude/Codex parser test expectations. I’m now pulling the original parser/type code so I can port it into Deno-native modules and keep behavior parity with those fixtures.
+
+# gpt-5.3-codex_2026-02-21_1916_27
+
+Yes. In the old project, `parser.test.ts` was the Claude parser suite. I ported it under an explicit name.
+
+Completed parser port:
+
+- Claude parser implementation: `apps/daemon/src/providers/claude/parser.ts`
+- Codex parser implementation: `apps/daemon/src/providers/codex/parser.ts`
+- Provider exports:
+  - `apps/daemon/src/providers/claude/mod.ts`
+  - `apps/daemon/src/providers/codex/mod.ts`
+  - `apps/daemon/src/providers/mod.ts`
+- Renamed/ported tests:
+  - `tests/claude-parser_test.ts`
+  - `tests/codex-parser_test.ts`
+- Added aborted-turn fixture (read-only test compatible): `tests/fixtures/codex-session-aborted.jsonl`
+- Added shared message contracts used by parsers: `shared/src/contracts/messages.ts`, exported via `shared/src/mod.ts:18`
+- Marked parser-port step complete in `dev-docs/notes/completed.2026.2026-02-21-deno-rewrite-metaplan.md:33`
+
+Validation:
+
+- `deno task ci` passes
+- Tests: `22 passed, 0 failed`
+
+If you want, next I can move to the daemon CLI command surface scaffold (`start/stop/status/export/clean`) on top of these parsers.
+
+# User_2026-02-21_1919_22
+
+What does "deno task dev:root" do?
+
+# gpt-5.3-codex_2026-02-21_1919_25
+
+`deno task dev:root` runs:
+
+```sh
+deno run --watch main.ts
+```
+
+So it only watches and runs the top-level `main.ts` entrypoint (not `apps/daemon/src` or `shared/src` directly, unless imported through `main.ts`). It’s mainly a root-workspace smoke/dev entrypoint, while `deno task dev` / `dev:daemon` is the real daemon loop.
+
+# User_2026-02-21_1921_29
+
+Don't you think it's better to settle on libraries, especially the CLI library and perhaps logging before anything else?
+
+# gpt-5.3-codex_2026-02-21_1921_45
+
+Yes. Settling **foundational** libraries early is the right move.
+
+For this repo, I’d lock these first:
+
+1. CLI framework (command model, parsing, help UX, testability).
+2. Logging approach (structured logger API, levels, sinks, redaction rules).
+
+Then partially lock these:
+
+1. Tracing/telemetry API shape now, exporter/vendor later.
+2. Feature-flag interface now, backend later (if MVP can run without it).
+
+That gives architectural stability without overcommitting to every dependency too early.  
+If you want, I can now turn `dev-docs/notes/task.2026.2026-02-22-mvp-epic-library-selection.md` into concrete decisions with criteria and a recommendation per item.
+
+# User_2026-02-21_1922_57
+
+Shall I start a new session for [task.2026.2026-02-22-mvp-epic-library-selection.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-mvp-epic-library-selection.md) ?
+
+# gpt-5.3-codex_2026-02-21_1923_04
+
+Yes, that’s a good cutoff.
+
+Use a new session for `dev-docs/notes/task.2026.2026-02-22-mvp-epic-library-selection.md` so decisions stay clean and reviewable, and keep this thread as scaffolding history.
+
+If you want, start it with: “Decide CLI + logging libraries first, with MVP-safe defaults and rationale recorded in the note.”

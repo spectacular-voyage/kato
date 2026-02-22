@@ -30,4 +30,4 @@ created: 1771724604223
 
 ## Next Build Step
 
-- Port parser behavior tests from `stenobot/tests/*.test.ts` into Deno-native parser tests.
+- [x] Port parser behavior tests from `stenobot/tests/*.test.ts` into Deno-native parser tests.

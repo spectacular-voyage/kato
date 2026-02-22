@@ -15,3 +15,4 @@ export type {
   RuntimeConfigMetadata,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
+export type { Message, ThinkingBlock, ToolCall } from "./contracts/messages.ts";

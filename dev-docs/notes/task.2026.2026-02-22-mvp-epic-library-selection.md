@@ -2,7 +2,7 @@
 id: 5z1m4pgm4tlr95vpyw0z8ge
 title: 2026 02 22 MVP Epic Library Selection
 desc: ''
-updated: 1771795200000
+updated: 1771729866379
 created: 1771795200000
 ---
 
@@ -12,7 +12,7 @@ Sequence the MVP epic with library choices first, then implementation slices.
 
 ## Scope (Phase 1)
 
-- CLI framework decision.
+- CLI framework decision. Cliffy?
 - OpenTelemetry instrumentation baseline.
 - Optional Sentry integration point.
 - OpenFeature adoption decision and rollout strategy.
