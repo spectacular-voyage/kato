@@ -242,3 +242,7 @@ The test asserts `"started in background"` but nothing asserts that auto-init is
 | Note | Optimistic status race window (gap #4) |
 
 The path propagation gap (#1) is the one most likely to cause silent misbehavior once anyone uses a non-default runtime dir.
+
+# User_2026-02-22_1320_12
+
+OK, I believe your suggestions were addressed, and step 3 has been implemented. Please review

@@ -2,11 +2,12 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1771724652182
+updated: 1771794716831
 created: 1771724652182
 ---
 
-
+- each project/workspace folder can have its own .kato file/folder that specified where conversations go by default and filename patterns
+  - extremely useful if all conversations go to the same place and should follow the same pattern
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
 - support restart and reload CLI commands

@@ -1,8 +1,17 @@
+import type { Message } from "@kato/shared";
 import {
   AuditLogger,
   NoopSink,
   StructuredLogger,
 } from "../observability/mod.ts";
+import {
+  resolveDefaultAllowedWriteRoots,
+  WritePathPolicyGate,
+} from "../policy/mod.ts";
+import {
+  RecordingPipeline,
+  type RecordingPipelineLike,
+} from "../writer/mod.ts";
 import {
   createDefaultStatusSnapshot,
   type DaemonControlRequest,
@@ -17,6 +26,8 @@ import {
 export interface DaemonRuntimeLoopOptions {
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
+  recordingPipeline?: RecordingPipelineLike;
+  loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
   now?: () => Date;
   pid?: number;
   heartbeatIntervalMs?: number;
@@ -65,10 +76,18 @@ export async function runDaemonRuntimeLoop(
     new DaemonStatusSnapshotFileStore(resolveDefaultStatusPath(), now);
   const controlStore = options.controlStore ??
     new DaemonControlRequestFileStore(resolveDefaultControlPath(), now);
-
   const operationalLogger = options.operationalLogger ??
     makeDefaultOperationalLogger(now);
   const auditLogger = options.auditLogger ?? makeDefaultAuditLogger(now);
+  const recordingPipeline = options.recordingPipeline ??
+    new RecordingPipeline({
+      pathPolicyGate: new WritePathPolicyGate({
+        allowedRoots: resolveDefaultAllowedWriteRoots(),
+      }),
+      now,
+      operationalLogger,
+      auditLogger,
+    });
 
   let snapshot = createDefaultStatusSnapshot(now());
   snapshot = {
@@ -92,8 +111,9 @@ export async function runDaemonRuntimeLoop(
     for (const request of requests) {
       shouldStop = await handleControlRequest({
         request,
-        now,
         controlStore,
+        recordingPipeline,
+        loadSessionMessages: options.loadSessionMessages,
         operationalLogger,
         auditLogger,
       });
@@ -101,6 +121,15 @@ export async function runDaemonRuntimeLoop(
         break;
       }
     }
+
+    const recordingSummary = recordingPipeline.getRecordingSummary();
+    snapshot = {
+      ...snapshot,
+      recordings: {
+        activeRecordings: recordingSummary.activeRecordings,
+        destinations: recordingSummary.destinations,
+      },
+    };
 
     const currentTimeMs = now().getTime();
     if (currentTimeMs >= nextHeartbeatAt) {
@@ -138,10 +167,19 @@ export async function runDaemonRuntimeLoop(
 
 interface HandleControlRequestOptions {
   request: DaemonControlRequest;
-  now: () => Date;
   controlStore: DaemonControlRequestStoreLike;
+  recordingPipeline: RecordingPipelineLike;
+  loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 async function handleControlRequest(
@@ -150,6 +188,8 @@ async function handleControlRequest(
   const {
     request,
     controlStore,
+    recordingPipeline,
+    loadSessionMessages,
     operationalLogger,
     auditLogger,
   } = options;
@@ -172,6 +212,60 @@ async function handleControlRequest(
       requestedAt: request.requestedAt,
     },
   );
+
+  if (request.command === "export") {
+    const payload = request.payload;
+    const sessionId = isRecord(payload)
+      ? readString(payload["sessionId"])
+      : undefined;
+    const outputPath = isRecord(payload)
+      ? readString(payload["resolvedOutputPath"]) ??
+        readString(payload["outputPath"])
+      : undefined;
+
+    if (!sessionId || !outputPath) {
+      await operationalLogger.warn(
+        "daemon.control.export.invalid",
+        "Export request payload is missing required fields",
+        {
+          requestId: request.requestId,
+          payload,
+        },
+      );
+    } else if (!loadSessionMessages) {
+      await operationalLogger.warn(
+        "daemon.control.export.unhandled",
+        "Export request skipped because session message loader is unavailable",
+        {
+          requestId: request.requestId,
+          sessionId,
+          outputPath,
+        },
+      );
+    } else {
+      try {
+        const messages = await loadSessionMessages(sessionId);
+        await recordingPipeline.exportSnapshot({
+          provider: "unknown",
+          sessionId,
+          targetPath: outputPath,
+          messages,
+          title: sessionId,
+        });
+      } catch (error) {
+        await operationalLogger.error(
+          "daemon.control.export.failed",
+          "Export request failed in daemon runtime",
+          {
+            requestId: request.requestId,
+            sessionId,
+            outputPath,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+  }
 
   await controlStore.markProcessed(request.requestId);
 

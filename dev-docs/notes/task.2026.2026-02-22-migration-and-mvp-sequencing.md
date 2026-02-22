@@ -46,7 +46,12 @@ Sequence migration and MVP implementation so foundational contracts and dependen
   - Recording identity is generated per recording stream (not provider `sessionId`), allowing multiple recordings per session.
   - Preserve `::record` (ongoing stream) vs `::capture` (one-shot snapshot) distinction.
   - Frontmatter IDs use compact slug + random suffix for human-friendly notes.
-- [ ] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
+- [x] Step 3: writer pipeline + destination rotation ordering + dedupe append guard.
+  - Add markdown writer module with create/append/overwrite modes and frontmatter support.
+  - Preserve exporter tail dedupe guard (`existingTrimmed.endsWith(content)`) to avoid duplicate appends.
+  - Add recording pipeline with policy-before-rotate ordering for `record`/`capture`/`export`.
+  - Preserve `capture` as one-shot snapshot that does not replace active recording target.
+  - Route daemon `export` control requests through the writer pipeline (session loader hook).
 - [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
 - [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:
   - [[dev.general-guidance]]

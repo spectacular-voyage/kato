@@ -71,3 +71,26 @@ export {
   type WatchDebounceOptions,
   watchFsDebounced,
 } from "./core/watcher.ts";
+export type {
+  ActiveRecording,
+  AppendToActiveRecordingInput,
+  AppendToActiveRecordingResult,
+  ConversationWriteMode,
+  ConversationWriterLike,
+  MarkdownRenderOptions,
+  MarkdownSpeakerNames,
+  MarkdownWriteResult,
+  RecordingPipelineLike,
+  RecordingPipelineOptions,
+  RecordingSummary,
+  SnapshotExportInput,
+  SnapshotExportResult,
+  StartOrRotateRecordingInput,
+} from "./writer/mod.ts";
+export {
+  makeCompactFrontmatterId,
+  MarkdownConversationWriter,
+  RecordingPipeline,
+  renderMessagesToMarkdown,
+  slugifyForFrontmatterId,
+} from "./writer/mod.ts";

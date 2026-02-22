@@ -667,3 +667,86 @@ The test asserts `"started in background"` but nothing asserts that auto-init is
 # gpt-5.3-codex_2026-02-22_1306_05
 
 I’ll address these 2.6 review gaps first before starting Step 3: I’m going to inspect the current launcher/router/runtime code paths, patch behavior for config-missing and auto-init messaging, and add tests plus a note for the known start race limitation.
+
+# gpt-5.3-codex_2026-02-22_1308_11
+
+Addressed all four review points before Step 3.
+
+1. Subprocess configured paths  
+- This was already fixed in runtime code (`KATO_CONFIG_PATH`, `KATO_DAEMON_STATUS_PATH`, `KATO_DAEMON_CONTROL_PATH` are passed) and now has explicit test coverage.
+- Added injectable command factory + assertions in `apps/daemon/src/orchestrator/launcher.ts:12` and `tests/daemon-launcher_test.ts:5`.
+
+2. Missing config now fails closed (except `start` with auto-init enabled)  
+- `status`/`stop`/`export`/`clean` now return exit code `1` with:
+  - `Runtime config not found ... Run \`kato init\` first.`
+- Implemented in `apps/daemon/src/cli/router.ts:177`.
+- Tests added in `tests/daemon-cli_test.ts:336` and `tests/daemon-cli_test.ts:357`.
+
+3. Auto-init feedback on `kato start`  
+- When `start` auto-creates config, CLI now prints:
+  - `initialized runtime config at ...`
+- Implemented in `apps/daemon/src/cli/router.ts:237`.
+- Test updated in `tests/daemon-cli_test.ts:305`.
+
+4. Optimistic start status race documented  
+- Added accepted MVP limitation note in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:148`.
+
+Validation:
+- `deno task fmt` pass
+- `deno task test` pass (55 tests)
+- `deno task ci` pass
+
+If you want, I’ll proceed directly into Step 3 implementation next.
+
+# User_2026-02-22_1308_31
+
+Yes, proceed to step 3
+
+# gpt-5.3-codex_2026-02-22_1308_43
+
+Proceeding with Step 3 now. I’ll first map existing orchestrator/control/provider contracts and any writer stubs, then implement a minimal writer pipeline with rotation ordering and dedupe append guard, followed by tests and checklist updates.
+
+# gpt-5.3-codex_2026-02-22_1318_34
+
+Step 3 is implemented.
+
+**What I changed**
+- Added a writer module with markdown rendering + frontmatter + append/overwrite modes:
+  - `apps/daemon/src/writer/markdown_writer.ts:1`
+  - `apps/daemon/src/writer/frontmatter.ts:1`
+  - `apps/daemon/src/writer/mod.ts:1`
+- Ported the dedupe append guard (`existingTrimmed.endsWith(content)`), now enforced in append mode:
+  - `apps/daemon/src/writer/markdown_writer.ts:329`
+- Added recording pipeline semantics with policy-before-rotate ordering and `record`/`capture`/`export` behavior:
+  - `apps/daemon/src/writer/recording_pipeline.ts:132`
+  - `apps/daemon/src/writer/recording_pipeline.ts:150`
+  - `apps/daemon/src/writer/recording_pipeline.ts:202`
+  - `apps/daemon/src/writer/recording_pipeline.ts:237`
+- `capture` is one-shot and does not replace active recording target:
+  - `apps/daemon/src/writer/recording_pipeline.ts:202`
+- Wired daemon runtime to route queued `export` control requests through the writer pipeline (via a session-loader hook):
+  - `apps/daemon/src/orchestrator/daemon_runtime.ts:26`
+  - `apps/daemon/src/orchestrator/daemon_runtime.ts:216`
+- Exported the new writer surfaces from daemon module:
+  - `apps/daemon/src/mod.ts:74`
+
+**Tests added/updated**
+- New writer tests (frontmatter ID format, dedupe tail guard, overwrite frontmatter preservation):
+  - `tests/writer-markdown_test.ts:1`
+- New recording pipeline tests (policy-before-writer ordering, deny-no-rotate, capture distinction):
+  - `tests/recording-pipeline_test.ts:1`
+- Runtime test for export request routing:
+  - `tests/daemon-runtime_test.ts:90`
+
+**Docs**
+- Marked Step 3 complete in sequencing checklist:
+  - `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:49`
+
+**Validation**
+- `deno task fmt` passed
+- `deno task test` passed (`62` tests)
+- `deno task ci` passed
+
+Unrelated local note changes already in your workspace (`dev-docs/notes/conv...` and `dev-docs/notes/dev.feature-ideas.md`) were left untouched.
+
+1. Next high-impact step is Step 4: wire real session message loading from providers into `runDaemonRuntimeLoop` so queued exports execute end-to-end without test hooks.
