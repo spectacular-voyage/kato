@@ -1,8 +1,18 @@
-export function add(a: number, b: number): number {
-  return a + b;
+import { describeDaemonEntryPoint } from "./apps/daemon/src/mod.ts";
+
+export function describeWorkspaceLayout(): string {
+  return [
+    "apps/daemon",
+    "apps/web",
+    "apps/cloud",
+    "shared/src",
+  ].join(", ");
 }
 
-// Learn more at https://docs.deno.com/runtime/manual/examples/module_metadata#concepts
+export function describeRuntime(): string {
+  return describeDaemonEntryPoint();
+}
+
 if (import.meta.main) {
-  console.log("Add 2 + 3 =", add(2, 3));
+  console.log(describeRuntime());
 }

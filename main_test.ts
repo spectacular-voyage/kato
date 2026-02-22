@@ -1,6 +1,16 @@
 import { assertEquals } from "@std/assert";
-import { add } from "./main.ts";
+import { describeRuntime, describeWorkspaceLayout } from "./main.ts";
 
-Deno.test(function addTest() {
-  assertEquals(add(2, 3), 5);
+Deno.test(function runtimeTest() {
+  assertEquals(
+    describeRuntime(),
+    "kato daemon entry point (launcher -> orchestrator)",
+  );
+});
+
+Deno.test(function workspaceLayoutTest() {
+  assertEquals(
+    describeWorkspaceLayout(),
+    "apps/daemon, apps/web, apps/cloud, shared/src",
+  );
 });

@@ -26,6 +26,7 @@ created: 1771724604223
   - Sentry integration checkpoint
   - OpenFeature decision point
 - [x] Port existing parser fixtures into Deno test structure (`tests/fixtures/*`).
+- [x] Expand monorepo skeleton into `apps/{daemon,web,cloud}` with `shared/src` contracts.
 
 ## Next Build Step
 
