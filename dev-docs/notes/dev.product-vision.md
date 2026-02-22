@@ -2,7 +2,7 @@
 id: 4tvkvybigqrxc5yehscco6o
 title: Product Vision
 desc: ''
-updated: 1771728919637
+updated: 1771782743074
 created: 1771728320207
 ---
 
@@ -83,7 +83,7 @@ Agents and processes are granted:
 
 Kato must:
 
-* Work across Claude Code, Codex, and future tools
+* Work across Claude Code, Codex, Gemini, and future tools
 * Operate as CLI or daemon
 * Integrate into larger systems (e.g., Semantic Flow, Stagecraft)
 
