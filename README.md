@@ -78,6 +78,15 @@ Default config shape:
   "allowedWriteRoots": [
     "."
   ],
+  "providerSessionRoots": {
+    "claude": [
+      "<HOME>/.claude/projects",
+      "<HOME>/.claude-personal/projects"
+    ],
+    "codex": [
+      "<HOME>/.codex/sessions"
+    ]
+  },
   "featureFlags": {
     "writerIncludeThinking": true,
     "writerIncludeToolCalls": true,
@@ -90,6 +99,7 @@ Default config shape:
 Notes:
 
 - Runtime config is validated fail-closed at startup.
+- `providerSessionRoots` controls provider ingestion discovery roots and daemon read-scope narrowing.
 - Unknown `featureFlags` keys are rejected.
 - Older daemon builds may fail to start with newer config files containing additional flags.
 

@@ -1,16 +1,18 @@
 ---
 id: kclfduln80f7td4hcfuszi4
 title: Testing
-desc: ''
+desc: ""
 updated: 1771811926065
 created: 1771811926065
 ---
 
 ## Purpose
 
-This note tracks practical testing workflows for Kato, including a repeatable MVP smoke test.
+This note tracks practical testing workflows for Kato, including a repeatable
+MVP smoke test.
 
-All `deno run -A ...` commands below are source/dev invocations. For production packaging, prefer a compiled binary with explicitly scoped permissions.
+All `deno run -A ...` commands below are source/dev invocations. For production
+packaging, prefer a compiled binary with explicitly scoped permissions.
 
 ## Test Levels
 
@@ -28,6 +30,8 @@ This runbook validates currently implemented MVP slices:
 - runtime config bootstrap and fail-closed loading
 - detached daemon start/stop and status files
 - control queue request enqueue behavior
+- provider ingestion from configured session roots
+- provider-backed export output (`kato export <session-id>`)
 
 ### Preconditions
 
@@ -58,7 +62,20 @@ Expected:
   - `runtime config already exists at ...`
 - `.kato/config.json` exists.
 
-### 2) Start daemon
+### 2) Configure provider roots and seed fixture
+
+```bash
+deno eval -A 'const path=".kato/config.json"; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[".kato/test-provider/claude"],codex:[".kato/test-provider/codex"]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
+mkdir -p .kato/test-provider/codex
+cp tests/fixtures/codex-session-vscode-new.jsonl .kato/test-provider/codex/smoke-codex.jsonl
+```
+
+Expected:
+
+- `.kato/config.json` includes `providerSessionRoots`.
+- `.kato/test-provider/codex/smoke-codex.jsonl` exists.
+
+### 3) Start daemon
 
 ```bash
 deno run -A apps/daemon/src/main.ts start
@@ -68,9 +85,10 @@ Expected:
 
 - Output contains:
   - `kato daemon started in background (pid: ...)`
-- `.kato/runtime/status.json` exists and eventually reports `daemonRunning: true`.
+- `.kato/runtime/status.json` exists and eventually reports
+  `daemonRunning: true`.
 
-### 3) Check status
+### 4) Check status
 
 ```bash
 deno run -A apps/daemon/src/main.ts status
@@ -86,19 +104,35 @@ Expected:
   - `heartbeatAt`
   - `recordings`
 
-### 4) Queue export and clean requests
+### 5) Verify provider ingestion + real export
 
 ```bash
-deno run -A apps/daemon/src/main.ts export smoke-session --output .kato/runtime/smoke-export.md
+deno run -A apps/daemon/src/main.ts status --json
+deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output .kato/runtime/smoke-export.md
+sleep 2
+cat .kato/runtime/smoke-export.md
+```
+
+Expected:
+
+- `status --json` eventually reports a non-empty `providers` list with
+  `provider: "codex"` and `activeSessions >= 1`.
+- Export command reports `export request queued ...`.
+- Export file exists and contains parsed conversation content (assistant/user
+  messages).
+
+### 6) Queue clean request
+
+```bash
 deno run -A apps/daemon/src/main.ts clean --all --dry-run
 ```
 
 Expected:
 
-- Each command reports `... request queued ...`.
+- Command reports `... request queued ...`.
 - `.kato/runtime/control.json` includes queued requests.
 
-### 5) Stop daemon
+### 7) Stop daemon
 
 ```bash
 deno run -A apps/daemon/src/main.ts stop
@@ -109,7 +143,7 @@ Expected:
 - Output indicates stop queued or stale status reset path.
 - `status` eventually reports daemon not running.
 
-### 6) Fail-closed config check (unknown feature flag)
+### 8) Fail-closed config check (unknown feature flag)
 
 1. Edit `.kato/config.json` and add an unknown key under `featureFlags`, e.g.:
    - `"futureFlagThatDoesNotExist": true`
@@ -126,7 +160,7 @@ Expected:
 
 3. Remove the unknown key and rerun `start`.
 
-### 7) Restore baseline and run full gate
+### 9) Restore baseline and run full gate
 
 ```bash
 deno task ci

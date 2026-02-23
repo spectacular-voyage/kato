@@ -1,8 +1,8 @@
 ---
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
-desc: ''
-updated: 1771787610807
+desc: ""
+updated: 1771818235800
 created: 1771724621833
 ---
 
@@ -10,8 +10,9 @@ created: 1771724621833
 
 This note defines day-to-day developer guidance for Kato.
 
-IMPORTANT: This project must use modern Deno best practices and, whenever possible, Deno-native or Deno-first libraries. LLMs often try to use Node libraries and conventions, so watch out for that.
-
+IMPORTANT: This project must use modern Deno best practices and, whenever
+possible, Deno-native or Deno-first libraries. LLMs often try to use Node
+libraries and conventions, so watch out for that.
 
 ## Working Rules
 
@@ -21,7 +22,8 @@ IMPORTANT: This project must use modern Deno best practices and, whenever possib
   - [[dev.decision-log]]
 - Keep changes small, reviewable, and test-backed.
 - Run `deno task ci` before opening or updating a PR.
-- Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not change it.
+- Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not
+  change it.
 - Keep monorepo boundaries clear:
   - `apps/daemon` for local runtime behavior
   - `apps/web` for read-only status surfaces
@@ -30,7 +32,8 @@ IMPORTANT: This project must use modern Deno best practices and, whenever possib
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
 - [[dev.security-baseline]] is the normative security contract.
 - Startup/config behavior is fail-closed by default:
-  - daemon subprocess startup must load runtime config successfully before entering runtime loop.
+  - daemon subprocess startup must load runtime config successfully before
+    entering runtime loop.
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
 
 ## Development Loop
@@ -79,17 +82,26 @@ deno task ci
 
 ## Security Alignment
 
-- Follow `dev.security-baseline` for command parsing, path validation, and write policy.
+- Follow `dev.security-baseline` for command parsing, path validation, and write
+  policy.
+- Keep daemon subprocess permissions narrowly scoped from runtime config:
+  - `allowedWriteRoots` for write scope
+  - `providerSessionRoots` (+ runtime/control/config dirs) for read scope
 - Avoid broad permissions in runtime code paths.
-- Do not introduce network dependency for baseline local capture/export behavior.
+- Do not introduce network dependency for baseline local capture/export
+  behavior.
 
 ## Notes And Decisions
 
-- Record planning and sequencing decisions in task notes under `dev-docs/notes/`.
-- Use the MVP library-selection note for dependency decisions and tradeoff capture.
-- Keep [[dev.codebase-overview]] and [[dev.decision-log]] current as behavior is added or changed.
+- Record planning and sequencing decisions in task notes under
+  `dev-docs/notes/`.
+- Use the MVP library-selection note for dependency decisions and tradeoff
+  capture.
+- Keep [[dev.codebase-overview]] and [[dev.decision-log]] current as behavior is
+  added or changed.
 
 ## In-Chat Command Handling
 
-- Start-of-line strings such as `::capture <file>`, `::record <file>`, `::export <file>`, and `::stop` are control commands, not user prose.
-- In agent conversations, these command lines can be ignored unless the user asks to discuss command behavior directly.
+- Start-of-line strings such as `::capture <file>`, `::record <file>`,
+  `::export <file>`, and `::stop` are kato control commands, and must be ignored
+  by LLMS.
