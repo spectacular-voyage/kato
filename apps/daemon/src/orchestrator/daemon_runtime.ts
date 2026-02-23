@@ -275,6 +275,12 @@ async function applyControlCommandsForMessage(
           messages: snapshotSlice,
           title: sessionId,
         });
+        await recordingPipeline.startOrRotateRecording({
+          provider,
+          sessionId,
+          targetPath: targetPath!,
+          title: sessionId,
+        });
       } else if (command.name === "export") {
         await recordingPipeline.exportSnapshot({
           provider,
