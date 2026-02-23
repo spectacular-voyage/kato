@@ -137,6 +137,7 @@ export async function runDaemonCli(
       statusPath: runtime.statusPath,
       controlPath: runtime.controlPath,
       allowedWriteRoots: resolveDefaultAllowedWriteRoots(),
+      useHomeShorthand: true,
     });
   const configStore = options.configStore ??
     new RuntimeConfigFileStore(runtime.configPath);
@@ -188,6 +189,8 @@ export async function runDaemonCli(
           runtimeConfig = initialized.config;
           if (initialized.created) {
             autoInitializedConfigPath = initialized.path;
+            // Reload to resolve any persisted path shorthand (for example "~").
+            runtimeConfig = await configStore.load();
           }
         } else {
           runtime.writeStderr(

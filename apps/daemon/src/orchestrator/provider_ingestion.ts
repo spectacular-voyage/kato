@@ -181,24 +181,19 @@ function parseRootsFromEnv(name: string): string[] | undefined {
     return undefined;
   }
 
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed) && parsed.every(isNonEmptyString)) {
-      const roots = normalizeRoots(parsed);
-      return roots.length > 0 ? roots : undefined;
-    }
+    parsed = JSON.parse(raw) as unknown;
   } catch {
-    // fall through
+    return undefined;
   }
 
-  const csv = raw.split(",").map((entry) => entry.trim()).filter((entry) =>
-    entry.length > 0
-  );
-  if (csv.length > 0) {
-    return normalizeRoots(csv);
+  if (!Array.isArray(parsed)) {
+    return undefined;
   }
 
-  return undefined;
+  const roots = normalizeRoots(parsed.filter(isNonEmptyString));
+  return roots.length > 0 ? roots : undefined;
 }
 
 function resolveClaudeSessionRoots(overrides?: string[]): string[] {
@@ -218,7 +213,6 @@ function resolveClaudeSessionRoots(overrides?: string[]): string[] {
 
   return normalizeRoots([
     join(home, ".claude", "projects"),
-    join(home, ".claude-personal", "projects"),
   ]);
 }
 

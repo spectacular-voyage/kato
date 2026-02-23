@@ -37,17 +37,17 @@ This runbook validates currently implemented MVP slices:
 
 1. Run from repo root (`kato/`).
 2. Deno 2.x installed.
-3. No critical local data in `.kato/` you need to keep.
+3. No critical local data in `~/.kato/` you need to keep.
 
 ### 0) Optional clean baseline
 
 ```bash
-rm -rf .kato
+rm -rf ~/.kato
 ```
 
 Expected:
 
-- `.kato/` removed if present.
+- `~/.kato/` removed if present.
 
 ### 1) Initialize runtime config
 
@@ -60,20 +60,20 @@ Expected:
 - Output contains either:
   - `created runtime config at ...`, or
   - `runtime config already exists at ...`
-- `.kato/config.json` exists.
+- `~/.kato/config.json` exists.
 
 ### 2) Configure provider roots and seed fixture
 
 ```bash
-deno eval -A 'const path=".kato/config.json"; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[".kato/test-provider/claude"],codex:[".kato/test-provider/codex"]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
-mkdir -p .kato/test-provider/codex
-cp tests/fixtures/codex-session-vscode-new.jsonl .kato/test-provider/codex/smoke-codex.jsonl
+deno eval -A 'const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/config.json`; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
+mkdir -p ~/.kato/test-provider/codex
+cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```
 
 Expected:
 
-- `.kato/config.json` includes `providerSessionRoots`.
-- `.kato/test-provider/codex/smoke-codex.jsonl` exists.
+- `~/.kato/config.json` includes `providerSessionRoots`.
+- `~/.kato/test-provider/codex/smoke-codex.jsonl` exists.
 
 ### 3) Start daemon
 
@@ -85,7 +85,7 @@ Expected:
 
 - Output contains:
   - `kato daemon started in background (pid: ...)`
-- `.kato/runtime/status.json` exists and eventually reports
+- `~/.kato/runtime/status.json` exists and eventually reports
   `daemonRunning: true`.
 
 ### 4) Check status
@@ -108,9 +108,9 @@ Expected:
 
 ```bash
 deno run -A apps/daemon/src/main.ts status --json
-deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output .kato/runtime/smoke-export.md
+deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output ~/.kato/runtime/smoke-export.md
 sleep 2
-cat .kato/runtime/smoke-export.md
+cat ~/.kato/runtime/smoke-export.md
 ```
 
 Expected:
@@ -130,7 +130,7 @@ deno run -A apps/daemon/src/main.ts clean --all --dry-run
 Expected:
 
 - Command reports `... request queued ...`.
-- `.kato/runtime/control.json` includes queued requests.
+- `~/.kato/runtime/control.json` includes queued requests.
 
 ### 7) Stop daemon
 
@@ -145,7 +145,7 @@ Expected:
 
 ### 8) Fail-closed config check (unknown feature flag)
 
-1. Edit `.kato/config.json` and add an unknown key under `featureFlags`, e.g.:
+1. Edit `~/.kato/config.json` and add an unknown key under `featureFlags`, e.g.:
    - `"futureFlagThatDoesNotExist": true`
 2. Run:
 
@@ -175,7 +175,8 @@ Expected:
 1. `Runtime config not found ... Run kato init first`:
    - Run `deno run -A apps/daemon/src/main.ts init`.
 2. `Runtime config file has unsupported schema`:
-   - Inspect `.kato/config.json` for invalid shape/unknown `featureFlags` keys.
+   - Inspect `~/.kato/config.json` for invalid shape/unknown `featureFlags`
+     keys.
 3. `Export path denied by policy`:
    - Use an output path within configured `allowedWriteRoots`.
 4. Status appears running right after failed start:

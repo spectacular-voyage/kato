@@ -2,11 +2,9 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1771812869620
+updated: 1771831053047
 created: 1771812869620
 ---
-
-## Current Next Tasks
 
 ## Runtime And Ingestion Follow-ups
 
@@ -17,6 +15,12 @@ created: 1771812869620
       `loadSessionSnapshot`.
 - [ ] Add permission-boundary tests that prove provider reads are denied outside
       `providerSessionRoots`.
+- [ ] _maybe_ Fix snapshot store key to include provider identity (`${provider}:${sessionId}`)
+      so concurrent Claude and Codex ingestion cannot clobber each other; requires
+      deciding `get(sessionId)` semantics for provider-unaware export lookups.
+- [ ] _maybe_ Fix mid-turn cursor advancement: cursor must not advance past an incomplete
+      multi-entry assistant turn; polling at a turn boundary splits one logical
+      message into two separate snapshot entries that dedupe cannot collapse.
 
 ## CLI And Runtime Hardening
 

@@ -3,7 +3,7 @@ import type {
   RuntimeConfig,
   RuntimeFeatureFlags,
 } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { dirname, isAbsolute, join, relative } from "@std/path";
 import {
   createDefaultRuntimeFeatureFlags,
   mergeRuntimeFeatureFlags,
@@ -92,11 +92,34 @@ function expandHome(path: string): string {
   if (path === "~") {
     return home;
   }
-  if (path.startsWith("~/")) {
+  if (path.startsWith("~/") || path.startsWith("~\\")) {
     return join(home, path.slice(2));
   }
 
   return path;
+}
+
+function collapseHome(path: string): string {
+  const home = resolveHomeDir();
+  if (!home) {
+    return path;
+  }
+
+  const rel = relative(home, path);
+  if (rel === "" || rel === ".") {
+    return "~";
+  }
+
+  if (
+    rel.startsWith("..") ||
+    rel.startsWith("../") ||
+    rel.startsWith("..\\") ||
+    isAbsolute(rel)
+  ) {
+    return path;
+  }
+
+  return `~/${rel.replaceAll("\\", "/")}`;
 }
 
 function normalizeRoots(paths: string[]): string[] {
@@ -116,23 +139,19 @@ function parseRootsFromEnv(name: string): string[] | undefined {
     return undefined;
   }
 
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed) && parsed.every(isNonEmptyString)) {
-      return normalizeRoots(parsed);
-    }
+    parsed = JSON.parse(raw) as unknown;
   } catch {
-    // fall through
+    return undefined;
   }
 
-  const csv = raw.split(",").map((entry) => entry.trim()).filter((entry) =>
-    entry.length > 0
-  );
-  if (csv.length > 0) {
-    return normalizeRoots(csv);
+  if (!Array.isArray(parsed)) {
+    return undefined;
   }
 
-  return undefined;
+  const roots = normalizeRoots(parsed.filter(isNonEmptyString));
+  return roots.length > 0 ? roots : undefined;
 }
 
 function cloneProviderSessionRoots(
@@ -150,7 +169,6 @@ export function resolveDefaultProviderSessionRoots(): ProviderSessionRoots {
     (home
       ? normalizeRoots([
         join(home, ".claude", "projects"),
-        join(home, ".claude-personal", "projects"),
       ])
       : []);
   const codex = parseRootsFromEnv("KATO_CODEX_SESSION_ROOTS") ??
@@ -236,6 +254,9 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   ) {
     return undefined;
   }
+  const runtimeDir = expandHome(value["runtimeDir"]);
+  const statusPath = expandHome(value["statusPath"]);
+  const controlPath = expandHome(value["controlPath"]);
   const allowedWriteRoots = value["allowedWriteRoots"];
   if (
     !Array.isArray(allowedWriteRoots) ||
@@ -259,10 +280,10 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
 
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
-    runtimeDir: value["runtimeDir"],
-    statusPath: value["statusPath"],
-    controlPath: value["controlPath"],
-    allowedWriteRoots: [...allowedWriteRoots],
+    runtimeDir,
+    statusPath,
+    controlPath,
+    allowedWriteRoots: allowedWriteRoots.map((root) => expandHome(root)),
     providerSessionRoots,
     featureFlags,
   };
@@ -319,16 +340,27 @@ export function createDefaultRuntimeConfig(options: {
   allowedWriteRoots: string[];
   providerSessionRoots?: Partial<ProviderSessionRoots>;
   featureFlags?: Partial<RuntimeFeatureFlags>;
+  useHomeShorthand?: boolean;
 }): RuntimeConfig {
+  const serializePath = options.useHomeShorthand ? collapseHome : (
+    path: string,
+  ) => path;
+  const providerSessionRoots = mergeProviderSessionRoots(
+    options.providerSessionRoots,
+  );
+
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
-    runtimeDir: options.runtimeDir,
-    statusPath: options.statusPath,
-    controlPath: options.controlPath,
-    allowedWriteRoots: [...options.allowedWriteRoots],
-    providerSessionRoots: mergeProviderSessionRoots(
-      options.providerSessionRoots,
+    runtimeDir: serializePath(options.runtimeDir),
+    statusPath: serializePath(options.statusPath),
+    controlPath: serializePath(options.controlPath),
+    allowedWriteRoots: options.allowedWriteRoots.map((root) =>
+      serializePath(root)
     ),
+    providerSessionRoots: {
+      claude: providerSessionRoots.claude.map((root) => serializePath(root)),
+      codex: providerSessionRoots.codex.map((root) => serializePath(root)),
+    },
     featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
   };
 }

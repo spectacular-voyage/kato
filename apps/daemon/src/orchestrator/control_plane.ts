@@ -1,7 +1,9 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
 import { dirname, join } from "@std/path";
 
-const DEFAULT_RUNTIME_DIR = ".kato/runtime";
+const DEFAULT_RUNTIME_DIR_FALLBACK = ".kato/runtime";
+const DEFAULT_KATO_DIRNAME = ".kato";
+const DEFAULT_RUNTIME_SUBDIR = "runtime";
 const STATUS_FILENAME = "status.json";
 const CONTROL_FILENAME = "control.json";
 const STATUS_SCHEMA_VERSION = 1;
@@ -199,6 +201,10 @@ function readEnvOptional(key: string): string | undefined {
   }
 }
 
+function resolveHomeDir(): string | undefined {
+  return readEnvOptional("HOME") ?? readEnvOptional("USERPROFILE");
+}
+
 async function writeJsonAtomically(path: string, data: unknown): Promise<void> {
   const dir = dirname(path);
   await Deno.mkdir(dir, { recursive: true });
@@ -243,7 +249,17 @@ export function isStatusSnapshotStale(
 }
 
 export function resolveDefaultRuntimeDir(): string {
-  return readEnvOptional("KATO_RUNTIME_DIR") ?? DEFAULT_RUNTIME_DIR;
+  const runtimeDirOverride = readEnvOptional("KATO_RUNTIME_DIR");
+  if (runtimeDirOverride) {
+    return runtimeDirOverride;
+  }
+
+  const homeDir = resolveHomeDir();
+  if (homeDir) {
+    return join(homeDir, DEFAULT_KATO_DIRNAME, DEFAULT_RUNTIME_SUBDIR);
+  }
+
+  return DEFAULT_RUNTIME_DIR_FALLBACK;
 }
 
 export function resolveDefaultStatusPath(

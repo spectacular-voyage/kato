@@ -2,7 +2,7 @@
 id: 5z1m4pgm4tlr95vpyw0z8ge
 title: 2026 02 22 migration and mvp sequencing
 desc: ''
-updated: 1771817910619
+updated: 1771831949429
 created: 1771795200000
 ---
 
@@ -166,5 +166,5 @@ Recommended for MVP:
 
 ## Out of Scope (MVP)
 
-1. Native service-manager integration (`systemd`, lau7nchd, Windows Service).
+1. Native service-manager integration (`systemd`, launchd, Windows Service).
 2. Sentry. Should be build-time optional and runtime-optional behind config with no-network default?

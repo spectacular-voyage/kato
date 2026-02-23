@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import {
   makeCompactFrontmatterId,
   MarkdownConversationWriter,
+  renderMessagesToMarkdown,
 } from "../apps/daemon/src/mod.ts";
 import type { Message } from "@kato/shared";
 
@@ -99,3 +100,149 @@ Deno.test("MarkdownConversationWriter overwrite preserves existing frontmatter",
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test(
+  "renderMessagesToMarkdown keeps tool call revisions when includeToolCalls is enabled",
+  () => {
+    const base: Message = {
+      id: "assistant-tool-revision",
+      role: "assistant",
+      content: "Done.",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      model: "claude-opus-4-6",
+    };
+    const messages: Message[] = [
+      {
+        ...base,
+        toolCalls: [{
+          id: "tool-1",
+          name: "search",
+          result: "first-result",
+        }],
+      },
+      {
+        ...base,
+        toolCalls: [{
+          id: "tool-1",
+          name: "search",
+          result: "second-result",
+        }],
+      },
+    ];
+
+    const rendered = renderMessagesToMarkdown(messages, {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(rendered, "first-result");
+    assertStringIncludes(rendered, "second-result");
+  },
+);
+
+Deno.test(
+  "renderMessagesToMarkdown dedupes tool call revisions when includeToolCalls is disabled",
+  () => {
+    const base: Message = {
+      id: "assistant-tool-hidden",
+      role: "assistant",
+      content: "Done.",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      model: "claude-opus-4-6",
+    };
+    const messages: Message[] = [
+      {
+        ...base,
+        toolCalls: [{
+          id: "tool-1",
+          name: "search",
+          result: "first-result",
+        }],
+      },
+      {
+        ...base,
+        toolCalls: [{
+          id: "tool-1",
+          name: "search",
+          result: "second-result",
+        }],
+      },
+    ];
+
+    const rendered = renderMessagesToMarkdown(messages, {
+      includeFrontmatter: false,
+      includeToolCalls: false,
+      includeThinking: false,
+    });
+
+    assertEquals(rendered.split("Done.").length - 1, 1);
+    assertEquals(rendered.includes("first-result"), false);
+    assertEquals(rendered.includes("second-result"), false);
+  },
+);
+
+Deno.test(
+  "renderMessagesToMarkdown keeps thinking revisions when includeThinking is enabled",
+  () => {
+    const base: Message = {
+      id: "assistant-thinking-revision",
+      role: "assistant",
+      content: "Answer ready.",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      model: "claude-opus-4-6",
+    };
+    const messages: Message[] = [
+      {
+        ...base,
+        thinkingBlocks: [{ content: "first-thought" }],
+      },
+      {
+        ...base,
+        thinkingBlocks: [{ content: "second-thought" }],
+      },
+    ];
+
+    const rendered = renderMessagesToMarkdown(messages, {
+      includeFrontmatter: false,
+      includeToolCalls: false,
+      includeThinking: true,
+    });
+
+    assertStringIncludes(rendered, "first-thought");
+    assertStringIncludes(rendered, "second-thought");
+  },
+);
+
+Deno.test(
+  "renderMessagesToMarkdown dedupes thinking revisions when includeThinking is disabled",
+  () => {
+    const base: Message = {
+      id: "assistant-thinking-hidden",
+      role: "assistant",
+      content: "Answer ready.",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      model: "claude-opus-4-6",
+    };
+    const messages: Message[] = [
+      {
+        ...base,
+        thinkingBlocks: [{ content: "first-thought" }],
+      },
+      {
+        ...base,
+        thinkingBlocks: [{ content: "second-thought" }],
+      },
+    ];
+
+    const rendered = renderMessagesToMarkdown(messages, {
+      includeFrontmatter: false,
+      includeToolCalls: false,
+      includeThinking: false,
+    });
+
+    assertEquals(rendered.split("Answer ready.").length - 1, 1);
+    assertEquals(rendered.includes("first-thought"), false);
+    assertEquals(rendered.includes("second-thought"), false);
+  },
+);

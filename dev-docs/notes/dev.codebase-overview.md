@@ -57,9 +57,9 @@ graph TD
   end
 
   subgraph FS
-    CONFIG[.kato/config.json]
-    CONTROL[.kato/runtime/control.json]
-    STATUS[.kato/runtime/status.json]
+    CONFIG[~/.kato/config.json]
+    CONTROL[~/.kato/runtime/control.json]
+    STATUS[~/.kato/runtime/status.json]
     LOGS[provider session logs .jsonl]
     OUTPUT[exports .md]
     OPLOG[operational.jsonl]
@@ -102,17 +102,17 @@ graph TD
 
 ## Responsibility Map
 
-| Area | Primary responsibility | Owns state | Reads from | Writes to | Key modules |
-| --- | --- | --- | --- | --- | --- |
-| CLI surface | Parse commands and dispatch behavior | none | argv, config, status/control | control queue, stdout/stderr | `apps/daemon/src/cli/*` |
-| Launcher | Start daemon with narrowed permissions | none | runtime config | child process spawn | `apps/daemon/src/orchestrator/launcher.ts` |
-| Config | Validate and default runtime config | config schema rules | `.kato/config.json`, env | `.kato/config.json` | `apps/daemon/src/config/runtime_config.ts` |
-| Runtime loop | Main orchestrator event loop | live runtime snapshot object | control queue, ingestion results | status snapshot, logs | `apps/daemon/src/orchestrator/daemon_runtime.ts` |
-| Ingestion | Discover/watch/parse provider session files | provider cursors + dirty sets | provider roots, parser output | session snapshot store, logs | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Snapshot store | Canonical session state for runtime | per-session snapshots | ingestion upserts | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts` |
-| Writer pipeline | Render/export markdown with dedupe/path gates | active recordings map | export requests + snapshots | markdown files, logs | `apps/daemon/src/writer/*` |
-| Policy | Deny/allow write destinations, command detection | none | config + command text | decisions/events | `apps/daemon/src/policy/*` |
-| Observability | structured operational + audit records | none | events from runtime/ingestion/writer | JSONL sinks | `apps/daemon/src/observability/*` |
+| Area            | Primary responsibility                           | Owns state                    | Reads from                           | Writes to                    | Key modules                                          |
+| --------------- | ------------------------------------------------ | ----------------------------- | ------------------------------------ | ---------------------------- | ---------------------------------------------------- |
+| CLI surface     | Parse commands and dispatch behavior             | none                          | argv, config, status/control         | control queue, stdout/stderr | `apps/daemon/src/cli/*`                              |
+| Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
+| Config          | Validate and default runtime config              | config schema rules           | `~/.kato/config.json`, env           | `~/.kato/config.json`        | `apps/daemon/src/config/runtime_config.ts`           |
+| Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
+| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | session snapshot store, logs | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
+| Snapshot store  | Canonical session state for runtime              | per-session snapshots         | ingestion upserts                    | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
+| Writer pipeline | Render/export markdown with dedupe/path gates    | active recordings map         | export requests + snapshots          | markdown files, logs         | `apps/daemon/src/writer/*`                           |
+| Policy          | Deny/allow write destinations, command detection | none                          | config + command text                | decisions/events             | `apps/daemon/src/policy/*`                           |
+| Observability   | structured operational + audit records           | none                          | events from runtime/ingestion/writer | JSONL sinks                  | `apps/daemon/src/observability/*`                    |
 
 ## Daemon Subsystems
 
@@ -125,8 +125,8 @@ graph TD
 3. build command context (stores, launcher, policy gate, loggers)
 4. call command-specific handler
 
-Command handlers do not run daemon business logic directly; they manipulate
-the control plane and rely on the daemon runtime to execute queued work.
+Command handlers do not run daemon business logic directly; they manipulate the
+control plane and rely on the daemon runtime to execute queued work.
 
 ### 2) Detached Launcher and Permission Envelope
 

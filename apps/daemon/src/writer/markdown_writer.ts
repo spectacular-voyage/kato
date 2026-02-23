@@ -209,18 +209,26 @@ export function renderMessagesToMarkdown(
 
   let lastRole: Message["role"] | undefined;
   let lastSignature: string | undefined;
+  const renderMessageOptions = {
+    includeToolCalls,
+    includeThinking,
+    italicizeUserMessages,
+    truncateToolResults,
+    speakerNames: options.speakerNames,
+  };
 
   for (const message of messages) {
     if (isEmptyMessage(message, { includeToolCalls, includeThinking })) {
       continue;
     }
 
+    const renderedBody = formatMessage(message, renderMessageOptions, false);
     const signature = [
       message.id,
       message.role,
       message.timestamp,
       message.model ?? "",
-      message.content,
+      renderedBody,
     ].join("\u0000");
     if (signature === lastSignature) {
       continue;
@@ -229,13 +237,7 @@ export function renderMessagesToMarkdown(
     parts.push(
       formatMessage(
         message,
-        {
-          includeToolCalls,
-          includeThinking,
-          italicizeUserMessages,
-          truncateToolResults,
-          speakerNames: options.speakerNames,
-        },
+        renderMessageOptions,
         message.role !== lastRole,
       ),
       "",
