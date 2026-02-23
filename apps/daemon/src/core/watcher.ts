@@ -77,6 +77,19 @@ export async function watchFsDebounced(
   const watcher = Deno.watchFs(watchPaths, {
     recursive: options.recursive ?? true,
   });
+  let aborted = options.signal?.aborted ?? false;
+  let closeError: unknown;
+  const onAbort = () => {
+    aborted = true;
+    try {
+      watcher.close();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BadResource)) {
+        closeError = error;
+      }
+    }
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const accumulator = new DebouncedPathAccumulator(debounceMs);
   let timer: number | null = null;
@@ -101,20 +114,35 @@ export async function watchFsDebounced(
 
   try {
     for await (const event of watcher) {
-      if (options.signal?.aborted) {
+      if (aborted || options.signal?.aborted) {
         break;
       }
 
       accumulator.add(event);
       scheduleFlush();
     }
+  } catch (error) {
+    if (!(aborted && error instanceof Deno.errors.BadResource)) {
+      throw error;
+    }
   } finally {
+    options.signal?.removeEventListener("abort", onAbort);
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
 
     await flush();
-    watcher.close();
+    try {
+      watcher.close();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BadResource)) {
+        closeError = error;
+      }
+    }
+  }
+
+  if (closeError !== undefined) {
+    throw closeError;
   }
 }

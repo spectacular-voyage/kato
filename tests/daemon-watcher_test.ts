@@ -1,5 +1,8 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { DebouncedPathAccumulator } from "../apps/daemon/src/mod.ts";
+import {
+  DebouncedPathAccumulator,
+  watchFsDebounced,
+} from "../apps/daemon/src/mod.ts";
 
 function createFsEvent(
   kind: Deno.FsEvent["kind"],
@@ -47,4 +50,40 @@ Deno.test("DebouncedPathAccumulator de-duplicates paths and kinds", () => {
 Deno.test("DebouncedPathAccumulator flush returns null with no pending events", () => {
   const accumulator = new DebouncedPathAccumulator(100);
   assertEquals(accumulator.flush(), null);
+});
+
+Deno.test("watchFsDebounced exits promptly when aborted without filesystem events", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const dir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "watch-abort-",
+  });
+
+  try {
+    const abortController = new AbortController();
+    const watchTask = watchFsDebounced(
+      [dir],
+      () => {},
+      { signal: abortController.signal },
+    );
+    const abortTimer = setTimeout(() => {
+      abortController.abort();
+    }, 25);
+    let timeoutTimer: number | undefined;
+
+    const completed = await Promise.race([
+      watchTask.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeoutTimer = setTimeout(() => resolve(false), 1_000);
+      }),
+    ]);
+    clearTimeout(abortTimer);
+    if (timeoutTimer !== undefined) {
+      clearTimeout(timeoutTimer);
+    }
+
+    assertEquals(completed, true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

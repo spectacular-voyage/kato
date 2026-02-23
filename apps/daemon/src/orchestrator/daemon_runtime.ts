@@ -5,6 +5,7 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
+  detectInChatControlCommands,
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../policy/mod.ts";
@@ -56,6 +57,7 @@ export interface DaemonRuntimeLoopOptions {
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
+const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -91,6 +93,354 @@ function readTimeMs(value: string | undefined): number | undefined {
     return undefined;
   }
   return timeMs;
+}
+
+interface SessionMessageProcessingState {
+  seenMessageSignatures: Set<string>;
+}
+
+interface ProcessInChatRecordingUpdatesOptions {
+  sessionSnapshotStore: SessionSnapshotStore;
+  sessionMessageStates: Map<string, SessionMessageProcessingState>;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+}
+
+interface ApplyControlCommandsForMessageOptions {
+  provider: string;
+  sessionId: string;
+  messages: Message[];
+  messageIndex: number;
+  message: Message;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+}
+
+function makeSessionProcessingKey(provider: string, sessionId: string): string {
+  return `${provider}\u0000${sessionId}`;
+}
+
+function makeMessageSignature(message: Message): string {
+  return [
+    message.id,
+    message.role,
+    message.timestamp,
+    message.model ?? "",
+    message.content,
+  ].join("\u0000");
+}
+
+function unwrapMatchingDelimiters(value: string): string {
+  if (value.length < 2) {
+    return value;
+  }
+
+  const first = value[0];
+  const last = value[value.length - 1];
+  if (
+    (first === '"' && last === '"') ||
+    (first === "'" && last === "'") ||
+    (first === "`" && last === "`")
+  ) {
+    return value.slice(1, -1).trim();
+  }
+
+  return value;
+}
+
+function normalizeCommandTargetPath(
+  rawArgument: string | undefined,
+): string | undefined {
+  if (!rawArgument) {
+    return undefined;
+  }
+
+  let normalized = rawArgument.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  const markdownMatch = normalized.match(MARKDOWN_LINK_PATH_PATTERN);
+  if (markdownMatch?.[1]) {
+    normalized = markdownMatch[1].trim();
+  }
+
+  normalized = unwrapMatchingDelimiters(normalized);
+  if (normalized.startsWith("@")) {
+    normalized = normalized.slice(1).trim();
+  }
+  normalized = unwrapMatchingDelimiters(normalized);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+async function applyControlCommandsForMessage(
+  options: ApplyControlCommandsForMessageOptions,
+): Promise<void> {
+  const {
+    provider,
+    sessionId,
+    messages,
+    messageIndex,
+    message,
+    recordingPipeline,
+    operationalLogger,
+    auditLogger,
+  } = options;
+
+  if (message.role !== "user") {
+    return;
+  }
+
+  const detection = detectInChatControlCommands(message.content);
+  if (detection.commands.length === 0 && detection.errors.length === 0) {
+    return;
+  }
+
+  if (detection.errors.length > 0) {
+    const parseErrors = detection.errors.map((error) => ({
+      line: error.line,
+      reason: error.reason,
+    }));
+    await operationalLogger.warn(
+      "recording.command.parse_error",
+      "Skipping in-chat control commands because at least one command line is invalid",
+      {
+        provider,
+        sessionId,
+        messageId: message.id,
+        parseErrors,
+      },
+    );
+    await auditLogger.record(
+      "recording.command.parse_error",
+      "In-chat control command parse error",
+      {
+        provider,
+        sessionId,
+        messageId: message.id,
+        parseErrors,
+      },
+    );
+    return;
+  }
+
+  const snapshotSlice = messages.slice(0, messageIndex + 1);
+
+  for (const command of detection.commands) {
+    const targetPath = normalizeCommandTargetPath(command.argument);
+
+    if (command.name !== "stop" && !targetPath) {
+      await operationalLogger.warn(
+        "recording.command.invalid_target",
+        "Skipping in-chat control command because target path is invalid",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          rawArgument: command.argument,
+        },
+      );
+      await auditLogger.record(
+        "recording.command.invalid_target",
+        "In-chat control command target path invalid",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          rawArgument: command.argument,
+        },
+      );
+      continue;
+    }
+
+    try {
+      if (command.name === "record") {
+        await recordingPipeline.startOrRotateRecording({
+          provider,
+          sessionId,
+          targetPath: targetPath!,
+          seedMessages: snapshotSlice,
+          title: sessionId,
+        });
+      } else if (command.name === "capture") {
+        await recordingPipeline.captureSnapshot({
+          provider,
+          sessionId,
+          targetPath: targetPath!,
+          messages: snapshotSlice,
+          title: sessionId,
+        });
+      } else if (command.name === "export") {
+        await recordingPipeline.exportSnapshot({
+          provider,
+          sessionId,
+          targetPath: targetPath!,
+          messages: snapshotSlice,
+          title: sessionId,
+        });
+      } else {
+        recordingPipeline.stopRecording(provider, sessionId);
+      }
+
+      await operationalLogger.info(
+        "recording.command.applied",
+        "Applied in-chat control command",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          ...(targetPath ? { targetPath } : {}),
+        },
+      );
+      await auditLogger.record(
+        "recording.command.applied",
+        "In-chat control command applied",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          ...(targetPath ? { targetPath } : {}),
+        },
+      );
+    } catch (error) {
+      await operationalLogger.error(
+        "recording.command.failed",
+        "Failed to apply in-chat control command",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          ...(targetPath ? { targetPath } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      await auditLogger.record(
+        "recording.command.failed",
+        "In-chat control command failed",
+        {
+          provider,
+          sessionId,
+          messageId: message.id,
+          command: command.name,
+          ...(targetPath ? { targetPath } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+}
+
+async function processInChatRecordingUpdates(
+  options: ProcessInChatRecordingUpdatesOptions,
+): Promise<void> {
+  const {
+    sessionSnapshotStore,
+    sessionMessageStates,
+    recordingPipeline,
+    operationalLogger,
+    auditLogger,
+  } = options;
+
+  const snapshots = sessionSnapshotStore.list();
+  const activeSessionKeys = new Set<string>();
+
+  for (const snapshot of snapshots) {
+    const provider = readString(snapshot.provider);
+    const sessionId = readString(snapshot.sessionId);
+    if (!provider || !sessionId) {
+      continue;
+    }
+
+    const sessionKey = makeSessionProcessingKey(provider, sessionId);
+    activeSessionKeys.add(sessionKey);
+
+    const signatures = snapshot.messages.map(makeMessageSignature);
+    const currentSignatureSet = new Set(signatures);
+
+    const existingState = sessionMessageStates.get(sessionKey);
+    if (!existingState) {
+      sessionMessageStates.set(sessionKey, {
+        seenMessageSignatures: currentSignatureSet,
+      });
+      continue;
+    }
+
+    for (
+      const seenSignature of Array.from(existingState.seenMessageSignatures)
+    ) {
+      if (!currentSignatureSet.has(seenSignature)) {
+        existingState.seenMessageSignatures.delete(seenSignature);
+      }
+    }
+
+    for (let i = 0; i < snapshot.messages.length; i += 1) {
+      const message = snapshot.messages[i];
+      if (!message) {
+        continue;
+      }
+
+      const signature = signatures[i] ?? makeMessageSignature(message);
+      if (existingState.seenMessageSignatures.has(signature)) {
+        continue;
+      }
+      existingState.seenMessageSignatures.add(signature);
+
+      await applyControlCommandsForMessage({
+        provider,
+        sessionId,
+        messages: snapshot.messages,
+        messageIndex: i,
+        message,
+        recordingPipeline,
+        operationalLogger,
+        auditLogger,
+      });
+
+      try {
+        await recordingPipeline.appendToActiveRecording({
+          provider,
+          sessionId,
+          messages: [message],
+          title: sessionId,
+        });
+      } catch (error) {
+        await operationalLogger.error(
+          "recording.append.failed",
+          "Failed to append message to active recording",
+          {
+            provider,
+            sessionId,
+            messageId: message.id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        await auditLogger.record(
+          "recording.append.failed",
+          "Failed to append message to active recording",
+          {
+            provider,
+            sessionId,
+            messageId: message.id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+  }
+
+  for (const sessionKey of Array.from(sessionMessageStates.keys())) {
+    if (!activeSessionKeys.has(sessionKey)) {
+      sessionMessageStates.delete(sessionKey);
+    }
+  }
 }
 
 function toProviderStatuses(
@@ -222,6 +572,7 @@ export async function runDaemonRuntimeLoop(
 
   let shouldStop = false;
   let nextHeartbeatAt = now().getTime() + heartbeatIntervalMs;
+  const sessionMessageStates = new Map<string, SessionMessageProcessingState>();
 
   while (!shouldStop) {
     for (const runner of ingestionRunners) {
@@ -245,6 +596,33 @@ export async function runDaemonRuntimeLoop(
           "Provider ingestion runner poll failed",
           {
             provider: runner.provider,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+
+    if (sessionSnapshotStore) {
+      try {
+        await processInChatRecordingUpdates({
+          sessionSnapshotStore,
+          sessionMessageStates,
+          recordingPipeline,
+          operationalLogger,
+          auditLogger,
+        });
+      } catch (error) {
+        await operationalLogger.error(
+          "recording.command.processing_failed",
+          "In-chat recording command processing failed",
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        await auditLogger.record(
+          "recording.command.processing_failed",
+          "In-chat recording command processing failed",
+          {
             error: error instanceof Error ? error.message : String(error),
           },
         );
