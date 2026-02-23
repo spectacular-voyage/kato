@@ -7,12 +7,18 @@ export interface RuntimeFeatureFlags {
   daemonExportEnabled: boolean;
 }
 
+export interface ProviderSessionRoots {
+  claude: string[];
+  codex: string[];
+}
+
 export interface RuntimeConfig {
   schemaVersion: 1;
   runtimeDir: string;
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
+  providerSessionRoots: ProviderSessionRoots;
   featureFlags: RuntimeFeatureFlags;
 }
 

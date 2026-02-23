@@ -1,3 +1,5 @@
+import type { ProviderSessionRoots } from "@kato/shared";
+
 export type DaemonCliCommandName =
   | "init"
   | "start"
@@ -30,6 +32,7 @@ export interface DaemonCliRuntime {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots?: string[];
+  providerSessionRoots?: ProviderSessionRoots;
   now: () => Date;
   pid: number;
   writeStdout: (text: string) => void;

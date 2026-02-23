@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
   createDefaultRuntimeFeatureFlags,
+  resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
 } from "../apps/daemon/src/mod.ts";
 
@@ -32,8 +33,13 @@ Deno.test("RuntimeConfigFileStore initializes missing config atomically", async 
     assertEquals(loaded, defaultConfig);
 
     loaded.allowedWriteRoots.push("mutated");
+    loaded.providerSessionRoots.claude.push("mutated");
     const loadedAgain = await store.load();
     assertEquals(loadedAgain.allowedWriteRoots.includes("mutated"), false);
+    assertEquals(
+      loadedAgain.providerSessionRoots.claude.includes("mutated"),
+      false,
+    );
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
@@ -67,7 +73,7 @@ Deno.test("RuntimeConfigFileStore rejects unsupported schema", async () => {
   }
 });
 
-Deno.test("RuntimeConfigFileStore backfills default feature flags for legacy config", async () => {
+Deno.test("RuntimeConfigFileStore backfills default feature flags and provider roots for legacy config", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "config.json");
   const runtimeDir = join(root, "runtime");
@@ -88,6 +94,10 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags for legacy con
 
     const loaded = await store.load();
     assertEquals(loaded.featureFlags, createDefaultRuntimeFeatureFlags());
+    assertEquals(
+      loaded.providerSessionRoots,
+      resolveDefaultProviderSessionRoots(),
+    );
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
@@ -124,6 +134,73 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
       Error,
       "unsupported schema",
     );
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "config.json");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        providerSessionRoots: {
+          claude: ".kato/not-an-array",
+          codex: [],
+        },
+        featureFlags: createDefaultRuntimeFeatureFlags(),
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "unsupported schema",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merges defaults", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "config.json");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+  const claudeOverride = join(root, "claude-only-root");
+  const defaultRoots = resolveDefaultProviderSessionRoots();
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        providerSessionRoots: {
+          claude: [claudeOverride],
+        },
+        featureFlags: createDefaultRuntimeFeatureFlags(),
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.providerSessionRoots.claude, [claudeOverride]);
+    assertEquals(loaded.providerSessionRoots.codex, defaultRoots.codex);
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }

@@ -33,11 +33,16 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
       dirname(this.runtime.statusPath),
       dirname(this.runtime.controlPath),
     ]);
+    const readRoots = new Set<string>([
+      ...writeRoots,
+      ...(this.runtime.providerSessionRoots?.claude ?? []),
+      ...(this.runtime.providerSessionRoots?.codex ?? []),
+    ]);
 
     const command = this.commandFactory(this.denoExecPath, {
       args: [
         "run",
-        "--allow-read",
+        `--allow-read=${Array.from(readRoots).join(",")}`,
         `--allow-write=${Array.from(writeRoots).join(",")}`,
         "--allow-env",
         this.daemonMainPath,
@@ -53,6 +58,12 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
         KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
         KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
           this.runtime.allowedWriteRoots ?? [],
+        ),
+        KATO_CLAUDE_SESSION_ROOTS: JSON.stringify(
+          this.runtime.providerSessionRoots?.claude ?? [],
+        ),
+        KATO_CODEX_SESSION_ROOTS: JSON.stringify(
+          this.runtime.providerSessionRoots?.codex ?? [],
         ),
       },
     });

@@ -45,6 +45,10 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
     statusPath: `${runtimeDir}/status.json`,
     controlPath: `${runtimeDir}/control.json`,
     allowedWriteRoots: [runtimeDir],
+    providerSessionRoots: {
+      claude: ["/sessions/claude"],
+      codex: ["/sessions/codex"],
+    },
     featureFlags: createDefaultRuntimeFeatureFlags(),
   };
 }
@@ -57,6 +61,10 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
     ? {
       ...initial,
       allowedWriteRoots: [...initial.allowedWriteRoots],
+      providerSessionRoots: {
+        claude: [...initial.providerSessionRoots.claude],
+        codex: [...initial.providerSessionRoots.codex],
+      },
       featureFlags: { ...initial.featureFlags },
     }
     : undefined;
@@ -72,6 +80,10 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
         return Promise.resolve({
           ...state,
           allowedWriteRoots: [...state.allowedWriteRoots],
+          providerSessionRoots: {
+            claude: [...state.providerSessionRoots.claude],
+            codex: [...state.providerSessionRoots.codex],
+          },
           featureFlags: { ...state.featureFlags },
         });
       },
@@ -81,6 +93,10 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           state = {
             ...defaultConfig,
             allowedWriteRoots: [...defaultConfig.allowedWriteRoots],
+            providerSessionRoots: {
+              claude: [...defaultConfig.providerSessionRoots.claude],
+              codex: [...defaultConfig.providerSessionRoots.codex],
+            },
             featureFlags: { ...defaultConfig.featureFlags },
           };
           return Promise.resolve({
@@ -88,6 +104,10 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             config: {
               ...state,
               allowedWriteRoots: [...state.allowedWriteRoots],
+              providerSessionRoots: {
+                claude: [...state.providerSessionRoots.claude],
+                codex: [...state.providerSessionRoots.codex],
+              },
               featureFlags: { ...state.featureFlags },
             },
             path: `${state.runtimeDir}/config.json`,
@@ -99,6 +119,10 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           config: {
             ...state,
             allowedWriteRoots: [...state.allowedWriteRoots],
+            providerSessionRoots: {
+              claude: [...state.providerSessionRoots.claude],
+              codex: [...state.providerSessionRoots.codex],
+            },
             featureFlags: { ...state.featureFlags },
           },
           path: `${state.runtimeDir}/config.json`,

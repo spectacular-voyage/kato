@@ -9,6 +9,10 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
     statusPath: ".kato/custom/status/status.json",
     controlPath: ".kato/custom/control/control.json",
     allowedWriteRoots: ["./notes", "./exports"],
+    providerSessionRoots: {
+      claude: ["/sessions/claude"],
+      codex: ["/sessions/codex"],
+    },
     now: () => new Date("2026-02-22T10:00:00.000Z"),
     pid: 4242,
     writeStdout: (_text: string) => {},
@@ -41,10 +45,25 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
 
   const args = capturedOptions?.args ?? [];
   assertEquals(args[0], "run");
-  assertEquals(args[1], "--allow-read");
+  const allowReadArg = args[1];
+  if (!allowReadArg?.startsWith("--allow-read=")) {
+    throw new Error("launcher did not set --allow-read");
+  }
   assertEquals(args[3], "--allow-env");
   assertEquals(args[4], "/app/daemon/main.ts");
   assertEquals(args[5], "__daemon-run");
+
+  const allowReadRoots = allowReadArg
+    .slice("--allow-read=".length)
+    .split(",");
+  assertEquals(allowReadRoots.includes(runtime.runtimeDir), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.configPath)), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.statusPath)), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.controlPath)), true);
+  assertEquals(allowReadRoots.includes("./notes"), true);
+  assertEquals(allowReadRoots.includes("./exports"), true);
+  assertEquals(allowReadRoots.includes("/sessions/claude"), true);
+  assertEquals(allowReadRoots.includes("/sessions/codex"), true);
 
   const allowWriteArg = args[2];
   if (!allowWriteArg?.startsWith("--allow-write=")) {
@@ -68,5 +87,13 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
   assertEquals(
     env["KATO_ALLOWED_WRITE_ROOTS_JSON"],
     JSON.stringify(runtime.allowedWriteRoots),
+  );
+  assertEquals(
+    env["KATO_CLAUDE_SESSION_ROOTS"],
+    JSON.stringify(runtime.providerSessionRoots.claude),
+  );
+  assertEquals(
+    env["KATO_CODEX_SESSION_ROOTS"],
+    JSON.stringify(runtime.providerSessionRoots.codex),
   );
 });

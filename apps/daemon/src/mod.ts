@@ -17,18 +17,36 @@ export {
   type RunDaemonCliOptions,
 } from "./cli/mod.ts";
 export type {
+  CreateProviderIngestionRunnerOptions,
   DaemonControlCommand,
   DaemonControlRequest,
   DaemonControlRequestDraft,
   DaemonControlRequestStoreLike,
   DaemonProcessLauncherLike,
   DaemonStatusSnapshotStoreLike,
+  FileProviderIngestionRunnerOptions,
+  InMemorySessionSnapshotStoreOptions,
+  ProviderIngestionFactoryOptions,
+  ProviderIngestionPollResult,
+  ProviderIngestionRunner,
+  ProviderSessionFile,
+  RuntimeSessionSnapshot,
+  SessionSnapshotStatusMetadata,
+  SessionSnapshotStore,
+  SessionSnapshotStoreRetentionPolicy,
+  SessionSnapshotUpsert,
 } from "./orchestrator/mod.ts";
 export {
+  createClaudeIngestionRunner,
+  createCodexIngestionRunner,
+  createDefaultProviderIngestionRunners,
   createDefaultStatusSnapshot,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY,
   DenoDetachedDaemonLauncher,
+  FileProviderIngestionRunner,
+  InMemorySessionSnapshotStore,
   isStatusSnapshotStale,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
@@ -42,6 +60,7 @@ export type {
 export {
   createDefaultRuntimeConfig,
   resolveDefaultConfigPath,
+  resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
 } from "./config/mod.ts";
 export type {

@@ -1,4 +1,5 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
+import { join } from "@std/path";
 import type { RuntimeConfig } from "@kato/shared";
 import {
   runDaemonSubprocess,
@@ -6,13 +7,17 @@ import {
   type RuntimeConfigStoreLike,
 } from "../apps/daemon/src/mod.ts";
 
-function makeRuntimeConfig(): RuntimeConfig {
+function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
   return {
     schemaVersion: 1,
-    runtimeDir: ".kato/runtime",
-    statusPath: ".kato/runtime/status.json",
-    controlPath: ".kato/runtime/control.json",
-    allowedWriteRoots: [".kato/runtime"],
+    runtimeDir,
+    statusPath: join(runtimeDir, "status.json"),
+    controlPath: join(runtimeDir, "control.json"),
+    allowedWriteRoots: [runtimeDir],
+    providerSessionRoots: {
+      claude: ["/sessions/claude"],
+      codex: ["/sessions/codex"],
+    },
     featureFlags: {
       writerIncludeThinking: false,
       writerIncludeToolCalls: false,
@@ -61,7 +66,11 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
     },
   };
 
-  const captured: Array<{ exportEnabled: boolean | undefined }> = [];
+  const captured: Array<{
+    exportEnabled: boolean | undefined;
+    hasSnapshotLoader: boolean;
+    hasSessionSnapshotStore: boolean;
+  }> = [];
   const stderr: string[] = [];
 
   const exitCode = await runDaemonSubprocess({
@@ -70,12 +79,69 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
       stderr.push(text);
     },
     runtimeLoop(options = {}) {
-      captured.push({ exportEnabled: options.exportEnabled });
+      captured.push({
+        exportEnabled: options.exportEnabled,
+        hasSnapshotLoader: typeof options.loadSessionSnapshot === "function",
+        hasSessionSnapshotStore: !!options.sessionSnapshotStore,
+      });
       return Promise.resolve();
     },
   });
 
   assertEquals(exitCode, 0);
-  assertEquals(captured, [{ exportEnabled: false }]);
+  assertEquals(captured, [{
+    exportEnabled: false,
+    hasSnapshotLoader: true,
+    hasSessionSnapshotStore: true,
+  }]);
   assertEquals(stderr.length, 0);
+});
+
+Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log files", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const runtimeDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-main-logs-",
+  });
+
+  try {
+    const config = makeRuntimeConfig(runtimeDir);
+    const configStore: RuntimeConfigStoreLike = {
+      load() {
+        return Promise.resolve(config);
+      },
+      ensureInitialized() {
+        throw new Error("not used");
+      },
+    };
+
+    const exitCode = await runDaemonSubprocess({
+      configStore,
+      runtimeLoop(options = {}) {
+        return Promise.all([
+          options.operationalLogger?.info(
+            "test.operational",
+            "operational smoke",
+          ),
+          options.auditLogger?.record("test.audit", "audit smoke"),
+        ]).then(() => undefined);
+      },
+    });
+
+    assertEquals(exitCode, 0);
+
+    const operationalLogPath = join(
+      runtimeDir,
+      "logs",
+      "operational.jsonl",
+    );
+    const auditLogPath = join(runtimeDir, "logs", "security-audit.jsonl");
+
+    const operationalLog = await Deno.readTextFile(operationalLogPath);
+    const auditLog = await Deno.readTextFile(auditLogPath);
+    assertStringIncludes(operationalLog, '"event":"test.operational"');
+    assertStringIncludes(auditLog, '"event":"test.audit"');
+  } finally {
+    await Deno.remove(runtimeDir, { recursive: true });
+  }
 });

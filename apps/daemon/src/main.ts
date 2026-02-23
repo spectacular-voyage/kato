@@ -1,4 +1,5 @@
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
+import { join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
   resolveDefaultConfigPath,
@@ -10,12 +11,19 @@ import {
   evaluateDaemonFeatureSettings,
 } from "./feature_flags/mod.ts";
 import {
+  createDefaultProviderIngestionRunners,
   createDefaultStatusSnapshot,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  InMemorySessionSnapshotStore,
   resolveDefaultRuntimeDir,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
+import {
+  AuditLogger,
+  JsonLineFileSink,
+  StructuredLogger,
+} from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
@@ -65,12 +73,48 @@ export async function runDaemonSubprocess(
 
   const featureClient = bootstrapOpenFeature(runtimeConfig.featureFlags);
   const featureSettings = evaluateDaemonFeatureSettings(featureClient);
+  const operationalLogPath = join(
+    runtimeConfig.runtimeDir,
+    "logs",
+    "operational.jsonl",
+  );
+  const auditLogPath = join(
+    runtimeConfig.runtimeDir,
+    "logs",
+    "security-audit.jsonl",
+  );
+
+  const operationalLogger = new StructuredLogger([
+    new JsonLineFileSink(operationalLogPath),
+  ], {
+    channel: "operational",
+    minLevel: "info",
+    now,
+  });
+  const auditLogger = new AuditLogger(
+    new StructuredLogger([new JsonLineFileSink(auditLogPath)], {
+      channel: "security-audit",
+      minLevel: "info",
+      now,
+    }),
+  );
+  const sessionSnapshotStore = new InMemorySessionSnapshotStore({ now });
+  const ingestionRunners = createDefaultProviderIngestionRunners({
+    sessionSnapshotStore,
+    claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
+    codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
+    now,
+    operationalLogger,
+    auditLogger,
+  });
   const recordingPipeline = new RecordingPipeline({
     pathPolicyGate: new WritePathPolicyGate({
       allowedRoots: runtimeConfig.allowedWriteRoots,
     }),
     now,
     defaultRenderOptions: featureSettings.writerRenderOptions,
+    operationalLogger,
+    auditLogger,
   });
   const runtimeLoop = options.runtimeLoop ?? runDaemonRuntimeLoop;
 
@@ -85,7 +129,22 @@ export async function runDaemonSubprocess(
         now,
       ),
       recordingPipeline,
+      ingestionRunners,
+      sessionSnapshotStore,
+      loadSessionSnapshot(sessionId: string) {
+        const snapshot = sessionSnapshotStore.get(sessionId);
+        if (!snapshot) {
+          return Promise.resolve(undefined);
+        }
+
+        return Promise.resolve({
+          provider: snapshot.provider,
+          messages: snapshot.messages,
+        });
+      },
       exportEnabled: featureSettings.exportEnabled,
+      operationalLogger,
+      auditLogger,
       now,
     });
     return 0;

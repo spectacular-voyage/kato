@@ -13,6 +13,7 @@ export type {
 } from "./contracts/ipc.ts";
 export type {
   ConfigSource,
+  ProviderSessionRoots,
   RuntimeConfig,
   RuntimeConfigMetadata,
   RuntimeFeatureFlags,
