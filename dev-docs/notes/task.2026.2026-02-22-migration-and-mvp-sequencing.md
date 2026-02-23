@@ -57,11 +57,11 @@ Sequence migration and MVP implementation so foundational contracts and dependen
   - Add local OpenFeature bootstrap/evaluation baseline with deterministic in-memory provider defaults.
   - Wire daemon subprocess startup to load runtime config before runtime loop and fail closed on invalid config.
   - Wire feature flag evaluation into runtime export enablement and writer render defaults.
-- [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:
+- [x] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:
   - [[dev.general-guidance]]
   - [[dev.codebase-overview]]
   - [[dev.decision-log]]
-- [ ] Step 6: Fill out README.md with user-oriented usage instructions
+- [x] Step 6: Fill out README.md with user-oriented usage instructions
 
 ## Highest-Impact Opportunities (from `stenobot` Audit)
 
@@ -162,6 +162,7 @@ Recommended for MVP:
 3. This is accepted for MVP and should be revisited with explicit startup acknowledgment/handshake after Step 3.
 4. Daemon-side `export` processing currently requires a wired session loader (`loadSessionSnapshot` or `loadSessionMessages`); until provider ingestion is connected, runtime logs and skips exports.
 5. Daemon-side export provider identity falls back to `provider: "unknown"` unless `loadSessionSnapshot` is wired with session-to-provider mapping.
+6. Runtime config `featureFlags` rejects unknown keys (fail-closed); running an older daemon against a newer config with extra flags will fail startup until versions are aligned.
 
 ## Out of Scope (MVP)
 

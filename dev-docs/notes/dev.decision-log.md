@@ -76,17 +76,18 @@ created: 1771779490894
 ### Configuration & Parsing
 
 - Decision:
-  - Config: Use `zod` for schema validation of `Deno.env`. No `dotenv` package (use `deno --env`).
+  - Config: Use inline type guards at boundary surfaces (runtime config, control-plane payloads, and state parsing). No `zod` in MVP.
+  - Keep environment handling Deno-native; no `dotenv` package (use `deno --env`).
   - Streams: Use `@std/streams` (`TextLineStream`) for all file processing.
 - Owner: Kato engineering
 - Date: 2026-02-22
 - Why:
   - Leverages Web Standards (Streams) and Deno native features.
-  - Zod provides runtime safety for the "Launcher -> Daemon" config handoff.
+  - Inline guards provide fail-closed runtime validation with minimal dependency surface.
 - Tradeoffs:
-  - None significant; standard modern Deno practice.
+  - More manual validation boilerplate than schema-library-driven parsing.
 - Follow-up tasks:
-  - Define config schema in `shared/src/contracts/config.ts`.
+  - Re-evaluate `zod` post-MVP if boundary complexity grows substantially.
 
 ### Service Mode
 
@@ -115,6 +116,59 @@ created: 1771779490894
   - Define feature flag contract in `shared/src/contracts/config.ts`.
   - Add a local/offline provider default for MVP and keep network dependency optional.
   - Add tests for deterministic fallback behavior when remote flag providers are unavailable.
+
+### Step 4 Config/OpenFeature Baseline
+
+- Decision:
+  - Add typed `featureFlags` to runtime config contract.
+  - Validate runtime config with fail-closed behavior, including rejection of unknown feature flag keys.
+  - Keep OpenFeature MVP provider local/in-memory only (no network dependency).
+- Owner: Kato engineering
+- Date: 2026-02-23
+- Why:
+  - Locks a stable feature-evaluation contract early for daemon/web/cloud evolution.
+  - Prevents permissive startup behavior on malformed or unrecognized config.
+  - Keeps local-first reliability and deterministic behavior for MVP.
+- Tradeoffs:
+  - Older daemon builds will refuse newer configs with unknown flags until versions align.
+  - Minimal local provider lacks targeting/rollout features (intentionally deferred).
+- Follow-up tasks:
+  - Add explicit versioning/migration strategy for feature flags beyond MVP.
+  - Revisit remote/centralized flag provider once cloud control-plane is active.
+
+### Step 4 Daemon Startup Hardening
+
+- Decision:
+  - Introduce fail-closed subprocess startup path that loads runtime config before entering runtime loop.
+  - Runtime subprocess exits non-zero on config load/validation failure.
+- Owner: Kato engineering
+- Date: 2026-02-23
+- Why:
+  - Prevents daemon from running with implicit defaults when config is missing/corrupt.
+  - Aligns startup semantics with security baseline and documented fail-closed policy.
+- Tradeoffs:
+  - Startup will fail for recoverable config mistakes until user runs explicit correction/init flow.
+- Follow-up tasks:
+  - Add CLI diagnostic tooling for config validation (`kato config validate`) post-MVP.
+  - Add schema migration helpers when config schema evolves.
+
+### Step 4 Export Loader Contract
+
+- Decision:
+  - Add provider-aware loader hook (`loadSessionSnapshot`) to runtime export handling.
+  - Retain fallback loader (`loadSessionMessages`) for compatibility.
+  - Keep provider fallback value `"unknown"` when provider mapping is unavailable.
+- Owner: Kato engineering
+- Date: 2026-02-23
+- Why:
+  - Preserves current behavior while allowing provider identity to flow into export/audit paths.
+  - Enables incremental wiring of provider ingestion without reworking control-plane contract.
+- Tradeoffs:
+  - Dual loader hooks add temporary API overlap.
+  - Provider identity can remain degraded until ingestion wiring is complete.
+- Follow-up tasks:
+  - Prefer `loadSessionSnapshot` as canonical hook and retire legacy loader after wiring.
+  - Ensure provider/session source-of-truth is documented for runtime and audit consumers.
 
 ### Runtime Config Bootstrap
 

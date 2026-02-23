@@ -942,3 +942,164 @@ RuntimeConfig.featureFlags is now required in the shared contract. The makeDefau
 runtime_config.ts:45-49 rejects any unknown key in the featureFlags object. This is intentional fail-closed behavior and is tested. The forward-compat implication: if a user runs a newer config.json (with extra flags from a future version) against an older daemon build, it won't start. Acceptable for MVP, but worth noting in the task doc or a comment.
 
 Anything worth incorporating?
+
+# gpt-5.3-codex_2026-02-22_1617_49
+
+I’ll verify each Claude point against the current code/tests, then add a short forward-compat note in the task doc if it’s not already captured.
+
+# gpt-5.3-codex_2026-02-22_1618_01
+
+Yes, and mostly it’s already incorporated.
+
+1. `runDaemonSubprocess` fail-closed test is present in `tests/daemon-main_test.ts:25` (load error -> exit `1`, runtime loop not called).
+2. `daemon-cli_test` already includes required `featureFlags` in `makeDefaultRuntimeConfig` at `tests/daemon-cli_test.ts:41`.
+3. The forward-compat caveat was worth adding, so I added it to `Known MVP Limitation` in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:164`.
+
+So the only net new incorporation from Claude’s note was documenting #3 explicitly.
+
+# User_2026-02-22_1619_59
+
+OK, so should kato actually work? Go ahead and proceed to step 5 if you're ready.
+
+# gpt-5.3-codex_2026-02-22_1620_09
+
+Yes for the implemented MVP slices: CLI control plane, config bootstrap, policy gate, writer pipeline, and Step 4 feature/config hardening are working and tested. I’ll proceed with Step 5 now by updating `dev.general-guidance.md`, `dev.codebase-overview.md`, and `dev.decision-log.md` to match the current architecture and known limitations.
+
+# gpt-5.3-codex_2026-02-22_1621_36
+
+Yes, for the implemented MVP slices it should work: CLI control flow, detached daemon startup, config/bootstrap, path policy, writer pipeline, and Step 4 flag/config hardening.
+
+Still intentionally limited:
+- Full provider ingestion/session store wiring is not complete yet (export depends on runtime session loader hooks).
+- Service-manager integration is deferred.
+
+Step 5 is now done:
+- Updated `dev-docs/notes/dev.general-guidance.md`
+- Filled `dev-docs/notes/dev.codebase-overview.md`
+- Updated `dev-docs/notes/dev.decision-log.md`
+- Marked Step 5 complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md`
+
+Validation:
+- `deno task check` passed.
+
+If you want, I’ll proceed to Step 6 and draft `README.md` user-facing usage docs next.
+
+# User_2026-02-22_1756_16
+
+yes please
+
+# gpt-5.3-codex_2026-02-22_1756_16
+
+I’m editing `README.md` now with concrete user-facing instructions (run commands, config, command reference, and current MVP limitations), then I’ll mark Step 6 complete in the migration task note.
+
+# gpt-5.3-codex_2026-02-22_1756_57
+
+Step 6 is complete.
+
+Updated:
+- `README.md:1` with user-facing MVP docs:
+  - quickstart (`deno run -A apps/daemon/src/main.ts ...`)
+  - full command reference
+  - default runtime file paths
+  - runtime config example including `featureFlags`
+  - current working scope and known MVP limits
+- `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:64` marked Step 6 as done.
+
+Validation:
+- `deno task check` passed.
+
+So yes, Kato should work for the implemented slices, with the documented current limits (notably provider ingestion/session loader wiring for export behavior).
+
+1. If you want, I can now do a short smoke-test runbook (exact commands + expected output) and add it to the README.
+2. Or I can move to cleanup/commit prep (grouping changes into logical commits).
+
+# User_2026-02-22_1759_07
+
+I've been committing as we go, but in the future I like the sound of logical commits.
+
+Would your smoke test runbook go better in [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) ?
+
+# gpt-5.3-codex_2026-02-22_1759_16
+
+Yes, that’s the better place.
+
+- `README.md` should stay user-facing and short.
+- `dev-docs/notes/dev.testing.md` is the right place for a full smoke-test runbook:
+  - setup/preconditions
+  - exact commands
+  - expected outputs/files
+  - cleanup/reset steps
+  - troubleshooting notes
+
+Recommended pattern: keep a brief “Smoke test” pointer in `README.md` that links to `dev.testing.md`.
+
+If you want, I can add the runbook there now.
+
+# User_2026-02-22_1800_21
+
+Yes. Also make this update (from Claude): Remaining Issue: Stale zod Reference in Decision Log
+dev.decision-log.md:79 reads:
+
+Config: Use \zod` for schema validation of `Deno.env`. No `dotenv` package (use `deno --env`).`
+
+zod is not present anywhere in the kato source — grep confirms hits only in doc/conversation files, never in apps/ or shared/. The actual implementation used inline guards throughout (hybrid strategy agreed to in the MVP library selection conversation). The decision log entry predates the hybrid decision and was never corrected.
+
+Suggested fix for Codex: Update that bullet to something like:
+
+Config: Use inline type guards at all boundary surfaces (parseRuntimeConfig, parseControlRequest, etc.). No zod in MVP; deferred to post-MVP if boundary complexity grows. No dotenv package (use deno --env).
+
+# gpt-5.3-codex_2026-02-22_1800_35
+
+I’ll do both: add a concrete smoke-test runbook in `dev-docs/notes/dev.testing.md` and update the stale `zod` decision-log entry to match the current inline-guard strategy. I’ll read both docs first, patch them, then do a quick grep sanity check.
+
+# gpt-5.3-codex_2026-02-22_1801_27
+
+Done.
+
+- Added a full MVP smoke-test runbook to `dev-docs/notes/dev.testing.md` (preconditions, step-by-step commands, expected outcomes, fail-closed config check, troubleshooting).
+- Updated the stale `zod` decision in `dev-docs/notes/dev.decision-log.md` under “Configuration & Parsing” to reflect the actual MVP implementation:
+  - inline boundary guards
+  - no `zod` in MVP
+  - no `dotenv`, use `deno --env`
+  - `zod` re-evaluation deferred post-MVP if complexity grows
+
+I also verified the new wording is present and the old `zod` claim is removed from that decision section.
+
+# User_2026-02-22_1802_19
+
+Minor gaps:
+
+-A in production: Using deno run -A grants all permissions. Should mention that this is for development/source-running. A compiled binary (deno compile) with narrower permissions is the production intent — or at least note it's a dev invocation.
+
+clean subflags not implemented: The README documents --all, --recordings <days>, --sessions <days>, --dry-run. Are those actually wired in the CLI? If clean only enqueues a bare request right now (no subflags parsed), documenting them may be premature.
+
+export <session-id>: The session-id positional is documented — is that actually parsed in the CLI router, or does export currently just enqueue a generic export request?
+
+No mention of KATO_AUTO_INIT_ON_START: It's referenced in the start bullet, but a user wouldn't know they can set it to false to disable auto-init.
+
+Items 2 and 3 are the most important — if clean subflags and export <session-id> aren't actually implemented yet, those lines should be trimmed back to match what's real. Want me to check the CLI router for those?
+
+# gpt-5.3-codex_2026-02-22_1802_28
+
+I’ll verify those points directly in the CLI parser/router/commands now, then I’ll update the docs to exactly match implemented behavior (including the `-A` dev-only note and `KATO_AUTO_INIT_ON_START`).
+
+# gpt-5.3-codex_2026-02-22_1803_02
+
+Good catches. I checked directly, and items 2/3 are implemented already.
+
+- `export <session-id>` is required/parsed in `apps/daemon/src/cli/parser.ts:125` and enqueued with `sessionId` in `apps/daemon/src/cli/commands/export.ts:43`.
+- `clean` subflags are parsed in `apps/daemon/src/cli/parser.ts:160` and forwarded into payload in `apps/daemon/src/cli/commands/clean.ts:16`.
+- Both behaviors are covered in `tests/daemon-cli_test.ts:454`.
+
+I updated docs accordingly:
+
+- Added `-A` dev/source-run caveat + production least-privilege note in `README.md:11`.
+- Added explicit `KATO_AUTO_INIT_ON_START=false` guidance in `README.md:40`.
+- Clarified `export` is for the specified session id in `README.md:48`.
+- Added the same `-A` caveat in the smoke runbook note in `dev-docs/notes/dev.testing.md:13`.
+
+And I previously fixed the stale zod decision line in `dev-docs/notes/dev.decision-log.md:79`.
+
+# User_2026-02-22_1810_42
+
+:stop
