@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
+  createDefaultRuntimeFeatureFlags,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
   type DaemonControlRequestStoreLike,
@@ -44,6 +45,11 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
     statusPath: `${runtimeDir}/status.json`,
     controlPath: `${runtimeDir}/control.json`,
     allowedWriteRoots: [runtimeDir],
+    providerSessionRoots: {
+      claude: ["/sessions/claude"],
+      codex: ["/sessions/codex"],
+    },
+    featureFlags: createDefaultRuntimeFeatureFlags(),
   };
 }
 
@@ -55,6 +61,11 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
     ? {
       ...initial,
       allowedWriteRoots: [...initial.allowedWriteRoots],
+      providerSessionRoots: {
+        claude: [...initial.providerSessionRoots.claude],
+        codex: [...initial.providerSessionRoots.codex],
+      },
+      featureFlags: { ...initial.featureFlags },
     }
     : undefined;
   const ensureCalls = { value: 0 };
@@ -69,6 +80,11 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
         return Promise.resolve({
           ...state,
           allowedWriteRoots: [...state.allowedWriteRoots],
+          providerSessionRoots: {
+            claude: [...state.providerSessionRoots.claude],
+            codex: [...state.providerSessionRoots.codex],
+          },
+          featureFlags: { ...state.featureFlags },
         });
       },
       ensureInitialized(defaultConfig: RuntimeConfig) {
@@ -77,12 +93,22 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           state = {
             ...defaultConfig,
             allowedWriteRoots: [...defaultConfig.allowedWriteRoots],
+            providerSessionRoots: {
+              claude: [...defaultConfig.providerSessionRoots.claude],
+              codex: [...defaultConfig.providerSessionRoots.codex],
+            },
+            featureFlags: { ...defaultConfig.featureFlags },
           };
           return Promise.resolve({
             created: true,
             config: {
               ...state,
               allowedWriteRoots: [...state.allowedWriteRoots],
+              providerSessionRoots: {
+                claude: [...state.providerSessionRoots.claude],
+                codex: [...state.providerSessionRoots.codex],
+              },
+              featureFlags: { ...state.featureFlags },
             },
             path: `${state.runtimeDir}/config.json`,
           });
@@ -93,6 +119,11 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           config: {
             ...state,
             allowedWriteRoots: [...state.allowedWriteRoots],
+            providerSessionRoots: {
+              claude: [...state.providerSessionRoots.claude],
+              codex: [...state.providerSessionRoots.codex],
+            },
+            featureFlags: { ...state.featureFlags },
           },
           path: `${state.runtimeDir}/config.json`,
         });
@@ -324,8 +355,55 @@ Deno.test(
     });
 
     assertEquals(code, 0);
+    assertStringIncludes(
+      harness.stdout.join(""),
+      `initialized runtime config at ${runtimeDir}/config.json`,
+    );
     assertStringIncludes(harness.stdout.join(""), "started in background");
     assertEquals(ensureCalls.value, 1);
+  },
+);
+
+Deno.test(
+  "runDaemonCli fails closed when config is missing for non-start commands",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+    const { store: configStore } = makeInMemoryConfigStore();
+
+    const code = await runDaemonCli(["status"], {
+      runtime: harness.runtime,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+
+    assertEquals(code, 1);
+    assertStringIncludes(harness.stderr.join(""), "Run `kato init` first");
+  },
+);
+
+Deno.test(
+  "runDaemonCli start fails when auto-init is disabled and config is missing",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+    const { store: configStore } = makeInMemoryConfigStore();
+
+    const code = await runDaemonCli(["start"], {
+      runtime: harness.runtime,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+      autoInitOnStart: false,
+    });
+
+    assertEquals(code, 1);
+    assertStringIncludes(harness.stderr.join(""), "Run `kato init` first");
   },
 );
 

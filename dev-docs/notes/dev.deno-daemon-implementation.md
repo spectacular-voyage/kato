@@ -2,7 +2,7 @@
 id: fqdjyr5a0x87p49k5mynvuu
 title: Deno Daemon Implementation
 desc: ''
-updated: 1771776628283
+updated: 1771795692729
 created: 1771724544510
 ---
 
@@ -113,7 +113,6 @@ Orchestrator Daemon (long-lived)
 
 ## IPC Contract (Reference)
 
-Use **JSONL over Stdio** for parent-child communication.
 Use typed envelopes for all process boundaries.
 
 ```ts

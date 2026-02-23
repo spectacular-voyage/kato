@@ -1,5 +1,13 @@
-import type { RuntimeConfig } from "@kato/shared";
+import type {
+  ProviderSessionRoots,
+  RuntimeConfig,
+  RuntimeFeatureFlags,
+} from "@kato/shared";
 import { dirname, join } from "@std/path";
+import {
+  createDefaultRuntimeFeatureFlags,
+  mergeRuntimeFeatureFlags,
+} from "../feature_flags/mod.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
@@ -21,40 +29,243 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isRuntimeConfig(value: unknown): value is RuntimeConfig {
+const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
+  "writerIncludeThinking",
+  "writerIncludeToolCalls",
+  "writerItalicizeUserMessages",
+  "daemonExportEnabled",
+];
+const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
+  "claude",
+  "codex",
+];
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function parseRuntimeFeatureFlags(
+  value: unknown,
+): RuntimeFeatureFlags | undefined {
+  if (value === undefined) {
+    return createDefaultRuntimeFeatureFlags();
+  }
   if (!isRecord(value)) {
-    return false;
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!RUNTIME_FEATURE_FLAG_KEYS.includes(key as keyof RuntimeFeatureFlags)) {
+      return undefined;
+    }
+  }
+
+  const merged = mergeRuntimeFeatureFlags();
+  for (const key of RUNTIME_FEATURE_FLAG_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (typeof candidate !== "boolean") {
+      return undefined;
+    }
+    merged[key] = candidate;
+  }
+
+  return merged;
+}
+
+function resolveHomeDir(): string | undefined {
+  return readOptionalEnv("HOME") ?? readOptionalEnv("USERPROFILE");
+}
+
+function expandHome(path: string): string {
+  if (!path.startsWith("~")) {
+    return path;
+  }
+
+  const home = resolveHomeDir();
+  if (!home) {
+    return path;
+  }
+
+  if (path === "~") {
+    return home;
+  }
+  if (path.startsWith("~/")) {
+    return join(home, path.slice(2));
+  }
+
+  return path;
+}
+
+function normalizeRoots(paths: string[]): string[] {
+  const deduped = new Set<string>();
+  for (const path of paths) {
+    if (!isNonEmptyString(path)) {
+      continue;
+    }
+    deduped.add(expandHome(path.trim()));
+  }
+  return Array.from(deduped);
+}
+
+function parseRootsFromEnv(name: string): string[] | undefined {
+  const raw = readOptionalEnv(name);
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed) && parsed.every(isNonEmptyString)) {
+      return normalizeRoots(parsed);
+    }
+  } catch {
+    // fall through
+  }
+
+  const csv = raw.split(",").map((entry) => entry.trim()).filter((entry) =>
+    entry.length > 0
+  );
+  if (csv.length > 0) {
+    return normalizeRoots(csv);
+  }
+
+  return undefined;
+}
+
+function cloneProviderSessionRoots(
+  roots: ProviderSessionRoots,
+): ProviderSessionRoots {
+  return {
+    claude: [...roots.claude],
+    codex: [...roots.codex],
+  };
+}
+
+export function resolveDefaultProviderSessionRoots(): ProviderSessionRoots {
+  const home = resolveHomeDir();
+  const claude = parseRootsFromEnv("KATO_CLAUDE_SESSION_ROOTS") ??
+    (home
+      ? normalizeRoots([
+        join(home, ".claude", "projects"),
+        join(home, ".claude-personal", "projects"),
+      ])
+      : []);
+  const codex = parseRootsFromEnv("KATO_CODEX_SESSION_ROOTS") ??
+    (home ? normalizeRoots([join(home, ".codex", "sessions")]) : []);
+
+  return { claude, codex };
+}
+
+function mergeProviderSessionRoots(
+  roots?: Partial<ProviderSessionRoots>,
+): ProviderSessionRoots {
+  const resolved = resolveDefaultProviderSessionRoots();
+  if (!roots) {
+    return resolved;
+  }
+
+  for (const key of PROVIDER_SESSION_ROOT_KEYS) {
+    const candidate = roots[key];
+    if (candidate !== undefined) {
+      resolved[key] = normalizeRoots(candidate);
+    }
+  }
+
+  return resolved;
+}
+
+function parseProviderSessionRoots(
+  value: unknown,
+): ProviderSessionRoots | undefined {
+  if (value === undefined) {
+    return resolveDefaultProviderSessionRoots();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (
+      !PROVIDER_SESSION_ROOT_KEYS.includes(key as keyof ProviderSessionRoots)
+    ) {
+      return undefined;
+    }
+  }
+
+  const overrides: Partial<ProviderSessionRoots> = {};
+  for (const key of PROVIDER_SESSION_ROOT_KEYS) {
+    const roots = value[key];
+    if (roots === undefined) {
+      continue;
+    }
+    if (
+      !Array.isArray(roots) || roots.some((root) => !isNonEmptyString(root))
+    ) {
+      return undefined;
+    }
+    overrides[key] = normalizeRoots(roots);
+  }
+
+  return mergeProviderSessionRoots(overrides);
+}
+
+function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
+  if (!isRecord(value)) {
+    return undefined;
   }
 
   if (value["schemaVersion"] !== DEFAULT_CONFIG_SCHEMA_VERSION) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["runtimeDir"] !== "string" || value["runtimeDir"].length === 0
   ) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["statusPath"] !== "string" || value["statusPath"].length === 0
   ) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["controlPath"] !== "string" ||
     value["controlPath"].length === 0
   ) {
-    return false;
+    return undefined;
   }
+  const allowedWriteRoots = value["allowedWriteRoots"];
   if (
-    !Array.isArray(value["allowedWriteRoots"]) ||
-    value["allowedWriteRoots"].some((root) =>
+    !Array.isArray(allowedWriteRoots) ||
+    allowedWriteRoots.some((root) =>
       typeof root !== "string" || root.length === 0
     )
   ) {
-    return false;
+    return undefined;
   }
 
-  return true;
+  const featureFlags = parseRuntimeFeatureFlags(value["featureFlags"]);
+  if (!featureFlags) {
+    return undefined;
+  }
+  const providerSessionRoots = parseProviderSessionRoots(
+    value["providerSessionRoots"],
+  );
+  if (!providerSessionRoots) {
+    return undefined;
+  }
+
+  return {
+    schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
+    runtimeDir: value["runtimeDir"],
+    statusPath: value["statusPath"],
+    controlPath: value["controlPath"],
+    allowedWriteRoots: [...allowedWriteRoots],
+    providerSessionRoots,
+    featureFlags,
+  };
 }
 
 function readOptionalEnv(name: string): string | undefined {
@@ -89,6 +300,10 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     statusPath: config.statusPath,
     controlPath: config.controlPath,
     allowedWriteRoots: [...config.allowedWriteRoots],
+    providerSessionRoots: cloneProviderSessionRoots(
+      config.providerSessionRoots,
+    ),
+    featureFlags: { ...config.featureFlags },
   };
 }
 
@@ -102,6 +317,8 @@ export function createDefaultRuntimeConfig(options: {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
+  providerSessionRoots?: Partial<ProviderSessionRoots>;
+  featureFlags?: Partial<RuntimeFeatureFlags>;
 }): RuntimeConfig {
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
@@ -109,6 +326,10 @@ export function createDefaultRuntimeConfig(options: {
     statusPath: options.statusPath,
     controlPath: options.controlPath,
     allowedWriteRoots: [...options.allowedWriteRoots],
+    providerSessionRoots: mergeProviderSessionRoots(
+      options.providerSessionRoots,
+    ),
+    featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
   };
 }
 
@@ -125,11 +346,12 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
       throw new Error("Runtime config file contains invalid JSON");
     }
 
-    if (!isRuntimeConfig(parsed)) {
+    const config = parseRuntimeConfig(parsed);
+    if (!config) {
       throw new Error("Runtime config file has unsupported schema");
     }
 
-    return cloneConfig(parsed);
+    return cloneConfig(config);
   }
 
   async ensureInitialized(

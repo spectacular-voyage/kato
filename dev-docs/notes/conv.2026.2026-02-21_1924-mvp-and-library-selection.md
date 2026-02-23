@@ -547,3 +547,559 @@ yes please
 # gpt-5.3-codex_2026-02-22_1242_34
 
 I’ll implement Step 2.6 now with `kato init` plus startup bootstrap behavior for missing config, then wire tests and update the migration checklist before re-running CI. I’m first reading the current config contract and CLI parser/usage paths to slot this cleanly.
+
+# gpt-5.3-codex_2026-02-22_1253_51
+
+Step 2.6 is implemented and validated.
+
+- Added runtime config contract + file store with schema guards and atomic initialize/load in `apps/daemon/src/config/runtime_config.ts:7` and `shared/src/contracts/config.ts:3`.
+- Added `kato init` end-to-end in `apps/daemon/src/cli/commands/init.ts:3`, parser/help wiring in `apps/daemon/src/cli/parser.ts:80` and `apps/daemon/src/cli/usage.ts:7`, and command typing/runtime path support in `apps/daemon/src/cli/types.ts:1`.
+- Wired config loading/bootstrap in CLI router, including `KATO_AUTO_INIT_ON_START` (default `true`) in `apps/daemon/src/cli/router.ts:103` and load/ensure logic in `apps/daemon/src/cli/router.ts:177`.
+- Updated detached launcher to propagate config env + derived write roots in `apps/daemon/src/orchestrator/launcher.ts:19`.
+- Marked Step 2.6 complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:41`.
+- Recorded the decision in `dev-docs/notes/dev.decision-log.md:119`.
+- Expanded tests for `init`/auto-bootstrap in `tests/daemon-cli_test.ts:260`.
+- Added dedicated runtime-config store tests in `tests/runtime-config_test.ts:12`.
+
+Validation run results:
+- `deno task fmt`: pass
+- `deno task test`: pass (52 tests)
+- `deno task ci`: pass
+
+Current repo state:
+- Only untracked file remains: `tests/runtime-config_test.ts`.
+- Other Step 2.6 files already match current HEAD (`b0f6c84`).
+
+1. Proceed to Step 3 now (writer pipeline, starting with rotation ordering + dedupe append guard)?
+
+# User_2026-02-22_1302_02
+
+Claude suggests three things to decide before Codex starts Step 3 :
+
+**1. Recording identity model**
+
+`RecordingStatus` has `activeRecordings: number` and `destinations: number` counts, but no IDs. The `export` command takes a `sessionId` but the writer pipeline in `ipc.ts` uses a `recordingId`. How are recordings keyed? Options:
+
+- **Provider session ID = recording ID** (1:1, simplest)
+- **`::record` command starts a recording with a generated ID**, bound to a (sessionId, destinationPath) pair
+- **Something else**
+
+This determines how rotation works and how the orchestrator runtime will dispatch `export` requests.
+
+**2. `::record` vs `::capture` behavioral contract in the writer**
+
+From stenobot's exporter, the distinction is:
+- `::record path` → open/maintain an ongoing stream writer to `path` (append as new messages arrive)
+- `::capture path` → one-shot dump of all messages seen so far to `path`, then continue with existing record target
+
+The writer needs to handle these differently. Should Kato preserve this distinction, or simplify it?
+
+**3. Frontmatter ID format**
+
+Stenobot uses `nanoid(10)` (compact, human-friendly, appears in user-facing `.md` files used by Dendron). Library substitutions say prefer `crypto.randomUUID()` unless compact IDs are explicitly required. Frontmatter IDs *are* a case where compact matters (36-char UUIDs are ugly in Dendron). Recommend: allow a small local `nanoid`-style utility (just alphanumeric random, no dependency needed), or explicitly accept UUIDs.
+
+---
+
+**Everything else in Step 3 can proceed with clear defaults:**
+- Output format: Markdown (same as stenobot, no change)
+- Dedupe tail guard: carry forward the `existingTrimmed.endsWith(content)` check from stenobot
+- Date formatting: native `Intl` (already decided in library substitutions, replacing `date-fns-tz`)
+- Speaker names / tool call / thinking config: defer to Step 4 (config/OpenFeature boundary)
+
+Once you answer those three, Step 3 is unblocked.
+
+---
+
+I would suggest not using the provider session ID for the recording ID because a single session might have more than one recordsing.
+
+Kato needs to preserve the record vs capture distinction
+
+For the frontmatter IDs, I suggest a brief slugification of the session name/filename with some random uniqueness plopped on the end. This means that renaming notes risks inconsistency between id and filename, but I think that's okay.
+
+# gpt-5.3-codex_2026-02-22_1302_23
+
+I agree with your direction. I’m going to lock these three decisions into the task/decision docs so Step 3 is unblocked with explicit defaults, then I’ll summarize the exact contract choices we’ll implement.
+
+# gpt-5.3-codex_2026-02-22_1303_27
+
+Agreed. Your three choices are the right MVP defaults, and I’ve now locked them in docs.
+
+- Step checklist updated with a new pre-decision gate in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:45`.
+- Full Step 3 pre-decision contract added in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:132`.
+- Library substitution note clarified for IDs in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:84`.
+- Decision log entries added for writer identity/semantics and frontmatter IDs in `dev-docs/notes/dev.decision-log.md:134` and `dev-docs/notes/dev.decision-log.md:153`.
+
+Locked decisions:
+
+1. `recordingId` is generated per recording stream, not equal to provider `sessionId`.
+2. `::record` and `::capture` remain distinct (`record` ongoing stream, `capture` one-shot snapshot, no active-stream replacement).
+3. Frontmatter IDs use compact `<slug>-<randomSuffix>` for user-facing notes; runtime/internal IDs stay UUID by default.
+
+Step 3 is now unblocked with explicit contracts.  
+1. If you want, I’ll start Step 3 implementation immediately with these contracts as the source of truth.
+
+# User_2026-02-22_1304_31
+
+Yes, implement step 3
+
+# User_2026-02-22_1305_57
+
+Claude had some comments on 2.6:
+
+**1. Daemon subprocess doesn't receive configured paths — real gap**
+
+`runDaemonRuntimeLoop()` ([daemon_runtime.ts](apps/daemon/src/orchestrator/daemon_runtime.ts)) still calls `resolveDefaultStatusPath()` / `resolveDefaultControlPath()` directly, which reads from env vars. The spawned `__daemon-run` process never receives the `statusPath` / `controlPath` from `RuntimeConfig`. For MVP with default paths this is invisible, but the moment a user runs `kato init` with a non-default `runtimeDir`, the daemon process will read/write the wrong files.
+
+The launcher needs to pass the resolved config paths — either as env vars or CLI args to the `__daemon-run` subprocess.
+
+**2. Silent fallback on missing config for non-`start`/non-`init` commands**
+
+[router.ts:177-193](apps/daemon/src/cli/router.ts#L177): if `config.json` is not found and the command is `status`, `stop`, `export`, or `clean`, the code silently falls through to `defaultRuntimeConfig`. `kato status` will show "daemon not running" (plausible), but `kato export` or `kato clean` will silently operate against default paths the user may not intend. A `NotFound` on config for these commands should probably output something like "no runtime config found — run `kato init` first" and exit 1, rather than silently proceeding.
+
+**3. Auto-init output on `kato start`**
+
+The test asserts `"started in background"` but nothing asserts that auto-init is communicated to the user. If `kato start` silently creates config and then launches, the user has no feedback that init happened. Should print something like "initialized runtime config at .kato/runtime/config.json" before the start message.
+
+**4. Optimistic status write race window (minor, known)**
+
+[start.ts:18-26](apps/daemon/src/cli/commands/start.ts#L18): CLI writes `daemonRunning: true` + `launchedPid` before the daemon process has confirmed startup. If the daemon crashes immediately (bad permissions, port conflict, etc.), `status.json` shows a running daemon until the stale threshold (30s). Acceptable for MVP but worth noting in the task doc as a known limitation.
+
+# gpt-5.3-codex_2026-02-22_1306_05
+
+I’ll address these 2.6 review gaps first before starting Step 3: I’m going to inspect the current launcher/router/runtime code paths, patch behavior for config-missing and auto-init messaging, and add tests plus a note for the known start race limitation.
+
+# gpt-5.3-codex_2026-02-22_1308_11
+
+Addressed all four review points before Step 3.
+
+1. Subprocess configured paths  
+- This was already fixed in runtime code (`KATO_CONFIG_PATH`, `KATO_DAEMON_STATUS_PATH`, `KATO_DAEMON_CONTROL_PATH` are passed) and now has explicit test coverage.
+- Added injectable command factory + assertions in `apps/daemon/src/orchestrator/launcher.ts:12` and `tests/daemon-launcher_test.ts:5`.
+
+2. Missing config now fails closed (except `start` with auto-init enabled)  
+- `status`/`stop`/`export`/`clean` now return exit code `1` with:
+  - `Runtime config not found ... Run \`kato init\` first.`
+- Implemented in `apps/daemon/src/cli/router.ts:177`.
+- Tests added in `tests/daemon-cli_test.ts:336` and `tests/daemon-cli_test.ts:357`.
+
+3. Auto-init feedback on `kato start`  
+- When `start` auto-creates config, CLI now prints:
+  - `initialized runtime config at ...`
+- Implemented in `apps/daemon/src/cli/router.ts:237`.
+- Test updated in `tests/daemon-cli_test.ts:305`.
+
+4. Optimistic start status race documented  
+- Added accepted MVP limitation note in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:148`.
+
+Validation:
+- `deno task fmt` pass
+- `deno task test` pass (55 tests)
+- `deno task ci` pass
+
+If you want, I’ll proceed directly into Step 3 implementation next.
+
+# User_2026-02-22_1308_31
+
+Yes, proceed to step 3
+
+# gpt-5.3-codex_2026-02-22_1308_43
+
+Proceeding with Step 3 now. I’ll first map existing orchestrator/control/provider contracts and any writer stubs, then implement a minimal writer pipeline with rotation ordering and dedupe append guard, followed by tests and checklist updates.
+
+# gpt-5.3-codex_2026-02-22_1318_34
+
+Step 3 is implemented.
+
+**What I changed**
+- Added a writer module with markdown rendering + frontmatter + append/overwrite modes:
+  - `apps/daemon/src/writer/markdown_writer.ts:1`
+  - `apps/daemon/src/writer/frontmatter.ts:1`
+  - `apps/daemon/src/writer/mod.ts:1`
+- Ported the dedupe append guard (`existingTrimmed.endsWith(content)`), now enforced in append mode:
+  - `apps/daemon/src/writer/markdown_writer.ts:329`
+- Added recording pipeline semantics with policy-before-rotate ordering and `record`/`capture`/`export` behavior:
+  - `apps/daemon/src/writer/recording_pipeline.ts:132`
+  - `apps/daemon/src/writer/recording_pipeline.ts:150`
+  - `apps/daemon/src/writer/recording_pipeline.ts:202`
+  - `apps/daemon/src/writer/recording_pipeline.ts:237`
+- `capture` is one-shot and does not replace active recording target:
+  - `apps/daemon/src/writer/recording_pipeline.ts:202`
+- Wired daemon runtime to route queued `export` control requests through the writer pipeline (via a session-loader hook):
+  - `apps/daemon/src/orchestrator/daemon_runtime.ts:26`
+  - `apps/daemon/src/orchestrator/daemon_runtime.ts:216`
+- Exported the new writer surfaces from daemon module:
+  - `apps/daemon/src/mod.ts:74`
+
+**Tests added/updated**
+- New writer tests (frontmatter ID format, dedupe tail guard, overwrite frontmatter preservation):
+  - `tests/writer-markdown_test.ts:1`
+- New recording pipeline tests (policy-before-writer ordering, deny-no-rotate, capture distinction):
+  - `tests/recording-pipeline_test.ts:1`
+- Runtime test for export request routing:
+  - `tests/daemon-runtime_test.ts:90`
+
+**Docs**
+- Marked Step 3 complete in sequencing checklist:
+  - `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:49`
+
+**Validation**
+- `deno task fmt` passed
+- `deno task test` passed (`62` tests)
+- `deno task ci` passed
+
+Unrelated local note changes already in your workspace (`dev-docs/notes/conv...` and `dev-docs/notes/dev.feature-ideas.md`) were left untouched.
+
+1. Next high-impact step is Step 4: wire real session message loading from providers into `runDaemonRuntimeLoop` so queued exports execute end-to-end without test hooks.
+
+# User_2026-02-22_1326_19
+
+Claude's feedback:
+
+Issues
+1. appendToActiveRecording has no tests
+
+This is the hot path — it fires for every new message the daemon ingests during an active recording. The critical behaviors that need tests:
+
+Returns {appended: false, deduped: false} when no active recording exists
+lastWriteAt updates on a successful write, doesn't update on a dedupe
+The writer's dedupe guard actually fires through the pipeline
+Given that dev.general-guidance.md says "new behavior should include tests, especially parsing and path-policy behavior," this gap matters.
+
+2. now is not propagated from pipeline through to writer/frontmatter
+
+In startOrRotateRecording and appendToActiveRecording, the writer calls don't forward this.now in the options:
+
+await this.writer.appendMessages(outputPath, input.seedMessages ?? [], {
+  title: input.title,
+  // now not passed
+});
+renderFrontmatter then falls back to new Date() instead of the injected clock. This means frontmatter created/updated timestamps are non-deterministic even in controlled-time test setups. Low impact on correctness, but makes test assertions against timestamps impossible.
+
+3. Carry-forward: daemon subprocess ignores RuntimeConfig paths/roots
+
+daemon_runtime.ts at lines 64-79 still resolves status path, control path, and allowed write roots from env vars (resolveDefaultStatusPath(), resolveDefaultControlPath(), resolveDefaultAllowedWriteRoots()). The RecordingPipeline inside the daemon process therefore doesn't honor RuntimeConfig.allowedWriteRoots if a user has configured non-default roots via kato init. This was flagged in Step 2.6 and is still present.
+
+4. loadSessionMessages is always undefined in production — export is currently a no-op
+
+[daemon_runtime.ts:195-205] logs a warning and skips when loadSessionMessages is undefined. In the __daemon-run subprocess, options.loadSessionMessages is never set (no provider ingestion yet). kato export <id> silently does nothing at runtime. Expected for now (Step 4), but worth a comment in the code or a note in the task doc so it's not forgotten.
+
+5. provider: "unknown" in export audit log
+
+[daemon_runtime.ts:209]: provider: "unknown" is passed to exportSnapshot. This shows up in audit events. The CLI export request carries a sessionId but no provider association. When provider ingestion is wired in, the session-to-provider mapping will need to be carried through to this call.
+
+Summary
+Add now	appendToActiveRecording tests (hot path, no coverage)
+Fix soon	Propagate this.now through to writer options
+Fix before non-default config matters	Daemon subprocess path/roots from RuntimeConfig (carry-forward #3)
+Note in task doc	loadSessionMessages always undefined until Step 4
+Deferred to Step 4	provider: "unknown" in export — needs session-provider mapping
+Ready for Step 4 once the appendToActiveRecording test gap is addressed. The rest can trail.
+
+# gpt-5.3-codex_2026-02-22_1327_01
+
+I’m implementing these fixes directly: append hot-path tests, clock propagation into writer/frontmatter, runtime allowed-write-roots propagation into the detached daemon env, and explicit Step 4 notes for the current export/session-loader limitations. I’ll patch code first, then run full CI.
+
+# gpt-5.3-codex_2026-02-22_1330_34
+
+Implemented Claude’s feedback items and validated them.
+
+1. `appendToActiveRecording` hot-path tests are now in place in `tests/recording-pipeline_test.ts:236` and `tests/recording-pipeline_test.ts:261`.
+2. Deterministic clock propagation is fixed by passing `now: this.now` through all writer calls in `apps/daemon/src/writer/recording_pipeline.ts:178`, `apps/daemon/src/writer/recording_pipeline.ts:218`, `apps/daemon/src/writer/recording_pipeline.ts:254`, and `apps/daemon/src/writer/recording_pipeline.ts:292`.
+3. Runtime-configured write roots are now carried into the detached daemon subprocess:
+   - Runtime type carries roots: `apps/daemon/src/cli/types.ts:32`
+   - Router forwards config roots: `apps/daemon/src/cli/router.ts:209`
+   - Launcher includes them in `--allow-write` and env (`KATO_ALLOWED_WRITE_ROOTS_JSON`): `apps/daemon/src/orchestrator/launcher.ts:30`, `apps/daemon/src/orchestrator/launcher.ts:54`
+   - Launcher test asserts both: `tests/daemon-launcher_test.ts:60`, `tests/daemon-launcher_test.ts:69`
+4. The export-loader gap is now explicitly documented in code and task notes:
+   - Runtime comment: `apps/daemon/src/orchestrator/daemon_runtime.ts:236`
+   - Task doc note: `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:159`
+5. `provider: "unknown"` remains intentionally deferred to Step 4 and is now called out in the task note (`dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:160`).
+
+Validation:
+- `deno task fmt` passed
+- `deno task test` passed (`65 passed, 0 failed`)
+- `deno task ci` passed
+
+# User_2026-02-22_1332_02
+
+OKAY, are we ready for Step 4?
+
+# gpt-5.3-codex_2026-02-22_1332_20
+
+Yes, we’re ready for Step 4.
+
+- Step 3 is implemented and validated (`deno task fmt`, `deno task test`, `deno task ci` all passed).
+- Claude’s Step 2.6 carry-forward gaps that needed immediate fixes are closed (clock propagation, subprocess write-root propagation, hot-path tests).
+- Remaining known items are intentionally Step 4 scope and documented in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:159`.
+
+If you want, I’ll start Step 4 now with: OpenFeature bootstrap, boundary validation hardening/fail-closed startup paths, and wiring `loadSessionMessages` + session-provider mapping for export.
+
+# User_2026-02-22_1332_54
+
+I'm really not sure what's involved with the OpenFeature bootstrap
+
+# gpt-5.3-codex_2026-02-22_1333_17
+
+OpenFeature bootstrap for Kato can be very small in MVP.
+
+What it means in practice:
+
+1. Add a feature flag module, e.g. `apps/daemon/src/feature_flags/`, that:
+- initializes OpenFeature once at startup
+- registers a local/static provider
+- exposes typed helpers like `isIncludeThinkingEnabled(ctx)`
+
+2. Define a short flag set (start with 3-5 flags), for example:
+- `writer.includeThinking`
+- `writer.includeToolCalls`
+- `writer.italicizeUserMessages`
+- `daemon.export.enabled`
+
+3. Add config boundary for flag overrides in runtime config (or env), validate it fail-closed in `apps/daemon/src/config/runtime_config.ts`.
+
+4. Wire bootstrap in `apps/daemon/src/main.ts` and pass the flag client/service into runtime/pipeline constructors (`apps/daemon/src/orchestrator/daemon_runtime.ts`, `apps/daemon/src/writer/recording_pipeline.ts`).
+
+5. Add tests:
+- defaults when no overrides are present
+- override behavior
+- invalid flag config causes startup failure
+
+What it does not require now:
+- remote flag service
+- rollout UI
+- advanced targeting/hook ecosystem
+
+So this is mostly initialization + typed evaluation + config validation, not a big platform effort. If you want, I can implement this minimal Step 4 slice next.
+
+# User_2026-02-22_1334_02
+
+Is it worth it?
+
+# gpt-5.3-codex_2026-02-22_1334_12
+
+Yes, with strict MVP scope, it’s worth it.
+
+- You already plan multiple apps (`daemon`, `web`, `cloud`) and config boundaries. OpenFeature gives one flag contract now, instead of refactoring later.
+- Cost is low if we keep it minimal: local provider only, typed wrappers, and 3-5 flags.
+- It becomes not worth it only if flags are basically constants and never runtime-controlled.
+
+Recommendation:
+1. Do a thin OpenFeature bootstrap now (no remote provider, no targeting rules).
+2. Limit to writer/export toggles.
+3. Re-evaluate after Step 4 before adding any advanced features.
+
+# User_2026-02-22_1334_34
+
+OK, proceed with step 4
+
+# gpt-5.3-codex_2026-02-22_1334_45
+
+Proceeding with Step 4 now. I’ll first map current config/runtime startup boundaries and check whether OpenFeature is already present, then I’ll implement the minimal bootstrap plus fail-closed validation and tests in one pass.
+
+# gpt-5.3-codex_2026-02-22_1342_39
+
+Step 4 is implemented and validated.
+
+**What changed**
+- Added typed runtime feature-flag contract to shared config: `shared/src/contracts/config.ts:3`.
+- Added local OpenFeature baseline (in-memory provider, bootstrap, evaluation): `apps/daemon/src/feature_flags/openfeature.ts:1`.
+- Expanded runtime config validation with strict feature-flag parsing (including unknown-key rejection) and legacy backfill defaults: `apps/daemon/src/config/runtime_config.ts:35`.
+- Added fail-closed daemon subprocess startup that loads runtime config before runtime loop and exits with error on bad config: `apps/daemon/src/main.ts:43`.
+- Wired feature evaluation into runtime behavior:
+  - `exportEnabled` gate in runtime loop: `apps/daemon/src/orchestrator/daemon_runtime.ts:78`.
+  - provider-aware export path via `loadSessionSnapshot`: `apps/daemon/src/orchestrator/daemon_runtime.ts:30`.
+  - writer render defaults passed through recording pipeline: `apps/daemon/src/writer/recording_pipeline.ts:84`.
+- Updated task checklist marking Step 4 complete: `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:55`.
+
+**Tests added/updated**
+- OpenFeature defaults/overrides: `tests/openfeature-flags_test.ts:1`.
+- Daemon subprocess fail-closed + feature wiring: `tests/daemon-main_test.ts:1`.
+- Runtime config feature-flag validation/backfill: `tests/runtime-config_test.ts:70`.
+- Runtime export gating + provider-aware snapshot path: `tests/daemon-runtime_test.ts:248`.
+- Recording pipeline render-option passthrough: `tests/recording-pipeline_test.ts:340`.
+
+**Validation**
+- `deno task fmt` passed.
+- `deno task test` passed (`74 passed, 0 failed`).
+- `deno task ci` passed.
+
+Next sensible step is Step 5 docs alignment (`dev.codebase-overview`, `dev.decision-log`, `dev.general-guidance`).
+
+# User_2026-02-22_1617_40
+
+Claude feedback:
+
+1. No test for runDaemonSubprocess fail-closed startup
+
+runDaemonSubprocess() has injected configStore and runtimeLoop parameters specifically for testability, but there's no test exercising the fail path (config missing → exit code 1, config invalid → exit code 1). The fail-closed daemon startup was explicitly listed as a Step 4 goal. The function is short and the test would be straightforward with an in-memory config store that throws NotFound.
+
+2. daemon-cli_test.ts makeDefaultRuntimeConfig likely needs featureFlags
+
+RuntimeConfig.featureFlags is now required in the shared contract. The makeDefaultRuntimeConfig helper in the CLI test file was shown without it in earlier diffs. If it wasn't updated, deno task check should be failing. Worth confirming deno task ci passes cleanly.
+
+3. Unknown featureFlags keys → reject config — forward-compat note
+
+runtime_config.ts:45-49 rejects any unknown key in the featureFlags object. This is intentional fail-closed behavior and is tested. The forward-compat implication: if a user runs a newer config.json (with extra flags from a future version) against an older daemon build, it won't start. Acceptable for MVP, but worth noting in the task doc or a comment.
+
+Anything worth incorporating?
+
+# gpt-5.3-codex_2026-02-22_1617_49
+
+I’ll verify each Claude point against the current code/tests, then add a short forward-compat note in the task doc if it’s not already captured.
+
+# gpt-5.3-codex_2026-02-22_1618_01
+
+Yes, and mostly it’s already incorporated.
+
+1. `runDaemonSubprocess` fail-closed test is present in `tests/daemon-main_test.ts:25` (load error -> exit `1`, runtime loop not called).
+2. `daemon-cli_test` already includes required `featureFlags` in `makeDefaultRuntimeConfig` at `tests/daemon-cli_test.ts:41`.
+3. The forward-compat caveat was worth adding, so I added it to `Known MVP Limitation` in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:164`.
+
+So the only net new incorporation from Claude’s note was documenting #3 explicitly.
+
+# User_2026-02-22_1619_59
+
+OK, so should kato actually work? Go ahead and proceed to step 5 if you're ready.
+
+# gpt-5.3-codex_2026-02-22_1620_09
+
+Yes for the implemented MVP slices: CLI control plane, config bootstrap, policy gate, writer pipeline, and Step 4 feature/config hardening are working and tested. I’ll proceed with Step 5 now by updating `dev.general-guidance.md`, `dev.codebase-overview.md`, and `dev.decision-log.md` to match the current architecture and known limitations.
+
+# gpt-5.3-codex_2026-02-22_1621_36
+
+Yes, for the implemented MVP slices it should work: CLI control flow, detached daemon startup, config/bootstrap, path policy, writer pipeline, and Step 4 flag/config hardening.
+
+Still intentionally limited:
+- Full provider ingestion/session store wiring is not complete yet (export depends on runtime session loader hooks).
+- Service-manager integration is deferred.
+
+Step 5 is now done:
+- Updated `dev-docs/notes/dev.general-guidance.md`
+- Filled `dev-docs/notes/dev.codebase-overview.md`
+- Updated `dev-docs/notes/dev.decision-log.md`
+- Marked Step 5 complete in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md`
+
+Validation:
+- `deno task check` passed.
+
+If you want, I’ll proceed to Step 6 and draft `README.md` user-facing usage docs next.
+
+# User_2026-02-22_1756_16
+
+yes please
+
+# gpt-5.3-codex_2026-02-22_1756_16
+
+I’m editing `README.md` now with concrete user-facing instructions (run commands, config, command reference, and current MVP limitations), then I’ll mark Step 6 complete in the migration task note.
+
+# gpt-5.3-codex_2026-02-22_1756_57
+
+Step 6 is complete.
+
+Updated:
+- `README.md:1` with user-facing MVP docs:
+  - quickstart (`deno run -A apps/daemon/src/main.ts ...`)
+  - full command reference
+  - default runtime file paths
+  - runtime config example including `featureFlags`
+  - current working scope and known MVP limits
+- `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:64` marked Step 6 as done.
+
+Validation:
+- `deno task check` passed.
+
+So yes, Kato should work for the implemented slices, with the documented current limits (notably provider ingestion/session loader wiring for export behavior).
+
+1. If you want, I can now do a short smoke-test runbook (exact commands + expected output) and add it to the README.
+2. Or I can move to cleanup/commit prep (grouping changes into logical commits).
+
+# User_2026-02-22_1759_07
+
+I've been committing as we go, but in the future I like the sound of logical commits.
+
+Would your smoke test runbook go better in [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) ?
+
+# gpt-5.3-codex_2026-02-22_1759_16
+
+Yes, that’s the better place.
+
+- `README.md` should stay user-facing and short.
+- `dev-docs/notes/dev.testing.md` is the right place for a full smoke-test runbook:
+  - setup/preconditions
+  - exact commands
+  - expected outputs/files
+  - cleanup/reset steps
+  - troubleshooting notes
+
+Recommended pattern: keep a brief “Smoke test” pointer in `README.md` that links to `dev.testing.md`.
+
+If you want, I can add the runbook there now.
+
+# User_2026-02-22_1800_21
+
+Yes. Also make this update (from Claude): Remaining Issue: Stale zod Reference in Decision Log
+dev.decision-log.md:79 reads:
+
+Config: Use \zod` for schema validation of `Deno.env`. No `dotenv` package (use `deno --env`).`
+
+zod is not present anywhere in the kato source — grep confirms hits only in doc/conversation files, never in apps/ or shared/. The actual implementation used inline guards throughout (hybrid strategy agreed to in the MVP library selection conversation). The decision log entry predates the hybrid decision and was never corrected.
+
+Suggested fix for Codex: Update that bullet to something like:
+
+Config: Use inline type guards at all boundary surfaces (parseRuntimeConfig, parseControlRequest, etc.). No zod in MVP; deferred to post-MVP if boundary complexity grows. No dotenv package (use deno --env).
+
+# gpt-5.3-codex_2026-02-22_1800_35
+
+I’ll do both: add a concrete smoke-test runbook in `dev-docs/notes/dev.testing.md` and update the stale `zod` decision-log entry to match the current inline-guard strategy. I’ll read both docs first, patch them, then do a quick grep sanity check.
+
+# gpt-5.3-codex_2026-02-22_1801_27
+
+Done.
+
+- Added a full MVP smoke-test runbook to `dev-docs/notes/dev.testing.md` (preconditions, step-by-step commands, expected outcomes, fail-closed config check, troubleshooting).
+- Updated the stale `zod` decision in `dev-docs/notes/dev.decision-log.md` under “Configuration & Parsing” to reflect the actual MVP implementation:
+  - inline boundary guards
+  - no `zod` in MVP
+  - no `dotenv`, use `deno --env`
+  - `zod` re-evaluation deferred post-MVP if complexity grows
+
+I also verified the new wording is present and the old `zod` claim is removed from that decision section.
+
+# User_2026-02-22_1802_19
+
+Minor gaps:
+
+-A in production: Using deno run -A grants all permissions. Should mention that this is for development/source-running. A compiled binary (deno compile) with narrower permissions is the production intent — or at least note it's a dev invocation.
+
+clean subflags not implemented: The README documents --all, --recordings <days>, --sessions <days>, --dry-run. Are those actually wired in the CLI? If clean only enqueues a bare request right now (no subflags parsed), documenting them may be premature.
+
+export <session-id>: The session-id positional is documented — is that actually parsed in the CLI router, or does export currently just enqueue a generic export request?
+
+No mention of KATO_AUTO_INIT_ON_START: It's referenced in the start bullet, but a user wouldn't know they can set it to false to disable auto-init.
+
+Items 2 and 3 are the most important — if clean subflags and export <session-id> aren't actually implemented yet, those lines should be trimmed back to match what's real. Want me to check the CLI router for those?
+
+# gpt-5.3-codex_2026-02-22_1802_28
+
+I’ll verify those points directly in the CLI parser/router/commands now, then I’ll update the docs to exactly match implemented behavior (including the `-A` dev-only note and `KATO_AUTO_INIT_ON_START`).
+
+# gpt-5.3-codex_2026-02-22_1803_02
+
+Good catches. I checked directly, and items 2/3 are implemented already.
+
+- `export <session-id>` is required/parsed in `apps/daemon/src/cli/parser.ts:125` and enqueued with `sessionId` in `apps/daemon/src/cli/commands/export.ts:43`.
+- `clean` subflags are parsed in `apps/daemon/src/cli/parser.ts:160` and forwarded into payload in `apps/daemon/src/cli/commands/clean.ts:16`.
+- Both behaviors are covered in `tests/daemon-cli_test.ts:454`.
+
+I updated docs accordingly:
+
+- Added `-A` dev/source-run caveat + production least-privilege note in `README.md:11`.
+- Added explicit `KATO_AUTO_INIT_ON_START=false` guidance in `README.md:40`.
+- Clarified `export` is for the specified session id in `README.md:48`.
+- Added the same `-A` caveat in the smoke runbook note in `dev-docs/notes/dev.testing.md:13`.
+
+And I previously fixed the stale zod decision line in `dev-docs/notes/dev.decision-log.md:79`.
+
+# User_2026-02-22_1810_42
+
+:stop

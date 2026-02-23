@@ -1,7 +1,9 @@
 export {
   createBootstrapStatusSnapshot,
   describeDaemonEntryPoint,
+  runDaemonSubprocess,
 } from "./main.ts";
+export type { RunDaemonSubprocessOptions } from "./main.ts";
 export {
   CliUsageError,
   type DaemonCliCommand,
@@ -15,18 +17,36 @@ export {
   type RunDaemonCliOptions,
 } from "./cli/mod.ts";
 export type {
+  CreateProviderIngestionRunnerOptions,
   DaemonControlCommand,
   DaemonControlRequest,
   DaemonControlRequestDraft,
   DaemonControlRequestStoreLike,
   DaemonProcessLauncherLike,
   DaemonStatusSnapshotStoreLike,
+  FileProviderIngestionRunnerOptions,
+  InMemorySessionSnapshotStoreOptions,
+  ProviderIngestionFactoryOptions,
+  ProviderIngestionPollResult,
+  ProviderIngestionRunner,
+  ProviderSessionFile,
+  RuntimeSessionSnapshot,
+  SessionSnapshotStatusMetadata,
+  SessionSnapshotStore,
+  SessionSnapshotStoreRetentionPolicy,
+  SessionSnapshotUpsert,
 } from "./orchestrator/mod.ts";
 export {
+  createClaudeIngestionRunner,
+  createCodexIngestionRunner,
+  createDefaultProviderIngestionRunners,
   createDefaultStatusSnapshot,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY,
   DenoDetachedDaemonLauncher,
+  FileProviderIngestionRunner,
+  InMemorySessionSnapshotStore,
   isStatusSnapshotStale,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
@@ -40,6 +60,7 @@ export type {
 export {
   createDefaultRuntimeConfig,
   resolveDefaultConfigPath,
+  resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
 } from "./config/mod.ts";
 export type {
@@ -71,3 +92,40 @@ export {
   type WatchDebounceOptions,
   watchFsDebounced,
 } from "./core/watcher.ts";
+export type {
+  DaemonFeatureSettings,
+  OpenFeatureBooleanProviderLike,
+  OpenFeatureEvaluationContext,
+  RuntimeFeatureFlagKey,
+} from "./feature_flags/mod.ts";
+export {
+  bootstrapOpenFeature,
+  createDefaultRuntimeFeatureFlags,
+  evaluateDaemonFeatureSettings,
+  InMemoryOpenFeatureProvider,
+  mergeRuntimeFeatureFlags,
+  OpenFeatureClient,
+} from "./feature_flags/mod.ts";
+export type {
+  ActiveRecording,
+  AppendToActiveRecordingInput,
+  AppendToActiveRecordingResult,
+  ConversationWriteMode,
+  ConversationWriterLike,
+  MarkdownRenderOptions,
+  MarkdownSpeakerNames,
+  MarkdownWriteResult,
+  RecordingPipelineLike,
+  RecordingPipelineOptions,
+  RecordingSummary,
+  SnapshotExportInput,
+  SnapshotExportResult,
+  StartOrRotateRecordingInput,
+} from "./writer/mod.ts";
+export {
+  makeCompactFrontmatterId,
+  MarkdownConversationWriter,
+  RecordingPipeline,
+  renderMessagesToMarkdown,
+  slugifyForFrontmatterId,
+} from "./writer/mod.ts";
