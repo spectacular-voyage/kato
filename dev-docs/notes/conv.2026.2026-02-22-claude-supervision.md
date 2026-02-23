@@ -316,3 +316,67 @@ await this.writer.appendMessages(outputPath, input.seedMessages ?? [], {
 | Deferred to Step 4 | `provider: "unknown"` in export — needs session-provider mapping |
 
 Ready for Step 4 once the `appendToActiveRecording` test gap is addressed. The rest can trail.
+
+# User_2026-02-22_1504_06
+
+step 4 completed, can you review?
+
+# claude-sonnet-4.6_2026-02-22_1504_25
+
+Let me check what was added for Step 4.
+
+# claude-sonnet-4.6_2026-02-22_1506_29
+
+Step 4 is well done. Here's the review.
+
+---
+
+## Step 4 Review
+
+### What's solid
+
+- **Daemon subprocess gap — resolved.** `runDaemonSubprocess()` in [main.ts:43](apps/daemon/src/main.ts#L43) now loads `RuntimeConfig` from file before the runtime loop starts, builds `RecordingPipeline` with `runtimeConfig.allowedWriteRoots`, and passes `featureSettings.exportEnabled` to `runDaemonRuntimeLoop`. The subprocess is fully config-driven, no longer env-var only.
+- **`RuntimeConfigFileStore.load()` is fail-closed** — throws on invalid JSON or unknown schema, no silent fallback. Tested via `runtime-config_test.ts`.
+- **Legacy config backfill** — `featureFlags` absent from existing `config.json` → loads with defaults rather than rejecting. This is the right forward-compat choice.
+- **OpenFeature baseline** — `InMemoryOpenFeatureProvider` → `OpenFeatureClient` → `evaluateDaemonFeatureSettings()` is a clean, swap-ready pattern. Tests verify deterministic defaults and overrides.
+- **`makeWriterOptions()` propagates `now` and `defaultRenderOptions`** — both Step 3 gaps resolved. Pipeline tests now assert `hasNow: true` on all writer calls.
+- **All four `RuntimeFeatureFlags` wired end-to-end**: config → `bootstrapOpenFeature` → `evaluateDaemonFeatureSettings` → pipeline `defaultRenderOptions` + `exportEnabled`.
+
+---
+
+### Issues
+
+**1. No test for `runDaemonSubprocess` fail-closed startup**
+
+`runDaemonSubprocess()` has injected `configStore` and `runtimeLoop` parameters specifically for testability, but there's no test exercising the fail path (config missing → exit code 1, config invalid → exit code 1). The fail-closed daemon startup was explicitly listed as a Step 4 goal. The function is short and the test would be straightforward with an in-memory config store that throws `NotFound`.
+
+**2. `daemon-cli_test.ts` `makeDefaultRuntimeConfig` likely needs `featureFlags`**
+
+`RuntimeConfig.featureFlags` is now required in the shared contract. The `makeDefaultRuntimeConfig` helper in the CLI test file was shown without it in earlier diffs. If it wasn't updated, `deno task check` should be failing. Worth confirming `deno task ci` passes cleanly.
+
+**3. Unknown `featureFlags` keys → reject config — forward-compat note**
+
+[runtime_config.ts:45-49](apps/daemon/src/config/runtime_config.ts#L45) rejects any unknown key in the `featureFlags` object. This is intentional fail-closed behavior and is tested. The forward-compat implication: if a user runs a *newer* `config.json` (with extra flags from a future version) against an *older* daemon build, it won't start. Acceptable for MVP, but worth noting in the task doc or a comment.
+
+**4. `resolveDefaultConfigPath` places config one level above `runtimeDir` — undocumented**
+
+[runtime_config.ts:152-154](apps/daemon/src/config/runtime_config.ts#L152):
+
+```ts
+join(dirname(runtimeDir), CONFIG_FILENAME)
+```
+
+With the default `runtimeDir = ".kato/runtime"`, this resolves to `.kato/config.json`. The intent (config sits alongside the runtime dir, not inside it) is sensible, but there's no comment or doc explaining the layout. Should surface in the README or Step 5 codebase overview.
+
+---
+
+### Summary
+
+| | |
+|---|---|
+| Add now | Test for `runDaemonSubprocess` fail-closed (config missing/invalid) |
+| Verify | `daemon-cli_test.ts` `makeDefaultRuntimeConfig` includes `featureFlags` |
+| Document in Step 5 | Config path layout (`.kato/config.json` vs `.kato/runtime/`) |
+| Accept + note | Unknown flag key rejection — forward-compat tradeoff |
+
+Steps 1–4 are substantively complete. Step 5 (docs) and Step 6 (README) are the remaining items.

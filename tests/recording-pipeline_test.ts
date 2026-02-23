@@ -52,6 +52,9 @@ function makeWriterSpy(callOrder: string[]): {
       path: string;
       messages: number;
       hasNow: boolean;
+      includeThinking?: boolean;
+      includeToolCalls?: boolean;
+      italicizeUserMessages?: boolean;
     }
   >;
   writer: ConversationWriterLike;
@@ -64,6 +67,9 @@ function makeWriterSpy(callOrder: string[]): {
       path: string;
       messages: number;
       hasNow: boolean;
+      includeThinking?: boolean;
+      includeToolCalls?: boolean;
+      italicizeUserMessages?: boolean;
     }
   > = [];
   const appendOutcomes: Array<{ wrote: boolean; deduped: boolean }> = [];
@@ -81,6 +87,9 @@ function makeWriterSpy(callOrder: string[]): {
           path,
           messages: messages.length,
           hasNow: typeof options?.now === "function",
+          includeThinking: options?.includeThinking,
+          includeToolCalls: options?.includeToolCalls,
+          italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = appendOutcomes.shift() ??
           { wrote: true, deduped: false };
@@ -98,6 +107,9 @@ function makeWriterSpy(callOrder: string[]): {
           path,
           messages: messages.length,
           hasNow: typeof options?.now === "function",
+          includeThinking: options?.includeThinking,
+          includeToolCalls: options?.includeToolCalls,
+          italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = overwriteOutcomes.shift() ??
           { wrote: true, deduped: false };
@@ -205,6 +217,9 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     path: "/safe/notes/capture.md",
     messages: 1,
     hasNow: true,
+    includeThinking: undefined,
+    includeToolCalls: undefined,
+    italicizeUserMessages: undefined,
   });
 });
 
@@ -230,6 +245,9 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
     path: "/safe/notes/export.md",
     messages: 1,
     hasNow: true,
+    includeThinking: undefined,
+    includeToolCalls: undefined,
+    italicizeUserMessages: undefined,
   });
 });
 
@@ -316,5 +334,56 @@ Deno.test(
     const active = pipeline.getActiveRecording("codex", "session-append");
     assertEquals(active?.lastWriteAt, "2026-02-22T10:00:05.000Z");
     assertEquals(writerSpy.calls.map((call) => call.hasNow), [true, true]);
+  },
+);
+
+Deno.test(
+  "RecordingPipeline applies default writer render options from pipeline config",
+  async () => {
+    const order: string[] = [];
+    const writerSpy = makeWriterSpy(order);
+    const pipeline = new RecordingPipeline({
+      pathPolicyGate: makeSequencedPathPolicyGate(["allow", "allow"], order),
+      writer: writerSpy.writer,
+      defaultRenderOptions: {
+        includeThinking: false,
+        includeToolCalls: false,
+        italicizeUserMessages: true,
+      },
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    await pipeline.startOrRotateRecording({
+      provider: "codex",
+      sessionId: "session-flags",
+      targetPath: "notes/with-flags.md",
+      seedMessages: [makeMessage("seed")],
+    });
+
+    await pipeline.appendToActiveRecording({
+      provider: "codex",
+      sessionId: "session-flags",
+      messages: [makeMessage("append")],
+    });
+
+    assertEquals(writerSpy.calls.length, 2);
+    assertEquals(writerSpy.calls[0], {
+      mode: "append",
+      path: "/safe/notes/with-flags.md",
+      messages: 1,
+      hasNow: true,
+      includeThinking: false,
+      includeToolCalls: false,
+      italicizeUserMessages: true,
+    });
+    assertEquals(writerSpy.calls[1], {
+      mode: "append",
+      path: "/safe/notes/with-flags.md",
+      messages: 1,
+      hasNow: true,
+      includeThinking: false,
+      includeToolCalls: false,
+      italicizeUserMessages: true,
+    });
   },
 );

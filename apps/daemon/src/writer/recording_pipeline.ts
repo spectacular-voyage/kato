@@ -11,6 +11,7 @@ import {
 import {
   type ConversationWriterLike,
   MarkdownConversationWriter,
+  type MarkdownRenderOptions,
   type MarkdownWriteResult,
 } from "./markdown_writer.ts";
 
@@ -83,6 +84,10 @@ export interface RecordingPipelineLike {
 export interface RecordingPipelineOptions {
   pathPolicyGate: WritePathPolicyGateLike;
   writer?: ConversationWriterLike;
+  defaultRenderOptions?: Pick<
+    MarkdownRenderOptions,
+    "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+  >;
   now?: () => Date;
   makeRecordingId?: () => string;
   operationalLogger?: StructuredLogger;
@@ -132,6 +137,10 @@ function cloneRecording(recording: ActiveRecording): ActiveRecording {
 export class RecordingPipeline implements RecordingPipelineLike {
   private readonly now: () => Date;
   private readonly writer: ConversationWriterLike;
+  private readonly defaultRenderOptions: Pick<
+    MarkdownRenderOptions,
+    "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+  >;
   private readonly makeRecordingId: () => string;
   private readonly recordings = new Map<string, ActiveRecording>();
   private readonly operationalLogger: StructuredLogger;
@@ -140,6 +149,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
   constructor(private readonly options: RecordingPipelineOptions) {
     this.now = options.now ?? (() => new Date());
     this.writer = options.writer ?? new MarkdownConversationWriter();
+    this.defaultRenderOptions = {
+      ...options.defaultRenderOptions,
+    };
     this.makeRecordingId = options.makeRecordingId ??
       (() => crypto.randomUUID());
     this.operationalLogger = options.operationalLogger ??
@@ -173,10 +185,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       const result = await this.writer.appendMessages(
         outputPath,
         input.seedMessages ?? [],
-        {
-          title: input.title,
-          now: this.now,
-        },
+        this.makeWriterOptions(input.title),
       );
       if (result.wrote) {
         const updated = this.recordings.get(sessionKey);
@@ -213,10 +222,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const writeResult = await this.writer.overwriteMessages(
       outputPath,
       input.messages,
-      {
-        title: input.title,
-        now: this.now,
-      },
+      this.makeWriterOptions(input.title),
     );
 
     await this.operationalLogger.info(
@@ -249,10 +255,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const writeResult = await this.writer.overwriteMessages(
       outputPath,
       input.messages,
-      {
-        title: input.title,
-        now: this.now,
-      },
+      this.makeWriterOptions(input.title),
     );
 
     await this.operationalLogger.info(
@@ -287,10 +290,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const writeResult = await this.writer.appendMessages(
       activeRecording.outputPath,
       input.messages,
-      {
-        title: input.title,
-        now: this.now,
-      },
+      this.makeWriterOptions(input.title),
     );
     if (writeResult.wrote) {
       activeRecording.lastWriteAt = this.now().toISOString();
@@ -370,5 +370,13 @@ export class RecordingPipeline implements RecordingPipelineLike {
     }
 
     return decision;
+  }
+
+  private makeWriterOptions(title: string | undefined): MarkdownRenderOptions {
+    return {
+      ...this.defaultRenderOptions,
+      title,
+      now: this.now,
+    };
   }
 }

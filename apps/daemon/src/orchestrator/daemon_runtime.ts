@@ -27,7 +27,11 @@ export interface DaemonRuntimeLoopOptions {
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
   recordingPipeline?: RecordingPipelineLike;
+  loadSessionSnapshot?: (
+    sessionId: string,
+  ) => Promise<{ provider: string; messages: Message[] }>;
   loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
+  exportEnabled?: boolean;
   now?: () => Date;
   pid?: number;
   heartbeatIntervalMs?: number;
@@ -71,6 +75,7 @@ export async function runDaemonRuntimeLoop(
   const heartbeatIntervalMs = options.heartbeatIntervalMs ??
     DEFAULT_HEARTBEAT_INTERVAL_MS;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const exportEnabled = options.exportEnabled ?? true;
 
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(resolveDefaultStatusPath(), now);
@@ -113,7 +118,9 @@ export async function runDaemonRuntimeLoop(
         request,
         controlStore,
         recordingPipeline,
+        loadSessionSnapshot: options.loadSessionSnapshot,
         loadSessionMessages: options.loadSessionMessages,
+        exportEnabled,
         operationalLogger,
         auditLogger,
       });
@@ -169,7 +176,11 @@ interface HandleControlRequestOptions {
   request: DaemonControlRequest;
   controlStore: DaemonControlRequestStoreLike;
   recordingPipeline: RecordingPipelineLike;
+  loadSessionSnapshot?: (
+    sessionId: string,
+  ) => Promise<{ provider: string; messages: Message[] }>;
   loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
+  exportEnabled: boolean;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
 }
@@ -189,7 +200,9 @@ async function handleControlRequest(
     request,
     controlStore,
     recordingPipeline,
+    loadSessionSnapshot,
     loadSessionMessages,
+    exportEnabled,
     operationalLogger,
     auditLogger,
   } = options;
@@ -214,6 +227,18 @@ async function handleControlRequest(
   );
 
   if (request.command === "export") {
+    if (!exportEnabled) {
+      await operationalLogger.warn(
+        "daemon.control.export.disabled",
+        "Export request skipped because feature flag is disabled",
+        {
+          requestId: request.requestId,
+        },
+      );
+      await controlStore.markProcessed(request.requestId);
+      return false;
+    }
+
     const payload = request.payload;
     const sessionId = isRecord(payload)
       ? readString(payload["sessionId"])
@@ -232,7 +257,7 @@ async function handleControlRequest(
           payload,
         },
       );
-    } else if (!loadSessionMessages) {
+    } else if (!loadSessionSnapshot && !loadSessionMessages) {
       // Step 4 wiring: export requests are deferred until provider ingestion
       // supplies a session message loader in the daemon runtime.
       await operationalLogger.warn(
@@ -246,9 +271,18 @@ async function handleControlRequest(
       );
     } else {
       try {
-        const messages = await loadSessionMessages(sessionId);
+        let provider = "unknown";
+        let messages: Message[];
+        if (loadSessionSnapshot) {
+          const snapshot = await loadSessionSnapshot(sessionId);
+          provider = readString(snapshot.provider) ?? "unknown";
+          messages = snapshot.messages;
+        } else {
+          messages = await loadSessionMessages!(sessionId);
+        }
+
         await recordingPipeline.exportSnapshot({
-          provider: "unknown",
+          provider,
           sessionId,
           targetPath: outputPath,
           messages,

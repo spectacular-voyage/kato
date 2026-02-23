@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
+  createDefaultRuntimeFeatureFlags,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
   type DaemonControlRequestStoreLike,
@@ -44,6 +45,7 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
     statusPath: `${runtimeDir}/status.json`,
     controlPath: `${runtimeDir}/control.json`,
     allowedWriteRoots: [runtimeDir],
+    featureFlags: createDefaultRuntimeFeatureFlags(),
   };
 }
 
@@ -55,6 +57,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
     ? {
       ...initial,
       allowedWriteRoots: [...initial.allowedWriteRoots],
+      featureFlags: { ...initial.featureFlags },
     }
     : undefined;
   const ensureCalls = { value: 0 };
@@ -69,6 +72,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
         return Promise.resolve({
           ...state,
           allowedWriteRoots: [...state.allowedWriteRoots],
+          featureFlags: { ...state.featureFlags },
         });
       },
       ensureInitialized(defaultConfig: RuntimeConfig) {
@@ -77,12 +81,14 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           state = {
             ...defaultConfig,
             allowedWriteRoots: [...defaultConfig.allowedWriteRoots],
+            featureFlags: { ...defaultConfig.featureFlags },
           };
           return Promise.resolve({
             created: true,
             config: {
               ...state,
               allowedWriteRoots: [...state.allowedWriteRoots],
+              featureFlags: { ...state.featureFlags },
             },
             path: `${state.runtimeDir}/config.json`,
           });
@@ -93,6 +99,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           config: {
             ...state,
             allowedWriteRoots: [...state.allowedWriteRoots],
+            featureFlags: { ...state.featureFlags },
           },
           path: `${state.runtimeDir}/config.json`,
         });

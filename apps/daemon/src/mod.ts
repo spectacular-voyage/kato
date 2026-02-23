@@ -1,7 +1,9 @@
 export {
   createBootstrapStatusSnapshot,
   describeDaemonEntryPoint,
+  runDaemonSubprocess,
 } from "./main.ts";
+export type { RunDaemonSubprocessOptions } from "./main.ts";
 export {
   CliUsageError,
   type DaemonCliCommand,
@@ -71,6 +73,20 @@ export {
   type WatchDebounceOptions,
   watchFsDebounced,
 } from "./core/watcher.ts";
+export type {
+  DaemonFeatureSettings,
+  OpenFeatureBooleanProviderLike,
+  OpenFeatureEvaluationContext,
+  RuntimeFeatureFlagKey,
+} from "./feature_flags/mod.ts";
+export {
+  bootstrapOpenFeature,
+  createDefaultRuntimeFeatureFlags,
+  evaluateDaemonFeatureSettings,
+  InMemoryOpenFeatureProvider,
+  mergeRuntimeFeatureFlags,
+  OpenFeatureClient,
+} from "./feature_flags/mod.ts";
 export type {
   ActiveRecording,
   AppendToActiveRecordingInput,

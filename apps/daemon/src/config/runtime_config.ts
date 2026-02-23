@@ -1,5 +1,9 @@
-import type { RuntimeConfig } from "@kato/shared";
+import type { RuntimeConfig, RuntimeFeatureFlags } from "@kato/shared";
 import { dirname, join } from "@std/path";
+import {
+  createDefaultRuntimeFeatureFlags,
+  mergeRuntimeFeatureFlags,
+} from "../feature_flags/mod.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
@@ -21,40 +25,91 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isRuntimeConfig(value: unknown): value is RuntimeConfig {
+const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
+  "writerIncludeThinking",
+  "writerIncludeToolCalls",
+  "writerItalicizeUserMessages",
+  "daemonExportEnabled",
+];
+
+function parseRuntimeFeatureFlags(
+  value: unknown,
+): RuntimeFeatureFlags | undefined {
+  if (value === undefined) {
+    return createDefaultRuntimeFeatureFlags();
+  }
   if (!isRecord(value)) {
-    return false;
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!RUNTIME_FEATURE_FLAG_KEYS.includes(key as keyof RuntimeFeatureFlags)) {
+      return undefined;
+    }
+  }
+
+  const merged = mergeRuntimeFeatureFlags();
+  for (const key of RUNTIME_FEATURE_FLAG_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (typeof candidate !== "boolean") {
+      return undefined;
+    }
+    merged[key] = candidate;
+  }
+
+  return merged;
+}
+
+function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
+  if (!isRecord(value)) {
+    return undefined;
   }
 
   if (value["schemaVersion"] !== DEFAULT_CONFIG_SCHEMA_VERSION) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["runtimeDir"] !== "string" || value["runtimeDir"].length === 0
   ) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["statusPath"] !== "string" || value["statusPath"].length === 0
   ) {
-    return false;
+    return undefined;
   }
   if (
     typeof value["controlPath"] !== "string" ||
     value["controlPath"].length === 0
   ) {
-    return false;
+    return undefined;
   }
+  const allowedWriteRoots = value["allowedWriteRoots"];
   if (
-    !Array.isArray(value["allowedWriteRoots"]) ||
-    value["allowedWriteRoots"].some((root) =>
+    !Array.isArray(allowedWriteRoots) ||
+    allowedWriteRoots.some((root) =>
       typeof root !== "string" || root.length === 0
     )
   ) {
-    return false;
+    return undefined;
   }
 
-  return true;
+  const featureFlags = parseRuntimeFeatureFlags(value["featureFlags"]);
+  if (!featureFlags) {
+    return undefined;
+  }
+
+  return {
+    schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
+    runtimeDir: value["runtimeDir"],
+    statusPath: value["statusPath"],
+    controlPath: value["controlPath"],
+    allowedWriteRoots: [...allowedWriteRoots],
+    featureFlags,
+  };
 }
 
 function readOptionalEnv(name: string): string | undefined {
@@ -89,6 +144,7 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     statusPath: config.statusPath,
     controlPath: config.controlPath,
     allowedWriteRoots: [...config.allowedWriteRoots],
+    featureFlags: { ...config.featureFlags },
   };
 }
 
@@ -102,6 +158,7 @@ export function createDefaultRuntimeConfig(options: {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
+  featureFlags?: Partial<RuntimeFeatureFlags>;
 }): RuntimeConfig {
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
@@ -109,6 +166,7 @@ export function createDefaultRuntimeConfig(options: {
     statusPath: options.statusPath,
     controlPath: options.controlPath,
     allowedWriteRoots: [...options.allowedWriteRoots],
+    featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
   };
 }
 
@@ -125,11 +183,12 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
       throw new Error("Runtime config file contains invalid JSON");
     }
 
-    if (!isRuntimeConfig(parsed)) {
+    const config = parseRuntimeConfig(parsed);
+    if (!config) {
       throw new Error("Runtime config file has unsupported schema");
     }
 
-    return cloneConfig(parsed);
+    return cloneConfig(config);
   }
 
   async ensureInitialized(

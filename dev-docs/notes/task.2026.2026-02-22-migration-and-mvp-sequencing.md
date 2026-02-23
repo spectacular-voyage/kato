@@ -52,7 +52,11 @@ Sequence migration and MVP implementation so foundational contracts and dependen
   - Add recording pipeline with policy-before-rotate ordering for `record`/`capture`/`export`.
   - Preserve `capture` as one-shot snapshot that does not replace active recording target.
   - Route daemon `export` control requests through the writer pipeline (session loader hook).
-- [ ] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
+- [x] Step 4: config/OpenFeature boundary validation hardening and startup fail-closed behavior.
+  - Expand runtime config contract with typed feature-flag values and strict boundary validation.
+  - Add local OpenFeature bootstrap/evaluation baseline with deterministic in-memory provider defaults.
+  - Wire daemon subprocess startup to load runtime config before runtime loop and fail closed on invalid config.
+  - Wire feature flag evaluation into runtime export enablement and writer render defaults.
 - [ ] Step 5: Fill out [[dev.codebase-overview]] and update key documentation:
   - [[dev.general-guidance]]
   - [[dev.codebase-overview]]
@@ -156,8 +160,8 @@ Recommended for MVP:
 1. `kato start` writes `daemonRunning: true` optimistically immediately after subprocess launch.
 2. If subprocess startup fails quickly, status may show running until stale-heartbeat detection flips state (~30s default).
 3. This is accepted for MVP and should be revisited with explicit startup acknowledgment/handshake after Step 3.
-4. Daemon-side `export` processing currently requires a wired `loadSessionMessages` source; until provider ingestion is connected, runtime logs and skips exports.
-5. Daemon-side export audit metadata currently uses `provider: "unknown"` until Step 4 adds explicit session-to-provider mapping.
+4. Daemon-side `export` processing currently requires a wired session loader (`loadSessionSnapshot` or `loadSessionMessages`); until provider ingestion is connected, runtime logs and skips exports.
+5. Daemon-side export provider identity falls back to `provider: "unknown"` unless `loadSessionSnapshot` is wired with session-to-provider mapping.
 
 ## Out of Scope (MVP)
 

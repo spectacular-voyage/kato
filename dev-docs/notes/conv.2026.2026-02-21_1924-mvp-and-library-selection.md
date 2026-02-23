@@ -819,3 +819,126 @@ Validation:
 - `deno task fmt` passed
 - `deno task test` passed (`65 passed, 0 failed`)
 - `deno task ci` passed
+
+# User_2026-02-22_1332_02
+
+OKAY, are we ready for Step 4?
+
+# gpt-5.3-codex_2026-02-22_1332_20
+
+Yes, we’re ready for Step 4.
+
+- Step 3 is implemented and validated (`deno task fmt`, `deno task test`, `deno task ci` all passed).
+- Claude’s Step 2.6 carry-forward gaps that needed immediate fixes are closed (clock propagation, subprocess write-root propagation, hot-path tests).
+- Remaining known items are intentionally Step 4 scope and documented in `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:159`.
+
+If you want, I’ll start Step 4 now with: OpenFeature bootstrap, boundary validation hardening/fail-closed startup paths, and wiring `loadSessionMessages` + session-provider mapping for export.
+
+# User_2026-02-22_1332_54
+
+I'm really not sure what's involved with the OpenFeature bootstrap
+
+# gpt-5.3-codex_2026-02-22_1333_17
+
+OpenFeature bootstrap for Kato can be very small in MVP.
+
+What it means in practice:
+
+1. Add a feature flag module, e.g. `apps/daemon/src/feature_flags/`, that:
+- initializes OpenFeature once at startup
+- registers a local/static provider
+- exposes typed helpers like `isIncludeThinkingEnabled(ctx)`
+
+2. Define a short flag set (start with 3-5 flags), for example:
+- `writer.includeThinking`
+- `writer.includeToolCalls`
+- `writer.italicizeUserMessages`
+- `daemon.export.enabled`
+
+3. Add config boundary for flag overrides in runtime config (or env), validate it fail-closed in `apps/daemon/src/config/runtime_config.ts`.
+
+4. Wire bootstrap in `apps/daemon/src/main.ts` and pass the flag client/service into runtime/pipeline constructors (`apps/daemon/src/orchestrator/daemon_runtime.ts`, `apps/daemon/src/writer/recording_pipeline.ts`).
+
+5. Add tests:
+- defaults when no overrides are present
+- override behavior
+- invalid flag config causes startup failure
+
+What it does not require now:
+- remote flag service
+- rollout UI
+- advanced targeting/hook ecosystem
+
+So this is mostly initialization + typed evaluation + config validation, not a big platform effort. If you want, I can implement this minimal Step 4 slice next.
+
+# User_2026-02-22_1334_02
+
+Is it worth it?
+
+# gpt-5.3-codex_2026-02-22_1334_12
+
+Yes, with strict MVP scope, it’s worth it.
+
+- You already plan multiple apps (`daemon`, `web`, `cloud`) and config boundaries. OpenFeature gives one flag contract now, instead of refactoring later.
+- Cost is low if we keep it minimal: local provider only, typed wrappers, and 3-5 flags.
+- It becomes not worth it only if flags are basically constants and never runtime-controlled.
+
+Recommendation:
+1. Do a thin OpenFeature bootstrap now (no remote provider, no targeting rules).
+2. Limit to writer/export toggles.
+3. Re-evaluate after Step 4 before adding any advanced features.
+
+# User_2026-02-22_1334_34
+
+OK, proceed with step 4
+
+# gpt-5.3-codex_2026-02-22_1334_45
+
+Proceeding with Step 4 now. I’ll first map current config/runtime startup boundaries and check whether OpenFeature is already present, then I’ll implement the minimal bootstrap plus fail-closed validation and tests in one pass.
+
+# gpt-5.3-codex_2026-02-22_1342_39
+
+Step 4 is implemented and validated.
+
+**What changed**
+- Added typed runtime feature-flag contract to shared config: `shared/src/contracts/config.ts:3`.
+- Added local OpenFeature baseline (in-memory provider, bootstrap, evaluation): `apps/daemon/src/feature_flags/openfeature.ts:1`.
+- Expanded runtime config validation with strict feature-flag parsing (including unknown-key rejection) and legacy backfill defaults: `apps/daemon/src/config/runtime_config.ts:35`.
+- Added fail-closed daemon subprocess startup that loads runtime config before runtime loop and exits with error on bad config: `apps/daemon/src/main.ts:43`.
+- Wired feature evaluation into runtime behavior:
+  - `exportEnabled` gate in runtime loop: `apps/daemon/src/orchestrator/daemon_runtime.ts:78`.
+  - provider-aware export path via `loadSessionSnapshot`: `apps/daemon/src/orchestrator/daemon_runtime.ts:30`.
+  - writer render defaults passed through recording pipeline: `apps/daemon/src/writer/recording_pipeline.ts:84`.
+- Updated task checklist marking Step 4 complete: `dev-docs/notes/task.2026.2026-02-22-migration-and-mvp-sequencing.md:55`.
+
+**Tests added/updated**
+- OpenFeature defaults/overrides: `tests/openfeature-flags_test.ts:1`.
+- Daemon subprocess fail-closed + feature wiring: `tests/daemon-main_test.ts:1`.
+- Runtime config feature-flag validation/backfill: `tests/runtime-config_test.ts:70`.
+- Runtime export gating + provider-aware snapshot path: `tests/daemon-runtime_test.ts:248`.
+- Recording pipeline render-option passthrough: `tests/recording-pipeline_test.ts:340`.
+
+**Validation**
+- `deno task fmt` passed.
+- `deno task test` passed (`74 passed, 0 failed`).
+- `deno task ci` passed.
+
+Next sensible step is Step 5 docs alignment (`dev.codebase-overview`, `dev.decision-log`, `dev.general-guidance`).
+
+# User_2026-02-22_1617_40
+
+Claude feedback:
+
+1. No test for runDaemonSubprocess fail-closed startup
+
+runDaemonSubprocess() has injected configStore and runtimeLoop parameters specifically for testability, but there's no test exercising the fail path (config missing → exit code 1, config invalid → exit code 1). The fail-closed daemon startup was explicitly listed as a Step 4 goal. The function is short and the test would be straightforward with an in-memory config store that throws NotFound.
+
+2. daemon-cli_test.ts makeDefaultRuntimeConfig likely needs featureFlags
+
+RuntimeConfig.featureFlags is now required in the shared contract. The makeDefaultRuntimeConfig helper in the CLI test file was shown without it in earlier diffs. If it wasn't updated, deno task check should be failing. Worth confirming deno task ci passes cleanly.
+
+3. Unknown featureFlags keys → reject config — forward-compat note
+
+runtime_config.ts:45-49 rejects any unknown key in the featureFlags object. This is intentional fail-closed behavior and is tested. The forward-compat implication: if a user runs a newer config.json (with extra flags from a future version) against an older daemon build, it won't start. Acceptable for MVP, but worth noting in the task doc or a comment.
+
+Anything worth incorporating?
