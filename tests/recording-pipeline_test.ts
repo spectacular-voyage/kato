@@ -1,19 +1,22 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { Message } from "@kato/shared";
+import type { ConversationEvent } from "@kato/shared";
 import {
   type ConversationWriterLike,
   RecordingPipeline,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 
-function makeMessage(content: string): Message {
+function makeEvent(content: string): ConversationEvent {
   return {
-    id: crypto.randomUUID(),
+    eventId: crypto.randomUUID(),
+    provider: "test",
+    sessionId: "sess-test",
+    timestamp: "2026-02-22T10:00:00.000Z",
+    kind: "message.assistant",
     role: "assistant",
     content,
-    timestamp: "2026-02-22T10:00:00.000Z",
-    model: "claude-opus-4-6",
-  };
+    source: { providerEventType: "assistant" },
+  } as unknown as ConversationEvent;
 }
 
 function makeSequencedPathPolicyGate(
@@ -50,7 +53,7 @@ function makeWriterSpy(callOrder: string[]): {
     {
       mode: "append" | "overwrite";
       path: string;
-      messages: number;
+      events: number;
       hasNow: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
@@ -65,7 +68,7 @@ function makeWriterSpy(callOrder: string[]): {
     {
       mode: "append" | "overwrite";
       path: string;
-      messages: number;
+      events: number;
       hasNow: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
@@ -80,12 +83,12 @@ function makeWriterSpy(callOrder: string[]): {
     appendOutcomes,
     overwriteOutcomes,
     writer: {
-      appendMessages(path, messages, options) {
+      appendEvents(path, events, options) {
         callOrder.push("writer.append");
         calls.push({
           mode: "append",
           path,
-          messages: messages.length,
+          events: events.length,
           hasNow: typeof options?.now === "function",
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
@@ -100,12 +103,12 @@ function makeWriterSpy(callOrder: string[]): {
           deduped: outcome.deduped,
         });
       },
-      overwriteMessages(path, messages, options) {
+      overwriteEvents(path, events, options) {
         callOrder.push("writer.overwrite");
         calls.push({
           mode: "overwrite",
           path,
-          messages: messages.length,
+          events: events.length,
           hasNow: typeof options?.now === "function",
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
@@ -138,7 +141,7 @@ Deno.test("RecordingPipeline evaluates policy before record writer start", async
     provider: "codex",
     sessionId: "session-1",
     targetPath: "notes/record.md",
-    seedMessages: [makeMessage("seed")],
+    seedEvents: [makeEvent("seed")],
   });
 
   assertEquals(recording.recordingId, "rec-1");
@@ -172,7 +175,7 @@ Deno.test(
           provider: "claude",
           sessionId: "session-42",
           targetPath: "notes/second.md",
-          seedMessages: [makeMessage("should-not-write")],
+          seedEvents: [makeEvent("should-not-write")],
         }),
       Error,
       "Path denied by policy",
@@ -206,7 +209,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     provider: "codex",
     sessionId: "session-9",
     targetPath: "notes/capture.md",
-    messages: [makeMessage("capture-all")],
+    events: [makeEvent("capture-all")],
   });
 
   const active = pipeline.getActiveRecording("codex", "session-9");
@@ -215,7 +218,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
   assertEquals(writerSpy.calls[0], {
     mode: "overwrite",
     path: "/safe/notes/capture.md",
-    messages: 1,
+    events: 1,
     hasNow: true,
     includeThinking: undefined,
     includeToolCalls: undefined,
@@ -236,14 +239,14 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
     provider: "codex",
     sessionId: "session-export",
     targetPath: "notes/export.md",
-    messages: [makeMessage("export-all")],
+    events: [makeEvent("export-all")],
   });
 
   assertEquals(writerSpy.calls.length, 1);
   assertEquals(writerSpy.calls[0], {
     mode: "overwrite",
     path: "/safe/notes/export.md",
-    messages: 1,
+    events: 1,
     hasNow: true,
     includeThinking: undefined,
     includeToolCalls: undefined,
@@ -265,7 +268,7 @@ Deno.test(
     const result = await pipeline.appendToActiveRecording({
       provider: "codex",
       sessionId: "missing-session",
-      messages: [makeMessage("noop")],
+      events: [makeEvent("noop")],
     });
 
     assertEquals(result, {
@@ -310,7 +313,7 @@ Deno.test(
     const firstAppend = await pipeline.appendToActiveRecording({
       provider: "codex",
       sessionId: "session-append",
-      messages: [makeMessage("first")],
+      events: [makeEvent("first")],
     });
     assertEquals(firstAppend.appended, true);
     assertEquals(firstAppend.deduped, false);
@@ -322,7 +325,7 @@ Deno.test(
     const secondAppend = await pipeline.appendToActiveRecording({
       provider: "codex",
       sessionId: "session-append",
-      messages: [makeMessage("duplicate")],
+      events: [makeEvent("duplicate")],
     });
     assertEquals(secondAppend.appended, false);
     assertEquals(secondAppend.deduped, true);
@@ -357,20 +360,20 @@ Deno.test(
       provider: "codex",
       sessionId: "session-flags",
       targetPath: "notes/with-flags.md",
-      seedMessages: [makeMessage("seed")],
+      seedEvents: [makeEvent("seed")],
     });
 
     await pipeline.appendToActiveRecording({
       provider: "codex",
       sessionId: "session-flags",
-      messages: [makeMessage("append")],
+      events: [makeEvent("append")],
     });
 
     assertEquals(writerSpy.calls.length, 2);
     assertEquals(writerSpy.calls[0], {
       mode: "append",
       path: "/safe/notes/with-flags.md",
-      messages: 1,
+      events: 1,
       hasNow: true,
       includeThinking: false,
       includeToolCalls: false,
@@ -379,7 +382,7 @@ Deno.test(
     assertEquals(writerSpy.calls[1], {
       mode: "append",
       path: "/safe/notes/with-flags.md",
-      messages: 1,
+      events: 1,
       hasNow: true,
       includeThinking: false,
       includeToolCalls: false,

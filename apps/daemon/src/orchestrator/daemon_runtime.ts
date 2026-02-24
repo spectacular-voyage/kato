@@ -1,4 +1,4 @@
-import type { Message, ProviderStatus } from "@kato/shared";
+import type { ConversationEvent, ProviderStatus } from "@kato/shared";
 import {
   AuditLogger,
   NoopSink,
@@ -31,7 +31,7 @@ import type {
 
 interface SessionExportSnapshot {
   provider: string;
-  messages: Message[];
+  events: ConversationEvent[];
 }
 
 export interface DaemonRuntimeLoopOptions {
@@ -43,7 +43,6 @@ export interface DaemonRuntimeLoopOptions {
   loadSessionSnapshot?: (
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
-  loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
   exportEnabled?: boolean;
   now?: () => Date;
   pid?: number;
@@ -84,35 +83,30 @@ function makeDefaultAuditLogger(now: () => Date): AuditLogger {
 }
 
 function readTimeMs(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-
+  if (!value) return undefined;
   const timeMs = Date.parse(value);
-  if (!Number.isFinite(timeMs)) {
-    return undefined;
-  }
+  if (!Number.isFinite(timeMs)) return undefined;
   return timeMs;
 }
 
-interface SessionMessageProcessingState {
-  seenMessageSignatures: Set<string>;
+interface SessionEventProcessingState {
+  seenEventSignatures: Set<string>;
 }
 
 interface ProcessInChatRecordingUpdatesOptions {
   sessionSnapshotStore: SessionSnapshotStore;
-  sessionMessageStates: Map<string, SessionMessageProcessingState>;
+  sessionEventStates: Map<string, SessionEventProcessingState>;
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
 }
 
-interface ApplyControlCommandsForMessageOptions {
+interface ApplyControlCommandsForEventOptions {
   provider: string;
   sessionId: string;
-  messages: Message[];
-  messageIndex: number;
-  message: Message;
+  events: ConversationEvent[];
+  eventIndex: number;
+  event: ConversationEvent & { kind: "message.user" };
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
@@ -122,21 +116,32 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
   return `${provider}\u0000${sessionId}`;
 }
 
-function makeMessageSignature(message: Message): string {
-  return [
-    message.id,
-    message.role,
-    message.timestamp,
-    message.model ?? "",
-    message.content,
-  ].join("\u0000");
+function makeEventSignature(event: ConversationEvent): string {
+  const base = `${event.kind}\0${event.source.providerEventType}\0${
+    event.source.providerEventId ?? ""
+  }\0${event.timestamp}`;
+  switch (event.kind) {
+    case "message.user":
+    case "message.assistant":
+    case "message.system":
+      return `${base}\0${event.content}`;
+    case "tool.call":
+      return `${base}\0${event.toolCallId}\0${event.name}`;
+    case "tool.result":
+      return `${base}\0${event.toolCallId}`;
+    case "thinking":
+      return `${base}\0${event.content}`;
+    case "decision":
+      return `${base}\0${event.decisionId}`;
+    case "provider.info":
+      return `${base}\0${event.content}`;
+    default:
+      return base;
+  }
 }
 
 function unwrapMatchingDelimiters(value: string): string {
-  if (value.length < 2) {
-    return value;
-  }
-
+  if (value.length < 2) return value;
   const first = value[0];
   const last = value[value.length - 1];
   if (
@@ -146,21 +151,16 @@ function unwrapMatchingDelimiters(value: string): string {
   ) {
     return value.slice(1, -1).trim();
   }
-
   return value;
 }
 
 function normalizeCommandTargetPath(
   rawArgument: string | undefined,
 ): string | undefined {
-  if (!rawArgument) {
-    return undefined;
-  }
+  if (!rawArgument) return undefined;
 
   let normalized = rawArgument.trim();
-  if (normalized.length === 0) {
-    return undefined;
-  }
+  if (normalized.length === 0) return undefined;
 
   const markdownMatch = normalized.match(MARKDOWN_LINK_PATH_PATTERN);
   if (markdownMatch?.[1]) {
@@ -176,25 +176,21 @@ function normalizeCommandTargetPath(
   return normalized.length > 0 ? normalized : undefined;
 }
 
-async function applyControlCommandsForMessage(
-  options: ApplyControlCommandsForMessageOptions,
+async function applyControlCommandsForEvent(
+  options: ApplyControlCommandsForEventOptions,
 ): Promise<void> {
   const {
     provider,
     sessionId,
-    messages,
-    messageIndex,
-    message,
+    events,
+    eventIndex,
+    event,
     recordingPipeline,
     operationalLogger,
     auditLogger,
   } = options;
 
-  if (message.role !== "user") {
-    return;
-  }
-
-  const detection = detectInChatControlCommands(message.content);
+  const detection = detectInChatControlCommands(event.content);
   if (detection.commands.length === 0 && detection.errors.length === 0) {
     return;
   }
@@ -210,7 +206,7 @@ async function applyControlCommandsForMessage(
       {
         provider,
         sessionId,
-        messageId: message.id,
+        eventId: event.eventId,
         parseErrors,
       },
     );
@@ -220,14 +216,14 @@ async function applyControlCommandsForMessage(
       {
         provider,
         sessionId,
-        messageId: message.id,
+        eventId: event.eventId,
         parseErrors,
       },
     );
     return;
   }
 
-  const snapshotSlice = messages.slice(0, messageIndex + 1);
+  const snapshotSlice = events.slice(0, eventIndex + 1);
 
   for (const command of detection.commands) {
     const targetPath = normalizeCommandTargetPath(command.argument);
@@ -239,7 +235,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           rawArgument: command.argument,
         },
@@ -250,7 +246,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           rawArgument: command.argument,
         },
@@ -264,7 +260,7 @@ async function applyControlCommandsForMessage(
           provider,
           sessionId,
           targetPath: targetPath!,
-          seedMessages: snapshotSlice,
+          seedEvents: snapshotSlice,
           title: sessionId,
         });
       } else if (command.name === "capture") {
@@ -272,7 +268,7 @@ async function applyControlCommandsForMessage(
           provider,
           sessionId,
           targetPath: targetPath!,
-          messages: snapshotSlice,
+          events: snapshotSlice,
           title: sessionId,
         });
         await recordingPipeline.startOrRotateRecording({
@@ -286,7 +282,7 @@ async function applyControlCommandsForMessage(
           provider,
           sessionId,
           targetPath: targetPath!,
-          messages: snapshotSlice,
+          events: snapshotSlice,
           title: sessionId,
         });
       } else {
@@ -299,7 +295,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           ...(targetPath ? { targetPath } : {}),
         },
@@ -310,7 +306,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           ...(targetPath ? { targetPath } : {}),
         },
@@ -322,7 +318,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           ...(targetPath ? { targetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
@@ -334,7 +330,7 @@ async function applyControlCommandsForMessage(
         {
           provider,
           sessionId,
-          messageId: message.id,
+          eventId: event.eventId,
           command: command.name,
           ...(targetPath ? { targetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
@@ -349,7 +345,7 @@ async function processInChatRecordingUpdates(
 ): Promise<void> {
   const {
     sessionSnapshotStore,
-    sessionMessageStates,
+    sessionEventStates,
     recordingPipeline,
     operationalLogger,
     auditLogger,
@@ -361,80 +357,75 @@ async function processInChatRecordingUpdates(
   for (const snapshot of snapshots) {
     const provider = readString(snapshot.provider);
     const sessionId = readString(snapshot.sessionId);
-    if (!provider || !sessionId) {
-      continue;
-    }
+    if (!provider || !sessionId) continue;
 
     const sessionKey = makeSessionProcessingKey(provider, sessionId);
     activeSessionKeys.add(sessionKey);
 
-    const signatures = snapshot.messages.map(makeMessageSignature);
+    const signatures = snapshot.events.map(makeEventSignature);
     const currentSignatureSet = new Set(signatures);
 
-    const existingState = sessionMessageStates.get(sessionKey);
+    const existingState = sessionEventStates.get(sessionKey);
     if (!existingState) {
-      sessionMessageStates.set(sessionKey, {
-        seenMessageSignatures: currentSignatureSet,
+      sessionEventStates.set(sessionKey, {
+        seenEventSignatures: currentSignatureSet,
       });
       continue;
     }
 
-    for (
-      const seenSignature of Array.from(existingState.seenMessageSignatures)
-    ) {
+    for (const seenSignature of Array.from(existingState.seenEventSignatures)) {
       if (!currentSignatureSet.has(seenSignature)) {
-        existingState.seenMessageSignatures.delete(seenSignature);
+        existingState.seenEventSignatures.delete(seenSignature);
       }
     }
 
-    for (let i = 0; i < snapshot.messages.length; i += 1) {
-      const message = snapshot.messages[i];
-      if (!message) {
-        continue;
-      }
+    for (let i = 0; i < snapshot.events.length; i += 1) {
+      const event = snapshot.events[i];
+      if (!event) continue;
 
-      const signature = signatures[i] ?? makeMessageSignature(message);
-      if (existingState.seenMessageSignatures.has(signature)) {
-        continue;
-      }
-      existingState.seenMessageSignatures.add(signature);
+      const signature = signatures[i] ?? makeEventSignature(event);
+      if (existingState.seenEventSignatures.has(signature)) continue;
+      existingState.seenEventSignatures.add(signature);
 
-      await applyControlCommandsForMessage({
-        provider,
-        sessionId,
-        messages: snapshot.messages,
-        messageIndex: i,
-        message,
-        recordingPipeline,
-        operationalLogger,
-        auditLogger,
-      });
+      // Only apply control commands from message.user events.
+      if (event.kind === "message.user") {
+        await applyControlCommandsForEvent({
+          provider,
+          sessionId,
+          events: snapshot.events,
+          eventIndex: i,
+          event: event as ConversationEvent & { kind: "message.user" },
+          recordingPipeline,
+          operationalLogger,
+          auditLogger,
+        });
+      }
 
       try {
         await recordingPipeline.appendToActiveRecording({
           provider,
           sessionId,
-          messages: [message],
+          events: [event],
           title: sessionId,
         });
       } catch (error) {
         await operationalLogger.error(
           "recording.append.failed",
-          "Failed to append message to active recording",
+          "Failed to append event to active recording",
           {
             provider,
             sessionId,
-            messageId: message.id,
+            eventId: event.eventId,
             error: error instanceof Error ? error.message : String(error),
           },
         );
         await auditLogger.record(
           "recording.append.failed",
-          "Failed to append message to active recording",
+          "Failed to append event to active recording",
           {
             provider,
             sessionId,
-            messageId: message.id,
+            eventId: event.eventId,
             error: error instanceof Error ? error.message : String(error),
           },
         );
@@ -442,9 +433,9 @@ async function processInChatRecordingUpdates(
     }
   }
 
-  for (const sessionKey of Array.from(sessionMessageStates.keys())) {
+  for (const sessionKey of Array.from(sessionEventStates.keys())) {
     if (!activeSessionKeys.has(sessionKey)) {
-      sessionMessageStates.delete(sessionKey);
+      sessionEventStates.delete(sessionKey);
     }
   }
 }
@@ -457,38 +448,30 @@ function toProviderStatuses(
   const nowMs = now.getTime();
   const byProvider = new Map<
     string,
-    { activeSessions: number; lastMessageAtMs?: number; lastMessageAt?: string }
+    { activeSessions: number; lastEventAtMs?: number; lastEventAt?: string }
   >();
 
   for (const snapshot of sessionSnapshots) {
     const provider = readString(snapshot.provider);
-    if (!provider) {
-      continue;
-    }
+    if (!provider) continue;
 
     const updatedAtMs = readTimeMs(snapshot.metadata.updatedAt);
-    if (updatedAtMs === undefined) {
-      continue;
-    }
-    if (nowMs - updatedAtMs > staleAfterMs) {
-      continue;
-    }
+    if (updatedAtMs === undefined) continue;
+    if (nowMs - updatedAtMs > staleAfterMs) continue;
 
-    const current = byProvider.get(provider) ?? {
-      activeSessions: 0,
-    };
+    const current = byProvider.get(provider) ?? { activeSessions: 0 };
     current.activeSessions += 1;
 
-    const lastMessageAt = snapshot.metadata.lastMessageAt;
-    const lastMessageAtMs = readTimeMs(lastMessageAt);
+    const lastEventAt = snapshot.metadata.lastEventAt;
+    const lastEventAtMs = readTimeMs(lastEventAt);
     if (
-      lastMessageAt &&
-      lastMessageAtMs !== undefined &&
-      (current.lastMessageAtMs === undefined ||
-        lastMessageAtMs > current.lastMessageAtMs)
+      lastEventAt &&
+      lastEventAtMs !== undefined &&
+      (current.lastEventAtMs === undefined ||
+        lastEventAtMs > current.lastEventAtMs)
     ) {
-      current.lastMessageAtMs = lastMessageAtMs;
-      current.lastMessageAt = lastMessageAt;
+      current.lastEventAtMs = lastEventAtMs;
+      current.lastEventAt = lastEventAt;
     }
 
     byProvider.set(provider, current);
@@ -499,7 +482,7 @@ function toProviderStatuses(
     .map(([provider, status]) => ({
       provider,
       activeSessions: status.activeSessions,
-      ...(status.lastMessageAt ? { lastMessageAt: status.lastMessageAt } : {}),
+      ...(status.lastEventAt ? { lastMessageAt: status.lastEventAt } : {}),
     }));
 }
 
@@ -537,22 +520,16 @@ export async function runDaemonRuntimeLoop(
     (sessionSnapshotStore
       ? (sessionId: string) => {
         const snapshot = sessionSnapshotStore.get(sessionId);
-        if (!snapshot) {
-          return Promise.resolve(undefined);
-        }
+        if (!snapshot) return Promise.resolve(undefined);
         return Promise.resolve({
           provider: snapshot.provider,
-          messages: snapshot.messages,
+          events: snapshot.events,
         });
       }
       : undefined);
 
   let snapshot = createDefaultStatusSnapshot(now());
-  snapshot = {
-    ...snapshot,
-    daemonRunning: true,
-    daemonPid: pid,
-  };
+  snapshot = { ...snapshot, daemonRunning: true, daemonPid: pid };
   await statusStore.save(snapshot);
 
   await operationalLogger.info(
@@ -578,20 +555,20 @@ export async function runDaemonRuntimeLoop(
 
   let shouldStop = false;
   let nextHeartbeatAt = now().getTime() + heartbeatIntervalMs;
-  const sessionMessageStates = new Map<string, SessionMessageProcessingState>();
+  const sessionEventStates = new Map<string, SessionEventProcessingState>();
 
   while (!shouldStop) {
     for (const runner of ingestionRunners) {
       try {
         const result = await runner.poll();
-        if (result.sessionsUpdated > 0 || result.messagesObserved > 0) {
+        if (result.sessionsUpdated > 0 || result.eventsObserved > 0) {
           await operationalLogger.info(
             "provider.ingestion.poll",
             "Provider ingestion poll observed updates",
             {
               provider: result.provider,
               sessionsUpdated: result.sessionsUpdated,
-              messagesObserved: result.messagesObserved,
+              eventsObserved: result.eventsObserved,
               polledAt: result.polledAt,
             },
           );
@@ -612,7 +589,7 @@ export async function runDaemonRuntimeLoop(
       try {
         await processInChatRecordingUpdates({
           sessionSnapshotStore,
-          sessionMessageStates,
+          sessionEventStates,
           recordingPipeline,
           operationalLogger,
           auditLogger,
@@ -621,16 +598,12 @@ export async function runDaemonRuntimeLoop(
         await operationalLogger.error(
           "recording.command.processing_failed",
           "In-chat recording command processing failed",
-          {
-            error: error instanceof Error ? error.message : String(error),
-          },
+          { error: error instanceof Error ? error.message : String(error) },
         );
         await auditLogger.record(
           "recording.command.processing_failed",
           "In-chat recording command processing failed",
-          {
-            error: error instanceof Error ? error.message : String(error),
-          },
+          { error: error instanceof Error ? error.message : String(error) },
         );
       }
     }
@@ -642,14 +615,11 @@ export async function runDaemonRuntimeLoop(
         controlStore,
         recordingPipeline,
         loadSessionSnapshot,
-        loadSessionMessages: options.loadSessionMessages,
         exportEnabled,
         operationalLogger,
         auditLogger,
       });
-      if (shouldStop) {
-        break;
-      }
+      if (shouldStop) break;
     }
 
     const recordingSummary = recordingPipeline.getRecordingSummary();
@@ -733,7 +703,6 @@ interface HandleControlRequestOptions {
   loadSessionSnapshot?: (
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
-  loadSessionMessages?: (sessionId: string) => Promise<Message[]>;
   exportEnabled: boolean;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
@@ -771,7 +740,6 @@ async function handleControlRequest(
     controlStore,
     recordingPipeline,
     loadSessionSnapshot,
-    loadSessionMessages,
     exportEnabled,
     operationalLogger,
     auditLogger,
@@ -780,10 +748,7 @@ async function handleControlRequest(
   await operationalLogger.info(
     "daemon.control.received",
     "Daemon runtime received control request",
-    {
-      requestId: request.requestId,
-      command: request.command,
-    },
+    { requestId: request.requestId, command: request.command },
   );
 
   await auditLogger.record(
@@ -801,9 +766,7 @@ async function handleControlRequest(
       await operationalLogger.warn(
         "daemon.control.export.disabled",
         "Export request skipped because feature flag is disabled",
-        {
-          requestId: request.requestId,
-        },
+        { requestId: request.requestId },
       );
       await controlStore.markProcessed(request.requestId);
       return false;
@@ -817,76 +780,62 @@ async function handleControlRequest(
       ? readString(payload["resolvedOutputPath"]) ??
         readString(payload["outputPath"])
       : undefined;
+    const format = isRecord(payload)
+      ? (readString(payload["format"]) as "markdown" | "jsonl" | undefined)
+      : undefined;
 
     if (!sessionId || !outputPath) {
       await operationalLogger.warn(
         "daemon.control.export.invalid",
         "Export request payload is missing required fields",
-        {
-          requestId: request.requestId,
-          payload,
-        },
+        { requestId: request.requestId, payload },
       );
-    } else if (!loadSessionSnapshot && !loadSessionMessages) {
-      // Step 4 wiring: export requests are deferred until provider ingestion
-      // supplies a session message loader in the daemon runtime.
+    } else if (!loadSessionSnapshot) {
       await warnExportSkipped(
         "daemon.control.export.unhandled",
-        "Export request skipped because session message loader is unavailable",
+        "Export request skipped because session snapshot loader is unavailable",
         { requestId: request.requestId, sessionId, outputPath },
         operationalLogger,
         auditLogger,
       );
     } else {
       try {
-        let provider: string;
-        let messages: Message[];
-        if (loadSessionSnapshot) {
-          const snapshot = await loadSessionSnapshot(sessionId);
-          if (!snapshot) {
-            await warnExportSkipped(
-              "daemon.control.export.session_missing",
-              "Export request skipped because session snapshot was not found",
-              { requestId: request.requestId, sessionId, outputPath },
-              operationalLogger,
-              auditLogger,
-            );
-            await controlStore.markProcessed(request.requestId);
-            return false;
-          }
-
-          const snapshotProvider = readString(snapshot.provider);
-          if (!snapshotProvider) {
-            await warnExportSkipped(
-              "daemon.control.export.invalid_snapshot",
-              "Export request skipped because session snapshot provider is invalid",
-              { requestId: request.requestId, sessionId, outputPath },
-              operationalLogger,
-              auditLogger,
-            );
-            await controlStore.markProcessed(request.requestId);
-            return false;
-          }
-
-          provider = snapshotProvider;
-          messages = snapshot.messages;
-        } else {
-          provider = "unknown";
-          messages = await loadSessionMessages!(sessionId);
+        const snapshotData = await loadSessionSnapshot(sessionId);
+        if (!snapshotData) {
           await warnExportSkipped(
-            "daemon.control.export.legacy_loader",
-            "Export request used legacy message loader without provider identity",
+            "daemon.control.export.session_missing",
+            "Export request skipped because session snapshot was not found",
             { requestId: request.requestId, sessionId, outputPath },
             operationalLogger,
             auditLogger,
           );
+          await controlStore.markProcessed(request.requestId);
+          return false;
         }
 
-        if (messages.length === 0) {
+        const snapshotProvider = readString(snapshotData.provider);
+        if (!snapshotProvider) {
+          await warnExportSkipped(
+            "daemon.control.export.invalid_snapshot",
+            "Export request skipped because session snapshot provider is invalid",
+            { requestId: request.requestId, sessionId, outputPath },
+            operationalLogger,
+            auditLogger,
+          );
+          await controlStore.markProcessed(request.requestId);
+          return false;
+        }
+
+        if (snapshotData.events.length === 0) {
           await warnExportSkipped(
             "daemon.control.export.empty",
-            "Export request skipped because session snapshot had no messages",
-            { requestId: request.requestId, sessionId, outputPath, provider },
+            "Export request skipped because session snapshot had no events",
+            {
+              requestId: request.requestId,
+              sessionId,
+              outputPath,
+              provider: snapshotProvider,
+            },
             operationalLogger,
             auditLogger,
           );
@@ -895,11 +844,12 @@ async function handleControlRequest(
         }
 
         await recordingPipeline.exportSnapshot({
-          provider,
+          provider: snapshotProvider,
           sessionId,
           targetPath: outputPath,
-          messages,
+          events: snapshotData.events,
           title: sessionId,
+          ...(format ? { format } : {}),
         });
       } catch (error) {
         await operationalLogger.error(

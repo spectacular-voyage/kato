@@ -139,7 +139,7 @@ export async function runDaemonSubprocess(
 
         return Promise.resolve({
           provider: snapshot.provider,
-          messages: snapshot.messages,
+          events: snapshot.events,
         });
       },
       exportEnabled: featureSettings.exportEnabled,

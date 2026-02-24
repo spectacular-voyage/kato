@@ -1,4 +1,4 @@
-import type { Message, ProviderCursor } from "@kato/shared";
+import type { ConversationEvent, ProviderCursor } from "@kato/shared";
 import { basename, join } from "@std/path";
 import {
   type DebouncedWatchBatch,
@@ -10,8 +10,8 @@ import {
   NoopSink,
   StructuredLogger,
 } from "../observability/mod.ts";
-import { parseClaudeMessages } from "../providers/claude/mod.ts";
-import { parseCodexMessages } from "../providers/codex/mod.ts";
+import { parseClaudeEvents } from "../providers/claude/mod.ts";
+import { parseCodexEvents } from "../providers/codex/mod.ts";
 import type {
   ProviderIngestionPollResult,
   ProviderIngestionRunner,
@@ -28,10 +28,11 @@ export interface FileProviderIngestionRunnerOptions {
   provider: string;
   watchRoots: string[];
   discoverSessions: () => Promise<ProviderSessionFile[]>;
-  parseMessages: (
+  parseEvents: (
     filePath: string,
     fromOffset: number,
-  ) => AsyncIterable<{ message: Message; offset: number }>;
+    ctx: { provider: string; sessionId: string },
+  ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
   sessionSnapshotStore: SessionSnapshotStore;
   discoveryIntervalMs?: number;
   watchDebounceMs?: number;
@@ -78,7 +79,7 @@ export interface CreateProviderIngestionRunnerOptions {
 
 interface IngestSessionResult {
   updated: boolean;
-  messagesObserved: number;
+  eventsObserved: number;
 }
 
 interface CodexSessionMeta {
@@ -148,28 +149,17 @@ function expandHome(path: string): string {
   if (!path.startsWith("~")) {
     return path;
   }
-
   const home = resolveHomeDir();
-  if (!home) {
-    return path;
-  }
-
-  if (path === "~") {
-    return home;
-  }
-  if (path.startsWith("~/")) {
-    return join(home, path.slice(2));
-  }
-
+  if (!home) return path;
+  if (path === "~") return home;
+  if (path.startsWith("~/")) return join(home, path.slice(2));
   return path;
 }
 
 function normalizeRoots(paths: string[]): string[] {
   const deduped = new Set<string>();
   for (const path of paths) {
-    if (!isNonEmptyString(path)) {
-      continue;
-    }
+    if (!isNonEmptyString(path)) continue;
     deduped.add(expandHome(path.trim()));
   }
   return Array.from(deduped);
@@ -177,60 +167,33 @@ function normalizeRoots(paths: string[]): string[] {
 
 function parseRootsFromEnv(name: string): string[] | undefined {
   const raw = readEnvOptional(name);
-  if (!raw) {
-    return undefined;
-  }
-
+  if (!raw) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
     return undefined;
   }
-
-  if (!Array.isArray(parsed)) {
-    return undefined;
-  }
-
+  if (!Array.isArray(parsed)) return undefined;
   const roots = normalizeRoots(parsed.filter(isNonEmptyString));
   return roots.length > 0 ? roots : undefined;
 }
 
 function resolveClaudeSessionRoots(overrides?: string[]): string[] {
-  if (overrides) {
-    return normalizeRoots(overrides);
-  }
-
+  if (overrides) return normalizeRoots(overrides);
   const envRoots = parseRootsFromEnv("KATO_CLAUDE_SESSION_ROOTS");
-  if (envRoots && envRoots.length > 0) {
-    return envRoots;
-  }
-
+  if (envRoots && envRoots.length > 0) return envRoots;
   const home = resolveHomeDir();
-  if (!home) {
-    return [];
-  }
-
-  return normalizeRoots([
-    join(home, ".claude", "projects"),
-  ]);
+  if (!home) return [];
+  return normalizeRoots([join(home, ".claude", "projects")]);
 }
 
 function resolveCodexSessionRoots(overrides?: string[]): string[] {
-  if (overrides) {
-    return normalizeRoots(overrides);
-  }
-
+  if (overrides) return normalizeRoots(overrides);
   const envRoots = parseRootsFromEnv("KATO_CODEX_SESSION_ROOTS");
-  if (envRoots && envRoots.length > 0) {
-    return envRoots;
-  }
-
+  if (envRoots && envRoots.length > 0) return envRoots;
   const home = resolveHomeDir();
-  if (!home) {
-    return [];
-  }
-
+  if (!home) return [];
   return normalizeRoots([join(home, ".codex", "sessions")]);
 }
 
@@ -251,13 +214,9 @@ async function pathExists(path: string): Promise<boolean> {
 
 async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
   const stack: string[] = [root];
-
   while (stack.length > 0) {
     const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
+    if (!current) continue;
     let entries: AsyncIterable<Deno.DirEntry>;
     try {
       entries = Deno.readDir(current);
@@ -270,14 +229,12 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
       }
       throw error;
     }
-
     for await (const entry of entries) {
       const fullPath = join(current, entry.name);
       if (entry.isDirectory) {
         stack.push(fullPath);
         continue;
       }
-
       if (entry.isFile && entry.name.endsWith(".jsonl")) {
         yield fullPath;
       }
@@ -294,16 +251,11 @@ async function discoverClaudeSessions(
   roots: string[],
 ): Promise<ProviderSessionFile[]> {
   const sessions: ProviderSessionFile[] = [];
-
   for (const root of roots) {
-    if (!(await pathExists(root))) {
-      continue;
-    }
+    if (!(await pathExists(root))) continue;
     for await (const filePath of walkJsonlFiles(root)) {
       const sessionId = basename(filePath, ".jsonl");
-      if (!isNonEmptyString(sessionId)) {
-        continue;
-      }
+      if (!isNonEmptyString(sessionId)) continue;
       sessions.push({
         sessionId,
         filePath,
@@ -311,7 +263,6 @@ async function discoverClaudeSessions(
       });
     }
   }
-
   return sessions;
 }
 
@@ -322,16 +273,11 @@ async function readFirstLineChunk(
   try {
     const buffer = new Uint8Array(32 * 1024);
     const read = await file.read(buffer);
-    if (read === null || read === 0) {
-      return undefined;
-    }
-
+    if (read === null || read === 0) return undefined;
     const chunk = new TextDecoder().decode(buffer.subarray(0, read));
     const lines = chunk.split("\n");
     for (const line of lines) {
-      if (line.trim().length > 0) {
-        return line;
-      }
+      if (line.trim().length > 0) return line;
     }
     return undefined;
   } finally {
@@ -343,35 +289,21 @@ async function readCodexSessionMeta(
   filePath: string,
 ): Promise<CodexSessionMeta | undefined> {
   const firstLine = await readFirstLineChunk(filePath);
-  if (!firstLine) {
-    return undefined;
-  }
-
+  if (!firstLine) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(firstLine);
   } catch {
     return undefined;
   }
-
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return undefined;
   }
-
-  const entry = parsed as {
-    type?: unknown;
-    payload?: Record<string, unknown>;
-  };
-  if (entry.type !== "session_meta" || !entry.payload) {
-    return undefined;
-  }
-
+  const entry = parsed as { type?: unknown; payload?: Record<string, unknown> };
+  if (entry.type !== "session_meta" || !entry.payload) return undefined;
   const id = entry.payload["id"];
   const source = entry.payload["source"];
-  if (!isNonEmptyString(id)) {
-    return undefined;
-  }
-
+  if (!isNonEmptyString(id)) return undefined;
   return {
     id: id.trim(),
     source: isNonEmptyString(source) ? source.trim() : "",
@@ -382,16 +314,11 @@ async function discoverCodexSessions(
   roots: string[],
 ): Promise<ProviderSessionFile[]> {
   const sessions: ProviderSessionFile[] = [];
-
   for (const root of roots) {
-    if (!(await pathExists(root))) {
-      continue;
-    }
+    if (!(await pathExists(root))) continue;
     for await (const filePath of walkJsonlFiles(root)) {
       const meta = await readCodexSessionMeta(filePath);
-      if (!meta || meta.source === "exec") {
-        continue;
-      }
+      if (!meta || meta.source === "exec") continue;
       sessions.push({
         sessionId: meta.id,
         filePath,
@@ -399,43 +326,52 @@ async function discoverCodexSessions(
       });
     }
   }
-
   return sessions;
 }
 
-function messageSignature(message: Message): string {
-  return [
-    message.id,
-    message.role,
-    message.timestamp,
-    message.model ?? "",
-    message.content,
-  ].join("\u0000");
+function eventSignature(event: ConversationEvent): string {
+  const base = `${event.kind}\0${event.source.providerEventType}\0${
+    event.source.providerEventId ?? ""
+  }\0${event.timestamp}`;
+  switch (event.kind) {
+    case "message.user":
+    case "message.assistant":
+    case "message.system":
+      return `${base}\0${event.content}`;
+    case "tool.call":
+      return `${base}\0${event.toolCallId}\0${event.name}`;
+    case "tool.result":
+      return `${base}\0${event.toolCallId}`;
+    case "thinking":
+      return `${base}\0${event.content}`;
+    case "decision":
+      return `${base}\0${event.decisionId}`;
+    case "provider.info":
+      return `${base}\0${event.content}`;
+    default:
+      return base;
+  }
 }
 
-function mergeMessages(
-  existingMessages: Message[],
-  incomingMessages: Message[],
-): { mergedMessages: Message[]; droppedEvents: number } {
-  const signatures = new Set(existingMessages.map(messageSignature));
-  const mergedMessages = [...existingMessages];
+function mergeEvents(
+  existingEvents: ConversationEvent[],
+  incomingEvents: ConversationEvent[],
+): { mergedEvents: ConversationEvent[]; droppedEvents: number } {
+  const signatures = new Set(existingEvents.map(eventSignature));
+  const mergedEvents = [...existingEvents];
   let droppedEvents = 0;
 
-  for (const message of incomingMessages) {
-    const signature = messageSignature(message);
+  for (const event of incomingEvents) {
+    const signature = eventSignature(event);
     if (signatures.has(signature)) {
       droppedEvents += 1;
       continue;
     }
-
     signatures.add(signature);
-    mergedMessages.push(message);
+    mergedEvents.push(event);
   }
 
-  return {
-    mergedMessages,
-    droppedEvents,
-  };
+  return { mergedEvents, droppedEvents };
 }
 
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
@@ -452,10 +388,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly auditLogger: AuditLogger;
   private readonly sessionSnapshotStore: SessionSnapshotStore;
   private readonly discoverSessions: () => Promise<ProviderSessionFile[]>;
-  private readonly parseMessages: (
+  private readonly parseEvents: (
     filePath: string,
     fromOffset: number,
-  ) => AsyncIterable<{ message: Message; offset: number }>;
+    ctx: { provider: string; sessionId: string },
+  ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
   private readonly watchRoots: string[];
   private readonly sessions = new Map<string, ProviderSessionFile>();
   private readonly sessionByFilePath = new Map<string, string>();
@@ -472,7 +409,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.provider = options.provider;
     this.watchRoots = normalizeRoots(options.watchRoots);
     this.discoverSessions = options.discoverSessions;
-    this.parseMessages = options.parseMessages;
+    this.parseEvents = options.parseEvents;
     this.sessionSnapshotStore = options.sessionSnapshotStore;
     this.now = options.now ?? (() => new Date());
     this.discoveryIntervalMs = options.discoveryIntervalMs ??
@@ -485,34 +422,24 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   }
 
   async start(): Promise<void> {
-    if (this.started) {
-      return;
-    }
+    if (this.started) return;
     this.started = true;
     this.needsDiscovery = true;
 
     await this.operationalLogger.info(
       "provider.ingestion.started",
       "Provider ingestion runner started",
-      {
-        provider: this.provider,
-        watchRoots: this.watchRoots,
-      },
+      { provider: this.provider, watchRoots: this.watchRoots },
     );
     await this.auditLogger.record(
       "provider.ingestion.started",
       "Provider ingestion runner started",
-      {
-        provider: this.provider,
-        watchRoots: this.watchRoots,
-      },
+      { provider: this.provider, watchRoots: this.watchRoots },
     );
 
     const existingWatchRoots: string[] = [];
     for (const root of this.watchRoots) {
-      if (await pathExists(root)) {
-        existingWatchRoots.push(root);
-      }
+      if (await pathExists(root)) existingWatchRoots.push(root);
     }
 
     if (existingWatchRoots.length > 0) {
@@ -546,9 +473,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       );
     }
 
-    if (
-      this.needsDiscovery || this.now().getTime() >= this.nextDiscoveryAtMs
-    ) {
+    if (this.needsDiscovery || this.now().getTime() >= this.nextDiscoveryAtMs) {
       await this.discoverAndTrackSessions();
     }
 
@@ -570,28 +495,24 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.dirtySessions.clear();
 
     let sessionsUpdated = 0;
-    let messagesObserved = 0;
+    let eventsObserved = 0;
 
     for (const sessionId of dirtySessions) {
       const result = await this.ingestSession(sessionId);
-      if (result.updated) {
-        sessionsUpdated += 1;
-      }
-      messagesObserved += result.messagesObserved;
+      if (result.updated) sessionsUpdated += 1;
+      eventsObserved += result.eventsObserved;
     }
 
     return {
       provider: this.provider,
       polledAt: this.now().toISOString(),
       sessionsUpdated,
-      messagesObserved,
+      eventsObserved,
     };
   }
 
   async stop(): Promise<void> {
-    if (!this.started) {
-      return;
-    }
+    if (!this.started) return;
     this.started = false;
 
     if (this.watchAbortController) {
@@ -606,16 +527,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     await this.operationalLogger.info(
       "provider.ingestion.stopped",
       "Provider ingestion runner stopped",
-      {
-        provider: this.provider,
-      },
+      { provider: this.provider },
     );
     await this.auditLogger.record(
       "provider.ingestion.stopped",
       "Provider ingestion runner stopped",
-      {
-        provider: this.provider,
-      },
+      { provider: this.provider },
     );
   }
 
@@ -626,15 +543,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.needsDiscovery = true;
       }
     }
-
     await this.operationalLogger.debug(
       "provider.ingestion.watch.batch",
       "Provider ingestion watch batch received",
-      {
-        provider: this.provider,
-        paths: batch.paths,
-        kinds: batch.kinds,
-      },
+      { provider: this.provider, paths: batch.paths, kinds: batch.kinds },
     );
   }
 
@@ -674,9 +586,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let droppedEvents = 0;
 
     const sorted = [...sessions].sort((a, b) => {
-      if (a.sessionId === b.sessionId) {
-        return b.modifiedAtMs - a.modifiedAtMs;
-      }
+      if (a.sessionId === b.sessionId) return b.modifiedAtMs - a.modifiedAtMs;
       return a.sessionId.localeCompare(b.sessionId);
     });
 
@@ -714,9 +624,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
   private async ingestSession(sessionId: string): Promise<IngestSessionResult> {
     const session = this.sessions.get(sessionId);
-    if (!session) {
-      return { updated: false, messagesObserved: 0 };
-    }
+    if (!session) return { updated: false, eventsObserved: 0 };
 
     let fromOffset = resolveByteOffset(this.cursors.get(sessionId));
     let fileStat: Deno.FileInfo;
@@ -727,7 +635,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         error instanceof Deno.errors.NotFound ||
         error instanceof Deno.errors.PermissionDenied
       ) {
-        return { updated: false, messagesObserved: 0 };
+        return { updated: false, eventsObserved: 0 };
       }
       throw error;
     }
@@ -739,26 +647,30 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       await this.operationalLogger.warn(
         "provider.ingestion.cursor.reset",
         "Provider ingestion cursor reset after file truncation",
-        {
-          provider: this.provider,
-          sessionId,
-          filePath: session.filePath,
-        },
+        { provider: this.provider, sessionId, filePath: session.filePath },
       );
     }
 
-    const incomingMessages: Message[] = [];
-    let latestOffset = fromOffset;
+    const incomingEvents: ConversationEvent[] = [];
+    let latestCursor: ProviderCursor = makeByteOffsetCursor(fromOffset);
 
     try {
       for await (
-        const { message, offset } of this.parseMessages(
+        const { event, cursor } of this.parseEvents(
           session.filePath,
           fromOffset,
+          { provider: this.provider, sessionId },
         )
       ) {
-        incomingMessages.push(message);
-        latestOffset = Math.max(latestOffset, offset);
+        incomingEvents.push(event);
+        if (cursor.kind === "byte-offset") {
+          const current = latestCursor.kind === "byte-offset"
+            ? latestCursor.value
+            : 0;
+          if (cursor.value > current) latestCursor = cursor;
+        } else {
+          latestCursor = cursor;
+        }
       }
     } catch (error) {
       await this.operationalLogger.error(
@@ -781,38 +693,42 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           error: error instanceof Error ? error.message : String(error),
         },
       );
-      return { updated: false, messagesObserved: 0 };
+      return { updated: false, eventsObserved: 0 };
     }
 
-    if (incomingMessages.length === 0 && latestOffset === fromOffset) {
-      return { updated: false, messagesObserved: 0 };
+    const latestOffset = latestCursor.kind === "byte-offset"
+      ? latestCursor.value
+      : fromOffset;
+
+    if (incomingEvents.length === 0 && latestOffset === fromOffset) {
+      return { updated: false, eventsObserved: 0 };
     }
 
     const currentSnapshot = this.sessionSnapshotStore.get(sessionId);
-    const existingMessages = currentSnapshot?.provider === this.provider
-      ? currentSnapshot.messages
+    const existingEvents = currentSnapshot?.provider === this.provider
+      ? currentSnapshot.events
       : [];
-    const merged = mergeMessages(existingMessages, incomingMessages);
+    const merged = mergeEvents(existingEvents, incomingEvents);
 
     if (merged.droppedEvents > 0) {
       await this.operationalLogger.warn(
         "provider.ingestion.events_dropped",
-        "Provider ingestion dropped duplicate message events",
+        "Provider ingestion dropped duplicate events",
         {
           provider: this.provider,
           sessionId,
           droppedEvents: merged.droppedEvents,
-          reason: "duplicate-message",
+          reason: "duplicate-event",
         },
       );
       await this.auditLogger.record(
         "provider.ingestion.events_dropped",
-        "Provider ingestion dropped duplicate message events",
+        "Provider ingestion dropped duplicate events",
         {
           provider: this.provider,
           sessionId,
           droppedEvents: merged.droppedEvents,
-          reason: "duplicate-message",
+          reason: "duplicate-event",
         },
       );
     }
@@ -820,15 +736,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.sessionSnapshotStore.upsert({
       provider: this.provider,
       sessionId,
-      cursor: makeByteOffsetCursor(latestOffset),
-      messages: merged.mergedMessages,
+      cursor: latestCursor,
+      events: merged.mergedEvents,
     });
-    this.cursors.set(sessionId, makeByteOffsetCursor(latestOffset));
+    this.cursors.set(sessionId, latestCursor);
 
-    return {
-      updated: true,
-      messagesObserved: incomingMessages.length,
-    };
+    return { updated: true, eventsObserved: incomingEvents.length };
   }
 }
 
@@ -840,8 +753,8 @@ export function createClaudeIngestionRunner(
     provider: "claude",
     watchRoots: roots,
     discoverSessions: () => discoverClaudeSessions(roots),
-    parseMessages: (filePath, fromOffset) =>
-      parseClaudeMessages(filePath, fromOffset),
+    parseEvents: (filePath, fromOffset, ctx) =>
+      parseClaudeEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
@@ -860,8 +773,8 @@ export function createCodexIngestionRunner(
     provider: "codex",
     watchRoots: roots,
     discoverSessions: () => discoverCodexSessions(roots),
-    parseMessages: (filePath, fromOffset) =>
-      parseCodexMessages(filePath, fromOffset),
+    parseEvents: (filePath, fromOffset, ctx) =>
+      parseCodexEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,

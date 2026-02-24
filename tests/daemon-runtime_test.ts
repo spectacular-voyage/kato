@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
-import type { DaemonStatusSnapshot, Message } from "@kato/shared";
+import type { ConversationEvent, DaemonStatusSnapshot } from "@kato/shared";
 import {
   AuditLogger,
   type DaemonControlRequestStoreLike,
@@ -12,6 +12,27 @@ import {
   type SessionSnapshotStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
+
+function makeEvent(
+  id: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+  timestamp = "2026-02-22T19:00:00.000Z",
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "codex",
+    sessionId: "session-1",
+    timestamp,
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: id,
+    },
+  } as unknown as ConversationEvent;
+}
 
 class CaptureSink {
   records: LogRecord[] = [];
@@ -176,7 +197,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
     provider: string;
     sessionId: string;
     targetPath: string;
-    messageCount: number;
+    eventCount: number;
   }> = [];
 
   const recordingPipeline: RecordingPipelineLike = {
@@ -191,7 +212,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
         provider: input.provider,
         sessionId: input.sessionId,
         targetPath: input.targetPath,
-        messageCount: input.messages.length,
+        eventCount: input.events.length,
       });
       return Promise.resolve({
         outputPath: input.targetPath,
@@ -201,6 +222,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     appendToActiveRecording() {
@@ -224,21 +246,25 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
   };
 
   const loadedSessions: string[] = [];
-  const sessionMessages: Message[] = [{
-    id: "m1",
-    role: "assistant",
-    content: "export me",
-    timestamp: "2026-02-22T10:00:00.000Z",
-    model: "claude-opus-4-6",
-  }];
+  const sessionMessages = [
+    makeEvent(
+      "m1",
+      "message.assistant",
+      "export me",
+      "2026-02-22T10:00:00.000Z",
+    ),
+  ];
 
   await runDaemonRuntimeLoop({
     statusStore,
     controlStore,
     recordingPipeline,
-    loadSessionMessages(sessionId: string) {
+    loadSessionSnapshot(sessionId: string) {
       loadedSessions.push(sessionId);
-      return Promise.resolve([...sessionMessages]);
+      return Promise.resolve({
+        provider: "unknown",
+        events: sessionMessages,
+      });
     },
     now: () => new Date("2026-02-22T10:00:00.000Z"),
     pid: 4242,
@@ -252,7 +278,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
     provider: "unknown",
     sessionId: "session-42",
     targetPath: ".kato/test-runtime/session-42.md",
-    messageCount: 1,
+    eventCount: 1,
   });
   const last = statusHistory[statusHistory.length - 1];
   assertExists(last);
@@ -334,6 +360,7 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     appendToActiveRecording() {
@@ -365,12 +392,14 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
       loadedSnapshots.push(sessionId);
       return Promise.resolve({
         provider: "codex",
-        messages: [{
-          id: "m1",
-          role: "assistant",
-          content: "export me",
-          timestamp: "2026-02-22T10:00:00.000Z",
-        }],
+        events: [
+          makeEvent(
+            "m1",
+            "message.assistant",
+            "export me",
+            "2026-02-22T10:00:00.000Z",
+          ),
+        ],
       });
     },
     now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -460,6 +489,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot is missing", 
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     appendToActiveRecording() {
@@ -597,6 +627,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot has no messag
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     appendToActiveRecording() {
@@ -640,7 +671,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot has no messag
     loadSessionSnapshot(_sessionId: string) {
       return Promise.resolve({
         provider: "codex",
-        messages: [],
+        events: [],
       });
     },
     operationalLogger,
@@ -737,6 +768,7 @@ Deno.test("runDaemonRuntimeLoop skips export requests when export feature is dis
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     appendToActiveRecording() {
@@ -764,9 +796,12 @@ Deno.test("runDaemonRuntimeLoop skips export requests when export feature is dis
     statusStore,
     controlStore,
     recordingPipeline,
-    loadSessionMessages(sessionId: string) {
+    loadSessionSnapshot(sessionId: string) {
       loadedSessions.push(sessionId);
-      return Promise.resolve([]);
+      return Promise.resolve({
+        provider: "unknown",
+        events: [],
+      });
     },
     exportEnabled: false,
     now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -837,7 +872,7 @@ Deno.test("runDaemonRuntimeLoop starts, polls, and stops ingestion runners", asy
         provider: "claude",
         polledAt: "2026-02-22T10:00:00.000Z",
         sessionsUpdated: 0,
-        messagesObserved: 0,
+        eventsObserved: 0,
       });
     },
     stop() {
@@ -932,51 +967,60 @@ Deno.test("runDaemonRuntimeLoop populates status.providers from session snapshot
           provider: "codex",
           sessionId: "s1",
           cursor: { kind: "byte-offset", value: 12 },
-          messages: [{
-            id: "m1",
-            role: "assistant",
-            content: "hello",
-            timestamp: "2026-02-22T10:00:00.000Z",
-          }],
+          events: [
+            makeEvent(
+              "m1",
+              "message.assistant",
+              "hello",
+              "2026-02-22T10:00:00.000Z",
+            ),
+          ],
+          conversationSchemaVersion: 2,
           metadata: {
             updatedAt: "2026-02-22T10:00:00.000Z",
-            messageCount: 1,
-            truncatedMessages: 0,
-            lastMessageAt: "2026-02-22T10:00:00.000Z",
+            eventCount: 1,
+            truncatedEvents: 0,
+            lastEventAt: "2026-02-22T10:00:00.000Z",
           },
         },
         {
           provider: "codex",
           sessionId: "s2",
           cursor: { kind: "byte-offset", value: 24 },
-          messages: [{
-            id: "m2",
-            role: "assistant",
-            content: "world",
-            timestamp: "2026-02-22T10:00:05.000Z",
-          }],
+          events: [
+            makeEvent(
+              "m2",
+              "message.assistant",
+              "world",
+              "2026-02-22T10:00:05.000Z",
+            ),
+          ],
+          conversationSchemaVersion: 2,
           metadata: {
             updatedAt: "2026-02-22T10:00:05.000Z",
-            messageCount: 1,
-            truncatedMessages: 0,
-            lastMessageAt: "2026-02-22T10:00:05.000Z",
+            eventCount: 1,
+            truncatedEvents: 0,
+            lastEventAt: "2026-02-22T10:00:05.000Z",
           },
         },
         {
           provider: "claude",
           sessionId: "s3",
           cursor: { kind: "byte-offset", value: 8 },
-          messages: [{
-            id: "m3",
-            role: "assistant",
-            content: "hi",
-            timestamp: "2026-02-22T10:00:03.000Z",
-          }],
+          events: [
+            makeEvent(
+              "m3",
+              "message.assistant",
+              "hi",
+              "2026-02-22T10:00:03.000Z",
+            ),
+          ],
+          conversationSchemaVersion: 2,
           metadata: {
             updatedAt: "2026-02-22T10:00:03.000Z",
-            messageCount: 1,
-            truncatedMessages: 0,
-            lastMessageAt: "2026-02-22T10:00:03.000Z",
+            eventCount: 1,
+            truncatedEvents: 0,
+            lastEventAt: "2026-02-22T10:00:03.000Z",
           },
         },
       ];
@@ -1081,16 +1125,19 @@ Deno.test("runDaemonRuntimeLoop omits lastMessageAt when provider sessions have 
         provider: "codex",
         sessionId: "s1",
         cursor: { kind: "byte-offset", value: 12 },
-        messages: [{
-          id: "m1",
-          role: "assistant",
-          content: "hello",
-          timestamp: "2026-02-22T10:00:00.000Z",
-        }],
+        events: [
+          makeEvent(
+            "m1",
+            "message.assistant",
+            "hello",
+            "2026-02-22T10:00:00.000Z",
+          ),
+        ],
+        conversationSchemaVersion: 2,
         metadata: {
           updatedAt: "2026-02-22T10:00:00.000Z",
-          messageCount: 1,
-          truncatedMessages: 0,
+          eventCount: 1,
+          truncatedEvents: 0,
         },
       }];
     },
@@ -1186,17 +1233,20 @@ Deno.test("runDaemonRuntimeLoop omits stale provider snapshots from status.provi
         provider: "codex",
         sessionId: "stale",
         cursor: { kind: "byte-offset", value: 10 },
-        messages: [{
-          id: "m1",
-          role: "assistant",
-          content: "stale",
-          timestamp: "2026-02-22T09:00:00.000Z",
-        }],
+        events: [
+          makeEvent(
+            "m1",
+            "message.assistant",
+            "stale",
+            "2026-02-22T09:00:00.000Z",
+          ),
+        ],
+        conversationSchemaVersion: 2,
         metadata: {
           updatedAt: "2026-02-22T09:00:00.000Z",
-          messageCount: 1,
-          truncatedMessages: 0,
-          lastMessageAt: "2026-02-22T09:00:00.000Z",
+          eventCount: 1,
+          truncatedEvents: 0,
+          lastEventAt: "2026-02-22T09:00:00.000Z",
         },
       }];
     },
@@ -1262,37 +1312,37 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
     poll() {
       pollCount += 1;
 
-      const baselineMessage: Message = {
-        id: "m1",
-        role: "user",
-        content: "::record @notes/old.md\nold command",
-        timestamp: "2026-02-22T10:00:00.000Z",
-      };
-      const newCommandMessage: Message = {
-        id: "m2",
-        role: "user",
-        content: "::record @notes/new.md\nnew command",
-        timestamp: "2026-02-22T10:00:01.000Z",
-      };
-      const assistantReply: Message = {
-        id: "m3",
-        role: "assistant",
-        content: "recording now",
-        timestamp: "2026-02-22T10:00:02.000Z",
-      };
+      const baselineMessage = makeEvent(
+        "m1",
+        "message.user",
+        "::record @notes/old.md\nold command",
+        "2026-02-22T10:00:00.000Z",
+      );
+      const newCommandMessage = makeEvent(
+        "m2",
+        "message.user",
+        "::record @notes/new.md\nnew command",
+        "2026-02-22T10:00:01.000Z",
+      );
+      const assistantReply = makeEvent(
+        "m3",
+        "message.assistant",
+        "recording now",
+        "2026-02-22T10:00:02.000Z",
+      );
 
       if (pollCount === 1) {
         sessionSnapshotStore.upsert({
           provider: "codex",
           sessionId: "session-1",
           cursor: { kind: "byte-offset", value: 10 },
-          messages: [baselineMessage],
+          events: [baselineMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:00.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1301,13 +1351,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
           provider: "codex",
           sessionId: "session-1",
           cursor: { kind: "byte-offset", value: 20 },
-          messages: [baselineMessage, newCommandMessage],
+          events: [baselineMessage, newCommandMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:01.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1316,13 +1366,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
           provider: "codex",
           sessionId: "session-1",
           cursor: { kind: "byte-offset", value: 30 },
-          messages: [baselineMessage, newCommandMessage, assistantReply],
+          events: [baselineMessage, newCommandMessage, assistantReply],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:02.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1330,7 +1380,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
         provider: "codex",
         polledAt: "2026-02-22T10:00:03.000Z",
         sessionsUpdated: 0,
-        messagesObserved: 0,
+        eventsObserved: 0,
       });
     },
     stop() {
@@ -1395,8 +1445,8 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
         });
       }
 
-      for (const message of input.messages) {
-        appendedMessageIds.push(message.id);
+      for (const event of input.events) {
+        appendedMessageIds.push(event.eventId);
       }
       return Promise.resolve({
         appended: true,
@@ -1481,37 +1531,37 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
     poll() {
       pollCount += 1;
 
-      const baselineMessage: Message = {
-        id: "m1",
-        role: "user",
-        content: "plain baseline",
-        timestamp: "2026-02-22T10:00:00.000Z",
-      };
-      const captureCommandMessage: Message = {
-        id: "m2",
-        role: "user",
-        content: "::capture @notes/captured.md\ncapture now",
-        timestamp: "2026-02-22T10:00:01.000Z",
-      };
-      const assistantReply: Message = {
-        id: "m3",
-        role: "assistant",
-        content: "captured and now recording",
-        timestamp: "2026-02-22T10:00:02.000Z",
-      };
+      const baselineMessage = makeEvent(
+        "m1",
+        "message.user",
+        "plain baseline",
+        "2026-02-22T10:00:00.000Z",
+      );
+      const captureCommandMessage = makeEvent(
+        "m2",
+        "message.user",
+        "::capture @notes/captured.md\ncapture now",
+        "2026-02-22T10:00:01.000Z",
+      );
+      const assistantReply = makeEvent(
+        "m3",
+        "message.assistant",
+        "captured and now recording",
+        "2026-02-22T10:00:02.000Z",
+      );
 
       if (pollCount === 1) {
         sessionSnapshotStore.upsert({
           provider: "codex",
           sessionId: "session-capture",
           cursor: { kind: "byte-offset", value: 10 },
-          messages: [baselineMessage],
+          events: [baselineMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:00.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1520,13 +1570,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
           provider: "codex",
           sessionId: "session-capture",
           cursor: { kind: "byte-offset", value: 20 },
-          messages: [baselineMessage, captureCommandMessage],
+          events: [baselineMessage, captureCommandMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:01.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1535,13 +1585,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
           provider: "codex",
           sessionId: "session-capture",
           cursor: { kind: "byte-offset", value: 30 },
-          messages: [baselineMessage, captureCommandMessage, assistantReply],
+          events: [baselineMessage, captureCommandMessage, assistantReply],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:02.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1549,7 +1599,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
         provider: "codex",
         polledAt: "2026-02-22T10:00:03.000Z",
         sessionsUpdated: 0,
-        messagesObserved: 0,
+        eventsObserved: 0,
       });
     },
     stop() {
@@ -1614,6 +1664,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
           wrote: true,
           deduped: false,
         },
+        format: "markdown" as const,
       });
     },
     exportSnapshot() {
@@ -1627,8 +1678,8 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
         });
       }
 
-      for (const message of input.messages) {
-        appendedMessageIds.push(message.id);
+      for (const event of input.events) {
+        appendedMessageIds.push(event.eventId);
       }
       return Promise.resolve({
         appended: true,
@@ -1715,31 +1766,31 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
     poll() {
       pollCount += 1;
 
-      const baselineMessage: Message = {
-        id: "base",
-        role: "user",
-        content: "hello",
-        timestamp: "2026-02-22T10:00:00.000Z",
-      };
-      const invalidCommandMessage: Message = {
-        id: "invalid",
-        role: "user",
-        content: "::record\n::record notes/should-not-run.md",
-        timestamp: "2026-02-22T10:00:01.000Z",
-      };
+      const baselineMessage = makeEvent(
+        "base",
+        "message.user",
+        "hello",
+        "2026-02-22T10:00:00.000Z",
+      );
+      const invalidCommandMessage = makeEvent(
+        "invalid",
+        "message.user",
+        "::record\n::record notes/should-not-run.md",
+        "2026-02-22T10:00:01.000Z",
+      );
 
       if (pollCount === 1) {
         sessionSnapshotStore.upsert({
           provider: "codex",
           sessionId: "session-parse-error",
           cursor: { kind: "byte-offset", value: 10 },
-          messages: [baselineMessage],
+          events: [baselineMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:00.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1748,13 +1799,13 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
           provider: "codex",
           sessionId: "session-parse-error",
           cursor: { kind: "byte-offset", value: 20 },
-          messages: [baselineMessage, invalidCommandMessage],
+          events: [baselineMessage, invalidCommandMessage],
         });
         return Promise.resolve({
           provider: "codex",
           polledAt: "2026-02-22T10:00:01.000Z",
           sessionsUpdated: 1,
-          messagesObserved: 1,
+          eventsObserved: 1,
         });
       }
 
@@ -1762,7 +1813,7 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
         provider: "codex",
         polledAt: "2026-02-22T10:00:02.000Z",
         sessionsUpdated: 0,
-        messagesObserved: 0,
+        eventsObserved: 0,
       });
     },
     stop() {
