@@ -14,8 +14,8 @@ Deno.test("OpenFeature bootstrap uses deterministic local defaults", () => {
 
   assertEquals(settings.exportEnabled, true);
   assertEquals(settings.writerRenderOptions, {
-    includeThinking: true,
-    includeToolCalls: true,
+    includeThinking: false,
+    includeToolCalls: false,
     italicizeUserMessages: false,
   });
 });

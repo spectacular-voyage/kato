@@ -5,7 +5,7 @@ dev:
 commands:
     lookup:
         note:
-            selectionMode: extract
+            selectionMode: none
             confirmVaultOnCreate: true
             vaultSelectionModeOnCreate: smart
             leaveTrace: false

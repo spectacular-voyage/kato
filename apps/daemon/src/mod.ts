@@ -4,6 +4,7 @@ export {
   runDaemonSubprocess,
 } from "./main.ts";
 export type { RunDaemonSubprocessOptions } from "./main.ts";
+export { DAEMON_APP_VERSION } from "./version.ts";
 export {
   CliUsageError,
   type DaemonCliCommand,

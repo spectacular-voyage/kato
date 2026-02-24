@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1771794716831
+updated: 1771869706161
 created: 1771724652182
 ---
 
@@ -20,3 +20,5 @@ created: 1771724652182
 - "::seal" command : sign, hash, and close a file
 - web-based UI for status; cleaning sessions, surfacing history and logs
 - run-as-service on windows; systemd/init.d on linux; and whatever macos uses
+- thinking and tools use should use, as default, the settings in config but allow per-session overrids, maybe by adding flags to the "::" commands
+- switch config to YAML

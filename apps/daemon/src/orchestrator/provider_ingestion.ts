@@ -825,29 +825,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     });
     this.cursors.set(sessionId, makeByteOffsetCursor(latestOffset));
 
-    await this.operationalLogger.info(
-      "provider.ingestion.cursor_updated",
-      "Provider ingestion cursor updated",
-      {
-        provider: this.provider,
-        sessionId,
-        cursorKind: "byte-offset",
-        cursorValue: latestOffset,
-        messagesObserved: incomingMessages.length,
-      },
-    );
-    await this.auditLogger.record(
-      "provider.ingestion.cursor_updated",
-      "Provider ingestion cursor updated",
-      {
-        provider: this.provider,
-        sessionId,
-        cursorKind: "byte-offset",
-        cursorValue: latestOffset,
-        messagesObserved: incomingMessages.length,
-      },
-    );
-
     return {
       updated: true,
       messagesObserved: incomingMessages.length,

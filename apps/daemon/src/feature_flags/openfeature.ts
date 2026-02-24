@@ -2,8 +2,8 @@ import type { RuntimeFeatureFlags } from "@kato/shared";
 import type { MarkdownRenderOptions } from "../writer/mod.ts";
 
 const DEFAULT_RUNTIME_FEATURE_FLAGS: RuntimeFeatureFlags = {
-  writerIncludeThinking: true,
-  writerIncludeToolCalls: true,
+  writerIncludeThinking: false,
+  writerIncludeToolCalls: false,
   writerItalicizeUserMessages: false,
   daemonExportEnabled: true,
 };

@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "@std/cli": "jsr:@std/cli@1",
+    "@std/path": "jsr:@std/path@1",
+    "@kato/shared": "../../shared/src/mod.ts"
+  }
+}

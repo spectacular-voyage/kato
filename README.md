@@ -37,6 +37,8 @@ deno run -A apps/daemon/src/main.ts stop
 
 Supported commands:
 
+- `--version` / `-V`
+  - Print the daemon CLI version.
 - `init`
   - Create default runtime config if missing.
 - `start`
@@ -44,6 +46,9 @@ Supported commands:
   - If config is missing, auto-init runs by default
     (`KATO_AUTO_INIT_ON_START=true`).
   - Disable auto-init by setting `KATO_AUTO_INIT_ON_START=false`.
+- `restart`
+  - Stop daemon and start it again.
+  - If daemon is not running, behaves like `start`.
 - `stop`
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
@@ -58,6 +63,7 @@ Usage help:
 ```bash
 deno run -A apps/daemon/src/main.ts help
 deno run -A apps/daemon/src/main.ts help start
+deno run -A apps/daemon/src/main.ts --version
 ```
 
 ## Runtime Files
@@ -111,8 +117,8 @@ Notes:
 
 Working now:
 
-- CLI control-plane commands (`init`, `start`, `stop`, `status`, `export`,
-  `clean`)
+- CLI control-plane commands (`init`, `start`, `restart`, `stop`, `status`,
+  `export`, `clean`)
 - Detached daemon launcher and heartbeat/status snapshots
 - Path-policy-gated writer pipeline (`record`/`capture`/`export` contracts)
 - Local OpenFeature baseline with config-driven feature flags
