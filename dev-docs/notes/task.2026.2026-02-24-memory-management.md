@@ -1,172 +1,120 @@
 ---
 id: hn7t9bp0x9wkhvtcgw4255u
 title: 2026 02 24 Memory Management
-desc: ''
-updated: 1771971777228
+desc: ""
+updated: 1771976234475
 created: 1771971777228
 ---
 
-# Session Snapshot Memory Management
+# Daemon Memory Management (Prereq for Improved Status)
 
 ## Goal
 
-Keep event-rich in-memory session snapshots as the primary runtime state (for
-capture correctness and low-latency command handling), while adding explicit
-memory controls and observability.
+Make daemon memory behavior explicit, bounded, and observable so:
 
-This task is the implementation follow-on for the status note item:
-- performance data like memory use, maybe with OpenTelemetry
-  ([task.2026.2026-02-23-improved-status](./task.2026.2026-02-23-improved-status.md))
+- capture can retain long histories (`maxEventsPerSession` no longer tiny)
+- status can report reliable memory/performance numbers
+- runtime cannot grow unbounded due to session snapshots
 
-## Why This Matters
+This task is a **prerequisite** for:
 
-- `maxEventsPerSession: 200` is too small for real sessions and causes
-  `::capture` to miss earlier conversation content.
-- Raising retention without memory controls risks unbounded growth.
-- Operators need first-class visibility into memory pressure and evictions.
-
-## Scope (This Task)
-
-1. Increase default snapshot event retention substantially.
-2. Add runtime-configurable memory budget for in-memory session snapshots.
-3. Add idle-eviction config setting, wired as **no-op** for now.
-4. Expose memory/perf snapshot stats in status and structured logs.
-5. Define telemetry integration path (OpenTelemetry optional, not required).
+- [task.2026.2026-02-23-improved-status](./task.2026.2026-02-23-improved-status.md)
 
 ## Non-Goals
 
 - Persisting full normalized event history to disk.
 - Replacing provider raw files as source data.
-- Adding network exporters as a baseline requirement.
+- Building full OpenTelemetry exporters/instrumentation baseline.
+- Implementing idle/time-based eviction.
 
-## Requirements
-
-### 1) Retention Defaults
-
-- Raise default `maxEventsPerSession` from `200` to `10000`.
-- Keep `maxSessions` bounded (current default may remain initially).
-- Ensure command behavior remains: capture should include history from the
-  beginning of retained session state through the command event.
-
-### 2) Memory Budget Setting
-
-Add a runtime config setting for snapshot memory budget:
-- `snapshotMaxMemoryMb` (required positive integer, defaults to a safe value)
-
-Behavior:
-- Track estimated bytes used by in-memory session snapshots.
-- On upsert, if over budget, evict least-recently-updated sessions until
-  within budget.
-- Emit structured operational + audit records on each eviction with reason and
-  bytes reclaimed.
-
-### 3) Idle Eviction Setting (No-Op in This Task)
-
-Add a runtime config setting:
-- `snapshotSessionEvictionIdleMs` (nullable number)
-
-Task requirement:
-- fully wire it through contracts, config validation, defaults, and status
-  projection,
-- but do not enforce time-based eviction yet.
-
-Status/logging should clearly indicate this setting is present but inactive.
-
-### 4) Status + Performance Data
-
-Extend status snapshot with memory management fields (or equivalent nested
-object), including:
-- estimated snapshot memory bytes
-- configured memory budget bytes
-- current in-memory session count
-- total retained event count
-- eviction counters (by reason)
-- process memory (`rss`, `heapUsed`, `heapTotal`) where available
-
-This aligns with improved-status work and should be reusable by CLI/web.
-
-### 5) Telemetry Strategy
-
-OpenTelemetry is optional and may be overkill for MVP.
-
-For this task:
-- required: local status + structured logs as source of truth
-- optional (behind flag/adaptor): emit equivalent counters/gauges to OTel
-  metrics API if integrated later
-- document a bridge path for Sentry performance ingestion (without making
-  Sentry a hard runtime dependency)
-
-## Proposed Config Additions
-
-Candidate `RuntimeConfig` fields:
-
-- `snapshotMaxMemoryMb: number`
-- `snapshotSessionEvictionIdleMs: number | null` (no-op in this task)
-
-Optional follow-up (if we decide to externalize current retention values):
-- `snapshotMaxEventsPerSession: number`
-- `snapshotMaxSessions: number`
-
-## Architecture Notes
+## Locked Decisions
 
 - Keep `InMemorySessionSnapshotStore` as canonical runtime state.
-- Add memory accounting inside snapshot store (or a wrapped manager), not in
-  ad hoc runtime code.
+- Budget control is global daemon budget, not snapshot-only budget:
+  - `daemonMaxMemoryMb` in `RuntimeConfig`
+  - default: `200` MB
+- Status must include both:
+  - process memory (`Deno.memoryUsage()` fields: `rss`, `heapTotal`, `heapUsed`,
+    `external`)
+  - snapshot-store memory/accounting metrics
+- Idle eviction is **deferred** (not in this task).
 - Eviction policy should be deterministic (LRU by last upsert/update time).
-- Do not block ingestion when under memory pressure; prefer bounded eviction
-  with explicit logs.
+- Over-budget handling:
+  - evict stale/old sessions first
+  - if only one session remains and daemon is still over budget, daemon exits
+    with a clear error (fail-closed)
 
-## Implementation Steps
+## Scope Checklist
 
-1. Contracts/config
-- Extend `shared/src/contracts/config.ts` with new settings.
-- Extend runtime config parser/validation/defaulting.
-- Add fixtures/tests for invalid and valid values.
+### 1) Runtime Config + Contracts
 
-2. Snapshot store
-- Raise default event retention to `10000`.
-- Add budget accounting + LRU eviction loop.
-- Add instrumentation counters (`evictions`, `bytesReclaimed`, etc.).
+- [ ] Add `daemonMaxMemoryMb: number` to `RuntimeConfig` contract.
+- [ ] Add parser/validator/default wiring in daemon config loader.
+- [ ] Enforce positive safe integer; fail-closed on invalid values.
+- [ ] Add env override support if desired (`KATO_DAEMON_MAX_MEMORY_MB`), with
+      clear precedence documentation.
 
-3. Runtime + status
-- Surface memory stats/counters in daemon status snapshot.
-- Include memory management summary in `kato status --json`.
+### 2) Snapshot Retention + Budget Enforcement
 
-4. Observability
-- Add structured operational/audit events for memory pressure and eviction.
-- Document optional OTel/Sentry integration hook points.
+- [ ] Raise default `maxEventsPerSession` from `200` to `10000`.
+- [ ] Add snapshot memory estimator inside `InMemorySessionSnapshotStore`
+      (events + metadata).
+- [ ] Track running totals:
+  - [ ] `estimatedSnapshotBytes`
+  - [ ] `retainedEventCount`
+  - [ ] `sessionCount`
+  - [ ] eviction counters (`evictionsTotal`, `bytesReclaimedTotal`,
+        `evictionsByReason`)
+- [ ] On upsert, enforce budget with LRU eviction until within budget.
+- [ ] If still over budget with one session left, emit final diagnostic and
+      terminate daemon with explicit message.
 
-5. Docs
-- Update `dev.codebase-overview` snapshot/retention sections.
-- Update `dev.testing` with memory-pressure test guidance.
+### 3) Status Contract (Prereq for Improved Status)
 
-## Testing Plan
+- [ ] Extend `DaemonStatusSnapshot` with memory/perf section (additive change):
+  - [ ] `memory.daemonMaxMemoryBytes`
+  - [ ] `memory.process.{rss,heapTotal,heapUsed,external}`
+  - [ ] `memory.snapshots.{estimatedBytes,sessionCount,eventCount}`
+  - [ ] `memory.snapshots.evictions{...}`
+  - [ ] `memory.snapshots.overBudget`
+- [ ] Populate these fields in daemon heartbeat/status projection.
+- [ ] Ensure `kato status --json` exposes this data without requiring
+      improved-status text UX changes.
 
-- Unit tests: memory budget validation and deterministic eviction behavior.
-- Store tests:
-  - over-budget upsert evicts oldest sessions
-  - retention still caps events per session
-  - session metadata remains consistent after eviction
-- Runtime tests:
-  - status includes memory metrics/counters
-  - eviction events are logged with expected reason/details
-- Config tests:
-  - `snapshotMaxMemoryMb` must be positive integer
-  - `snapshotSessionEvictionIdleMs` accepts `null` or positive integer
-  - idle setting is wired but does not trigger eviction in this task
+### 4) Observability + Logging
+
+- [ ] Add operational events for:
+  - [ ] memory sample / summary updates
+  - [ ] eviction actions
+  - [ ] over-budget shutdown path
+- [ ] Keep OpenTelemetry/Sentry integration out-of-scope here; document hook
+      points only.
+
+### 5) Tests
+
+- [ ] Config tests:
+  - [ ] accepts valid `daemonMaxMemoryMb`
+  - [ ] rejects zero/negative/non-integer values
+- [ ] Store tests:
+  - [ ] enforces `maxEventsPerSession=10000` default
+  - [ ] deterministic LRU eviction under pressure
+  - [ ] counters/estimated-bytes update correctly
+  - [ ] over-budget single-session path triggers fail-closed behavior
+- [ ] Runtime/status tests:
+  - [ ] status snapshot contains memory section
+  - [ ] process memory fields are populated
+  - [ ] eviction/over-budget events are logged
 
 ## Acceptance Criteria
 
-- Default per-session retained event window is `10000`.
-- Memory budget setting is configurable and enforced via eviction.
-- Idle eviction setting exists and is visible in status/config as no-op.
-- `kato status --json` exposes memory/performance data needed for ops.
-- Structured logs provide auditable eviction events.
-- CI passes with tests/docs updated.
+- `daemonMaxMemoryMb` is enforced at runtime with deterministic eviction.
+- Snapshot retention default is `10000` events per session.
+- `kato status --json` includes process + snapshot memory telemetry needed by
+  improved-status/web.
+- Daemon emits clear operational logs for evictions and over-budget shutdown.
+- Test suite covers config, store behavior, and runtime status exposure.
 
 ## Open Questions
 
-1. What should default `snapshotMaxMemoryMb` be for MVP (e.g. 256 vs 512)?
-2. Should single oversized sessions be truncated before cross-session eviction?
-3. Should process memory fields be sampled on heartbeat only or every poll?
-4. Do we add OTel in this task behind a feature flag, or defer entirely?
+1. Keep default at `200MB` or increase to `256MB`?
+2. Sample process memory on heartbeat only, or on every ingestion poll?

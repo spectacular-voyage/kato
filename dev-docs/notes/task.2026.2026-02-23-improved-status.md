@@ -22,12 +22,31 @@ Logging-specific work is tracked separately in
 - `kato-status-web` will need almost the same status projection logic, so
   sharing model/projection code avoids duplicate business logic.
 
+## Dependency
+
+This task explicitly depends on:
+
+- [task.2026.2026-02-24-memory-management](./task.2026.2026-02-24-memory-management.md)
+
+Required prerequisite outputs from that task:
+
+- `RuntimeConfig.daemonMaxMemoryMb`
+- `DaemonStatusSnapshot.memory.daemonMaxMemoryBytes`
+- `DaemonStatusSnapshot.memory.process.{rss,heapTotal,heapUsed,external}`
+- `DaemonStatusSnapshot.memory.snapshots.{estimatedBytes,sessionCount,eventCount}`
+- `DaemonStatusSnapshot.memory.snapshots.evictions{...}`
+- `DaemonStatusSnapshot.memory.snapshots.overBudget`
+
+Status UX in this task should **consume/display** these fields, not invent a
+separate memory model.
+
 ## Scope (This Task)
 
 1. Rich status model in shared contract
 2. CLI status output improvements
 3. Shared status projection/formatting logic for daemon + web reuse
-4. Tests + docs updates
+4. Memory-section consumption from prereq task
+5. Tests + docs updates
 
 ## Requirements
 
@@ -72,8 +91,19 @@ shared projected data.
 
 ### 3) "Live status"
 
-- instead of returning, the status stays onscreen (maybe fullscreen) and updates in real time
-- including a text-based memory graph would be nice. Keep execution-scope data fixed, and display most recent sessions/recordings. 
+- instead of returning, the status stays onscreen (maybe fullscreen) and updates
+  in real time
+- including a text-based memory graph would be nice. Keep execution-scope data
+  fixed, and display most recent sessions/recordings.
+
+### 4) Memory Visibility (Depends on Prereq)
+
+- `kato status --json` must include the memory section defined by the memory
+  management task.
+- default text `kato status` should include a compact memory summary line (at
+  minimum: rss + snapshot estimated bytes + budget + over-budget flag).
+- any richer visualization (graph/sparkline/live mode) is additive, but must use
+  the same underlying memory fields.
 
 ## Proposed Data Model Changes
 
@@ -84,7 +114,7 @@ Candidate additions:
 
 - `sessions: DaemonSessionStatus[]`
 - `recordings.active: DaemonRecordingStatus[]` (or `recordings.entries`)
-- performance data like memory use, maybe with OpenTelemetry
+- `memory: ...` from memory-management task (required, not optional)
 
 Candidate `DaemonSessionStatus` fields:
 
@@ -153,6 +183,11 @@ Legend:
 
 ## Implementation Steps
 
+0. Dependency gate
+
+- Verify memory-management task is complete or land required contract/status
+  fields first.
+
 1. Shared contracts
 
 - Extend `shared/src/contracts/status.ts` with session/recording detail types.
@@ -169,6 +204,7 @@ Legend:
 - Extend parser/types for `status --all`.
 - Implement detailed renderer in `apps/daemon/src/cli/commands/status.ts`.
 - Ensure `--json` output carries new fields.
+- Add memory summary rendering sourced from `status.memory`.
 
 4. Web view model
 
@@ -179,6 +215,7 @@ Legend:
 
 - Update README command docs for `status --all`.
 - Update `dev.codebase-overview` status model section.
+- Document memory summary fields and their source task dependency.
 
 ## Testing Plan
 
@@ -190,6 +227,9 @@ Legend:
 - Runtime tests:
   - status snapshot includes active recording/session details
   - stale classification behavior is deterministic
+- Memory tests:
+  - `status --json` includes prereq memory fields unchanged
+  - text output shows memory summary when memory section is present
 - Web model tests for filtering/sorting parity with CLI projection rules.
 
 ## Acceptance Criteria
@@ -197,6 +237,8 @@ Legend:
 - `kato status` shows currently recording sessions with provider/session id and
   destination.
 - `kato status --all` includes stale sessions and stale recording rows.
+- Status surfaces (`--json` and text) include memory information sourced from
+  memory-management fields.
 - Shared status projection/model logic is used by both CLI and web code paths.
 - CI passes with updated tests and docs.
 

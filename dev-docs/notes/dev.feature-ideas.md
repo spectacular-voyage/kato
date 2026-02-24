@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1771972680606
+updated: 1771976401274
 created: 1771724652182
 ---
 
@@ -21,3 +21,4 @@ created: 1771724652182
 - thinking and tools use should use, as default, the settings in config but allow per-session overrids, maybe by adding flags to the "::" commands
 - switch config to YAML
 - Multi-destination recording
+- support flag in in-chat comments, e.g. to start including thinking or tool use
