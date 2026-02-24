@@ -127,6 +127,6 @@ export {
   makeCompactFrontmatterId,
   MarkdownConversationWriter,
   RecordingPipeline,
-  renderMessagesToMarkdown,
+  renderEventsToMarkdown,
   slugifyForFrontmatterId,
 } from "./writer/mod.ts";
