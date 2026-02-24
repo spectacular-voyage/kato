@@ -103,6 +103,7 @@ export async function runDaemonSubprocess(
     sessionSnapshotStore,
     claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
     codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
+    geminiSessionRoots: runtimeConfig.providerSessionRoots.gemini,
     now,
     operationalLogger,
     auditLogger,

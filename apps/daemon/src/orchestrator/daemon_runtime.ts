@@ -126,9 +126,11 @@ function makeEventSignature(event: ConversationEvent): string {
     case "message.system":
       return `${base}\0${event.content}`;
     case "tool.call":
-      return `${base}\0${event.toolCallId}\0${event.name}`;
+      return `${base}\0${event.toolCallId}\0${event.name}\0${
+        event.description ?? ""
+      }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
     case "tool.result":
-      return `${base}\0${event.toolCallId}`;
+      return `${base}\0${event.toolCallId}\0${event.result}`;
     case "thinking":
       return `${base}\0${event.content}`;
     case "decision":
@@ -780,9 +782,9 @@ async function handleControlRequest(
       ? readString(payload["resolvedOutputPath"]) ??
         readString(payload["outputPath"])
       : undefined;
-    const format = isRecord(payload)
-      ? (readString(payload["format"]) as "markdown" | "jsonl" | undefined)
-      : undefined;
+    const formatRaw = isRecord(payload) ? readString(payload["format"]) : undefined;
+    const format: "markdown" | "jsonl" | undefined =
+      formatRaw === "markdown" || formatRaw === "jsonl" ? formatRaw : undefined;
 
     if (!sessionId || !outputPath) {
       await operationalLogger.warn(

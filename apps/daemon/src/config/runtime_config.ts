@@ -39,6 +39,7 @@ const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "claude",
   "codex",
+  "gemini",
 ];
 
 function isNonEmptyString(value: unknown): value is string {
@@ -161,6 +162,7 @@ function cloneProviderSessionRoots(
   return {
     claude: [...roots.claude],
     codex: [...roots.codex],
+    gemini: [...roots.gemini],
   };
 }
 
@@ -174,8 +176,10 @@ export function resolveDefaultProviderSessionRoots(): ProviderSessionRoots {
       : []);
   const codex = parseRootsFromEnv("KATO_CODEX_SESSION_ROOTS") ??
     (home ? normalizeRoots([join(home, ".codex", "sessions")]) : []);
+  const gemini = parseRootsFromEnv("KATO_GEMINI_SESSION_ROOTS") ??
+    (home ? normalizeRoots([join(home, ".gemini", "tmp")]) : []);
 
-  return { claude, codex };
+  return { claude, codex, gemini };
 }
 
 function mergeProviderSessionRoots(
@@ -361,6 +365,7 @@ export function createDefaultRuntimeConfig(options: {
     providerSessionRoots: {
       claude: providerSessionRoots.claude.map((root) => serializePath(root)),
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),
+      gemini: providerSessionRoots.gemini.map((root) => serializePath(root)),
     },
     featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
   };

@@ -205,7 +205,7 @@ export async function* parseClaudeEvents(
       continue;
     }
 
-    const blocks = entry.message!.content;
+    const blocks = entry.message?.content ?? [];
 
     if (entry.type === "user") {
       // Extract text content → message.user
@@ -242,7 +242,7 @@ export async function* parseClaudeEvents(
         toolResultIndex += 1;
       }
     } else if (entry.type === "assistant") {
-      const model = entry.message!.model;
+      const model = entry.message?.model;
 
       // Extract text → message.assistant
       const text = extractText(blocks);

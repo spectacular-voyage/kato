@@ -34,10 +34,15 @@ Deno.test("RuntimeConfigFileStore initializes missing config atomically", async 
 
     loaded.allowedWriteRoots.push("mutated");
     loaded.providerSessionRoots.claude.push("mutated");
+    loaded.providerSessionRoots.gemini.push("mutated");
     const loadedAgain = await store.load();
     assertEquals(loadedAgain.allowedWriteRoots.includes("mutated"), false);
     assertEquals(
       loadedAgain.providerSessionRoots.claude.includes("mutated"),
+      false,
+    );
+    assertEquals(
+      loadedAgain.providerSessionRoots.gemini.includes("mutated"),
       false,
     );
   } finally {
@@ -201,6 +206,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
     const loaded = await store.load();
     assertEquals(loaded.providerSessionRoots.claude, [claudeOverride]);
     assertEquals(loaded.providerSessionRoots.codex, defaultRoots.codex);
+    assertEquals(loaded.providerSessionRoots.gemini, defaultRoots.gemini);
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }

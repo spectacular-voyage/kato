@@ -223,6 +223,7 @@ export async function runDaemonCli(
     providerSessionRoots: {
       claude: [...runtimeConfig.providerSessionRoots.claude],
       codex: [...runtimeConfig.providerSessionRoots.codex],
+      gemini: [...runtimeConfig.providerSessionRoots.gemini],
     },
   };
   const statusStore = options.statusStore ??

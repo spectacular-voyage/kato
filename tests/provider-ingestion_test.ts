@@ -5,6 +5,7 @@ import {
   AuditLogger,
   createClaudeIngestionRunner,
   createCodexIngestionRunner,
+  createGeminiIngestionRunner,
   FileProviderIngestionRunner,
   InMemorySessionSnapshotStore,
   type LogRecord,
@@ -463,5 +464,81 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
     assertEquals(snapshot.provider, "codex");
     assert(snapshot.events.length >= 1);
     assertEquals(snapshot.cursor.kind, "byte-offset");
+  });
+});
+
+Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", async () => {
+  await withTempDir("provider-ingestion-gemini-", async (dir) => {
+    const chatsDir = join(dir, "project-alpha", "chats");
+    await Deno.mkdir(chatsDir, { recursive: true });
+    const sessionPath = join(chatsDir, "session-2026-02-24-example.json");
+    await Deno.writeTextFile(
+      sessionPath,
+      JSON.stringify({
+        sessionId: "gemini-session-1",
+        startTime: "2026-02-24T20:00:00.000Z",
+        lastUpdated: "2026-02-24T20:00:10.000Z",
+        messages: [
+          {
+            id: "u1",
+            timestamp: "2026-02-24T20:00:01.000Z",
+            type: "user",
+            displayContent: [{ text: "build auth middleware" }],
+            content: [{ text: "ignored because displayContent exists" }],
+          },
+          {
+            id: "a1",
+            timestamp: "2026-02-24T20:00:05.000Z",
+            type: "gemini",
+            model: "gemini-2.0-pro",
+            content: "I will inspect your routes first.",
+            toolCalls: [{
+              id: "tool-1",
+              name: "run_shell_command",
+              args: { command: "ls src/routes" },
+              resultDisplay: "auth.ts\nusers.ts",
+            }],
+          },
+          {
+            id: "i1",
+            timestamp: "2026-02-24T20:00:06.000Z",
+            type: "info",
+            content: "ignored info event",
+          },
+        ],
+      }),
+    );
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const runner = createGeminiIngestionRunner({
+      sessionSnapshotStore: store,
+      sessionRoots: [dir],
+      watchFs: harness.watchFn,
+    });
+
+    await runner.start();
+    const result = await runner.poll();
+    await runner.stop();
+
+    assertEquals(result.provider, "gemini");
+    assertEquals(result.sessionsUpdated, 1);
+    assert(result.eventsObserved >= 3);
+    const snapshot = store.get("gemini-session-1");
+    assertExists(snapshot);
+    assertEquals(snapshot.provider, "gemini");
+    assertEquals(snapshot.cursor.kind, "item-index");
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "provider.info"),
+      false,
+    );
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "message.user"),
+      true,
+    );
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "message.assistant"),
+      true,
+    );
   });
 });

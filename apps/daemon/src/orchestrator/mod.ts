@@ -38,6 +38,7 @@ export {
   createClaudeIngestionRunner,
   createCodexIngestionRunner,
   createDefaultProviderIngestionRunners,
+  createGeminiIngestionRunner,
   FileProviderIngestionRunner,
 } from "./provider_ingestion.ts";
 export type { DaemonProcessLauncherLike } from "./launcher.ts";

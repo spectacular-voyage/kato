@@ -12,6 +12,7 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
     providerSessionRoots: {
       claude: ["/sessions/claude"],
       codex: ["/sessions/codex"],
+      gemini: ["/sessions/gemini"],
     },
     now: () => new Date("2026-02-22T10:00:00.000Z"),
     pid: 4242,
@@ -64,6 +65,7 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
   assertEquals(allowReadRoots.includes("./exports"), true);
   assertEquals(allowReadRoots.includes("/sessions/claude"), true);
   assertEquals(allowReadRoots.includes("/sessions/codex"), true);
+  assertEquals(allowReadRoots.includes("/sessions/gemini"), true);
 
   const allowWriteArg = args[2];
   if (!allowWriteArg?.startsWith("--allow-write=")) {
@@ -95,5 +97,9 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
   assertEquals(
     env["KATO_CODEX_SESSION_ROOTS"],
     JSON.stringify(runtime.providerSessionRoots.codex),
+  );
+  assertEquals(
+    env["KATO_GEMINI_SESSION_ROOTS"],
+    JSON.stringify(runtime.providerSessionRoots.gemini),
   );
 });

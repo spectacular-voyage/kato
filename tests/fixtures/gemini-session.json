@@ -1,0 +1,83 @@
+{
+  "sessionId": "gemini-fixture-session-1",
+  "startTime": "2026-02-24T10:00:00.000Z",
+  "lastUpdated": "2026-02-24T10:00:40.000Z",
+  "messages": [
+    {
+      "id": "u1",
+      "timestamp": "2026-02-24T10:00:01.000Z",
+      "type": "user",
+      "displayContent": [
+        {
+          "text": "please analyze auth flow"
+        }
+      ],
+      "content": [
+        {
+          "text": "raw user text that should be ignored in favor of displayContent"
+        }
+      ]
+    },
+    {
+      "id": "a1",
+      "timestamp": "2026-02-24T10:00:08.000Z",
+      "type": "gemini",
+      "model": "gemini-2.0-pro",
+      "content": "I will inspect your middleware and routes.",
+      "thoughts": [
+        {
+          "text": "Need to inspect src/middleware first."
+        }
+      ],
+      "toolCalls": [
+        {
+          "id": "tool-read-1",
+          "name": "read_file",
+          "args": {
+            "path": "src/middleware/auth.ts"
+          },
+          "resultDisplay": "export function authMiddleware() {}"
+        },
+        {
+          "id": "tool-shell-1",
+          "name": "run_shell_command",
+          "args": {
+            "command": "ls src/routes"
+          },
+          "result": [
+            {
+              "functionResponse": {
+                "response": {
+                  "output": "auth.ts\nusers.ts"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "i1",
+      "timestamp": "2026-02-24T10:00:15.000Z",
+      "type": "info",
+      "content": "Signed in successfully"
+    },
+    {
+      "id": "u2",
+      "timestamp": "2026-02-24T10:00:20.000Z",
+      "type": "user",
+      "content": [
+        {
+          "text": "add jwt refresh tokens too"
+        }
+      ]
+    },
+    {
+      "id": "a2",
+      "timestamp": "2026-02-24T10:00:30.000Z",
+      "type": "gemini",
+      "model": "gemini-2.0-pro",
+      "content": "Done. I added refresh token routes."
+    }
+  ]
+}

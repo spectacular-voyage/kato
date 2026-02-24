@@ -198,8 +198,62 @@ Deno.test(
       "Done.",
       "2026-02-22T10:00:00.000Z",
     );
+    const toolCall1: ConversationEvent = {
+      eventId: "tc1a-hidden",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-1",
+      name: "search",
+      source: { providerEventType: "tool_call", providerEventId: "tc1a-hidden" },
+    } as unknown as ConversationEvent;
+    const toolResult1: ConversationEvent = {
+      eventId: "tr1a-hidden",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-1",
+      result: "first-result",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr1a-hidden",
+      },
+    } as unknown as ConversationEvent;
+    const toolCall2: ConversationEvent = {
+      eventId: "tc1b-hidden",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-1",
+      name: "search",
+      source: { providerEventType: "tool_call", providerEventId: "tc1b-hidden" },
+    } as unknown as ConversationEvent;
+    const toolResult2: ConversationEvent = {
+      eventId: "tr1b-hidden",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-1",
+      result: "second-result",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr1b-hidden",
+      },
+    } as unknown as ConversationEvent;
 
-    const rendered = renderEventsToMarkdown([baseAssistant], {
+    const events: ConversationEvent[] = [
+      baseAssistant,
+      toolCall1,
+      toolResult1,
+      toolCall2,
+      toolResult2,
+    ];
+
+    const rendered = renderEventsToMarkdown(events, {
       includeFrontmatter: false,
       includeToolCalls: false,
       includeThinking: false,

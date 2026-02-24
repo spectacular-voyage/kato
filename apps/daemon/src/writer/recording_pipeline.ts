@@ -345,12 +345,13 @@ export class RecordingPipeline implements RecordingPipelineLike {
     writerOptions: MarkdownRenderOptions,
     format: ExportFormat,
   ): Promise<MarkdownWriteResult> {
-    if (format === "jsonl" && this.jsonlWriter) {
-      return await this.jsonlWriter.writeEvents(
-        outputPath,
-        events,
-        "overwrite",
-      );
+    if (format === "jsonl") {
+      if (!this.jsonlWriter) {
+        throw new Error(
+          "JSONL export requested but jsonlWriter is not configured",
+        );
+      }
+      return await this.jsonlWriter.writeEvents(outputPath, events, "overwrite");
     }
     return await this.writer.overwriteEvents(outputPath, events, writerOptions);
   }

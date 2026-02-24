@@ -65,7 +65,7 @@ Expected:
 ### 2) Configure provider roots and seed fixture
 
 ```bash
-deno eval -A 'const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/config.json`; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
+deno eval -A 'const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/config.json`; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
 mkdir -p ~/.kato/test-provider/codex
 cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```

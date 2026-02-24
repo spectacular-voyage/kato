@@ -53,8 +53,12 @@ Supported commands:
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
   - Show daemon status.
-- `export <session-id> [--output <path>]`
+- `export <session-id> [--output|-o <path>] [--format|-f markdown|jsonl]`
   - Queue one-off export request for the specified session id.
+  - `--format markdown` (default): render as a human-readable markdown file.
+  - `--format jsonl` / `-f jsonl`: emit one canonical `ConversationEvent` JSON
+    object per line.
+  - When `--output` is omitted, the daemon chooses a default path.
 - `clean [--all|--recordings <days>|--sessions <days>] [--dry-run]`
   - Queue cleanup request.
 
@@ -93,13 +97,17 @@ Default config shape:
     ],
     "codex": [
       "~/.codex/sessions"
+    ],
+    "gemini": [
+      "~/.gemini/tmp"
     ]
   },
   "featureFlags": {
     "writerIncludeThinking": true,
     "writerIncludeToolCalls": true,
     "writerItalicizeUserMessages": false,
-    "daemonExportEnabled": true
+    "daemonExportEnabled": true,
+    "captureIncludeSystemEvents": false
   }
 }
 ```

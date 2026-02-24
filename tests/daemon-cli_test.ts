@@ -49,6 +49,7 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
     providerSessionRoots: {
       claude: ["/sessions/claude"],
       codex: ["/sessions/codex"],
+      gemini: ["/sessions/gemini"],
     },
     featureFlags: createDefaultRuntimeFeatureFlags(),
   };
@@ -65,6 +66,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
       providerSessionRoots: {
         claude: [...initial.providerSessionRoots.claude],
         codex: [...initial.providerSessionRoots.codex],
+        gemini: [...initial.providerSessionRoots.gemini],
       },
       featureFlags: { ...initial.featureFlags },
     }
@@ -84,6 +86,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           providerSessionRoots: {
             claude: [...state.providerSessionRoots.claude],
             codex: [...state.providerSessionRoots.codex],
+            gemini: [...state.providerSessionRoots.gemini],
           },
           featureFlags: { ...state.featureFlags },
         });
@@ -97,6 +100,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             providerSessionRoots: {
               claude: [...defaultConfig.providerSessionRoots.claude],
               codex: [...defaultConfig.providerSessionRoots.codex],
+              gemini: [...defaultConfig.providerSessionRoots.gemini],
             },
             featureFlags: { ...defaultConfig.featureFlags },
           };
@@ -108,6 +112,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               providerSessionRoots: {
                 claude: [...state.providerSessionRoots.claude],
                 codex: [...state.providerSessionRoots.codex],
+                gemini: [...state.providerSessionRoots.gemini],
               },
               featureFlags: { ...state.featureFlags },
             },
@@ -123,6 +128,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             providerSessionRoots: {
               claude: [...state.providerSessionRoots.claude],
               codex: [...state.providerSessionRoots.codex],
+              gemini: [...state.providerSessionRoots.gemini],
             },
             featureFlags: { ...state.featureFlags },
           },

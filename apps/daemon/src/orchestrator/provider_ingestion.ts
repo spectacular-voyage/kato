@@ -12,6 +12,7 @@ import {
 } from "../observability/mod.ts";
 import { parseClaudeEvents } from "../providers/claude/mod.ts";
 import { parseCodexEvents } from "../providers/codex/mod.ts";
+import { parseGeminiEvents } from "../providers/gemini/mod.ts";
 import type {
   ProviderIngestionPollResult,
   ProviderIngestionRunner,
@@ -53,6 +54,7 @@ export interface ProviderIngestionFactoryOptions {
   discoveryIntervalMs?: number;
   claudeSessionRoots?: string[];
   codexSessionRoots?: string[];
+  geminiSessionRoots?: string[];
   watchFs?: (
     watchPaths: string[],
     onBatch: (batch: DebouncedWatchBatch) => Promise<void> | void,
@@ -119,10 +121,34 @@ function resolveByteOffset(cursor: ProviderCursor | undefined): number {
   return 0;
 }
 
+function resolveItemIndex(cursor: ProviderCursor | undefined): number {
+  if (cursor?.kind === "item-index" && Number.isFinite(cursor.value)) {
+    return Math.max(0, Math.floor(cursor.value));
+  }
+  return 0;
+}
+
+function resolveCursorPosition(cursor: ProviderCursor | undefined): number {
+  if (cursor?.kind === "byte-offset") {
+    return resolveByteOffset(cursor);
+  }
+  if (cursor?.kind === "item-index") {
+    return resolveItemIndex(cursor);
+  }
+  return 0;
+}
+
 function makeByteOffsetCursor(offset: number): ProviderCursor {
   return {
     kind: "byte-offset",
     value: Math.max(0, Math.floor(offset)),
+  };
+}
+
+function makeItemIndexCursor(index: number): ProviderCursor {
+  return {
+    kind: "item-index",
+    value: Math.max(0, Math.floor(index)),
   };
 }
 
@@ -197,6 +223,15 @@ function resolveCodexSessionRoots(overrides?: string[]): string[] {
   return normalizeRoots([join(home, ".codex", "sessions")]);
 }
 
+function resolveGeminiSessionRoots(overrides?: string[]): string[] {
+  if (overrides) return normalizeRoots(overrides);
+  const envRoots = parseRootsFromEnv("KATO_GEMINI_SESSION_ROOTS");
+  if (envRoots && envRoots.length > 0) return envRoots;
+  const home = resolveHomeDir();
+  if (!home) return [];
+  return normalizeRoots([join(home, ".gemini", "tmp")]);
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await Deno.stat(path);
@@ -236,6 +271,36 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
         continue;
       }
       if (entry.isFile && entry.name.endsWith(".jsonl")) {
+        yield fullPath;
+      }
+    }
+  }
+}
+
+async function* walkJsonFiles(root: string): AsyncGenerator<string> {
+  const stack: string[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    let entries: AsyncIterable<Deno.DirEntry>;
+    try {
+      entries = Deno.readDir(current);
+    } catch (error) {
+      if (
+        error instanceof Deno.errors.NotFound ||
+        error instanceof Deno.errors.PermissionDenied
+      ) {
+        continue;
+      }
+      throw error;
+    }
+    for await (const entry of entries) {
+      const fullPath = join(current, entry.name);
+      if (entry.isDirectory) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile && entry.name.endsWith(".json")) {
         yield fullPath;
       }
     }
@@ -329,6 +394,51 @@ async function discoverCodexSessions(
   return sessions;
 }
 
+async function readGeminiSessionId(
+  filePath: string,
+): Promise<string | undefined> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const root = parsed as Record<string, unknown>;
+  if (!Array.isArray(root["messages"])) {
+    return undefined;
+  }
+  const sessionId = root["sessionId"];
+  if (isNonEmptyString(sessionId)) {
+    return sessionId.trim();
+  }
+  const fromName = basename(filePath, ".json").trim();
+  return fromName.length > 0 ? fromName : undefined;
+}
+
+async function discoverGeminiSessions(
+  roots: string[],
+): Promise<ProviderSessionFile[]> {
+  const sessions: ProviderSessionFile[] = [];
+  for (const root of roots) {
+    if (!(await pathExists(root))) continue;
+    for await (const filePath of walkJsonFiles(root)) {
+      const filename = basename(filePath);
+      if (!filename.startsWith("session-")) continue;
+      const sessionId = await readGeminiSessionId(filePath);
+      if (!sessionId) continue;
+      sessions.push({
+        sessionId,
+        filePath,
+        modifiedAtMs: await statModifiedAtMs(filePath),
+      });
+    }
+  }
+  return sessions;
+}
+
 function eventSignature(event: ConversationEvent): string {
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
@@ -339,9 +449,11 @@ function eventSignature(event: ConversationEvent): string {
     case "message.system":
       return `${base}\0${event.content}`;
     case "tool.call":
-      return `${base}\0${event.toolCallId}\0${event.name}`;
+      return `${base}\0${event.toolCallId}\0${event.name}\0${
+        event.description ?? ""
+      }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
     case "tool.result":
-      return `${base}\0${event.toolCallId}`;
+      return `${base}\0${event.toolCallId}\0${event.result}`;
     case "thinking":
       return `${base}\0${event.content}`;
     case "decision":
@@ -481,7 +593,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const sessionId = this.sessionByFilePath.get(path);
       if (sessionId) {
         this.dirtySessions.add(sessionId);
-      } else if (path.endsWith(".jsonl")) {
+      } else {
         this.needsDiscovery = true;
       }
     }
@@ -626,7 +738,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     const session = this.sessions.get(sessionId);
     if (!session) return { updated: false, eventsObserved: 0 };
 
-    let fromOffset = resolveByteOffset(this.cursors.get(sessionId));
+    const existingCursor = this.cursors.get(sessionId);
+    let fromOffset = resolveCursorPosition(existingCursor);
     let fileStat: Deno.FileInfo;
     try {
       fileStat = await Deno.stat(session.filePath);
@@ -640,19 +753,23 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       throw error;
     }
 
-    const fileSize = fileStat.size ?? 0;
-    if (fromOffset > fileSize) {
-      fromOffset = 0;
-      this.cursors.set(sessionId, makeByteOffsetCursor(0));
-      await this.operationalLogger.warn(
-        "provider.ingestion.cursor.reset",
-        "Provider ingestion cursor reset after file truncation",
-        { provider: this.provider, sessionId, filePath: session.filePath },
-      );
+    if (existingCursor?.kind === "byte-offset") {
+      const fileSize = fileStat.size ?? 0;
+      if (fromOffset > fileSize) {
+        fromOffset = 0;
+        this.cursors.set(sessionId, makeByteOffsetCursor(0));
+        await this.operationalLogger.warn(
+          "provider.ingestion.cursor.reset",
+          "Provider ingestion cursor reset after file truncation",
+          { provider: this.provider, sessionId, filePath: session.filePath },
+        );
+      }
     }
 
     const incomingEvents: ConversationEvent[] = [];
-    let latestCursor: ProviderCursor = makeByteOffsetCursor(fromOffset);
+    let latestCursor: ProviderCursor = existingCursor?.kind === "item-index"
+      ? makeItemIndexCursor(fromOffset)
+      : makeByteOffsetCursor(fromOffset);
 
     try {
       for await (
@@ -663,11 +780,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         )
       ) {
         incomingEvents.push(event);
-        if (cursor.kind === "byte-offset") {
-          const current = latestCursor.kind === "byte-offset"
-            ? latestCursor.value
-            : 0;
-          if (cursor.value > current) latestCursor = cursor;
+        if (cursor.kind === "byte-offset" || cursor.kind === "item-index") {
+          const current = resolveCursorPosition(latestCursor);
+          const incoming = resolveCursorPosition(cursor);
+          if (cursor.kind !== latestCursor.kind || incoming > current) {
+            latestCursor = cursor;
+          }
         } else {
           latestCursor = cursor;
         }
@@ -696,9 +814,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       return { updated: false, eventsObserved: 0 };
     }
 
-    const latestOffset = latestCursor.kind === "byte-offset"
-      ? latestCursor.value
-      : fromOffset;
+    const latestOffset = resolveCursorPosition(latestCursor);
 
     if (incomingEvents.length === 0 && latestOffset === fromOffset) {
       return { updated: false, eventsObserved: 0 };
@@ -785,6 +901,26 @@ export function createCodexIngestionRunner(
   });
 }
 
+export function createGeminiIngestionRunner(
+  options: CreateProviderIngestionRunnerOptions,
+): ProviderIngestionRunner {
+  const roots = resolveGeminiSessionRoots(options.sessionRoots);
+  return new FileProviderIngestionRunner({
+    provider: "gemini",
+    watchRoots: roots,
+    discoverSessions: () => discoverGeminiSessions(roots),
+    parseEvents: (filePath, fromOffset, ctx) =>
+      parseGeminiEvents(filePath, fromOffset, ctx),
+    sessionSnapshotStore: options.sessionSnapshotStore,
+    now: options.now,
+    discoveryIntervalMs: options.discoveryIntervalMs,
+    watchDebounceMs: options.watchDebounceMs,
+    watchFs: options.watchFs,
+    operationalLogger: options.operationalLogger,
+    auditLogger: options.auditLogger,
+  });
+}
+
 export function createDefaultProviderIngestionRunners(
   options: ProviderIngestionFactoryOptions,
 ): ProviderIngestionRunner[] {
@@ -802,6 +938,16 @@ export function createDefaultProviderIngestionRunners(
     createCodexIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
       sessionRoots: options.codexSessionRoots,
+      now: options.now,
+      watchDebounceMs: options.watchDebounceMs,
+      discoveryIntervalMs: options.discoveryIntervalMs,
+      watchFs: options.watchFs,
+      operationalLogger: options.operationalLogger,
+      auditLogger: options.auditLogger,
+    }),
+    createGeminiIngestionRunner({
+      sessionSnapshotStore: options.sessionSnapshotStore,
+      sessionRoots: options.geminiSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
       discoveryIntervalMs: options.discoveryIntervalMs,

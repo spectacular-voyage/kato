@@ -42,6 +42,7 @@ export {
   createCodexIngestionRunner,
   createDefaultProviderIngestionRunners,
   createDefaultStatusSnapshot,
+  createGeminiIngestionRunner,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
   DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY,

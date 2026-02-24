@@ -11,6 +11,7 @@ export interface RuntimeFeatureFlags {
 export interface ProviderSessionRoots {
   claude: string[];
   codex: string[];
+  gemini: string[];
 }
 
 export interface RuntimeConfig {

@@ -25,8 +25,8 @@ For implementation constraints and security invariants, also see:
 
 - **Daemon**: long-running subprocess (`kato __daemon-run`) that ingests
   provider logs, handles queued control commands, and updates runtime status.
-- **Provider**: external conversation source (currently `claude`, `codex`)
-  represented as session log files under configured roots.
+- **Provider**: external conversation source (currently `claude`, `codex`,
+  `gemini`) represented as session log files under configured roots.
 - **Session**: one provider conversation identified by a provider-specific
   `sessionId`.
 - **ConversationEvent**: typed canonical event record (kind: `message.user`,
@@ -64,7 +64,7 @@ graph TD
     CONFIG[~/.kato/config.json]
     CONTROL[~/.kato/runtime/control.json]
     STATUS[~/.kato/runtime/status.json]
-    LOGS[provider session logs .jsonl]
+    LOGS[provider session logs .jsonl/.json]
     OUTPUT[exports .md]
     OPLOG[operational.jsonl]
     AUDIT[security-audit.jsonl]
@@ -169,7 +169,8 @@ Per runner responsibilities:
 - watch filesystem changes with debounce
 - maintain in-memory cursor map per session
 - parse new log content from last cursor
-- merge/dedupe events against existing snapshot (signature includes kind, source fields, and content)
+- merge/dedupe events against existing snapshot (signature includes kind, source
+  fields, and content)
 - upsert into shared snapshot store
 - emit operational and audit events for starts/errors/cursor updates/drops
 
@@ -192,7 +193,8 @@ Per runner responsibilities:
 
 `export` command flow:
 
-1. CLI enqueues request in `control.json` (with optional `format: markdown|jsonl`)
+1. CLI enqueues request in `control.json` (with optional
+   `format: markdown|jsonl`)
 2. runtime loop reads request
 3. runtime resolves snapshot events via `loadSessionSnapshot`
 4. writer pipeline enforces path policy
@@ -264,7 +266,8 @@ Runtime startup wires JSONL file sinks under `<runtimeDir>/logs`.
 - ingestion runner behavior: `tests/provider-ingestion_test.ts`
 - snapshot store semantics: `tests/daemon-ingestion-runtime_test.ts`
 - config parsing/defaulting/fail-closed behavior: `tests/runtime-config_test.ts`
-- parser fixtures: `tests/claude-parser_test.ts`, `tests/codex-parser_test.ts`
+- parser fixtures: `tests/claude-parser_test.ts`, `tests/codex-parser_test.ts`,
+  `tests/gemini-parser_test.ts`
 - write policy enforcement: `tests/path-policy_test.ts`
 
 ## Extension Guide

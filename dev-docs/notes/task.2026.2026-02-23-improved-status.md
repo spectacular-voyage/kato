@@ -2,7 +2,7 @@
 id: qj35rmg7lnprv1nf706jhh1
 title: 2026 02 23 Improved Status
 desc: ""
-updated: 1771870652766
+updated: 1771970992600
 created: 1771870111637
 ---
 
@@ -70,6 +70,11 @@ Put reusable status model/projection logic in `shared/`:
 CLI-specific plain text formatting can remain in daemon, but it should consume
 shared projected data.
 
+### 3) "Live status"
+
+- instead of returning, the status stays onscreen (maybe fullscreen) and updates in real time
+- including a text-based memory graph would be nice. Keep execution-scope data fixed, and display most recent sessions/recordings. 
+
 ## Proposed Data Model Changes
 
 Extend `DaemonStatusSnapshot` with session-level details instead of only
@@ -79,6 +84,7 @@ Candidate additions:
 
 - `sessions: DaemonSessionStatus[]`
 - `recordings.active: DaemonRecordingStatus[]` (or `recordings.entries`)
+- performance data like memory use, maybe with OpenTelemetry
 
 Candidate `DaemonSessionStatus` fields:
 

@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1771831053047
+updated: 1771973806111
 created: 1771812869620
 ---
 
@@ -19,17 +19,24 @@ created: 1771812869620
 
 ## Runtime And Ingestion Follow-ups
 
-- [ ] Persist provider cursors across daemon restarts (disk-backed cursor state).
+- [ ] Persist provider cursors across daemon restarts (disk-backed cursor state),
+      so re-parses after restart produce stable event signatures for Codex events
+      (whose timestamps are synthetic parse-time values, not provider-native).
+- [ ] Persist sessions/recording state across daemon restarts
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into
       `clean` command behavior.
 - [ ] Add permission-boundary tests that prove provider reads are denied outside
       `providerSessionRoots`.
-- [ ] _maybe_ Fix snapshot store key to include provider identity (`${provider}:${sessionId}`)
+- [ ] Fix snapshot store key to include provider identity (`${provider}:${sessionId}`)
       so concurrent Claude and Codex ingestion cannot clobber each other; requires
-      deciding `get(sessionId)` semantics for provider-unaware export lookups.
+      a design decision on `get(sessionId)` semantics for provider-unaware export
+      lookups (return first match? require provider param everywhere?).
 - [ ] _maybe_ Fix mid-turn cursor advancement: cursor must not advance past an incomplete
       multi-entry assistant turn; polling at a turn boundary splits one logical
-      event into two separate snapshot entries that dedupe cannot collapse.
+      event into two separate snapshot entries that dedupe cannot collapse. This
+      requires the ingestion runner to detect turn boundaries per provider (e.g.
+      `task_complete`/`final_answer` for Codex; consecutive assistant entries for
+      Claude) and buffer partial turns between polls — significant redesign.
 
 ## CLI And Runtime Hardening
 

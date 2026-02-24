@@ -17,6 +17,7 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
     providerSessionRoots: {
       claude: ["/sessions/claude"],
       codex: ["/sessions/codex"],
+      gemini: ["/sessions/gemini"],
     },
     featureFlags: {
       writerIncludeThinking: false,

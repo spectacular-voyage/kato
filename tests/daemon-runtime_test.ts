@@ -553,7 +553,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot is missing", 
   );
 });
 
-Deno.test("runDaemonRuntimeLoop skips export when session snapshot has no messages", async () => {
+Deno.test("runDaemonRuntimeLoop skips export when session snapshot has no events", async () => {
   const statusStore: DaemonStatusSnapshotStoreLike = {
     load() {
       return Promise.resolve({
@@ -1053,6 +1053,8 @@ Deno.test("runDaemonRuntimeLoop populates status.providers from session snapshot
   ]);
 });
 
+// Note: `lastMessageAt` is the external ProviderStatus field name (status.json API surface,
+// intentionally kept for backward compatibility). Internally the snapshot store uses `lastEventAt`.
 Deno.test("runDaemonRuntimeLoop omits lastMessageAt when provider sessions have no message timestamps", async () => {
   const statusHistory: DaemonStatusSnapshot[] = [];
   let currentStatus: DaemonStatusSnapshot = {
