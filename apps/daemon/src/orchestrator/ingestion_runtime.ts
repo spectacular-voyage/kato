@@ -1,17 +1,18 @@
-import type { Message, ProviderCursor } from "@kato/shared";
+import type { ConversationEvent, ProviderCursor } from "@kato/shared";
 
 export interface SessionSnapshotStatusMetadata {
   updatedAt: string;
-  messageCount: number;
-  truncatedMessages: number;
-  lastMessageAt?: string;
+  eventCount: number;
+  truncatedEvents: number;
+  lastEventAt?: string;
 }
 
 export interface RuntimeSessionSnapshot {
   provider: string;
   sessionId: string;
   cursor: ProviderCursor;
-  messages: Message[];
+  events: ConversationEvent[];
+  conversationSchemaVersion: 2;
   metadata: SessionSnapshotStatusMetadata;
 }
 
@@ -19,7 +20,7 @@ export interface SessionSnapshotUpsert {
   provider: string;
   sessionId: string;
   cursor: ProviderCursor;
-  messages: Message[];
+  events: ConversationEvent[];
 }
 
 export interface SessionSnapshotStore {
@@ -32,7 +33,7 @@ export interface ProviderIngestionPollResult {
   provider: string;
   polledAt: string;
   sessionsUpdated: number;
-  messagesObserved: number;
+  eventsObserved: number;
 }
 
 export interface ProviderIngestionRunner {
@@ -44,13 +45,13 @@ export interface ProviderIngestionRunner {
 
 export interface SessionSnapshotStoreRetentionPolicy {
   maxSessions: number;
-  maxMessagesPerSession: number;
+  maxEventsPerSession: number;
 }
 
 export const DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY:
   SessionSnapshotStoreRetentionPolicy = {
     maxSessions: 200,
-    maxMessagesPerSession: 200,
+    maxEventsPerSession: 200,
   };
 
 export interface InMemorySessionSnapshotStoreOptions {
@@ -73,21 +74,21 @@ function resolveRetentionPolicy(
 ): SessionSnapshotStoreRetentionPolicy {
   const maxSessions = retention?.maxSessions ??
     DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY.maxSessions;
-  const maxMessagesPerSession = retention?.maxMessagesPerSession ??
-    DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY.maxMessagesPerSession;
+  const maxEventsPerSession = retention?.maxEventsPerSession ??
+    DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY.maxEventsPerSession;
 
   if (!isPositiveSafeInteger(maxSessions)) {
     throw new Error("Session snapshot retention maxSessions must be > 0");
   }
-  if (!isPositiveSafeInteger(maxMessagesPerSession)) {
+  if (!isPositiveSafeInteger(maxEventsPerSession)) {
     throw new Error(
-      "Session snapshot retention maxMessagesPerSession must be > 0",
+      "Session snapshot retention maxEventsPerSession must be > 0",
     );
   }
 
   return {
     maxSessions,
-    maxMessagesPerSession,
+    maxEventsPerSession,
   };
 }
 
@@ -98,9 +99,9 @@ function requireNonEmpty(value: string, fieldName: string): string {
   return value;
 }
 
-function readLastMessageAt(messages: Message[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const timestamp = messages[i]?.timestamp;
+function readLastEventAt(events: ConversationEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const timestamp = events[i]?.timestamp;
     if (typeof timestamp === "string" && timestamp.length > 0) {
       return timestamp;
     }
@@ -121,26 +122,27 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
   upsert(input: SessionSnapshotUpsert): RuntimeSessionSnapshot {
     const provider = requireNonEmpty(input.provider, "provider");
     const sessionId = requireNonEmpty(input.sessionId, "sessionId");
-    const retainedMessages = input.messages.slice(
-      -this.retention.maxMessagesPerSession,
+    const retainedEvents = input.events.slice(
+      -this.retention.maxEventsPerSession,
     );
-    const truncatedMessages = Math.max(
+    const truncatedEvents = Math.max(
       0,
-      input.messages.length - retainedMessages.length,
+      input.events.length - retainedEvents.length,
     );
     const updatedAt = this.now().toISOString();
-    const lastMessageAt = readLastMessageAt(retainedMessages);
+    const lastEventAt = readLastEventAt(retainedEvents);
 
     const snapshot: RuntimeSessionSnapshot = {
       provider,
       sessionId,
       cursor: structuredClone(input.cursor),
-      messages: structuredClone(retainedMessages),
+      events: structuredClone(retainedEvents),
+      conversationSchemaVersion: 2,
       metadata: {
         updatedAt,
-        messageCount: retainedMessages.length,
-        truncatedMessages,
-        ...(lastMessageAt ? { lastMessageAt } : {}),
+        eventCount: retainedEvents.length,
+        truncatedEvents,
+        ...(lastEventAt ? { lastEventAt } : {}),
       },
     };
 

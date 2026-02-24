@@ -5,6 +5,7 @@ export interface RuntimeFeatureFlags {
   writerIncludeToolCalls: boolean;
   writerItalicizeUserMessages: boolean;
   daemonExportEnabled: boolean;
+  captureIncludeSystemEvents: boolean;
 }
 
 export interface ProviderSessionRoots {
@@ -25,5 +26,5 @@ export interface RuntimeConfig {
 export interface RuntimeConfigMetadata {
   configSource: ConfigSource;
   statusSchemaVersion: 1;
-  conversationSchemaVersion: 1;
+  conversationSchemaVersion: 2;
 }

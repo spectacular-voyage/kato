@@ -23,6 +23,7 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
       writerIncludeToolCalls: false,
       writerItalicizeUserMessages: true,
       daemonExportEnabled: false,
+      captureIncludeSystemEvents: false,
     },
   };
 }

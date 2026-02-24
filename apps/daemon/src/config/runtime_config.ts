@@ -34,6 +34,7 @@ const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
   "writerIncludeToolCalls",
   "writerItalicizeUserMessages",
   "daemonExportEnabled",
+  "captureIncludeSystemEvents",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "claude",

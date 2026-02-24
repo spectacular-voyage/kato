@@ -17,6 +17,7 @@ Deno.test("OpenFeature bootstrap uses deterministic local defaults", () => {
     includeThinking: false,
     includeToolCalls: false,
     italicizeUserMessages: false,
+    includeSystemEvents: false,
   });
 });
 
@@ -39,5 +40,6 @@ Deno.test("OpenFeature bootstrap applies local overrides", () => {
     includeThinking: false,
     includeToolCalls: false,
     italicizeUserMessages: true,
+    includeSystemEvents: false,
   });
 });
