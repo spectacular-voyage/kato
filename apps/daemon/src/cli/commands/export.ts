@@ -4,6 +4,7 @@ export async function runExportCommand(
   ctx: DaemonCliCommandContext,
   sessionId: string,
   outputPath?: string,
+  format?: "markdown" | "jsonl",
 ): Promise<void> {
   let resolvedOutputPath = outputPath;
   if (outputPath) {
@@ -46,6 +47,7 @@ export async function runExportCommand(
       sessionId,
       ...(outputPath ? { outputPath } : {}),
       ...(resolvedOutputPath ? { resolvedOutputPath } : {}),
+      ...(format ? { format } : {}),
       requestedByPid: ctx.runtime.pid,
     },
   });
@@ -58,6 +60,7 @@ export async function runExportCommand(
       sessionId,
       outputPath,
       resolvedOutputPath,
+      format,
       controlPath: ctx.runtime.controlPath,
     },
   );
@@ -66,11 +69,12 @@ export async function runExportCommand(
     sessionId,
     outputPath,
     resolvedOutputPath,
+    format,
   });
 
   ctx.runtime.writeStdout(
     `export request queued: session=${sessionId}${
       outputPath ? ` output=${outputPath}` : ""
-    } requestId=${request.requestId}\n`,
+    }${format ? ` format=${format}` : ""} requestId=${request.requestId}\n`,
   );
 }

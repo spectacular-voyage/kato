@@ -15,7 +15,12 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean }
-  | { name: "export"; sessionId: string; outputPath?: string }
+  | {
+    name: "export";
+    sessionId: string;
+    outputPath?: string;
+    format?: "markdown" | "jsonl";
+  }
   | {
     name: "clean";
     all: boolean;

@@ -283,6 +283,7 @@ export async function runDaemonCli(
           commandContext,
           intent.command.sessionId,
           intent.command.outputPath,
+          intent.command.format,
         );
         return 0;
       case "clean":

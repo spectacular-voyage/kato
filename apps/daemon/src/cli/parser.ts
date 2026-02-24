@@ -139,10 +139,11 @@ function parseStatus(rest: string[]): DaemonCliIntent {
 function parseExport(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
-    string: ["output"],
+    string: ["output", "format"],
     alias: {
       h: "help",
       o: "output",
+      f: "format",
     },
   });
 
@@ -162,10 +163,24 @@ function parseExport(rest: string[]): DaemonCliIntent {
       ? parsed.output
       : undefined;
 
+  const formatRaw = typeof parsed.format === "string"
+    ? parsed.format
+    : undefined;
+  if (
+    formatRaw !== undefined && formatRaw !== "markdown" &&
+    formatRaw !== "jsonl"
+  ) {
+    throw new CliUsageError(
+      `--format must be 'markdown' or 'jsonl', got: ${formatRaw}`,
+    );
+  }
+  const format = formatRaw as "markdown" | "jsonl" | undefined;
+
   const command: DaemonCliCommand = {
     name: "export",
     sessionId: positionals[0]!,
     ...(outputPath ? { outputPath } : {}),
+    ...(format ? { format } : {}),
   };
 
   return { kind: "command", command };
