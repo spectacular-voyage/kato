@@ -112,12 +112,7 @@ function collapseHome(path: string): string {
     return "~";
   }
 
-  if (
-    rel.startsWith("..") ||
-    rel.startsWith("../") ||
-    rel.startsWith("..\\") ||
-    isAbsolute(rel)
-  ) {
+  if (rel.startsWith("..") || isAbsolute(rel)) {
     return path;
   }
 

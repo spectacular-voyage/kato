@@ -199,8 +199,14 @@ export async function runDaemonCli(
           runtimeConfig = initialized.config;
           if (initialized.created) {
             autoInitializedConfigPath = initialized.path;
-            // Reload to resolve any persisted path shorthand (for example "~").
-            runtimeConfig = await configStore.load();
+            // Reload after init so persisted path shorthands (e.g. "~") are
+            // expanded by the store's own load logic. Fall back to the
+            // just-initialized config if the reload fails.
+            try {
+              runtimeConfig = await configStore.load();
+            } catch {
+              runtimeConfig = initialized.config;
+            }
           }
         } else {
           runtime.writeStderr(

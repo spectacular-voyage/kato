@@ -351,7 +351,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
           "JSONL export requested but jsonlWriter is not configured",
         );
       }
-      return await this.jsonlWriter.writeEvents(outputPath, events, "overwrite");
+      return await this.jsonlWriter.writeEvents(
+        outputPath,
+        events,
+        "overwrite",
+      );
     }
     return await this.writer.overwriteEvents(outputPath, events, writerOptions);
   }

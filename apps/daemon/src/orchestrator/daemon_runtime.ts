@@ -116,7 +116,7 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
   return `${provider}\u0000${sessionId}`;
 }
 
-function makeEventSignature(event: ConversationEvent): string {
+function makeRuntimeEventSignature(event: ConversationEvent): string {
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
   }\0${event.timestamp}`;
@@ -364,7 +364,7 @@ async function processInChatRecordingUpdates(
     const sessionKey = makeSessionProcessingKey(provider, sessionId);
     activeSessionKeys.add(sessionKey);
 
-    const signatures = snapshot.events.map(makeEventSignature);
+    const signatures = snapshot.events.map(makeRuntimeEventSignature);
     const currentSignatureSet = new Set(signatures);
 
     const existingState = sessionEventStates.get(sessionKey);
@@ -385,7 +385,7 @@ async function processInChatRecordingUpdates(
       const event = snapshot.events[i];
       if (!event) continue;
 
-      const signature = signatures[i] ?? makeEventSignature(event);
+      const signature = signatures[i] ?? makeRuntimeEventSignature(event);
       if (existingState.seenEventSignatures.has(signature)) continue;
       existingState.seenEventSignatures.add(signature);
 
@@ -782,7 +782,9 @@ async function handleControlRequest(
       ? readString(payload["resolvedOutputPath"]) ??
         readString(payload["outputPath"])
       : undefined;
-    const formatRaw = isRecord(payload) ? readString(payload["format"]) : undefined;
+    const formatRaw = isRecord(payload)
+      ? readString(payload["format"])
+      : undefined;
     const format: "markdown" | "jsonl" | undefined =
       formatRaw === "markdown" || formatRaw === "jsonl" ? formatRaw : undefined;
 

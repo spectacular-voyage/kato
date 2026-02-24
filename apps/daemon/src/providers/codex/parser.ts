@@ -91,6 +91,8 @@ export async function* parseCodexEvents(
       sessionId,
       timestamp,
       kind,
+      // turnIdOverride semantics: undefined → fall back to currentTurnId;
+      // empty string → explicitly suppress turnId; non-empty → use as turnId.
       ...(turnIdOverride !== undefined
         ? (turnIdOverride ? { turnId: turnIdOverride } : {})
         : currentTurnId

@@ -17,6 +17,14 @@ export class JsonlConversationWriter {
     const content = lines.length > 0 ? `${lines}\n` : "";
 
     if (mode === "overwrite") {
+      if (content.length === 0) {
+        return {
+          mode: "overwrite" as ConversationWriteMode,
+          outputPath,
+          wrote: false,
+          deduped: false,
+        };
+      }
       await Deno.writeTextFile(outputPath, content);
       return {
         mode: "overwrite" as ConversationWriteMode,

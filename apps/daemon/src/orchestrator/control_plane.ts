@@ -251,6 +251,18 @@ export function isStatusSnapshotStale(
 export function resolveDefaultRuntimeDir(): string {
   const runtimeDirOverride = readEnvOptional("KATO_RUNTIME_DIR");
   if (runtimeDirOverride) {
+    // Expand leading ~ so users can set KATO_RUNTIME_DIR=~/.kato/runtime.
+    if (runtimeDirOverride.startsWith("~")) {
+      const home = resolveHomeDir();
+      if (home) {
+        if (runtimeDirOverride === "~") {
+          return home;
+        }
+        if (runtimeDirOverride.startsWith("~/")) {
+          return join(home, runtimeDirOverride.slice(2));
+        }
+      }
+    }
     return runtimeDirOverride;
   }
 

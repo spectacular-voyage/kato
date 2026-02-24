@@ -9,11 +9,7 @@ const FIXTURE_VSCODE = join(
   "fixtures",
   "codex-session-vscode-new.jsonl",
 );
-const _FIXTURE_LEGACY = join(
-  THIS_DIR,
-  "fixtures",
-  "codex-session-legacy.jsonl",
-);
+
 const FIXTURE_ABORTED = join(
   THIS_DIR,
   "fixtures",

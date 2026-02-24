@@ -85,7 +85,8 @@ export async function watchFsDebounced(
       watcher.close();
     } catch (error) {
       if (!(error instanceof Deno.errors.BadResource)) {
-        closeError = error;
+        // Preserve the first close error; don't overwrite if already set.
+        if (closeError === undefined) closeError = error;
       }
     }
   };
@@ -132,12 +133,16 @@ export async function watchFsDebounced(
       timer = null;
     }
 
+    // Deliberate drain-on-close: remove the abort listener, clear any pending
+    // timer, then flush accumulated events before closing the watcher so no
+    // buffered paths are lost on shutdown.
     await flush();
     try {
       watcher.close();
     } catch (error) {
       if (!(error instanceof Deno.errors.BadResource)) {
-        closeError = error;
+        // Preserve the first close error; don't overwrite if already set.
+        if (closeError === undefined) closeError = error;
       }
     }
   }

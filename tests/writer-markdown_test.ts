@@ -206,7 +206,10 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-1",
       name: "search",
-      source: { providerEventType: "tool_call", providerEventId: "tc1a-hidden" },
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc1a-hidden",
+      },
     } as unknown as ConversationEvent;
     const toolResult1: ConversationEvent = {
       eventId: "tr1a-hidden",
@@ -229,7 +232,10 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-1",
       name: "search",
-      source: { providerEventType: "tool_call", providerEventId: "tc1b-hidden" },
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc1b-hidden",
+      },
     } as unknown as ConversationEvent;
     const toolResult2: ConversationEvent = {
       eventId: "tr1b-hidden",
