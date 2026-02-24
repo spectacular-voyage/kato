@@ -77,6 +77,20 @@ export async function watchFsDebounced(
   const watcher = Deno.watchFs(watchPaths, {
     recursive: options.recursive ?? true,
   });
+  let aborted = options.signal?.aborted ?? false;
+  let closeError: unknown;
+  const onAbort = () => {
+    aborted = true;
+    try {
+      watcher.close();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BadResource)) {
+        // Preserve the first close error; don't overwrite if already set.
+        if (closeError === undefined) closeError = error;
+      }
+    }
+  };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const accumulator = new DebouncedPathAccumulator(debounceMs);
   let timer: number | null = null;
@@ -101,20 +115,39 @@ export async function watchFsDebounced(
 
   try {
     for await (const event of watcher) {
-      if (options.signal?.aborted) {
+      if (aborted || options.signal?.aborted) {
         break;
       }
 
       accumulator.add(event);
       scheduleFlush();
     }
+  } catch (error) {
+    if (!(aborted && error instanceof Deno.errors.BadResource)) {
+      throw error;
+    }
   } finally {
+    options.signal?.removeEventListener("abort", onAbort);
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
 
+    // Deliberate drain-on-close: remove the abort listener, clear any pending
+    // timer, then flush accumulated events before closing the watcher so no
+    // buffered paths are lost on shutdown.
     await flush();
-    watcher.close();
+    try {
+      watcher.close();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BadResource)) {
+        // Preserve the first close error; don't overwrite if already set.
+        if (closeError === undefined) closeError = error;
+      }
+    }
+  }
+
+  if (closeError !== undefined) {
+    throw closeError;
   }
 }

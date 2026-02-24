@@ -13,6 +13,11 @@ async function readJsonl(relativePath: string): Promise<JsonMap[]> {
   return lines.map((line) => JSON.parse(line) as JsonMap);
 }
 
+async function readJson(relativePath: string): Promise<JsonMap> {
+  const filePath = join(FIXTURE_DIR, relativePath);
+  return JSON.parse(await Deno.readTextFile(filePath)) as JsonMap;
+}
+
 Deno.test("ported fixtures parse as valid JSONL", async () => {
   const files = [
     "claude-session.jsonl",
@@ -94,4 +99,12 @@ Deno.test("Codex exec fixture remains minimal for smoke testing", async () => {
   assertEquals(rows.length, 2);
   assertEquals(rows[0]?.type, "session_meta");
   assertEquals(rows[1]?.type, "event_msg");
+});
+
+Deno.test("Gemini fixture keeps JSON session-message shape", async () => {
+  const session = await readJson("gemini-session.json");
+  assertEquals(session["sessionId"], "gemini-fixture-session-1");
+  const messages = session["messages"];
+  assert(Array.isArray(messages));
+  assert((messages as unknown[]).length > 0);
 });

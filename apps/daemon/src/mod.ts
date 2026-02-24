@@ -4,6 +4,7 @@ export {
   runDaemonSubprocess,
 } from "./main.ts";
 export type { RunDaemonSubprocessOptions } from "./main.ts";
+export { DAEMON_APP_VERSION } from "./version.ts";
 export {
   CliUsageError,
   type DaemonCliCommand,
@@ -41,6 +42,7 @@ export {
   createCodexIngestionRunner,
   createDefaultProviderIngestionRunners,
   createDefaultStatusSnapshot,
+  createGeminiIngestionRunner,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
   DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY,
@@ -126,6 +128,6 @@ export {
   makeCompactFrontmatterId,
   MarkdownConversationWriter,
   RecordingPipeline,
-  renderMessagesToMarkdown,
+  renderEventsToMarkdown,
   slugifyForFrontmatterId,
 } from "./writer/mod.ts";

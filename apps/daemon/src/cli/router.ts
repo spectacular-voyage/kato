@@ -2,6 +2,7 @@ import { CliUsageError } from "./errors.ts";
 import { parseDaemonCliArgs } from "./parser.ts";
 import { getCommandUsage, getGlobalUsage } from "./usage.ts";
 import type { DaemonCliRuntime } from "./types.ts";
+import { DAEMON_APP_VERSION } from "../version.ts";
 import type { RuntimeConfig } from "@kato/shared";
 import {
   DaemonControlRequestFileStore,
@@ -34,6 +35,7 @@ import {
   runCleanCommand,
   runExportCommand,
   runInitCommand,
+  runRestartCommand,
   runStartCommand,
   runStatusCommand,
   runStopCommand,
@@ -137,6 +139,7 @@ export async function runDaemonCli(
       statusPath: runtime.statusPath,
       controlPath: runtime.controlPath,
       allowedWriteRoots: resolveDefaultAllowedWriteRoots(),
+      useHomeShorthand: true,
     });
   const configStore = options.configStore ??
     new RuntimeConfigFileStore(runtime.configPath);
@@ -174,6 +177,11 @@ export async function runDaemonCli(
     return 0;
   }
 
+  if (intent.kind === "version") {
+    runtime.writeStdout(`kato ${DAEMON_APP_VERSION}\n`);
+    return 0;
+  }
+
   let runtimeConfig = defaultRuntimeConfig;
   let autoInitializedConfigPath: string | undefined;
   if (intent.command.name !== "init") {
@@ -181,13 +189,24 @@ export async function runDaemonCli(
       runtimeConfig = await configStore.load();
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
-        if (intent.command.name === "start" && autoInitOnStart) {
+        if (
+          (intent.command.name === "start" ||
+            intent.command.name === "restart") && autoInitOnStart
+        ) {
           const initialized = await configStore.ensureInitialized(
             defaultRuntimeConfig,
           );
           runtimeConfig = initialized.config;
           if (initialized.created) {
             autoInitializedConfigPath = initialized.path;
+            // Reload after init so persisted path shorthands (e.g. "~") are
+            // expanded by the store's own load logic. Fall back to the
+            // just-initialized config if the reload fails.
+            try {
+              runtimeConfig = await configStore.load();
+            } catch {
+              runtimeConfig = initialized.config;
+            }
           }
         } else {
           runtime.writeStderr(
@@ -210,6 +229,7 @@ export async function runDaemonCli(
     providerSessionRoots: {
       claude: [...runtimeConfig.providerSessionRoots.claude],
       codex: [...runtimeConfig.providerSessionRoots.codex],
+      gemini: [...runtimeConfig.providerSessionRoots.gemini],
     },
   };
   const statusStore = options.statusStore ??
@@ -239,7 +259,10 @@ export async function runDaemonCli(
     auditLogger,
   };
 
-  if (intent.command.name === "start" && autoInitializedConfigPath) {
+  if (
+    (intent.command.name === "start" || intent.command.name === "restart") &&
+    autoInitializedConfigPath
+  ) {
     runtime.writeStdout(
       `initialized runtime config at ${autoInitializedConfigPath}\n`,
     );
@@ -253,6 +276,9 @@ export async function runDaemonCli(
       case "start":
         await runStartCommand(commandContext);
         return 0;
+      case "restart":
+        await runRestartCommand(commandContext);
+        return 0;
       case "stop":
         await runStopCommand(commandContext);
         return 0;
@@ -264,6 +290,7 @@ export async function runDaemonCli(
           commandContext,
           intent.command.sessionId,
           intent.command.outputPath,
+          intent.command.format,
         );
         return 0;
       case "clean":

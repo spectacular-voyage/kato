@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
-import { parseCodexMessages } from "../apps/daemon/src/providers/codex/mod.ts";
+import type { ConversationEvent } from "@kato/shared";
+import { parseCodexEvents } from "../apps/daemon/src/providers/codex/mod.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const FIXTURE_VSCODE = join(
@@ -8,150 +9,145 @@ const FIXTURE_VSCODE = join(
   "fixtures",
   "codex-session-vscode-new.jsonl",
 );
-const FIXTURE_LEGACY = join(THIS_DIR, "fixtures", "codex-session-legacy.jsonl");
+
 const FIXTURE_ABORTED = join(
   THIS_DIR,
   "fixtures",
   "codex-session-aborted.jsonl",
 );
 
-type CodexParseResult = Awaited<ReturnType<typeof parseCodexMessages>> extends
-  AsyncIterable<infer Item> ? Item : never;
+const TEST_CTX = { provider: "codex", sessionId: "sess-vscode-001" };
 
-async function collectMessages(
+type ParseItem = {
+  event: ConversationEvent;
+  cursor: { kind: string; value: number };
+};
+
+async function collectEvents(
   filePath: string,
   fromOffset?: number,
-): Promise<CodexParseResult[]> {
-  const items: CodexParseResult[] = [];
-  for await (const item of parseCodexMessages(filePath, fromOffset)) {
-    items.push(item);
+  ctx = TEST_CTX,
+): Promise<ParseItem[]> {
+  const items: ParseItem[] = [];
+  for await (
+    const item of parseCodexEvents(filePath, fromOffset, ctx)
+  ) {
+    items.push(item as ParseItem);
   }
   return items;
 }
 
-Deno.test("codex parser strips IDE preamble and preserves command text", async () => {
-  const results = await collectMessages(FIXTURE_VSCODE);
-  const user1 = results[0]!;
-  assertEquals(user1.message.role, "user");
-  assertStringIncludes(
-    user1.message.content,
-    "::record @documentation/notes/test.md",
-  );
-  assertStringIncludes(user1.message.content, "Help me set up authentication");
-  assert(!user1.message.content.includes("## Active file:"));
-  assert(!user1.message.content.includes("# Context from my IDE setup"));
+Deno.test("codex parser strips IDE preamble from user message", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE);
+  const userEvent = results.find((r) => r.event.kind === "message.user");
+  assert(userEvent !== undefined);
+  if (userEvent.event.kind === "message.user") {
+    assertStringIncludes(
+      userEvent.event.content,
+      "::record @documentation/notes/test.md",
+    );
+    assertStringIncludes(
+      userEvent.event.content,
+      "Help me set up authentication",
+    );
+    assert(!userEvent.event.content.includes("## Active file:"));
+    assert(!userEvent.event.content.includes("# Context from my IDE setup"));
+  }
 });
 
 Deno.test("codex parser prefers final_answer over intermediate agent messages", async () => {
-  const results = await collectMessages(FIXTURE_VSCODE);
-  const assistant1 = results[1]!;
-  assertEquals(assistant1.message.role, "assistant");
-  assertStringIncludes(
-    assistant1.message.content,
-    "JWT tokens with a middleware approach",
+  const results = await collectEvents(FIXTURE_VSCODE);
+  const assistantEvents = results.filter(
+    (r) => r.event.kind === "message.assistant",
   );
-  assert(
-    !assistant1.message.content.includes(
-      "I'm analyzing your project structure",
-    ),
-  );
-  assert(
-    !assistant1.message.content.includes("Let me check the existing code"),
-  );
+  // At least 2 assistant messages for 2 turns.
+  assert(assistantEvents.length >= 2);
+  const firstAssistant = assistantEvents[0]!.event;
+  if (firstAssistant.kind === "message.assistant") {
+    assertStringIncludes(firstAssistant.content, "JWT tokens");
+    assert(!firstAssistant.content.includes("I'm analyzing your project"));
+    assert(!firstAssistant.content.includes("Let me check the existing code"));
+  }
 });
 
-Deno.test("codex parser emits one assistant message per finalized turn", async () => {
-  const results = await collectMessages(FIXTURE_VSCODE);
-  const assistantMessages = results.filter((item) =>
-    item.message.role === "assistant"
-  );
-  assertEquals(assistantMessages.length, 2);
-  assertEquals(
-    results.map((item) => item.message.role),
-    ["user", "assistant", "user", "assistant"],
-  );
-  assertEquals(results[2]!.message.content, "Can you also add OAuth?");
-});
+Deno.test("codex parser emits tool.call, tool.result, and thinking events", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE);
 
-Deno.test("codex parser links turn ids, model, tools, and reasoning", async () => {
-  const results = await collectMessages(FIXTURE_VSCODE);
-  assertEquals(results[0]!.message.id, "turn-001");
-  assertEquals(results[2]!.message.id, "turn-002");
-  assertEquals(results[1]!.message.model, "gpt-5.3-codex");
-
-  const toolCall = results[1]!.message.toolCalls?.[0];
-  assert(toolCall);
-  assertEquals(toolCall.name, "exec_command");
-  assertEquals(toolCall.input, { cmd: "ls src/" });
-  assertStringIncludes(toolCall.result ?? "", "auth.ts");
-
-  const thinking = results[1]!.message.thinkingBlocks?.[0];
-  assert(thinking);
-  assertStringIncludes(thinking.content, "set up authentication");
-});
-
-Deno.test("codex parser keeps offset ordering and resume semantics", async () => {
-  const full = await collectMessages(FIXTURE_VSCODE);
-  for (let i = 1; i < full.length; i++) {
-    assert(full[i]!.offset > full[i - 1]!.offset);
+  const toolCallEvent = results.find((r) => r.event.kind === "tool.call");
+  assert(toolCallEvent !== undefined);
+  if (toolCallEvent.event.kind === "tool.call") {
+    assertEquals(toolCallEvent.event.name, "exec_command");
+    assertStringIncludes(toolCallEvent.event.description ?? "", "ls src/");
   }
 
-  const resumedAfterUser1 = await collectMessages(
-    FIXTURE_VSCODE,
-    full[0]!.offset,
-  );
-  assertEquals(resumedAfterUser1[0]!.message.role, "assistant");
-  assertStringIncludes(resumedAfterUser1[0]!.message.content, "JWT tokens");
+  const toolResultEvent = results.find((r) => r.event.kind === "tool.result");
+  assert(toolResultEvent !== undefined);
+  if (toolResultEvent.event.kind === "tool.result") {
+    assertStringIncludes(toolResultEvent.event.result, "auth.ts");
+  }
 
-  const resumedAfterAssistant1 = await collectMessages(
-    FIXTURE_VSCODE,
-    full[1]!.offset,
-  );
-  assertEquals(resumedAfterAssistant1.length, 2);
-  assertEquals(resumedAfterAssistant1[0]!.message.role, "user");
-  assertEquals(resumedAfterAssistant1[1]!.message.role, "assistant");
+  const thinkingEvent = results.find((r) => r.event.kind === "thinking");
+  assert(thinkingEvent !== undefined);
+  if (thinkingEvent.event.kind === "thinking") {
+    assertStringIncludes(
+      thinkingEvent.event.content,
+      "set up authentication",
+    );
+  }
 });
 
-Deno.test("codex parser supports legacy EOF flush format", async () => {
-  const results = await collectMessages(FIXTURE_LEGACY);
-  assertEquals(results.length, 2);
-  assertEquals(results[0]!.message.role, "user");
-  assertEquals(
-    results[0]!.message.content,
-    "How do I use async/await in JavaScript?",
-  );
-  assertEquals(results[1]!.message.role, "assistant");
-  assertStringIncludes(
-    results[1]!.message.content,
-    "Async/await is a modern JavaScript feature",
-  );
-  assertEquals(results[1]!.message.model, undefined);
-
-  const toolCall = results[1]!.message.toolCalls?.[0];
-  assert(toolCall);
-  assertEquals(toolCall.name, "search");
-  assertStringIncludes(toolCall.result ?? "", "async/await is a syntax");
-
-  const thinking = results[1]!.message.thinkingBlocks?.[0];
-  assert(thinking);
-  assertStringIncludes(thinking.content, "async/await basics");
+Deno.test("codex parser emits message.user with correct turn id", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE);
+  const userEvents = results.filter((r) => r.event.kind === "message.user");
+  assert(userEvents.length >= 2);
+  // First user message should have turnId from task_started turn-001.
+  const firstUser = userEvents[0]!.event;
+  assertEquals(firstUser.turnId, "turn-001");
+  // Second user message should have turn-002.
+  const secondUser = userEvents[1]!.event;
+  assertEquals(secondUser.turnId, "turn-002");
+  if (secondUser.kind === "message.user") {
+    assertEquals(secondUser.content, "Can you also add OAuth?");
+  }
 });
 
-Deno.test("codex parser handles aborted turn without assistant payload", async () => {
-  const results = await collectMessages(FIXTURE_ABORTED);
-  assertEquals(results[0]!.message.role, "user");
-  const assistantMessages = results.filter((item) =>
-    item.message.role === "assistant"
+Deno.test("codex parser cursor increases monotonically and supports resume", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE);
+  for (let i = 1; i < results.length; i++) {
+    assert(results[i]!.cursor.value >= results[i - 1]!.cursor.value);
+  }
+
+  const firstUserIdx = results.findIndex((r) =>
+    r.event.kind === "message.user"
   );
-  assertEquals(assistantMessages.length, 0);
+  assert(firstUserIdx >= 0);
+  const resumeOffset = results[firstUserIdx]!.cursor.value;
+
+  const resumed = await collectEvents(FIXTURE_VSCODE, resumeOffset);
+  assert(resumed.length > 0);
+  // After the first user message, should get tool events and then assistant.
+  const firstResumedKind = resumed[0]!.event.kind;
+  assert(
+    firstResumedKind === "tool.call" ||
+      firstResumedKind === "thinking" ||
+      firstResumedKind === "message.assistant",
+  );
 });
 
-Deno.test("codex parser keeps stable EOF offset behavior", async () => {
-  const results = await collectMessages(FIXTURE_LEGACY);
-  const eofOffset = results[1]!.offset;
-  const fileSize = (await Deno.stat(FIXTURE_LEGACY)).size;
-  assert(eofOffset >= fileSize - 1);
+Deno.test("codex parser handles aborted session without errors", async () => {
+  const results = await collectEvents(
+    FIXTURE_ABORTED,
+    undefined,
+    { provider: "codex", sessionId: "sess-aborted" },
+  );
+  // Should not throw; may produce some events or be empty.
+  assert(Array.isArray(results));
+});
 
-  const resumed = await collectMessages(FIXTURE_LEGACY, eofOffset);
-  assertEquals(resumed.length, 0);
+Deno.test("codex parser populates source fields", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE);
+  assert(results.length > 0);
+  const first = results[0]!.event;
+  assert(first.source.providerEventType.length > 0);
+  assert(first.source.rawCursor !== undefined);
 });

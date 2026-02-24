@@ -3,6 +3,7 @@ import type { ProviderSessionRoots } from "@kato/shared";
 export type DaemonCliCommandName =
   | "init"
   | "start"
+  | "restart"
   | "stop"
   | "status"
   | "export"
@@ -11,9 +12,15 @@ export type DaemonCliCommandName =
 export type DaemonCliCommand =
   | { name: "init" }
   | { name: "start" }
+  | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean }
-  | { name: "export"; sessionId: string; outputPath?: string }
+  | {
+    name: "export";
+    sessionId: string;
+    outputPath?: string;
+    format?: "markdown" | "jsonl";
+  }
   | {
     name: "clean";
     all: boolean;
@@ -24,6 +31,7 @@ export type DaemonCliCommand =
 
 export type DaemonCliIntent =
   | { kind: "help"; topic?: DaemonCliCommandName }
+  | { kind: "version" }
   | { kind: "command"; command: DaemonCliCommand };
 
 export interface DaemonCliRuntime {

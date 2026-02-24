@@ -1,23 +1,28 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { join } from "@std/path";
-import type { Message } from "@kato/shared";
+import type { ConversationEvent } from "@kato/shared";
 import {
   AuditLogger,
   createClaudeIngestionRunner,
   createCodexIngestionRunner,
+  createGeminiIngestionRunner,
   FileProviderIngestionRunner,
   InMemorySessionSnapshotStore,
   type LogRecord,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
 
-function makeMessage(id: string, timestamp: string): Message {
+function makeEvent(id: string, timestamp: string): ConversationEvent {
   return {
-    id,
+    eventId: id,
+    provider: "test-provider",
+    sessionId: "sess-test",
+    timestamp,
+    kind: "message.assistant",
     role: "assistant",
     content: `${id}-content`,
-    timestamp,
-  };
+    source: { providerEventType: "assistant", providerEventId: id },
+  } as unknown as ConversationEvent;
 }
 
 class CaptureSink {
@@ -108,21 +113,25 @@ Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch u
           modifiedAtMs: Date.now(),
         }]);
       },
-      parseMessages(_filePath, fromOffset) {
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
         parseOffsets.push(fromOffset);
         return (async function* () {
           if (fromOffset === 0) {
             yield {
-              message: makeMessage("m1", "2026-02-22T20:00:00.000Z"),
-              offset: 10,
+              event: makeEvent("m1", "2026-02-22T20:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 10 },
             };
             return;
           }
 
           if (fromOffset === 10) {
             yield {
-              message: makeMessage("m2", "2026-02-22T20:01:00.000Z"),
-              offset: 20,
+              event: makeEvent("m2", "2026-02-22T20:01:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 20 },
             };
           }
         })();
@@ -132,21 +141,21 @@ Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch u
     await runner.start();
     const firstPoll = await runner.poll();
     assertEquals(firstPoll.sessionsUpdated, 1);
-    assertEquals(firstPoll.messagesObserved, 1);
+    assertEquals(firstPoll.eventsObserved, 1);
 
     const firstSnapshot = store.get("session-1");
     assertExists(firstSnapshot);
-    assertEquals(firstSnapshot.messages.map((message) => message.id), ["m1"]);
+    assertEquals(firstSnapshot.events.map((event) => event.eventId), ["m1"]);
     assertEquals(firstSnapshot.cursor, { kind: "byte-offset", value: 10 });
 
     await harness.emitModify(sessionFile);
     const secondPoll = await runner.poll();
     assertEquals(secondPoll.sessionsUpdated, 1);
-    assertEquals(secondPoll.messagesObserved, 1);
+    assertEquals(secondPoll.eventsObserved, 1);
 
     const secondSnapshot = store.get("session-1");
     assertExists(secondSnapshot);
-    assertEquals(secondSnapshot.messages.map((message) => message.id), [
+    assertEquals(secondSnapshot.events.map((event) => event.eventId), [
       "m1",
       "m2",
     ]);
@@ -191,12 +200,16 @@ Deno.test("FileProviderIngestionRunner logs parse errors and continues polling",
           modifiedAtMs: Date.now(),
         }]);
       },
-      parseMessages() {
+      parseEvents(
+        _filePath: string,
+        _fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
         return (async function* () {
           if (Date.now() < 0) {
             yield {
-              message: makeMessage("unreachable", "2026-02-22T00:00:00.000Z"),
-              offset: 0,
+              event: makeEvent("unreachable", "2026-02-22T00:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 0 },
             };
           }
           throw new Error("parse exploded");
@@ -207,7 +220,7 @@ Deno.test("FileProviderIngestionRunner logs parse errors and continues polling",
     await runner.start();
     const result = await runner.poll();
     assertEquals(result.sessionsUpdated, 0);
-    assertEquals(result.messagesObserved, 0);
+    assertEquals(result.eventsObserved, 0);
 
     await runner.stop();
 
@@ -242,7 +255,11 @@ Deno.test("FileProviderIngestionRunner skips watch setup when roots are missing"
       discoverSessions() {
         return Promise.resolve([]);
       },
-      parseMessages() {
+      parseEvents(
+        _filePath: string,
+        _fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
         return (async function* () {})();
       },
     });
@@ -253,7 +270,7 @@ Deno.test("FileProviderIngestionRunner skips watch setup when roots are missing"
 
     assertEquals(watchCalled, 0);
     assertEquals(result.sessionsUpdated, 0);
-    assertEquals(result.messagesObserved, 0);
+    assertEquals(result.eventsObserved, 0);
   });
 });
 
@@ -292,18 +309,22 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
           modifiedAtMs: Date.now(),
         }]);
       },
-      parseMessages(_filePath, fromOffset) {
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
         return (async function* () {
           if (fromOffset === 0) {
             yield {
-              message: makeMessage("m1", "2026-02-22T20:15:00.000Z"),
-              offset: 10,
+              event: makeEvent("m1", "2026-02-22T20:15:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 10 },
             };
           } else if (fromOffset === 10) {
-            // Simulate replayed message after provider offset drift.
+            // Simulate replayed event after provider offset drift.
             yield {
-              message: makeMessage("m1", "2026-02-22T20:15:00.000Z"),
-              offset: 20,
+              event: makeEvent("m1", "2026-02-22T20:15:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 20 },
             };
           }
         })();
@@ -318,7 +339,7 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
 
     const snapshot = store.get("session-dedupe");
     assertExists(snapshot);
-    assertEquals(snapshot.messages.length, 1);
+    assertEquals(snapshot.events.length, 1);
     assert(
       sink.records.some((record) =>
         record.event === "provider.ingestion.events_dropped" &&
@@ -372,11 +393,11 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
 
     assertEquals(result.provider, "claude");
     assertEquals(result.sessionsUpdated, 1);
-    assert(result.messagesObserved >= 1);
+    assert(result.eventsObserved >= 1);
     const snapshot = store.get("session-claude");
     assertExists(snapshot);
     assertEquals(snapshot.provider, "claude");
-    assert(snapshot.messages.length >= 1);
+    assert(snapshot.events.length >= 1);
     assertEquals(snapshot.cursor.kind, "byte-offset");
   });
 });
@@ -437,11 +458,87 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
 
     assertEquals(result.provider, "codex");
     assertEquals(result.sessionsUpdated, 1);
-    assert(result.messagesObserved >= 1);
+    assert(result.eventsObserved >= 1);
     const snapshot = store.get("codex-session-1");
     assertExists(snapshot);
     assertEquals(snapshot.provider, "codex");
-    assert(snapshot.messages.length >= 1);
+    assert(snapshot.events.length >= 1);
     assertEquals(snapshot.cursor.kind, "byte-offset");
+  });
+});
+
+Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", async () => {
+  await withTempDir("provider-ingestion-gemini-", async (dir) => {
+    const chatsDir = join(dir, "project-alpha", "chats");
+    await Deno.mkdir(chatsDir, { recursive: true });
+    const sessionPath = join(chatsDir, "session-2026-02-24-example.json");
+    await Deno.writeTextFile(
+      sessionPath,
+      JSON.stringify({
+        sessionId: "gemini-session-1",
+        startTime: "2026-02-24T20:00:00.000Z",
+        lastUpdated: "2026-02-24T20:00:10.000Z",
+        messages: [
+          {
+            id: "u1",
+            timestamp: "2026-02-24T20:00:01.000Z",
+            type: "user",
+            displayContent: [{ text: "build auth middleware" }],
+            content: [{ text: "ignored because displayContent exists" }],
+          },
+          {
+            id: "a1",
+            timestamp: "2026-02-24T20:00:05.000Z",
+            type: "gemini",
+            model: "gemini-2.0-pro",
+            content: "I will inspect your routes first.",
+            toolCalls: [{
+              id: "tool-1",
+              name: "run_shell_command",
+              args: { command: "ls src/routes" },
+              resultDisplay: "auth.ts\nusers.ts",
+            }],
+          },
+          {
+            id: "i1",
+            timestamp: "2026-02-24T20:00:06.000Z",
+            type: "info",
+            content: "ignored info event",
+          },
+        ],
+      }),
+    );
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const runner = createGeminiIngestionRunner({
+      sessionSnapshotStore: store,
+      sessionRoots: [dir],
+      watchFs: harness.watchFn,
+    });
+
+    await runner.start();
+    const result = await runner.poll();
+    await runner.stop();
+
+    assertEquals(result.provider, "gemini");
+    assertEquals(result.sessionsUpdated, 1);
+    assert(result.eventsObserved >= 3);
+    const snapshot = store.get("gemini-session-1");
+    assertExists(snapshot);
+    assertEquals(snapshot.provider, "gemini");
+    assertEquals(snapshot.cursor.kind, "item-index");
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "provider.info"),
+      false,
+    );
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "message.user"),
+      true,
+    );
+    assertEquals(
+      snapshot.events.some((event) => event.kind === "message.assistant"),
+      true,
+    );
   });
 });

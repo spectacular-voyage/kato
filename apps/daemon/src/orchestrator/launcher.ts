@@ -37,6 +37,7 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
       ...writeRoots,
       ...(this.runtime.providerSessionRoots?.claude ?? []),
       ...(this.runtime.providerSessionRoots?.codex ?? []),
+      ...(this.runtime.providerSessionRoots?.gemini ?? []),
     ]);
 
     const command = this.commandFactory(this.denoExecPath, {
@@ -64,6 +65,9 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
         ),
         KATO_CODEX_SESSION_ROOTS: JSON.stringify(
           this.runtime.providerSessionRoots?.codex ?? [],
+        ),
+        KATO_GEMINI_SESSION_ROOTS: JSON.stringify(
+          this.runtime.providerSessionRoots?.gemini ?? [],
         ),
       },
     });

@@ -3,6 +3,7 @@ import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
   createDefaultRuntimeFeatureFlags,
+  DAEMON_APP_VERSION,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
   type DaemonControlRequestStoreLike,
@@ -48,6 +49,7 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
     providerSessionRoots: {
       claude: ["/sessions/claude"],
       codex: ["/sessions/codex"],
+      gemini: ["/sessions/gemini"],
     },
     featureFlags: createDefaultRuntimeFeatureFlags(),
   };
@@ -64,6 +66,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
       providerSessionRoots: {
         claude: [...initial.providerSessionRoots.claude],
         codex: [...initial.providerSessionRoots.codex],
+        gemini: [...initial.providerSessionRoots.gemini],
       },
       featureFlags: { ...initial.featureFlags },
     }
@@ -83,6 +86,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           providerSessionRoots: {
             claude: [...state.providerSessionRoots.claude],
             codex: [...state.providerSessionRoots.codex],
+            gemini: [...state.providerSessionRoots.gemini],
           },
           featureFlags: { ...state.featureFlags },
         });
@@ -96,6 +100,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             providerSessionRoots: {
               claude: [...defaultConfig.providerSessionRoots.claude],
               codex: [...defaultConfig.providerSessionRoots.codex],
+              gemini: [...defaultConfig.providerSessionRoots.gemini],
             },
             featureFlags: { ...defaultConfig.featureFlags },
           };
@@ -107,6 +112,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               providerSessionRoots: {
                 claude: [...state.providerSessionRoots.claude],
                 codex: [...state.providerSessionRoots.codex],
+                gemini: [...state.providerSessionRoots.gemini],
               },
               featureFlags: { ...state.featureFlags },
             },
@@ -122,6 +128,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             providerSessionRoots: {
               claude: [...state.providerSessionRoots.claude],
               codex: [...state.providerSessionRoots.codex],
+              gemini: [...state.providerSessionRoots.gemini],
             },
             featureFlags: { ...state.featureFlags },
           },
@@ -298,6 +305,67 @@ Deno.test("cli parser accepts init", () => {
   assertEquals(parsed.command.name, "init");
 });
 
+Deno.test("cli parser accepts --version and -V", () => {
+  const longFlag = parseDaemonCliArgs(["--version"]);
+  assertEquals(longFlag.kind, "version");
+
+  const shortFlag = parseDaemonCliArgs(["-V"]);
+  assertEquals(shortFlag.kind, "version");
+});
+
+Deno.test("cli parser accepts restart", () => {
+  const parsed = parseDaemonCliArgs(["restart"]);
+  assertEquals(parsed.kind, "command");
+  if (parsed.kind !== "command") {
+    return;
+  }
+
+  assertEquals(parsed.command.name, "restart");
+});
+
+Deno.test("runDaemonCli prints version without loading config", async () => {
+  const harness = makeRuntimeHarness(".kato/test-runtime");
+
+  const code = await runDaemonCli(["--version"], {
+    runtime: harness.runtime,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(harness.stderr.join(""), "");
+  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+});
+
+Deno.test("runDaemonCli help includes version and tagline", async () => {
+  const harness = makeRuntimeHarness(".kato/test-runtime");
+
+  const code = await runDaemonCli(["help"], {
+    runtime: harness.runtime,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(harness.stderr.join(""), "");
+  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+  assertStringIncludes(harness.stdout.join(""), "Own your AI conversations.");
+  assertStringIncludes(
+    harness.stdout.join(""),
+    "Usage: kato <command> [options]",
+  );
+});
+
+Deno.test("runDaemonCli help topic includes version and tagline", async () => {
+  const harness = makeRuntimeHarness(".kato/test-runtime");
+
+  const code = await runDaemonCli(["help", "start"], {
+    runtime: harness.runtime,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(harness.stderr.join(""), "");
+  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+  assertStringIncludes(harness.stdout.join(""), "Own your AI conversations.");
+  assertStringIncludes(harness.stdout.join(""), "Usage: kato start");
+});
+
 Deno.test("runDaemonCli init creates runtime config when missing", async () => {
   const runtimeDir = ".kato/test-runtime";
   const harness = makeRuntimeHarness(runtimeDir);
@@ -345,6 +413,37 @@ Deno.test(
     const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
 
     const code = await runDaemonCli(["start"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+      daemonLauncher: daemonLauncher.launcher,
+      autoInitOnStart: true,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(
+      harness.stdout.join(""),
+      `initialized runtime config at ${runtimeDir}/config.json`,
+    );
+    assertStringIncludes(harness.stdout.join(""), "started in background");
+    assertEquals(ensureCalls.value, 1);
+  },
+);
+
+Deno.test(
+  "runDaemonCli restart auto-initializes runtime config when missing",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+    const daemonLauncher = makeDaemonLauncher(31337);
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+
+    const code = await runDaemonCli(["restart"], {
       runtime: harness.runtime,
       defaultRuntimeConfig,
       configStore,
@@ -580,6 +679,142 @@ Deno.test("runDaemonCli stop resets stale running status without queueing", asyn
   assertEquals(code, 0);
   assertEquals(controlStore.requests.length, 0);
   assertStringIncludes(harness.stdout.join(""), "status was stale");
+});
+
+Deno.test("runDaemonCli restart starts daemon when not running", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore();
+  const daemonLauncher = makeDaemonLauncher(31337);
+  const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(["restart"], {
+    runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore: controlStore.store,
+    daemonLauncher: daemonLauncher.launcher,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(controlStore.requests.length, 0);
+  assertEquals(daemonLauncher.launchedCount.value, 1);
+  assertStringIncludes(harness.stdout.join(""), "started in background");
+});
+
+Deno.test("runDaemonCli restart queues stop and then starts daemon when running", async () => {
+  const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+  const daemonLauncher = makeDaemonLauncher(31337);
+
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 9999,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+  let loadCount = 0;
+  let stopQueued = false;
+
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      loadCount += 1;
+      if (
+        stopQueued &&
+        loadCount >= 3 &&
+        currentStatus.daemonRunning &&
+        currentStatus.daemonPid === 9999
+      ) {
+        const { daemonPid: _ignoredDaemonPid, ...rest } = currentStatus;
+        currentStatus = {
+          ...rest,
+          daemonRunning: false,
+          generatedAt: "2026-02-22T10:00:01.000Z",
+          heartbeatAt: "2026-02-22T10:00:01.000Z",
+        };
+      }
+
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(next: DaemonStatusSnapshot) {
+      currentStatus = {
+        ...next,
+        providers: [...next.providers],
+        recordings: { ...next.recordings },
+      };
+      return Promise.resolve();
+    },
+  };
+
+  const controlRequests: DaemonControlRequest[] = [];
+  let requestCounter = 0;
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(
+        controlRequests.map((request) => ({
+          ...request,
+          ...(request.payload ? { payload: { ...request.payload } } : {}),
+        })),
+      );
+    },
+    enqueue(draft: DaemonControlRequestDraft) {
+      requestCounter += 1;
+      const request: DaemonControlRequest = {
+        requestId: `req-${requestCounter}`,
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: draft.command,
+        ...(draft.payload ? { payload: { ...draft.payload } } : {}),
+      };
+      controlRequests.push(request);
+      if (draft.command === "stop") {
+        stopQueued = true;
+      }
+      return Promise.resolve({
+        ...request,
+        ...(request.payload ? { payload: { ...request.payload } } : {}),
+      });
+    },
+    markProcessed(requestId: string) {
+      const index = controlRequests.findIndex((request) =>
+        request.requestId === requestId
+      );
+      if (index >= 0) {
+        controlRequests.splice(0, index + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(["restart"], {
+    runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore,
+    daemonLauncher: daemonLauncher.launcher,
+  });
+
+  assertEquals(code, 0);
+  assertEquals(controlRequests.length, 1);
+  assertEquals(controlRequests[0]?.command, "stop");
+  assertEquals(daemonLauncher.launchedCount.value, 1);
+  assertStringIncludes(harness.stdout.join(""), "stop request queued");
+  assertStringIncludes(harness.stdout.join(""), "started in background");
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {

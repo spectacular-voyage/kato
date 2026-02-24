@@ -1,4 +1,5 @@
 {
+  "exclude": ["stenobot/"],
   "tasks": {
     "dev": "deno task dev:daemon",
     "dev:daemon": "deno run --watch=apps/daemon/src,shared/src apps/daemon/src/main.ts",

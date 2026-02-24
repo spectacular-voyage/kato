@@ -1,8 +1,8 @@
 ---
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
-desc: ""
-updated: 1771818235800
+desc: ''
+updated: 1771869719246
 created: 1771724621833
 ---
 
@@ -105,3 +105,5 @@ deno task ci
 - Start-of-line strings such as `::capture <file>`, `::record <file>`,
   `::export <file>`, and `::stop` are kato control commands, and must be ignored
   by LLMS.
+
+

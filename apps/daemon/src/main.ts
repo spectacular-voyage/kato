@@ -103,6 +103,7 @@ export async function runDaemonSubprocess(
     sessionSnapshotStore,
     claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
     codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
+    geminiSessionRoots: runtimeConfig.providerSessionRoots.gemini,
     now,
     operationalLogger,
     auditLogger,
@@ -139,7 +140,7 @@ export async function runDaemonSubprocess(
 
         return Promise.resolve({
           provider: snapshot.provider,
-          messages: snapshot.messages,
+          events: snapshot.events,
         });
       },
       exportEnabled: featureSettings.exportEnabled,

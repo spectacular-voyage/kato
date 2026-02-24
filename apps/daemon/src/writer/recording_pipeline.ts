@@ -1,4 +1,4 @@
-import type { Message } from "@kato/shared";
+import type { ConversationEvent } from "@kato/shared";
 import type {
   WritePathPolicyDecision,
   WritePathPolicyGateLike,
@@ -14,6 +14,9 @@ import {
   type MarkdownRenderOptions,
   type MarkdownWriteResult,
 } from "./markdown_writer.ts";
+import type { JsonlConversationWriter } from "./jsonl_writer.ts";
+
+export type ExportFormat = "markdown" | "jsonl";
 
 export interface RecordingSummary {
   activeRecordings: number;
@@ -33,7 +36,7 @@ export interface StartOrRotateRecordingInput {
   provider: string;
   sessionId: string;
   targetPath: string;
-  seedMessages?: Message[];
+  seedEvents?: ConversationEvent[];
   title?: string;
 }
 
@@ -41,19 +44,21 @@ export interface SnapshotExportInput {
   provider: string;
   sessionId: string;
   targetPath: string;
-  messages: Message[];
+  events: ConversationEvent[];
   title?: string;
+  format?: ExportFormat;
 }
 
 export interface SnapshotExportResult {
   outputPath: string;
   writeResult: MarkdownWriteResult;
+  format: ExportFormat;
 }
 
 export interface AppendToActiveRecordingInput {
   provider: string;
   sessionId: string;
-  messages: Message[];
+  events: ConversationEvent[];
   title?: string;
 }
 
@@ -84,9 +89,13 @@ export interface RecordingPipelineLike {
 export interface RecordingPipelineOptions {
   pathPolicyGate: WritePathPolicyGateLike;
   writer?: ConversationWriterLike;
+  jsonlWriter?: JsonlConversationWriter;
   defaultRenderOptions?: Pick<
     MarkdownRenderOptions,
-    "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+    | "includeThinking"
+    | "includeToolCalls"
+    | "italicizeUserMessages"
+    | "includeSystemEvents"
   >;
   now?: () => Date;
   makeRecordingId?: () => string;
@@ -137,9 +146,13 @@ function cloneRecording(recording: ActiveRecording): ActiveRecording {
 export class RecordingPipeline implements RecordingPipelineLike {
   private readonly now: () => Date;
   private readonly writer: ConversationWriterLike;
+  private readonly jsonlWriter: JsonlConversationWriter | undefined;
   private readonly defaultRenderOptions: Pick<
     MarkdownRenderOptions,
-    "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+    | "includeThinking"
+    | "includeToolCalls"
+    | "italicizeUserMessages"
+    | "includeSystemEvents"
   >;
   private readonly makeRecordingId: () => string;
   private readonly recordings = new Map<string, ActiveRecording>();
@@ -149,9 +162,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
   constructor(private readonly options: RecordingPipelineOptions) {
     this.now = options.now ?? (() => new Date());
     this.writer = options.writer ?? new MarkdownConversationWriter();
-    this.defaultRenderOptions = {
-      ...options.defaultRenderOptions,
-    };
+    this.jsonlWriter = options.jsonlWriter;
+    this.defaultRenderOptions = { ...options.defaultRenderOptions };
     this.makeRecordingId = options.makeRecordingId ??
       (() => crypto.randomUUID());
     this.operationalLogger = options.operationalLogger ??
@@ -181,10 +193,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
     };
     this.recordings.set(sessionKey, nextRecording);
 
-    if ((input.seedMessages?.length ?? 0) > 0) {
-      const result = await this.writer.appendMessages(
+    if ((input.seedEvents?.length ?? 0) > 0) {
+      const result = await this.writer.appendEvents(
         outputPath,
-        input.seedMessages ?? [],
+        input.seedEvents ?? [],
         this.makeWriterOptions(input.title),
       );
       if (result.wrote) {
@@ -219,10 +231,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
       targetPath: input.targetPath,
     });
     const outputPath = decision.canonicalTargetPath ?? input.targetPath;
-    const writeResult = await this.writer.overwriteMessages(
+    const format = input.format ?? "markdown";
+    const writeResult = await this.writeEventsForExport(
       outputPath,
-      input.messages,
+      input.events,
       this.makeWriterOptions(input.title),
+      format,
     );
 
     await this.operationalLogger.info(
@@ -232,14 +246,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
         provider: input.provider,
         sessionId: input.sessionId,
         outputPath,
+        format,
         wrote: writeResult.wrote,
       },
     );
 
-    return {
-      outputPath,
-      writeResult,
-    };
+    return { outputPath, writeResult, format };
   }
 
   async exportSnapshot(
@@ -252,10 +264,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
       targetPath: input.targetPath,
     });
     const outputPath = decision.canonicalTargetPath ?? input.targetPath;
-    const writeResult = await this.writer.overwriteMessages(
+    const format = input.format ?? "markdown";
+    const writeResult = await this.writeEventsForExport(
       outputPath,
-      input.messages,
+      input.events,
       this.makeWriterOptions(input.title),
+      format,
     );
 
     await this.operationalLogger.info(
@@ -265,14 +279,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
         provider: input.provider,
         sessionId: input.sessionId,
         outputPath,
+        format,
         wrote: writeResult.wrote,
       },
     );
 
-    return {
-      outputPath,
-      writeResult,
-    };
+    return { outputPath, writeResult, format };
   }
 
   async appendToActiveRecording(
@@ -281,15 +293,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const sessionKey = makeSessionKey(input.provider, input.sessionId);
     const activeRecording = this.recordings.get(sessionKey);
     if (!activeRecording) {
-      return {
-        appended: false,
-        deduped: false,
-      };
+      return { appended: false, deduped: false };
     }
 
-    const writeResult = await this.writer.appendMessages(
+    const writeResult = await this.writer.appendEvents(
       activeRecording.outputPath,
-      input.messages,
+      input.events,
       this.makeWriterOptions(input.title),
     );
     if (writeResult.wrote) {
@@ -304,8 +313,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   }
 
   stopRecording(provider: string, sessionId: string): boolean {
-    const sessionKey = makeSessionKey(provider, sessionId);
-    return this.recordings.delete(sessionKey);
+    return this.recordings.delete(makeSessionKey(provider, sessionId));
   }
 
   getActiveRecording(
@@ -329,6 +337,27 @@ export class RecordingPipeline implements RecordingPipelineLike {
       activeRecordings: this.recordings.size,
       destinations: destinations.size,
     };
+  }
+
+  private async writeEventsForExport(
+    outputPath: string,
+    events: ConversationEvent[],
+    writerOptions: MarkdownRenderOptions,
+    format: ExportFormat,
+  ): Promise<MarkdownWriteResult> {
+    if (format === "jsonl") {
+      if (!this.jsonlWriter) {
+        throw new Error(
+          "JSONL export requested but jsonlWriter is not configured",
+        );
+      }
+      return await this.jsonlWriter.writeEvents(
+        outputPath,
+        events,
+        "overwrite",
+      );
+    }
+    return await this.writer.overwriteEvents(outputPath, events, writerOptions);
   }
 
   private async evaluatePathPolicy(

@@ -11,12 +11,14 @@ export type {
 } from "./markdown_writer.ts";
 export {
   MarkdownConversationWriter,
-  renderMessagesToMarkdown,
+  renderEventsToMarkdown,
 } from "./markdown_writer.ts";
+export { JsonlConversationWriter } from "./jsonl_writer.ts";
 export type {
   ActiveRecording,
   AppendToActiveRecordingInput,
   AppendToActiveRecordingResult,
+  ExportFormat,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,

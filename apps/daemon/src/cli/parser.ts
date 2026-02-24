@@ -77,6 +77,20 @@ function parseStart(rest: string[]): DaemonCliIntent {
   return { kind: "command", command: { name: "start" } };
 }
 
+function parseRestart(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "restart" };
+  }
+
+  requireNoPositionals("restart", toPositionals(parsed));
+  return { kind: "command", command: { name: "restart" } };
+}
+
 function parseInit(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
@@ -125,10 +139,11 @@ function parseStatus(rest: string[]): DaemonCliIntent {
 function parseExport(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
-    string: ["output"],
+    string: ["output", "format"],
     alias: {
       h: "help",
       o: "output",
+      f: "format",
     },
   });
 
@@ -148,10 +163,24 @@ function parseExport(rest: string[]): DaemonCliIntent {
       ? parsed.output
       : undefined;
 
+  const formatRaw = typeof parsed.format === "string"
+    ? parsed.format
+    : undefined;
+  if (
+    formatRaw !== undefined && formatRaw !== "markdown" &&
+    formatRaw !== "jsonl"
+  ) {
+    throw new CliUsageError(
+      `--format must be 'markdown' or 'jsonl', got: ${formatRaw}`,
+    );
+  }
+  const format = formatRaw as "markdown" | "jsonl" | undefined;
+
   const command: DaemonCliCommand = {
     name: "export",
     sessionId: positionals[0]!,
     ...(outputPath ? { outputPath } : {}),
+    ...(format ? { format } : {}),
   };
 
   return { kind: "command", command };
@@ -200,6 +229,14 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
 
   const [commandName, ...rest] = args;
+  if (commandName === "--version" || commandName === "-V") {
+    if (rest.length > 0) {
+      throw new CliUsageError(
+        "Usage: kato [--version|-V]",
+      );
+    }
+    return { kind: "version" };
+  }
 
   if (commandName === "help") {
     if (rest.length === 0) {
@@ -211,6 +248,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
       if (
         topic === "init" ||
         topic === "start" ||
+        topic === "restart" ||
         topic === "stop" ||
         topic === "status" ||
         topic === "export" ||
@@ -221,7 +259,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     }
 
     throw new CliUsageError(
-      "Usage: kato help [init|start|stop|status|export|clean]",
+      "Usage: kato help [init|start|restart|stop|status|export|clean]",
     );
   }
 
@@ -230,6 +268,9 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
   if (commandName === "start") {
     return parseStart(rest);
+  }
+  if (commandName === "restart") {
+    return parseRestart(rest);
   }
   if (commandName === "stop") {
     return parseStop(rest);

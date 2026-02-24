@@ -188,25 +188,51 @@ created: 1771779490894
 
 - Decision:
   - Add provider-aware loader hook (`loadSessionSnapshot`) to runtime export
-    handling.
-  - Retain fallback loader (`loadSessionMessages`) for compatibility.
-  - Keep provider fallback value `"unknown"` when provider mapping is
-    unavailable.
+    handling, returning `{provider, events}`.
+  - Legacy `loadSessionMessages` hook removed in event-native refactor.
 - Owner: Kato engineering
-- Date: 2026-02-23
+- Date: 2026-02-23 (revised 2026-02-24)
 - Why:
-  - Preserves current behavior while allowing provider identity to flow into
-    export/audit paths.
-  - Enables incremental wiring of provider ingestion without reworking
-    control-plane contract.
+  - Provider identity flows cleanly into export/audit paths.
+  - Event-native payload is the canonical snapshot format (schema v2).
 - Tradeoffs:
-  - Dual loader hooks add temporary API overlap.
-  - Provider identity can remain degraded until ingestion wiring is complete.
+  - Breaking change from message-centric to event-centric; no migration for in-flight v1 data (none persisted).
 - Follow-up tasks:
-  - Prefer `loadSessionSnapshot` as canonical hook and retire legacy loader
-    after wiring.
-  - Ensure provider/session source-of-truth is documented for runtime and audit
-    consumers.
+  - Ensure provider/session source-of-truth is documented for runtime and audit consumers.
+
+### Event-Native Conversation Schema (v2)
+
+- Decision:
+  - Replace `Message[]` with `ConversationEvent[]` as canonical runtime session
+    state. No backward compatibility with message-only schema required.
+  - Events are typed discriminated unions (`message.user`, `message.assistant`,
+    `tool.call`, `tool.result`, `thinking`, `decision`, `provider.info`, etc.).
+  - `conversationSchemaVersion: 2` stamped on every `RuntimeSessionSnapshot`.
+  - Event dedupe signature includes `kind` to prevent cross-kind collisions.
+  - Markdown rendering is a projection from events, not from canonical storage.
+  - JSONL export (one event JSON per line) added alongside markdown default.
+  - `captureIncludeSystemEvents` feature flag gates `message.system` and
+    `provider.info` visibility in export/render (default: false).
+- Owner: Kato engineering
+- Date: 2026-02-24
+- Why:
+  - Message-centric model could not represent tool calls, thinking, decisions,
+    or provider metadata without lossy embedding in content strings.
+  - First-class events enable structured export, decision tracking, and
+    per-event metadata without hacks.
+  - Gemini provider can be built directly on this schema without migration.
+- Tradeoffs:
+  - All parsers and ingestion wiring required simultaneous refactor.
+  - CLI and tests required comprehensive updates.
+  - `request_user_input` questionnaire synthesis is approximated (format not
+    fully documented; tested with inference).
+- Follow-up tasks:
+  - Add `request_user_input` fixture under `tests/fixtures/` for explicit
+    questionnaire→decision test coverage.
+  - Add explicit cross-kind collision test.
+  - Add schema fail-closed check for persisted snapshot files (once persistence
+    is added).
+  - Build Gemini provider runner using this event model directly.
 
 ### Runtime Config Bootstrap
 

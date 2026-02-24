@@ -2,21 +2,41 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1771812869620
+updated: 1771973806111
 created: 1771812869620
 ---
 
-## Current Next Tasks
+## Event Schema Follow-ups (v2)
+
+- [ ] Add `request_user_input` Codex fixture under `tests/fixtures/` and add
+      explicit questionnaire→decision event synthesis tests.
+- [ ] Add explicit cross-kind collision test: assert two events with same
+      content/timestamp but different `kind` do NOT dedupe.
+- [ ] Add schema fail-closed check when persisted snapshot files are added
+      (fail with `kato clean --all` remediation hint on v1 data).
+- [ ] Add `JsonlConversationWriter` to active recording pipeline (currently
+      only markdown recordings are appended; JSONL write mode is export-only).
 
 ## Runtime And Ingestion Follow-ups
 
-- [ ] Persist provider cursors across daemon restarts (disk-backed cursor state).
+- [ ] Persist provider cursors across daemon restarts (disk-backed cursor state),
+      so re-parses after restart produce stable event signatures for Codex events
+      (whose timestamps are synthetic parse-time values, not provider-native).
+- [ ] Persist sessions/recording state across daemon restarts
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into
       `clean` command behavior.
-- [ ] Retire `loadSessionMessages` legacy export fallback once all paths use
-      `loadSessionSnapshot`.
 - [ ] Add permission-boundary tests that prove provider reads are denied outside
       `providerSessionRoots`.
+- [ ] Fix snapshot store key to include provider identity (`${provider}:${sessionId}`)
+      so concurrent Claude and Codex ingestion cannot clobber each other; requires
+      a design decision on `get(sessionId)` semantics for provider-unaware export
+      lookups (return first match? require provider param everywhere?).
+- [ ] _maybe_ Fix mid-turn cursor advancement: cursor must not advance past an incomplete
+      multi-entry assistant turn; polling at a turn boundary splits one logical
+      event into two separate snapshot entries that dedupe cannot collapse. This
+      requires the ingestion runner to detect turn boundaries per provider (e.g.
+      `task_complete`/`final_answer` for Codex; consecutive assistant entries for
+      Claude) and buffer partial turns between polls — significant redesign.
 
 ## CLI And Runtime Hardening
 

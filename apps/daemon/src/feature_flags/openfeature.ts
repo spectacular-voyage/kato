@@ -2,10 +2,11 @@ import type { RuntimeFeatureFlags } from "@kato/shared";
 import type { MarkdownRenderOptions } from "../writer/mod.ts";
 
 const DEFAULT_RUNTIME_FEATURE_FLAGS: RuntimeFeatureFlags = {
-  writerIncludeThinking: true,
-  writerIncludeToolCalls: true,
+  writerIncludeThinking: false,
+  writerIncludeToolCalls: false,
   writerItalicizeUserMessages: false,
   daemonExportEnabled: true,
+  captureIncludeSystemEvents: false,
 };
 
 export type RuntimeFeatureFlagKey = keyof RuntimeFeatureFlags;
@@ -32,6 +33,7 @@ function cloneRuntimeFeatureFlags(
     writerIncludeToolCalls: value.writerIncludeToolCalls,
     writerItalicizeUserMessages: value.writerItalicizeUserMessages,
     daemonExportEnabled: value.daemonExportEnabled,
+    captureIncludeSystemEvents: value.captureIncludeSystemEvents,
   };
 }
 
@@ -80,10 +82,13 @@ export class OpenFeatureClient {
 
 export interface DaemonFeatureSettings {
   exportEnabled: boolean;
-  writerRenderOptions: Pick<
-    MarkdownRenderOptions,
-    "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
-  >;
+  captureIncludeSystemEvents: boolean;
+  writerRenderOptions:
+    & Pick<
+      MarkdownRenderOptions,
+      "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+    >
+    & { includeSystemEvents: boolean };
 }
 
 export function bootstrapOpenFeature(
@@ -98,12 +103,18 @@ export function evaluateDaemonFeatureSettings(
   context: OpenFeatureEvaluationContext = {},
 ): DaemonFeatureSettings {
   const defaults = createDefaultRuntimeFeatureFlags();
+  const captureIncludeSystemEvents = client.getBooleanValue(
+    "captureIncludeSystemEvents",
+    defaults.captureIncludeSystemEvents,
+    context,
+  );
   return {
     exportEnabled: client.getBooleanValue(
       "daemonExportEnabled",
       defaults.daemonExportEnabled,
       { ...context, command: "export" },
     ),
+    captureIncludeSystemEvents,
     writerRenderOptions: {
       includeThinking: client.getBooleanValue(
         "writerIncludeThinking",
@@ -120,6 +131,7 @@ export function evaluateDaemonFeatureSettings(
         defaults.writerItalicizeUserMessages,
         context,
       ),
+      includeSystemEvents: captureIncludeSystemEvents,
     },
   };
 }

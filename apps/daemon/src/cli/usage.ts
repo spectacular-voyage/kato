@@ -1,11 +1,25 @@
 import type { DaemonCliCommandName } from "./types.ts";
+import { DAEMON_APP_VERSION } from "../version.ts";
 
-const GLOBAL_USAGE = [
+const APP_TAGLINE = "Own your AI conversations.";
+
+function withAppHeader(usageBody: string): string {
+  return [
+    `kato ${DAEMON_APP_VERSION}`,
+    APP_TAGLINE,
+    "",
+    usageBody,
+  ].join("\n");
+}
+
+const GLOBAL_USAGE_BODY = [
   "Usage: kato <command> [options]",
+  "       kato [--version|-V]",
   "",
   "Commands:",
   "  init                  Create default runtime config if missing",
   "  start                 Start daemon in detached background mode",
+  "  restart               Stop then start daemon (start only if not running)",
   "  stop                  Queue daemon stop request (or reset stale status)",
   "  status [--json]       Show daemon status",
   "  export <session-id> [--output <path>]",
@@ -16,16 +30,21 @@ const GLOBAL_USAGE = [
   "Run `kato help <command>` for command-specific usage.",
 ].join("\n");
 
-const COMMAND_USAGE: Record<DaemonCliCommandName, string> = {
+const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates a default local runtime config at .kato/config.json when missing.",
+    "Creates a default local runtime config at ~/.kato/config.json when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",
     "",
     "Starts daemon runtime in detached background mode.",
+  ].join("\n"),
+  restart: [
+    "Usage: kato restart",
+    "",
+    "Stops daemon and starts it again. If daemon is not running, starts it.",
   ].join("\n"),
   stop: [
     "Usage: kato stop",
@@ -50,9 +69,9 @@ const COMMAND_USAGE: Record<DaemonCliCommandName, string> = {
 };
 
 export function getGlobalUsage(): string {
-  return GLOBAL_USAGE;
+  return withAppHeader(GLOBAL_USAGE_BODY);
 }
 
 export function getCommandUsage(commandName: DaemonCliCommandName): string {
-  return COMMAND_USAGE[commandName];
+  return withAppHeader(COMMAND_USAGE_BODY[commandName]);
 }
