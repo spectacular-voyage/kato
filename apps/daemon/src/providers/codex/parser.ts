@@ -1,4 +1,4 @@
-import type { Message, ThinkingBlock, ToolCall } from "@kato/shared";
+import type { ConversationEvent, ProviderCursor } from "@kato/shared";
 import { normalizeText, utf8ByteLength } from "../../utils/text.ts";
 
 interface CodexEntry {
@@ -32,7 +32,7 @@ function deriveCodexToolDescription(
   return undefined;
 }
 
-function extractFinalAnswerText(content: unknown): string {
+function extractMessageText(content: unknown): string {
   if (!Array.isArray(content)) return "";
   return (content as Array<Record<string, unknown>>)
     .filter((item) => item["type"] === "text")
@@ -41,99 +41,115 @@ function extractFinalAnswerText(content: unknown): string {
     .trim();
 }
 
-function makeMessage(
-  role: "user" | "assistant",
-  id: string,
-  model: string | undefined,
-  content: string,
-  toolCalls: ToolCall[],
-  thinkingBlocks: ThinkingBlock[],
-): Message {
-  return {
-    id,
-    role,
-    content: normalizeText(content),
-    timestamp: new Date().toISOString(),
-    ...(model && role === "assistant" && { model }),
-    ...(toolCalls.length > 0 && { toolCalls: [...toolCalls] }),
-    ...(thinkingBlocks.length > 0 && { thinkingBlocks: [...thinkingBlocks] }),
-  };
+function makeByteOffsetCursor(offset: number): ProviderCursor {
+  return { kind: "byte-offset", value: Math.max(0, Math.floor(offset)) };
 }
 
-export async function* parseCodexMessages(
+function makeEventId(
+  sessionId: string,
+  lineEnd: number,
+  kind: string,
+  index: number = 0,
+): string {
+  return `${sessionId}:${lineEnd}:${kind}${index > 0 ? `:${index}` : ""}`;
+}
+
+export interface CodexParseContext {
+  provider: string;
+  sessionId: string;
+}
+
+export async function* parseCodexEvents(
   filePath: string,
   fromOffset: number = 0,
-): AsyncIterable<{ message: Message; offset: number }> {
+  ctx: CodexParseContext,
+): AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }> {
   const content = await Deno.readTextFile(filePath);
   const lines = content.split("\n");
 
+  const { provider, sessionId } = ctx;
   let model: string | undefined;
-  let sessionId: string | undefined;
   let currentTurnId: string | undefined;
 
   let userMsgEnd = -1;
   let pendingAssistantText: string | undefined;
-  let toolCalls: ToolCall[] = [];
-  let thinkingBlocks: ThinkingBlock[] = [];
-  const pendingTools = new Map<string, ToolCall>();
   let turnFinalized = false;
 
   let currentByteOffset = 0;
+  const timestamp = new Date().toISOString();
 
-  function* finalizeAssistant(
-    text: string,
+  function makeBase(
+    kind: ConversationEvent["kind"],
+    providerEventType: string,
     lineEnd: number,
-  ): Generator<{ message: Message; offset: number }> {
-    if (turnFinalized) return;
-    turnFinalized = true;
-    pendingAssistantText = undefined;
-
-    if (lineEnd > fromOffset) {
-      const assistantId = `${sessionId ?? "unknown"}-assist-${lineEnd}`;
-      yield {
-        message: makeMessage(
-          "assistant",
-          assistantId,
-          model,
-          text,
-          toolCalls,
-          thinkingBlocks,
-        ),
-        offset: lineEnd,
-      };
-    }
-
-    toolCalls = [];
-    thinkingBlocks = [];
-    pendingTools.clear();
+    index: number = 0,
+    turnIdOverride?: string,
+  ): Record<string, unknown> {
+    return {
+      eventId: makeEventId(sessionId, lineEnd, kind, index),
+      provider,
+      sessionId,
+      timestamp,
+      kind,
+      ...(turnIdOverride !== undefined
+        ? (turnIdOverride ? { turnId: turnIdOverride } : {})
+        : currentTurnId
+        ? { turnId: currentTurnId }
+        : {}),
+      source: {
+        providerEventType,
+        rawCursor: makeByteOffsetCursor(lineEnd),
+      },
+    };
   }
 
   function* flushPendingAssistant(
     newUserLineStart: number,
-  ): Generator<{ message: Message; offset: number }> {
+  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
     if (!pendingAssistantText || turnFinalized || userMsgEnd < fromOffset) {
       return;
     }
-
     const text = pendingAssistantText;
     turnFinalized = true;
     pendingAssistantText = undefined;
-    const assistantId = `${sessionId ?? "unknown"}-assist-${newUserLineStart}`;
+    const base = makeBase(
+      "message.assistant",
+      "event_msg.agent_message",
+      newUserLineStart,
+    );
     yield {
-      message: makeMessage(
-        "assistant",
-        assistantId,
-        model,
-        text,
-        toolCalls,
-        thinkingBlocks,
-      ),
-      offset: newUserLineStart,
+      event: {
+        ...base,
+        kind: "message.assistant",
+        role: "assistant",
+        content: normalizeText(text),
+        ...(model ? { model } : {}),
+      } as unknown as ConversationEvent,
+      cursor: makeByteOffsetCursor(newUserLineStart),
     };
+  }
 
-    toolCalls = [];
-    thinkingBlocks = [];
-    pendingTools.clear();
+  function* finalizeAssistant(
+    text: string,
+    lineEnd: number,
+    providerEventType: string,
+    phase: "final" | "commentary",
+  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
+    if (turnFinalized || lineEnd <= fromOffset) return;
+    turnFinalized = true;
+    pendingAssistantText = undefined;
+    const base = makeBase("message.assistant", providerEventType, lineEnd);
+    yield {
+      event: {
+        ...base,
+        kind: "message.assistant",
+        role: "assistant",
+        content: normalizeText(text),
+        ...(model ? { model } : {}),
+        phase,
+      } as unknown as ConversationEvent,
+      cursor: makeByteOffsetCursor(lineEnd),
+    };
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -159,13 +175,6 @@ export async function* parseCodexMessages(
     const payload = entry.payload;
 
     switch (entry.type) {
-      case "session_meta": {
-        if (payload?.["id"]) {
-          sessionId = String(payload["id"]);
-        }
-        break;
-      }
-
       case "turn_context": {
         if (!model && payload?.["model"]) {
           model = String(payload["model"]);
@@ -189,27 +198,32 @@ export async function* parseCodexMessages(
             yield* flushPendingAssistant(lineStart);
 
             pendingAssistantText = undefined;
-            toolCalls = [];
-            thinkingBlocks = [];
-            pendingTools.clear();
             turnFinalized = false;
 
-            const msgId = currentTurnId ??
-              `${sessionId ?? "unknown"}-${lineStart}`;
+            const savedTurnId = currentTurnId;
             currentTurnId = undefined;
             userMsgEnd = lineEnd;
 
             if (text) {
+              const base = makeBase(
+                "message.user",
+                "event_msg.user_message",
+                lineEnd,
+                0,
+                savedTurnId,
+              );
               yield {
-                message: makeMessage("user", msgId, undefined, text, [], []),
-                offset: lineEnd,
+                event: {
+                  ...base,
+                  kind: "message.user",
+                  role: "user",
+                  content: text,
+                } as unknown as ConversationEvent,
+                cursor: makeByteOffsetCursor(lineEnd),
               };
             }
           } else {
             pendingAssistantText = undefined;
-            toolCalls = [];
-            thinkingBlocks = [];
-            pendingTools.clear();
             turnFinalized = false;
             currentTurnId = undefined;
             userMsgEnd = lineEnd;
@@ -223,7 +237,12 @@ export async function* parseCodexMessages(
             const lastMessage = payload["last_agent_message"];
             const text = typeof lastMessage === "string" ? lastMessage : "";
             if (text) {
-              yield* finalizeAssistant(text, lineEnd);
+              yield* finalizeAssistant(
+                text,
+                lineEnd,
+                "event_msg.task_complete",
+                "final",
+              );
             }
           }
         }
@@ -234,14 +253,37 @@ export async function* parseCodexMessages(
         if (!payload) break;
         const itemType = String(payload["type"] ?? "");
 
-        if (itemType === "message" && payload["phase"] === "final_answer") {
-          if (!turnFinalized) {
-            const text = extractFinalAnswerText(payload["content"]);
-            if (text) {
-              yield* finalizeAssistant(text, lineEnd);
+        if (itemType === "message") {
+          const phase = String(payload["phase"] ?? "other");
+          const text = extractMessageText(payload["content"]);
+          if (text && lineEnd > fromOffset) {
+            if (phase === "final_answer") {
+              yield* finalizeAssistant(
+                text,
+                lineEnd,
+                "response_item.message.final_answer",
+                "final",
+              );
+            } else if (phase === "commentary" && !turnFinalized) {
+              const base = makeBase(
+                "message.assistant",
+                "response_item.message.commentary",
+                lineEnd,
+              );
+              yield {
+                event: {
+                  ...base,
+                  kind: "message.assistant",
+                  role: "assistant",
+                  content: normalizeText(text),
+                  ...(model ? { model } : {}),
+                  phase: "commentary",
+                } as unknown as ConversationEvent,
+                cursor: makeByteOffsetCursor(lineEnd),
+              };
             }
           }
-        } else if (itemType === "function_call") {
+        } else if (itemType === "function_call" && lineEnd > fromOffset) {
           const callId = String(payload["call_id"] ?? "");
           const name = String(payload["name"] ?? "unknown");
           let input: Record<string, unknown> | undefined;
@@ -253,28 +295,47 @@ export async function* parseCodexMessages(
           } catch {
             // Ignore malformed function_call arguments.
           }
-
-          const toolCall: ToolCall = {
-            id: callId,
-            name,
-            description: deriveCodexToolDescription(name, input),
-            input,
+          const toolCallId = callId ||
+            makeEventId(sessionId, lineEnd, "tool.call");
+          const base = makeBase(
+            "tool.call",
+            "response_item.function_call",
+            lineEnd,
+          );
+          yield {
+            event: {
+              ...base,
+              kind: "tool.call",
+              toolCallId,
+              name,
+              description: deriveCodexToolDescription(name, input),
+              ...(input ? { input } : {}),
+            } as unknown as ConversationEvent,
+            cursor: makeByteOffsetCursor(lineEnd),
           };
-          toolCalls.push(toolCall);
-          if (callId) {
-            pendingTools.set(callId, toolCall);
-          }
-        } else if (itemType === "function_call_output") {
+        } else if (
+          itemType === "function_call_output" && lineEnd > fromOffset
+        ) {
           const callId = String(payload["call_id"] ?? "");
-          const toolCall = pendingTools.get(callId);
-          if (toolCall) {
-            const output = payload["output"];
-            toolCall.result = typeof output === "string"
-              ? output
-              : JSON.stringify(output);
-            pendingTools.delete(callId);
-          }
-        } else if (itemType === "reasoning") {
+          const output = payload["output"];
+          const result = typeof output === "string"
+            ? output
+            : JSON.stringify(output);
+          const base = makeBase(
+            "tool.result",
+            "response_item.function_call_output",
+            lineEnd,
+          );
+          yield {
+            event: {
+              ...base,
+              kind: "tool.result",
+              toolCallId: callId,
+              result,
+            } as unknown as ConversationEvent,
+            cursor: makeByteOffsetCursor(lineEnd),
+          };
+        } else if (itemType === "reasoning" && lineEnd > fromOffset) {
           const summary = payload["summary"];
           if (Array.isArray(summary) && summary.length > 0) {
             const texts = (summary as Array<Record<string, unknown>>)
@@ -282,8 +343,137 @@ export async function* parseCodexMessages(
               .map((item) => String(item["text"] ?? ""))
               .filter((text) => text.length > 0);
             if (texts.length > 0) {
-              thinkingBlocks.push({ content: texts.join("\n") });
+              const base = makeBase(
+                "thinking",
+                "response_item.reasoning",
+                lineEnd,
+              );
+              yield {
+                event: {
+                  ...base,
+                  kind: "thinking",
+                  content: texts.join("\n"),
+                } as unknown as ConversationEvent,
+                cursor: makeByteOffsetCursor(lineEnd),
+              };
             }
+          }
+        }
+        break;
+      }
+
+      case "request_user_input": {
+        if (!payload || lineEnd <= fromOffset) break;
+
+        const toolCallId = makeEventId(
+          sessionId,
+          lineEnd,
+          "request_user_input",
+        );
+        const questions = payload["questions"];
+        const answers = payload["answers"];
+
+        // tool.call: the questionnaire prompt
+        const toolCallBase = makeBase(
+          "tool.call",
+          "request_user_input",
+          lineEnd,
+          0,
+        );
+        yield {
+          event: {
+            ...toolCallBase,
+            kind: "tool.call",
+            toolCallId,
+            name: "request_user_input",
+            ...(questions ? { input: { questions } } : {}),
+          } as unknown as ConversationEvent,
+          cursor: makeByteOffsetCursor(lineEnd),
+        };
+
+        // tool.result: raw answer output
+        const toolResultBase = makeBase(
+          "tool.result",
+          "request_user_input",
+          lineEnd,
+          1,
+        );
+        yield {
+          event: {
+            ...toolResultBase,
+            kind: "tool.result",
+            toolCallId,
+            result: answers !== undefined ? JSON.stringify(answers) : "",
+          } as unknown as ConversationEvent,
+          cursor: makeByteOffsetCursor(lineEnd),
+        };
+
+        const answersRecord = answers !== null && typeof answers === "object" &&
+            !Array.isArray(answers)
+          ? answers as Record<string, unknown>
+          : undefined;
+
+        if (answersRecord) {
+          const answeredLines = Object.entries(answersRecord)
+            .map(([key, val]) => `- ${key}: ${String(val)}`)
+            .join("\n");
+
+          const userBase = makeBase(
+            "message.user",
+            "request_user_input",
+            lineEnd,
+            2,
+          );
+          userMsgEnd = lineEnd;
+          yield {
+            event: {
+              ...userBase,
+              kind: "message.user",
+              role: "user",
+              content: answeredLines,
+            } as unknown as ConversationEvent,
+            cursor: makeByteOffsetCursor(lineEnd),
+          };
+
+          // decision events: one per answered question
+          const questionsList = Array.isArray(questions)
+            ? questions as Array<Record<string, unknown>>
+            : [];
+          let decisionIndex = 3;
+          for (const [key, val] of Object.entries(answersRecord)) {
+            const questionEntry = questionsList.find((q) => q["id"] === key);
+            const questionText = questionEntry
+              ? String(questionEntry["question"] ?? key)
+              : key;
+            const decisionBase = makeBase(
+              "decision",
+              "request_user_input",
+              lineEnd,
+              decisionIndex,
+            );
+            const decisionId = makeEventId(
+              sessionId,
+              lineEnd,
+              "decision",
+              decisionIndex,
+            );
+            yield {
+              event: {
+                ...decisionBase,
+                kind: "decision",
+                decisionId,
+                decisionKey: key,
+                summary: `${questionText} → ${String(val)}`,
+                status: "accepted",
+                decidedBy: "user",
+                basisEventIds: [
+                  String(toolCallBase["eventId"]),
+                  String(toolResultBase["eventId"]),
+                ],
+              } as unknown as ConversationEvent,
+              cursor: makeByteOffsetCursor(lineEnd),
+            };
+            decisionIndex += 1;
           }
         }
         break;
@@ -291,18 +481,22 @@ export async function* parseCodexMessages(
     }
   }
 
+  // Flush any remaining pending assistant text at end of file
   if (pendingAssistantText && !turnFinalized && userMsgEnd >= fromOffset) {
-    const assistantId = `${sessionId ?? "unknown"}-assist-${currentByteOffset}`;
+    const base = makeBase(
+      "message.assistant",
+      "event_msg.agent_message",
+      currentByteOffset,
+    );
     yield {
-      message: makeMessage(
-        "assistant",
-        assistantId,
-        model,
-        pendingAssistantText,
-        toolCalls,
-        thinkingBlocks,
-      ),
-      offset: currentByteOffset,
+      event: {
+        ...base,
+        kind: "message.assistant",
+        role: "assistant",
+        content: normalizeText(pendingAssistantText),
+        ...(model ? { model } : {}),
+      } as unknown as ConversationEvent,
+      cursor: makeByteOffsetCursor(currentByteOffset),
     };
   }
 }
