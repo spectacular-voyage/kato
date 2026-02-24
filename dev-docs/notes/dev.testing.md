@@ -119,7 +119,20 @@ Expected:
   `provider: "codex"` and `activeSessions >= 1`.
 - Export command reports `export request queued ...`.
 - Export file exists and contains parsed conversation content (assistant/user
-  messages).
+  messages, tool calls rendered as collapsible sections).
+
+### 5b) Verify JSONL export format
+
+```bash
+deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output ~/.kato/runtime/smoke-export.jsonl --format jsonl
+sleep 2
+head -1 ~/.kato/runtime/smoke-export.jsonl | deno eval -A 'const line=await new Response(Deno.stdin).text(); const e=JSON.parse(line); console.log(e.kind, e.eventId);'
+```
+
+Expected:
+
+- JSONL file exists with one `ConversationEvent` JSON object per line.
+- Each line includes `kind`, `eventId`, `provider`, `sessionId`, `timestamp`.
 
 ### 6) Queue clean request
 

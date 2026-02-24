@@ -29,20 +29,24 @@ For implementation constraints and security invariants, also see:
   represented as session log files under configured roots.
 - **Session**: one provider conversation identified by a provider-specific
   `sessionId`.
+- **ConversationEvent**: typed canonical event record (kind: `message.user`,
+  `message.assistant`, `tool.call`, `tool.result`, `thinking`, `decision`,
+  `provider.info`, etc.) with base fields `eventId`, `provider`, `sessionId`,
+  `timestamp`, `turnId?`, and `source` (provider-native identity).
 - **Runtime session snapshot**: normalized in-memory state for a session
-  (provider, cursor, bounded messages, status metadata). This is the canonical
-  runtime state for export and provider status.
+  (provider, cursor, `conversationSchemaVersion: 2`, bounded events list, status
+  metadata). This is the canonical runtime state for export and provider status.
 - **Control plane**: filesystem IPC boundary between CLI and daemon:
   `control.json` (requests) and `status.json` (daemon snapshot).
-- **Recording/writer pipeline**: module chain that converts snapshots/messages
-  into markdown output and applies write policy checks.
+- **Recording/writer pipeline**: module chain that converts event snapshots into
+  markdown or JSONL output and applies write policy checks.
 - **Policy layer**: command and path gates that enforce fail-closed behavior
   before mutation actions.
 
 ## Monorepo Boundaries
 
 - `shared/src`: contracts used across app boundaries (`config`, `status`,
-  `messages`, `ipc`).
+  `messages`, `events`, `ipc`).
 - `apps/daemon/src`: the operational system (CLI + launcher + runtime).
 - `apps/web/src`: placeholder for read-only status surfaces.
 - `apps/cloud/src`: placeholder for centralized control/aggregation surfaces.
@@ -72,7 +76,7 @@ graph TD
     RUNTIME[runDaemonRuntimeLoop]
     INGEST[Provider Ingestion Runners]
     SNAPSHOT[InMemorySessionSnapshotStore]
-    WRITER[RecordingPipeline + MarkdownWriter]
+    WRITER[RecordingPipeline + MarkdownWriter/JsonlWriter]
     POLICY[WritePathPolicyGate]
   end
 
@@ -110,7 +114,7 @@ graph TD
 | Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
 | Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | session snapshot store, logs | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
 | Snapshot store  | Canonical session state for runtime              | per-session snapshots         | ingestion upserts                    | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
-| Writer pipeline | Render/export markdown with dedupe/path gates    | active recordings map         | export requests + snapshots          | markdown files, logs         | `apps/daemon/src/writer/*`                           |
+| Writer pipeline | Render/export markdown or JSONL with path gates  | active recordings map         | export requests + event snapshots    | .md/.jsonl files, logs       | `apps/daemon/src/writer/*`                           |
 | Policy          | Deny/allow write destinations, command detection | none                          | config + command text                | decisions/events             | `apps/daemon/src/policy/*`                           |
 | Observability   | structured operational + audit records           | none                          | events from runtime/ingestion/writer | JSONL sinks                  | `apps/daemon/src/observability/*`                    |
 
@@ -165,7 +169,7 @@ Per runner responsibilities:
 - watch filesystem changes with debounce
 - maintain in-memory cursor map per session
 - parse new log content from last cursor
-- merge/dedupe messages against existing snapshot
+- merge/dedupe events against existing snapshot (signature includes kind, source fields, and content)
 - upsert into shared snapshot store
 - emit operational and audit events for starts/errors/cursor updates/drops
 
@@ -173,13 +177,14 @@ Per runner responsibilities:
 
 `InMemorySessionSnapshotStore` is runtime canonical state for session data:
 
-- bounded by retention policy (`maxSessions`, `maxMessagesPerSession`)
+- bounded by retention policy (`maxSessions`, `maxEventsPerSession`)
+- stores `ConversationEvent[]` with `conversationSchemaVersion: 2`
 - upsert is copy-safe (clones inputs/outputs)
 - metadata carries:
   - `updatedAt` (ingestion-time)
-  - `messageCount`
-  - `truncatedMessages`
-  - optional `lastMessageAt`
+  - `eventCount`
+  - `truncatedEvents`
+  - optional `lastEventAt`
 
 `status.providers` is derived from this store, not from parser internals.
 
@@ -187,15 +192,18 @@ Per runner responsibilities:
 
 `export` command flow:
 
-1. CLI enqueues request in `control.json`
+1. CLI enqueues request in `control.json` (with optional `format: markdown|jsonl`)
 2. runtime loop reads request
-3. runtime resolves snapshot via `loadSessionSnapshot`
+3. runtime resolves snapshot events via `loadSessionSnapshot`
 4. writer pipeline enforces path policy
-5. markdown writer renders and writes output
+5. markdown writer (`renderEventsToMarkdown`) or JSONL writer renders and writes
 6. control request is marked processed
 
 If snapshot is missing/invalid/empty, runtime skips export with explicit
 operational + audit events (fail-safe behavior, no silent empty file writes).
+
+Default export format is markdown. JSONL emits one canonical `ConversationEvent`
+JSON object per line.
 
 ### 7) Policy and Security Gates
 

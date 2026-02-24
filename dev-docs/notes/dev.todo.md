@@ -6,13 +6,22 @@ updated: 1771831053047
 created: 1771812869620
 ---
 
+## Event Schema Follow-ups (v2)
+
+- [ ] Add `request_user_input` Codex fixture under `tests/fixtures/` and add
+      explicit questionnaire→decision event synthesis tests.
+- [ ] Add explicit cross-kind collision test: assert two events with same
+      content/timestamp but different `kind` do NOT dedupe.
+- [ ] Add schema fail-closed check when persisted snapshot files are added
+      (fail with `kato clean --all` remediation hint on v1 data).
+- [ ] Add `JsonlConversationWriter` to active recording pipeline (currently
+      only markdown recordings are appended; JSONL write mode is export-only).
+
 ## Runtime And Ingestion Follow-ups
 
 - [ ] Persist provider cursors across daemon restarts (disk-backed cursor state).
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into
       `clean` command behavior.
-- [ ] Retire `loadSessionMessages` legacy export fallback once all paths use
-      `loadSessionSnapshot`.
 - [ ] Add permission-boundary tests that prove provider reads are denied outside
       `providerSessionRoots`.
 - [ ] _maybe_ Fix snapshot store key to include provider identity (`${provider}:${sessionId}`)
@@ -20,7 +29,7 @@ created: 1771812869620
       deciding `get(sessionId)` semantics for provider-unaware export lookups.
 - [ ] _maybe_ Fix mid-turn cursor advancement: cursor must not advance past an incomplete
       multi-entry assistant turn; polling at a turn boundary splits one logical
-      message into two separate snapshot entries that dedupe cannot collapse.
+      event into two separate snapshot entries that dedupe cannot collapse.
 
 ## CLI And Runtime Hardening
 
