@@ -1,2 +1,2 @@
-export { parseClaudeMessages } from "./claude/mod.ts";
-export { parseCodexMessages } from "./codex/mod.ts";
+export { parseClaudeEvents } from "./claude/mod.ts";
+export { parseCodexEvents } from "./codex/mod.ts";

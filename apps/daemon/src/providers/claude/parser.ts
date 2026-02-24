@@ -1,4 +1,4 @@
-import type { Message, ThinkingBlock, ToolCall } from "@kato/shared";
+import type { ConversationEvent, ProviderCursor } from "@kato/shared";
 import { normalizeText, utf8ByteLength } from "../../utils/text.ts";
 
 interface RawContentBlock {
@@ -50,15 +50,15 @@ function* parseLines(
     }
 
     const entry = parsed as RawEntry;
-    if (entry.type !== "user" && entry.type !== "assistant") {
+    // Accept user, assistant, and system entries.
+    if (
+      entry.type !== "user" && entry.type !== "assistant" &&
+      entry.type !== "system"
+    ) {
       currentOffset = endOffset;
       continue;
     }
     if (entry.isSidechain) {
-      currentOffset = endOffset;
-      continue;
-    }
-    if (!entry.message?.content || !Array.isArray(entry.message.content)) {
       currentOffset = endOffset;
       continue;
     }
@@ -69,7 +69,10 @@ function* parseLines(
 }
 
 function isUserTextEntry(entry: RawEntry): boolean {
-  return entry.message!.content.some((block) => block.type === "text");
+  return (
+    Array.isArray(entry.message?.content) &&
+    entry.message!.content.some((block) => block.type === "text")
+  );
 }
 
 function stripAnsi(text: string): string {
@@ -94,25 +97,19 @@ function extractText(content: RawContentBlock[]): string {
     .join("\n\n");
 }
 
-function extractThinking(content: RawContentBlock[]): ThinkingBlock[] {
-  return content
-    .filter((block) => block.type === "thinking")
-    .map((block) => ({ content: String(block["thinking"] ?? "") }));
-}
-
-function extractToolUses(content: RawContentBlock[]): ToolCall[] {
-  return content
-    .filter((block) => block.type === "tool_use")
-    .map((block) => {
-      const name = String(block["name"] ?? "unknown");
-      const input = block["input"] as Record<string, unknown> | undefined;
-      return {
-        id: String(block["id"] ?? ""),
-        name,
-        description: deriveToolDescription(name, input),
-        input,
-      };
-    });
+function extractToolResultText(content: unknown): string {
+  if (typeof content === "string") return stripAnsi(content);
+  if (Array.isArray(content)) {
+    return content
+      .filter((item: unknown) =>
+        typeof item === "object" &&
+        item !== null &&
+        (item as RawContentBlock).type === "text"
+      )
+      .map((item: unknown) => stripAnsi((item as { text: string }).text))
+      .join("\n");
+  }
+  return "";
 }
 
 function deriveToolDescription(
@@ -143,146 +140,165 @@ function truncate(text: string | undefined, max: number): string | undefined {
   return text.length > max ? text.slice(0, max) + "..." : text;
 }
 
-function extractToolResultText(content: unknown): string {
-  if (typeof content === "string") return stripAnsi(content);
-  if (Array.isArray(content)) {
-    return content
-      .filter((item: unknown) =>
-        typeof item === "object" &&
-        item !== null &&
-        (item as RawContentBlock).type === "text"
-      )
-      .map((item: unknown) => stripAnsi((item as { text: string }).text))
-      .join("\n");
-  }
-  return "";
+function makeByteOffsetCursor(offset: number): ProviderCursor {
+  return { kind: "byte-offset", value: Math.max(0, Math.floor(offset)) };
 }
 
-function linkToolResults(
-  content: RawContentBlock[],
-  pendingTools: Map<string, ToolCall>,
-): void {
-  for (const block of content) {
-    if (block.type !== "tool_result") continue;
-    const toolUseId = block.tool_use_id as string;
-    const toolCall = pendingTools.get(toolUseId);
-    if (toolCall) {
-      toolCall.result = extractToolResultText(block.content);
-      pendingTools.delete(toolUseId);
-    }
-  }
+function makeEventId(
+  entryUuid: string,
+  kind: string,
+  index: number = 0,
+): string {
+  return `${entryUuid}:${kind}${index > 0 ? `:${index}` : ""}`;
 }
 
-function makeMessage(
-  role: "user" | "assistant",
-  id: string,
-  timestamp: string,
-  textParts: string[],
-  toolCalls: ToolCall[],
-  thinkingBlocks: ThinkingBlock[],
-  model?: string,
-): Message {
-  const content = normalizeText(
-    textParts.filter((part) => part.length > 0).join("\n\n"),
-  );
-
-  return {
-    id,
-    role,
-    content,
-    timestamp,
-    ...(model && { model }),
-    ...(toolCalls.length > 0 && { toolCalls }),
-    ...(thinkingBlocks.length > 0 && { thinkingBlocks }),
-  };
+export interface ClaudeParseContext {
+  provider: string;
+  sessionId: string;
 }
 
-export async function* parseClaudeMessages(
+export async function* parseClaudeEvents(
   filePath: string,
   fromOffset: number = 0,
-): AsyncIterable<{ message: Message; offset: number }> {
+  ctx: ClaudeParseContext,
+): AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }> {
   const content = await Deno.readTextFile(filePath);
-
-  let currentRole: "user" | "assistant" | null = null;
-  let currentId = "";
-  let currentTimestamp = "";
-  let currentModel: string | undefined;
-  let textParts: string[] = [];
-  let toolCalls: ToolCall[] = [];
-  let thinkingBlocks: ThinkingBlock[] = [];
-  let lastOffset = fromOffset;
-  const pendingTools = new Map<string, ToolCall>();
-
-  function* flushCurrent(): Generator<{ message: Message; offset: number }> {
-    if (!currentRole) return;
-    if (
-      textParts.length > 0 || toolCalls.length > 0 || thinkingBlocks.length > 0
-    ) {
-      yield {
-        message: makeMessage(
-          currentRole,
-          currentId,
-          currentTimestamp,
-          textParts,
-          toolCalls,
-          thinkingBlocks,
-          currentModel,
-        ),
-        offset: lastOffset,
-      };
-    }
-
-    currentRole = null;
-    currentModel = undefined;
-    textParts = [];
-    toolCalls = [];
-    thinkingBlocks = [];
-  }
+  const { provider, sessionId } = ctx;
 
   for (const { entry, endOffset } of parseLines(content, fromOffset)) {
+    const turnId = entry.uuid;
+    const timestamp = entry.timestamp;
+    const cursor = makeByteOffsetCursor(endOffset);
+
+    const makeBase = (
+      kind: ConversationEvent["kind"],
+      index: number = 0,
+    ): Record<string, unknown> => ({
+      eventId: makeEventId(turnId, kind, index),
+      provider,
+      sessionId,
+      timestamp,
+      kind,
+      turnId,
+      source: {
+        providerEventType: entry.type,
+        providerEventId: turnId,
+        rawCursor: cursor,
+      },
+    });
+
+    if (entry.type === "system") {
+      // system entries → provider.info events
+      const blocks = entry.message?.content ?? [];
+      const text = extractText(blocks);
+      if (text) {
+        yield {
+          event: {
+            ...makeBase("provider.info"),
+            kind: "provider.info",
+            content: text,
+            subtype: "system",
+          } as unknown as ConversationEvent,
+          cursor,
+        };
+      }
+      continue;
+    }
+
+    const blocks = entry.message!.content;
+
     if (entry.type === "user") {
-      const blocks = entry.message!.content;
-      const hasText = isUserTextEntry(entry);
-
-      if (hasText) {
-        yield* flushCurrent();
-
-        currentRole = "user";
-        currentId = entry.uuid;
-        currentTimestamp = entry.timestamp;
-        textParts = [];
+      // Extract text content → message.user
+      if (isUserTextEntry(entry)) {
         const text = extractText(blocks);
         if (text) {
-          textParts.push(text);
+          yield {
+            event: {
+              ...makeBase("message.user"),
+              kind: "message.user",
+              role: "user",
+              content: text,
+            } as unknown as ConversationEvent,
+            cursor,
+          };
         }
       }
 
-      linkToolResults(blocks, pendingTools);
-    } else {
-      if (currentRole !== "assistant") {
-        yield* flushCurrent();
-        currentRole = "assistant";
-        currentId = entry.uuid;
-        currentTimestamp = entry.timestamp;
-        currentModel = entry.message!.model;
+      // Extract tool_result blocks → tool.result events
+      let toolResultIndex = 0;
+      for (const block of blocks) {
+        if (block.type !== "tool_result") continue;
+        const toolUseId = String(block["tool_use_id"] ?? "");
+        const resultText = extractToolResultText(block["content"]);
+        yield {
+          event: {
+            ...makeBase("tool.result", toolResultIndex),
+            kind: "tool.result",
+            toolCallId: toolUseId,
+            result: resultText,
+          } as unknown as ConversationEvent,
+          cursor,
+        };
+        toolResultIndex += 1;
       }
+    } else if (entry.type === "assistant") {
+      const model = entry.message!.model;
 
-      const blocks = entry.message!.content;
+      // Extract text → message.assistant
       const text = extractText(blocks);
       if (text) {
-        textParts.push(text);
+        yield {
+          event: {
+            ...makeBase("message.assistant"),
+            kind: "message.assistant",
+            role: "assistant",
+            content: normalizeText(text),
+            ...(model ? { model } : {}),
+          } as unknown as ConversationEvent,
+          cursor,
+        };
       }
-      thinkingBlocks.push(...extractThinking(blocks));
 
-      const newToolCalls = extractToolUses(blocks);
-      toolCalls.push(...newToolCalls);
-      for (const toolCall of newToolCalls) {
-        pendingTools.set(toolCall.id, toolCall);
+      // Extract thinking blocks → thinking events
+      let thinkingIndex = 0;
+      for (const block of blocks) {
+        if (block.type !== "thinking") continue;
+        const thinkingContent = String(block["thinking"] ?? "");
+        if (thinkingContent) {
+          yield {
+            event: {
+              ...makeBase("thinking", thinkingIndex),
+              kind: "thinking",
+              content: thinkingContent,
+            } as unknown as ConversationEvent,
+            cursor,
+          };
+          thinkingIndex += 1;
+        }
+      }
+
+      // Extract tool_use blocks → tool.call events
+      let toolCallIndex = 0;
+      for (const block of blocks) {
+        if (block.type !== "tool_use") continue;
+        const name = String(block["name"] ?? "unknown");
+        const input = block["input"] as Record<string, unknown> | undefined;
+        const toolCallId = String(
+          block["id"] ?? makeEventId(turnId, "tool.call", toolCallIndex),
+        );
+        yield {
+          event: {
+            ...makeBase("tool.call", toolCallIndex),
+            kind: "tool.call",
+            toolCallId,
+            name,
+            description: deriveToolDescription(name, input),
+            ...(input ? { input } : {}),
+          } as unknown as ConversationEvent,
+          cursor,
+        };
+        toolCallIndex += 1;
       }
     }
-
-    lastOffset = endOffset;
   }
-
-  yield* flushCurrent();
 }

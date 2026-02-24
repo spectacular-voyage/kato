@@ -1,1 +1,1 @@
-export { parseClaudeMessages } from "./parser.ts";
+export { type ClaudeParseContext, parseClaudeEvents } from "./parser.ts";
