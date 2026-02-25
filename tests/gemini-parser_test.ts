@@ -10,6 +10,11 @@ const COMMAND_FIXTURE = join(
   "fixtures",
   "gemini-session-command-display-mismatch.json",
 );
+const ASSISTANT_CONTENT_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "gemini-session-assistant-content-mismatch.json",
+);
 const TEST_CTX = { provider: "gemini", sessionId: "sess-gemini-001" };
 
 type ParseItem = {
@@ -75,6 +80,21 @@ Deno.test("gemini parser preserves control-command lines from raw user content",
     assert(
       !firstUser.event.content.includes("raw-only body text"),
     );
+  }
+});
+
+Deno.test("gemini parser prefers content over displayContent for assistant messages", async () => {
+  const results = await collectEvents(ASSISTANT_CONTENT_FIXTURE);
+  const assistant = results.find((result) =>
+    result.event.kind === "message.assistant"
+  );
+  assert(assistant !== undefined);
+  if (assistant.event.kind === "message.assistant") {
+    assertStringIncludes(
+      assistant.event.content,
+      "I'll take the taxonomy-cleanup slice now.",
+    );
+    assertStringIncludes(assistant.event.content, "Here is the updated code.");
   }
 });
 

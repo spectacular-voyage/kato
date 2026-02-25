@@ -52,6 +52,11 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
       gemini: ["/sessions/gemini"],
     },
     featureFlags: createDefaultRuntimeFeatureFlags(),
+    logging: {
+      operationalLevel: "info",
+      auditLevel: "info",
+    },
+    daemonMaxMemoryMb: 200,
   };
 }
 
@@ -69,6 +74,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
         gemini: [...initial.providerSessionRoots.gemini],
       },
       featureFlags: { ...initial.featureFlags },
+      logging: { ...initial.logging },
     }
     : undefined;
   const ensureCalls = { value: 0 };
@@ -89,6 +95,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             gemini: [...state.providerSessionRoots.gemini],
           },
           featureFlags: { ...state.featureFlags },
+          logging: { ...state.logging },
         });
       },
       ensureInitialized(defaultConfig: RuntimeConfig) {
@@ -103,6 +110,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               gemini: [...defaultConfig.providerSessionRoots.gemini],
             },
             featureFlags: { ...defaultConfig.featureFlags },
+            logging: { ...defaultConfig.logging },
           };
           return Promise.resolve({
             created: true,
@@ -115,6 +123,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
                 gemini: [...state.providerSessionRoots.gemini],
               },
               featureFlags: { ...state.featureFlags },
+              logging: { ...state.logging },
             },
             path: `${state.runtimeDir}/config.json`,
           });
@@ -131,6 +140,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               gemini: [...state.providerSessionRoots.gemini],
             },
             featureFlags: { ...state.featureFlags },
+            logging: { ...state.logging },
           },
           path: `${state.runtimeDir}/config.json`,
         });

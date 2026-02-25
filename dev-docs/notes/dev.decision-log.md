@@ -2,7 +2,7 @@
 id: lemvnlo09cw54zczwbgyhvw
 title: Decision Log
 desc: ""
-updated: 1771779491637
+updated: 1771985134546
 created: 1771779490894
 ---
 
@@ -233,6 +233,33 @@ created: 1771779490894
   - Add schema fail-closed check for persisted snapshot files (once persistence
     is added).
   - Build Gemini provider runner using this event model directly.
+
+### Gemini Text Source Precedence
+
+- Decision:
+  - For Gemini `message.user`, prefer `displayContent` and preserve missing
+    command-like lines from raw `content`.
+  - For Gemini `message.assistant`, prefer raw `content` and fall back to
+    `displayContent` only when `content` is absent.
+- Owner: Kato engineering
+- Date: 2026-02-25
+- Why:
+  - User `displayContent` better matches what operators see in Gemini UI and
+    avoids raw payload noise.
+  - Assistant raw `content` is the authoritative/full text; `displayContent`
+    can omit narration/action lines that are relevant for faithful capture.
+  - Preserving command-like lines from raw user `content` keeps `::record` and
+    `::capture` detection reliable.
+- Tradeoffs:
+  - Different precedence rules for user vs assistant messages add parser
+    complexity.
+  - Raw assistant `content` may include text that UI-softened `displayContent`
+    would not show.
+- Follow-up tasks:
+  - Keep regression fixtures/tests for both mismatch cases:
+    - user command line present only in raw `content`
+    - assistant narration present only in raw `content`
+  - Revisit this mapping if upstream Gemini schema semantics change.
 
 ### Runtime Config Bootstrap
 

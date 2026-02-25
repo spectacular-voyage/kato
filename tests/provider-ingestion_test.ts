@@ -230,11 +230,150 @@ Deno.test("FileProviderIngestionRunner logs parse errors and continues polling",
         record.channel === "operational"
       ),
     );
-    assert(
+    assertEquals(
       sink.records.some((record) =>
         record.event === "provider.ingestion.parse_error" &&
         record.channel === "security-audit"
       ),
+      false,
+    );
+  });
+});
+
+Deno.test("FileProviderIngestionRunner audits permission-denied discovery failures", async () => {
+  await withTempDir(
+    "provider-ingestion-access-denied-discovery-",
+    async (dir) => {
+      const sink = new CaptureSink();
+      const operationalLogger = new StructuredLogger([sink], {
+        channel: "operational",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T20:10:00.000Z"),
+      });
+      const auditLogger = new AuditLogger(
+        new StructuredLogger([sink], {
+          channel: "security-audit",
+          minLevel: "debug",
+          now: () => new Date("2026-02-22T20:10:00.000Z"),
+        }),
+      );
+
+      const harness = makeWatchHarness();
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: new InMemorySessionSnapshotStore(),
+        watchFs: harness.watchFn,
+        operationalLogger,
+        auditLogger,
+        discoverSessions() {
+          return Promise.reject(
+            new Deno.errors.PermissionDenied("read denied"),
+          );
+        },
+        parseEvents() {
+          return (async function* () {})();
+        },
+      });
+
+      await runner.start();
+      const result = await runner.poll();
+      await runner.stop();
+
+      assertEquals(result.sessionsUpdated, 0);
+      assertEquals(result.eventsObserved, 0);
+      assert(
+        sink.records.some((record) =>
+          record.event === "provider.ingestion.read_denied" &&
+          record.channel === "operational" &&
+          record.attributes?.["operation"] === "readDir"
+        ),
+      );
+      assert(
+        sink.records.some((record) =>
+          record.event === "provider.ingestion.read_denied" &&
+          record.channel === "security-audit" &&
+          record.attributes?.["operation"] === "readDir"
+        ),
+      );
+    },
+  );
+});
+
+Deno.test("FileProviderIngestionRunner audits permission-denied parse reads", async () => {
+  await withTempDir("provider-ingestion-access-denied-open-", async (dir) => {
+    const sessionFile = join(dir, "session-denied.jsonl");
+    await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+    const sink = new CaptureSink();
+    const operationalLogger = new StructuredLogger([sink], {
+      channel: "operational",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T20:10:00.000Z"),
+    });
+    const auditLogger = new AuditLogger(
+      new StructuredLogger([sink], {
+        channel: "security-audit",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T20:10:00.000Z"),
+      }),
+    );
+
+    const harness = makeWatchHarness();
+    const runner = new FileProviderIngestionRunner({
+      provider: "test-provider",
+      watchRoots: [dir],
+      sessionSnapshotStore: new InMemorySessionSnapshotStore(),
+      watchFs: harness.watchFn,
+      operationalLogger,
+      auditLogger,
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-denied",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents() {
+        return (async function* () {
+          if (Date.now() < 0) {
+            yield {
+              event: makeEvent("unreachable", "2026-02-22T00:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 0 },
+            };
+          }
+          throw new Deno.errors.PermissionDenied("open denied");
+        })();
+      },
+    });
+
+    await runner.start();
+    const result = await runner.poll();
+    await runner.stop();
+
+    assertEquals(result.sessionsUpdated, 0);
+    assertEquals(result.eventsObserved, 0);
+    assert(
+      sink.records.some((record) =>
+        record.event === "provider.ingestion.read_denied" &&
+        record.channel === "operational" &&
+        record.attributes?.["operation"] === "open" &&
+        record.attributes?.["targetPath"] === sessionFile
+      ),
+    );
+    assert(
+      sink.records.some((record) =>
+        record.event === "provider.ingestion.read_denied" &&
+        record.channel === "security-audit" &&
+        record.attributes?.["operation"] === "open" &&
+        record.attributes?.["targetPath"] === sessionFile
+      ),
+    );
+    assertEquals(
+      sink.records.some((record) =>
+        record.event === "provider.ingestion.parse_error"
+      ),
+      false,
     );
   });
 });
@@ -409,9 +548,10 @@ Deno.test("FileProviderIngestionRunner logs duplicate session discovery warnings
 
     const duplicateDiscoveryWarnings = sink.records.filter((record) =>
       record.event === "provider.ingestion.events_dropped" &&
+      record.channel === "operational" &&
       record.attributes?.["reason"] === "duplicate-session-id"
     );
-    assertEquals(duplicateDiscoveryWarnings.length, 2);
+    assertEquals(duplicateDiscoveryWarnings.length, 1);
     assert(
       duplicateDiscoveryWarnings.every((record) =>
         Array.isArray(record.attributes?.["duplicateSessionIds"])

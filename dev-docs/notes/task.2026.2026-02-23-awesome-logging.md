@@ -2,7 +2,7 @@
 id: 451qv7hh06v1gwe3dklz0i5
 title: 2026 02 23 Awesome Logging
 desc: ""
-updated: 1771871047984
+updated: 1771983577193
 created: 1771871047984
 ---
 
@@ -37,6 +37,15 @@ Make logging high-signal, configurable, and production-ready:
 5. OpenTelemetry plugin + codebase-wide instrumentation baseline
 6. Tests and docs updates
 
+## Status Checklist
+
+- [ ] 1. Event taxonomy and channel ownership
+- [x] 2. Audit coverage for access-failure events
+- [x] 3. Log level configuration
+- [ ] 4. LogLayer adoption/migration
+- [ ] 5. OpenTelemetry plugin + codebase-wide instrumentation baseline
+- [ ] 6. Tests and docs updates (final pass after LogLayer/OTel)
+
 ## Decisions To Lock
 
 ### 1) Channel Semantics
@@ -52,14 +61,12 @@ Make logging high-signal, configurable, and production-ready:
 
 ### 2) Noise Reduction
 
-- `provider.ingestion.cursor_updated` should not be emitted to either channel.
+- move these to TRACE level:
+  - provider.ingestion.poll
+- move these to DEBUG level:
+  - Provider ingestion dropped duplicate events (maybe a new event, provider.ingestion.events_dropped.duplicate)
 - Remove or downgrade audit events that are purely telemetry and do not carry
   security value.
-
-Note:
-
-- The `cursor_updated` removal has already been applied in code; this task still
-  owns broader taxonomy cleanup and follow-up verification.
 
 ### 3) Access-Failure Audit Events
 
@@ -241,8 +248,6 @@ Candidate config shape:
 
 - Should CLI include explicit runtime logging override flags now, or defer to
   config/env only?
-- Should parse failures remain in `security-audit` by default, or only those
-  linked to access/control-policy risks?
 - Do we want per-component levels (ingestion/runtime/writer), or only per
   channel for MVP?
 - Which OTel exporter defaults should we support first (OTLP HTTP only, or OTLP

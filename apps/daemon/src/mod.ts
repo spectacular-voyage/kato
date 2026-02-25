@@ -36,6 +36,7 @@ export type {
   SessionSnapshotStore,
   SessionSnapshotStoreRetentionPolicy,
   SessionSnapshotUpsert,
+  SnapshotMemoryStats,
 } from "./orchestrator/mod.ts";
 export {
   createClaudeIngestionRunner,
@@ -54,6 +55,7 @@ export {
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
   runDaemonRuntimeLoop,
+  SessionSnapshotMemoryBudgetExceededError,
 } from "./orchestrator/mod.ts";
 export type {
   EnsureRuntimeConfigResult,
@@ -61,6 +63,7 @@ export type {
 } from "./config/mod.ts";
 export {
   createDefaultRuntimeConfig,
+  createDefaultRuntimeLoggingConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,

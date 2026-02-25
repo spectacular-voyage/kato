@@ -72,10 +72,13 @@ function extractText(value: unknown): string {
   return "";
 }
 
+// For model messages, prefer content (authoritative full text) over displayContent
+// (display-optimized and may omit narration/action lines).  Fall back to
+// displayContent only when content is absent.
 function extractPreferredMessageText(message: Record<string, unknown>): string {
-  const display = extractText(message["displayContent"]);
-  if (display.length > 0) return display;
-  return extractText(message["content"]);
+  const content = extractText(message["content"]);
+  if (content.length > 0) return content;
+  return extractText(message["displayContent"]);
 }
 
 const COMMAND_LINE_PATTERN = /^\s*::[a-z][a-z0-9-]*(?:\s+.+)?\s*$/i;

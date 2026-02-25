@@ -110,7 +110,12 @@ Default config shape:
     "writerItalicizeUserMessages": false,
     "daemonExportEnabled": true,
     "captureIncludeSystemEvents": false
-  }
+  },
+  "logging": {
+    "operationalLevel": "info",
+    "auditLevel": "info"
+  },
+  "daemonMaxMemoryMb": 200
 }
 ```
 
@@ -119,6 +124,21 @@ Notes:
 - Runtime config is validated fail-closed at startup.
 - `providerSessionRoots` controls provider ingestion discovery roots and daemon
   read-scope narrowing.
+- Missing provider root keys in legacy configs are backfilled with defaults
+  (including `gemini`).
+- Missing `logging` config in legacy files is backfilled to:
+  - `operationalLevel: "info"`
+  - `auditLevel: "info"`
+- Runtime log level precedence is:
+  - `KATO_LOGGING_OPERATIONAL_LEVEL` / `KATO_LOGGING_AUDIT_LEVEL` env override
+  - `runtimeConfig.logging`
+- `daemonMaxMemoryMb` is the global in-memory snapshot budget.
+- `KATO_DAEMON_MAX_MEMORY_MB` is used only when generating a default config
+  (`init`/auto-init). Precedence for generated config is: explicit value > env
+  var > `200`.
+- `allowedWriteRoots` gates user-requested output paths (`record`, `capture`,
+  `export`), not daemon-owned runtime artifacts (`status.json`, `control.json`,
+  runtime logs).
 - Unknown `featureFlags` keys are rejected.
 - Older daemon builds may fail to start with newer config files containing
   additional flags.

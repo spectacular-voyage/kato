@@ -2,6 +2,8 @@ import type {
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeFeatureFlags,
+  RuntimeLoggingConfig,
+  RuntimeLogLevel,
 } from "@kato/shared";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import {
@@ -11,6 +13,17 @@ import {
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
+const DEFAULT_DAEMON_MAX_MEMORY_MB = 200;
+const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
+  "debug",
+  "info",
+  "warn",
+  "error",
+];
+const RUNTIME_LOGGING_CONFIG_KEYS: Array<keyof RuntimeLoggingConfig> = [
+  "operationalLevel",
+  "auditLevel",
+];
 
 export interface EnsureRuntimeConfigResult {
   created: boolean;
@@ -75,6 +88,72 @@ function parseRuntimeFeatureFlags(
   }
 
   return merged;
+}
+
+function isRuntimeLogLevel(value: unknown): value is RuntimeLogLevel {
+  return typeof value === "string" &&
+    RUNTIME_LOG_LEVELS.includes(value as RuntimeLogLevel);
+}
+
+function normalizeRuntimeLogLevel(
+  value: string,
+): RuntimeLogLevel | undefined {
+  const normalized = value.trim().toLowerCase();
+  return isRuntimeLogLevel(normalized) ? normalized : undefined;
+}
+
+export function createDefaultRuntimeLoggingConfig(
+  overrides?: Partial<RuntimeLoggingConfig>,
+): RuntimeLoggingConfig {
+  const defaults: RuntimeLoggingConfig = {
+    operationalLevel: "info",
+    auditLevel: "info",
+  };
+  if (!overrides) {
+    return defaults;
+  }
+
+  return {
+    operationalLevel: overrides.operationalLevel ?? defaults.operationalLevel,
+    auditLevel: overrides.auditLevel ?? defaults.auditLevel,
+  };
+}
+
+function parseRuntimeLoggingConfig(
+  value: unknown,
+): RuntimeLoggingConfig | undefined {
+  if (value === undefined) {
+    return createDefaultRuntimeLoggingConfig();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (
+      !RUNTIME_LOGGING_CONFIG_KEYS.includes(key as keyof RuntimeLoggingConfig)
+    ) {
+      return undefined;
+    }
+  }
+
+  const resolved = createDefaultRuntimeLoggingConfig();
+  for (const key of RUNTIME_LOGGING_CONFIG_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (typeof candidate !== "string") {
+      return undefined;
+    }
+    const level = normalizeRuntimeLogLevel(candidate);
+    if (!level) {
+      return undefined;
+    }
+    resolved[key] = level;
+  }
+
+  return resolved;
 }
 
 function resolveHomeDir(): string | undefined {
@@ -271,11 +350,24 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!featureFlags) {
     return undefined;
   }
+  const logging = parseRuntimeLoggingConfig(value["logging"]);
+  if (!logging) {
+    return undefined;
+  }
   const providerSessionRoots = parseProviderSessionRoots(
     value["providerSessionRoots"],
   );
   if (!providerSessionRoots) {
     return undefined;
+  }
+
+  let daemonMaxMemoryMb = DEFAULT_DAEMON_MAX_MEMORY_MB;
+  if ("daemonMaxMemoryMb" in value) {
+    const raw = value["daemonMaxMemoryMb"];
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
+      return undefined;
+    }
+    daemonMaxMemoryMb = raw;
   }
 
   return {
@@ -286,6 +378,8 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     allowedWriteRoots: allowedWriteRoots.map((root) => expandHome(root)),
     providerSessionRoots,
     featureFlags,
+    logging,
+    daemonMaxMemoryMb,
   };
 }
 
@@ -325,6 +419,8 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
       config.providerSessionRoots,
     ),
     featureFlags: { ...config.featureFlags },
+    logging: { ...config.logging },
+    daemonMaxMemoryMb: config.daemonMaxMemoryMb,
   };
 }
 
@@ -340,6 +436,8 @@ export function createDefaultRuntimeConfig(options: {
   allowedWriteRoots: string[];
   providerSessionRoots?: Partial<ProviderSessionRoots>;
   featureFlags?: Partial<RuntimeFeatureFlags>;
+  logging?: Partial<RuntimeLoggingConfig>;
+  daemonMaxMemoryMb?: number;
   useHomeShorthand?: boolean;
 }): RuntimeConfig {
   const serializePath = options.useHomeShorthand ? collapseHome : (
@@ -348,6 +446,58 @@ export function createDefaultRuntimeConfig(options: {
   const providerSessionRoots = mergeProviderSessionRoots(
     options.providerSessionRoots,
   );
+
+  const envOperationalLevelRaw = readOptionalEnv(
+    "KATO_LOGGING_OPERATIONAL_LEVEL",
+  );
+  const envOperationalLevel = envOperationalLevelRaw !== undefined
+    ? normalizeRuntimeLogLevel(envOperationalLevelRaw)
+    : undefined;
+  if (envOperationalLevelRaw !== undefined && !envOperationalLevel) {
+    throw new Error(
+      "KATO_LOGGING_OPERATIONAL_LEVEL must be one of: debug, info, warn, error",
+    );
+  }
+  const envAuditLevelRaw = readOptionalEnv("KATO_LOGGING_AUDIT_LEVEL");
+  const envAuditLevel = envAuditLevelRaw !== undefined
+    ? normalizeRuntimeLogLevel(envAuditLevelRaw)
+    : undefined;
+  if (envAuditLevelRaw !== undefined && !envAuditLevel) {
+    throw new Error(
+      "KATO_LOGGING_AUDIT_LEVEL must be one of: debug, info, warn, error",
+    );
+  }
+  const resolvedLogging = createDefaultRuntimeLoggingConfig({
+    operationalLevel: options.logging?.operationalLevel ??
+      envOperationalLevel,
+    auditLevel: options.logging?.auditLevel ?? envAuditLevel,
+  });
+  if (
+    !isRuntimeLogLevel(resolvedLogging.operationalLevel) ||
+    !isRuntimeLogLevel(resolvedLogging.auditLevel)
+  ) {
+    throw new Error(
+      "logging levels must be one of: debug, info, warn, error",
+    );
+  }
+
+  const envMemoryMb = readOptionalEnv("KATO_DAEMON_MAX_MEMORY_MB");
+  const parsedEnvMemoryMb = envMemoryMb
+    ? Number(envMemoryMb.trim())
+    : undefined;
+  const resolvedDaemonMaxMemoryMb = options.daemonMaxMemoryMb ??
+    (parsedEnvMemoryMb !== undefined &&
+        Number.isInteger(parsedEnvMemoryMb) &&
+        parsedEnvMemoryMb > 0
+      ? parsedEnvMemoryMb
+      : undefined) ??
+    DEFAULT_DAEMON_MAX_MEMORY_MB;
+  if (
+    !Number.isInteger(resolvedDaemonMaxMemoryMb) ||
+    resolvedDaemonMaxMemoryMb <= 0
+  ) {
+    throw new Error("daemonMaxMemoryMb must be a positive integer");
+  }
 
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
@@ -363,6 +513,8 @@ export function createDefaultRuntimeConfig(options: {
       gemini: providerSessionRoots.gemini.map((root) => serializePath(root)),
     },
     featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
+    logging: resolvedLogging,
+    daemonMaxMemoryMb: resolvedDaemonMaxMemoryMb,
   };
 }
 

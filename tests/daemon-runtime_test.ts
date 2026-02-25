@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import type { ConversationEvent, DaemonStatusSnapshot } from "@kato/shared";
 import {
   AuditLogger,
@@ -9,6 +9,7 @@ import {
   type ProviderIngestionRunner,
   type RecordingPipelineLike,
   runDaemonRuntimeLoop,
+  SessionSnapshotMemoryBudgetExceededError,
   type SessionSnapshotStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
@@ -1922,6 +1923,323 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
   assert(
     sink.records.some((record) =>
       record.event === "recording.command.parse_error" &&
+      record.channel === "security-audit"
+    ),
+  );
+});
+
+Deno.test("runDaemonRuntimeLoop populates memory stats in status snapshot", async () => {
+  const statusHistory: DaemonStatusSnapshot[] = [];
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+        memory: snapshot.memory ? { ...snapshot.memory } : undefined,
+      };
+      statusHistory.push({
+        ...currentStatus,
+      });
+      return Promise.resolve();
+    },
+  };
+
+  const requests = [{
+    requestId: "req-stop",
+    requestedAt: "2026-02-22T10:00:01.000Z",
+    command: "stop" as const,
+  }];
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(requests.map((request) => ({ ...request })));
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called in this test");
+    },
+    markProcessed(requestId: string) {
+      const index = requests.findIndex((request) =>
+        request.requestId === requestId
+      );
+      if (index >= 0) {
+        requests.splice(0, index + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+    daemonMaxMemoryMb: 50,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+  });
+
+  // Add some data to verify stats
+  sessionSnapshotStore.upsert({
+    provider: "p1",
+    sessionId: "s1",
+    cursor: { kind: "byte-offset", value: 0 },
+    events: [makeEvent("e1", "message.user", "test")],
+  });
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    sessionSnapshotStore,
+    now: () => new Date("2026-02-22T10:00:06.000Z"),
+    pid: 4242,
+    heartbeatIntervalMs: 50,
+    pollIntervalMs: 10,
+    daemonMaxMemoryMb: 50,
+  });
+
+  const last = statusHistory[statusHistory.length - 1];
+  assertExists(last);
+  assertExists(last.memory);
+  assertEquals(last.memory?.daemonMaxMemoryBytes, 50 * 1024 * 1024);
+  assertExists(last.memory?.process);
+  assertExists(last.memory?.snapshots);
+  assertEquals(last.memory?.snapshots.sessionCount, 1);
+  assertEquals(last.memory?.snapshots.overBudget, false);
+});
+
+Deno.test("runDaemonRuntimeLoop logs memory samples and evictions", async () => {
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+      });
+    },
+    save(_snapshot) {
+      return Promise.resolve();
+    },
+  };
+
+  const requests = [{
+    requestId: "req-stop",
+    requestedAt: "2026-02-22T10:00:01.000Z",
+    command: "stop" as const,
+  }];
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(requests.map((request) => ({ ...request })));
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called in this test");
+    },
+    markProcessed(requestId: string) {
+      const index = requests.findIndex((request) =>
+        request.requestId === requestId
+      );
+      if (index >= 0) {
+        requests.splice(0, index + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+    daemonMaxMemoryMb: 50,
+    retention: { maxSessions: 1, maxEventsPerSession: 100 },
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+  });
+  sessionSnapshotStore.upsert({
+    provider: "p1",
+    sessionId: "s1",
+    cursor: { kind: "byte-offset", value: 0 },
+    events: [makeEvent("e1", "message.user", "first")],
+  });
+  sessionSnapshotStore.upsert({
+    provider: "p1",
+    sessionId: "s2",
+    cursor: { kind: "byte-offset", value: 1 },
+    events: [makeEvent("e2", "message.user", "second")],
+  });
+
+  const sink = new CaptureSink();
+  const operationalLogger = new StructuredLogger([sink], {
+    channel: "operational",
+    minLevel: "debug",
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+  });
+  const auditLogger = new AuditLogger(
+    new StructuredLogger([sink], {
+      channel: "security-audit",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    }),
+  );
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    sessionSnapshotStore,
+    operationalLogger,
+    auditLogger,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+    pid: 4242,
+    heartbeatIntervalMs: 50,
+    pollIntervalMs: 10,
+    daemonMaxMemoryMb: 50,
+  });
+
+  assert(
+    sink.records.some((record) =>
+      record.event === "daemon.memory.sample" &&
+      record.channel === "operational"
+    ),
+  );
+  const evictionRecord = sink.records.find((record) =>
+    record.event === "daemon.memory.evicted" &&
+    record.channel === "operational"
+  );
+  assertExists(evictionRecord);
+  const evictions = evictionRecord.attributes?.["evictions"];
+  assertEquals(typeof evictions, "number");
+  assert((evictions as number) > 0);
+});
+
+Deno.test("runDaemonRuntimeLoop shuts down cleanly on fatal memory-budget error", async () => {
+  const statusHistory: DaemonStatusSnapshot[] = [];
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+      };
+      statusHistory.push({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+      return Promise.resolve();
+    },
+  };
+
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve([]);
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called in this test");
+    },
+    markProcessed(_requestId: string) {
+      throw new Error("markProcessed should not be called in this test");
+    },
+  };
+
+  const sink = new CaptureSink();
+  const operationalLogger = new StructuredLogger([sink], {
+    channel: "operational",
+    minLevel: "debug",
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+  });
+  const auditLogger = new AuditLogger(
+    new StructuredLogger([sink], {
+      channel: "security-audit",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    }),
+  );
+
+  const calls: string[] = [];
+  const ingestionRunner: ProviderIngestionRunner = {
+    provider: "codex",
+    start() {
+      calls.push("start");
+      return Promise.resolve();
+    },
+    poll() {
+      calls.push("poll");
+      return Promise.reject(
+        new SessionSnapshotMemoryBudgetExceededError(
+          "session-over-budget",
+          1024,
+          512,
+        ),
+      );
+    },
+    stop() {
+      calls.push("stop");
+      return Promise.resolve();
+    },
+  };
+
+  await assertRejects(
+    () =>
+      runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        ingestionRunners: [ingestionRunner],
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        operationalLogger,
+        auditLogger,
+      }),
+    SessionSnapshotMemoryBudgetExceededError,
+  );
+
+  assertEquals(calls, ["start", "poll", "stop"]);
+  const last = statusHistory[statusHistory.length - 1];
+  assertExists(last);
+  assertEquals(last.daemonRunning, false);
+  assert(
+    sink.records.some((record) =>
+      record.event === "daemon.memory_budget.exceeded" &&
+      record.channel === "operational"
+    ),
+  );
+  assert(
+    sink.records.some((record) =>
+      record.event === "daemon.memory_budget.exceeded" &&
       record.channel === "security-audit"
     ),
   );

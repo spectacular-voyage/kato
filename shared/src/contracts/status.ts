@@ -9,6 +9,29 @@ export interface RecordingStatus {
   destinations: number;
 }
 
+export interface MemoryProcessStats {
+  rss: number;
+  heapTotal: number;
+  heapUsed: number;
+  external: number;
+}
+
+export interface MemorySnapshotStats {
+  estimatedBytes: number;
+  sessionCount: number;
+  eventCount: number;
+  evictionsTotal: number;
+  bytesReclaimedTotal: number;
+  evictionsByReason: Record<string, number>;
+  overBudget: boolean;
+}
+
+export interface MemoryStatus {
+  daemonMaxMemoryBytes: number;
+  process: MemoryProcessStats;
+  snapshots: MemorySnapshotStats;
+}
+
 export interface DaemonStatusSnapshot {
   schemaVersion: number;
   generatedAt: string;
@@ -17,4 +40,5 @@ export interface DaemonStatusSnapshot {
   daemonPid?: number;
   providers: ProviderStatus[];
   recordings: RecordingStatus;
+  memory?: MemoryStatus;
 }

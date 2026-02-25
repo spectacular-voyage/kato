@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1771869719246
+updated: 1771980330029
 created: 1771724621833
 ---
 
@@ -95,8 +95,7 @@ deno task ci
 
 - Record planning and sequencing decisions in task notes under
   `dev-docs/notes/`.
-- Use the MVP library-selection note for dependency decisions and tradeoff
-  capture.
+  - check off markdown boxes for task items as you progress
 - Keep [[dev.codebase-overview]] and [[dev.decision-log]] current as behavior is
   added or changed.
 

@@ -91,6 +91,27 @@ interface CodexSessionMeta {
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
+type ProviderReadOperation = "stat" | "readDir" | "open";
+
+class ProviderIngestionReadDeniedError extends Error {
+  readonly operation: ProviderReadOperation;
+  readonly targetPath: string;
+  readonly causeError: Error;
+
+  constructor(
+    operation: ProviderReadOperation,
+    targetPath: string,
+    causeError: Error,
+  ) {
+    super(
+      `permission denied for ${operation} on '${targetPath}': ${causeError.message}`,
+    );
+    this.name = "ProviderIngestionReadDeniedError";
+    this.operation = operation;
+    this.targetPath = targetPath;
+    this.causeError = causeError;
+  }
+}
 
 function makeNoopOperationalLogger(now: () => Date): StructuredLogger {
   return new StructuredLogger([new NoopSink()], {
@@ -237,11 +258,11 @@ async function pathExists(path: string): Promise<boolean> {
     await Deno.stat(path);
     return true;
   } catch (error) {
-    if (
-      error instanceof Deno.errors.NotFound ||
-      error instanceof Deno.errors.PermissionDenied
-    ) {
+    if (error instanceof Deno.errors.NotFound) {
       return false;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("stat", path, error);
     }
     throw error;
   }
@@ -256,11 +277,11 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
     try {
       entries = Deno.readDir(current);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
         continue;
+      }
+      if (error instanceof Deno.errors.PermissionDenied) {
+        throw new ProviderIngestionReadDeniedError("readDir", current, error);
       }
       throw error;
     }
@@ -286,11 +307,11 @@ async function* walkJsonFiles(root: string): AsyncGenerator<string> {
     try {
       entries = Deno.readDir(current);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
         continue;
+      }
+      if (error instanceof Deno.errors.PermissionDenied) {
+        throw new ProviderIngestionReadDeniedError("readDir", current, error);
       }
       throw error;
     }
@@ -308,8 +329,15 @@ async function* walkJsonFiles(root: string): AsyncGenerator<string> {
 }
 
 async function statModifiedAtMs(path: string): Promise<number> {
-  const stat = await Deno.stat(path);
-  return stat.mtime?.getTime() ?? 0;
+  try {
+    const stat = await Deno.stat(path);
+    return stat.mtime?.getTime() ?? 0;
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("stat", path, error);
+    }
+    throw error;
+  }
 }
 
 async function discoverClaudeSessions(
@@ -334,7 +362,15 @@ async function discoverClaudeSessions(
 async function readFirstLineChunk(
   filePath: string,
 ): Promise<string | undefined> {
-  const file = await Deno.open(filePath, { read: true });
+  let file: Deno.FsFile;
+  try {
+    file = await Deno.open(filePath, { read: true });
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
+    throw error;
+  }
   try {
     const buffer = new Uint8Array(32 * 1024);
     const read = await file.read(buffer);
@@ -400,7 +436,10 @@ async function readGeminiSessionId(
   let parsed: unknown;
   try {
     parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
-  } catch {
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -544,15 +583,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       "Provider ingestion runner started",
       { provider: this.provider, watchRoots: this.watchRoots },
     );
-    await this.auditLogger.record(
-      "provider.ingestion.started",
-      "Provider ingestion runner started",
-      { provider: this.provider, watchRoots: this.watchRoots },
-    );
 
     const existingWatchRoots: string[] = [];
     for (const root of this.watchRoots) {
-      if (await pathExists(root)) existingWatchRoots.push(root);
+      try {
+        if (await pathExists(root)) {
+          existingWatchRoots.push(root);
+        }
+      } catch (error) {
+        if (!(await this.handleReadDenied(error, "stat", root))) {
+          throw error;
+        }
+      }
     }
 
     if (existingWatchRoots.length > 0) {
@@ -642,11 +684,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       "Provider ingestion runner stopped",
       { provider: this.provider },
     );
-    await this.auditLogger.record(
-      "provider.ingestion.stopped",
-      "Provider ingestion runner stopped",
-      { provider: this.provider },
-    );
   }
 
   private async onWatchBatch(batch: DebouncedWatchBatch): Promise<void> {
@@ -663,8 +700,69 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     );
   }
 
+  private async logReadDenied(
+    operation: ProviderReadOperation,
+    targetPath: string,
+    error: Error,
+  ): Promise<void> {
+    const attributes = {
+      provider: this.provider,
+      operation,
+      targetPath,
+      reason: error.message,
+    };
+
+    await this.operationalLogger.warn(
+      "provider.ingestion.read_denied",
+      "Provider ingestion read access denied",
+      attributes,
+    );
+    await this.auditLogger.record(
+      "provider.ingestion.read_denied",
+      "Provider ingestion read access denied",
+      attributes,
+    );
+  }
+
+  private async handleReadDenied(
+    error: unknown,
+    fallbackOperation: ProviderReadOperation,
+    fallbackTargetPath: string,
+  ): Promise<boolean> {
+    if (error instanceof ProviderIngestionReadDeniedError) {
+      await this.logReadDenied(
+        error.operation,
+        error.targetPath,
+        error.causeError,
+      );
+      return true;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      await this.logReadDenied(fallbackOperation, fallbackTargetPath, error);
+      return true;
+    }
+    return false;
+  }
+
   private async discoverAndTrackSessions(): Promise<void> {
-    const discovered = await this.discoverSessions();
+    let discovered: ProviderSessionFile[];
+    try {
+      discovered = await this.discoverSessions();
+    } catch (error) {
+      if (
+        await this.handleReadDenied(
+          error,
+          "readDir",
+          this.watchRoots[0] ?? "unknown",
+        )
+      ) {
+        this.needsDiscovery = false;
+        this.nextDiscoveryAtMs = this.now().getTime() +
+          this.discoveryIntervalMs;
+        return;
+      }
+      throw error;
+    }
     const deduped = await this.dedupeDiscoveredSessions(discovered);
     const activeSessionIds = new Set<string>();
 
@@ -723,17 +821,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         return Array.from(bySessionId.values());
       }
       this.lastDuplicateDiscoveryWarningKey = warningKey;
-      await this.operationalLogger.warn(
-        "provider.ingestion.events_dropped",
-        "Dropped duplicate session discovery events",
-        {
-          provider: this.provider,
-          droppedEvents,
-          reason: "duplicate-session-id",
-          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
-        },
-      );
-      await this.auditLogger.record(
+      await this.operationalLogger.debug(
         "provider.ingestion.events_dropped",
         "Dropped duplicate session discovery events",
         {
@@ -760,10 +848,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     try {
       fileStat = await Deno.stat(session.filePath);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
+        return { updated: false, eventsObserved: 0 };
+      }
+      if (await this.handleReadDenied(error, "stat", session.filePath)) {
         return { updated: false, eventsObserved: 0 };
       }
       throw error;
@@ -807,17 +895,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         }
       }
     } catch (error) {
+      if (await this.handleReadDenied(error, "open", session.filePath)) {
+        return { updated: false, eventsObserved: 0 };
+      }
       await this.operationalLogger.error(
-        "provider.ingestion.parse_error",
-        "Provider ingestion parse failed",
-        {
-          provider: this.provider,
-          sessionId,
-          filePath: session.filePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-      await this.auditLogger.record(
         "provider.ingestion.parse_error",
         "Provider ingestion parse failed",
         {
@@ -843,17 +924,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     const merged = mergeEvents(existingEvents, incomingEvents);
 
     if (merged.droppedEvents > 0) {
-      await this.operationalLogger.warn(
-        "provider.ingestion.events_dropped",
-        "Provider ingestion dropped duplicate events",
-        {
-          provider: this.provider,
-          sessionId,
-          droppedEvents: merged.droppedEvents,
-          reason: "duplicate-event",
-        },
-      );
-      await this.auditLogger.record(
+      await this.operationalLogger.debug(
         "provider.ingestion.events_dropped",
         "Provider ingestion dropped duplicate events",
         {

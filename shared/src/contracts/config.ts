@@ -1,11 +1,18 @@
 export type ConfigSource = "local-file" | "centralized-service";
 
+export type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
+
 export interface RuntimeFeatureFlags {
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
   writerItalicizeUserMessages: boolean;
   daemonExportEnabled: boolean;
   captureIncludeSystemEvents: boolean;
+}
+
+export interface RuntimeLoggingConfig {
+  operationalLevel: RuntimeLogLevel;
+  auditLevel: RuntimeLogLevel;
 }
 
 export interface ProviderSessionRoots {
@@ -22,6 +29,8 @@ export interface RuntimeConfig {
   allowedWriteRoots: string[];
   providerSessionRoots: ProviderSessionRoots;
   featureFlags: RuntimeFeatureFlags;
+  logging: RuntimeLoggingConfig;
+  daemonMaxMemoryMb: number;
 }
 
 export interface RuntimeConfigMetadata {

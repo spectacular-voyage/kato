@@ -48,62 +48,62 @@ This task is a **prerequisite** for:
 
 ### 1) Runtime Config + Contracts
 
-- [ ] Add `daemonMaxMemoryMb: number` to `RuntimeConfig` contract.
-- [ ] Add parser/validator/default wiring in daemon config loader.
-- [ ] Enforce positive safe integer; fail-closed on invalid values.
-- [ ] Add env override support if desired (`KATO_DAEMON_MAX_MEMORY_MB`), with
+- [x] Add `daemonMaxMemoryMb: number` to `RuntimeConfig` contract.
+- [x] Add parser/validator/default wiring in daemon config loader.
+- [x] Enforce positive safe integer; fail-closed on invalid values.
+- [x] Add env override support if desired (`KATO_DAEMON_MAX_MEMORY_MB`), with
       clear precedence documentation.
 
 ### 2) Snapshot Retention + Budget Enforcement
 
-- [ ] Raise default `maxEventsPerSession` from `200` to `10000`.
-- [ ] Add snapshot memory estimator inside `InMemorySessionSnapshotStore`
+- [x] Raise default `maxEventsPerSession` from `200` to `10000`.
+- [x] Add snapshot memory estimator inside `InMemorySessionSnapshotStore`
       (events + metadata).
-- [ ] Track running totals:
-  - [ ] `estimatedSnapshotBytes`
-  - [ ] `retainedEventCount`
-  - [ ] `sessionCount`
-  - [ ] eviction counters (`evictionsTotal`, `bytesReclaimedTotal`,
+- [x] Track running totals:
+  - [x] `estimatedSnapshotBytes`
+  - [x] `retainedEventCount`
+  - [x] `sessionCount`
+  - [x] eviction counters (`evictionsTotal`, `bytesReclaimedTotal`,
         `evictionsByReason`)
-- [ ] On upsert, enforce budget with LRU eviction until within budget.
-- [ ] If still over budget with one session left, emit final diagnostic and
+- [x] On upsert, enforce budget with LRU eviction until within budget.
+- [x] If still over budget with one session left, emit final diagnostic and
       terminate daemon with explicit message.
 
 ### 3) Status Contract (Prereq for Improved Status)
 
-- [ ] Extend `DaemonStatusSnapshot` with memory/perf section (additive change):
-  - [ ] `memory.daemonMaxMemoryBytes`
-  - [ ] `memory.process.{rss,heapTotal,heapUsed,external}`
-  - [ ] `memory.snapshots.{estimatedBytes,sessionCount,eventCount}`
-  - [ ] `memory.snapshots.evictions{...}`
-  - [ ] `memory.snapshots.overBudget`
-- [ ] Populate these fields in daemon heartbeat/status projection.
-- [ ] Ensure `kato status --json` exposes this data without requiring
+- [x] Extend `DaemonStatusSnapshot` with memory/perf section (additive change):
+  - [x] `memory.daemonMaxMemoryBytes`
+  - [x] `memory.process.{rss,heapTotal,heapUsed,external}`
+  - [x] `memory.snapshots.{estimatedBytes,sessionCount,eventCount}`
+  - [x] `memory.snapshots.evictions{...}`
+  - [x] `memory.snapshots.overBudget`
+- [x] Populate these fields in daemon heartbeat/status projection.
+- [x] Ensure `kato status --json` exposes this data without requiring
       improved-status text UX changes.
 
 ### 4) Observability + Logging
 
-- [ ] Add operational events for:
-  - [ ] memory sample / summary updates
-  - [ ] eviction actions
-  - [ ] over-budget shutdown path
+- [x] Add operational events for:
+  - [x] memory sample / summary updates
+  - [x] eviction actions
+  - [x] over-budget shutdown path
 - [ ] Keep OpenTelemetry/Sentry integration out-of-scope here; document hook
       points only.
 
 ### 5) Tests
 
-- [ ] Config tests:
-  - [ ] accepts valid `daemonMaxMemoryMb`
-  - [ ] rejects zero/negative/non-integer values
+- [x] Config tests:
+  - [x] accepts valid `daemonMaxMemoryMb`
+  - [x] rejects zero/negative/non-integer values
 - [ ] Store tests:
   - [ ] enforces `maxEventsPerSession=10000` default
-  - [ ] deterministic LRU eviction under pressure
-  - [ ] counters/estimated-bytes update correctly
-  - [ ] over-budget single-session path triggers fail-closed behavior
-- [ ] Runtime/status tests:
-  - [ ] status snapshot contains memory section
-  - [ ] process memory fields are populated
-  - [ ] eviction/over-budget events are logged
+  - [x] deterministic LRU eviction under pressure
+  - [x] counters/estimated-bytes update correctly
+  - [x] over-budget single-session path triggers fail-closed behavior
+- [x] Runtime/status tests:
+  - [x] status snapshot contains memory section
+  - [x] process memory fields are populated
+  - [x] eviction/over-budget events are logged
 
 ## Acceptance Criteria
 

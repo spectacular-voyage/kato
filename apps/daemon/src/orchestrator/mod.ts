@@ -23,10 +23,12 @@ export type {
   SessionSnapshotStore,
   SessionSnapshotStoreRetentionPolicy,
   SessionSnapshotUpsert,
+  SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
 export {
   DEFAULT_SESSION_SNAPSHOT_RETENTION_POLICY,
   InMemorySessionSnapshotStore,
+  SessionSnapshotMemoryBudgetExceededError,
 } from "./ingestion_runtime.ts";
 export type {
   CreateProviderIngestionRunnerOptions,

@@ -27,7 +27,9 @@ import type {
   ProviderIngestionRunner,
   RuntimeSessionSnapshot,
   SessionSnapshotStore,
+  SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
+import { SessionSnapshotMemoryBudgetExceededError } from "./ingestion_runtime.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -49,6 +51,7 @@ export interface DaemonRuntimeLoopOptions {
   heartbeatIntervalMs?: number;
   pollIntervalMs?: number;
   providerStatusStaleAfterMs?: number;
+  daemonMaxMemoryMb?: number;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -488,6 +491,158 @@ function toProviderStatuses(
     }));
 }
 
+function emptySnapshotMemoryStats(): SnapshotMemoryStats {
+  return {
+    estimatedBytes: 0,
+    sessionCount: 0,
+    eventCount: 0,
+    evictionsTotal: 0,
+    bytesReclaimedTotal: 0,
+    evictionsByReason: {},
+    overBudget: false,
+  };
+}
+
+function cloneSnapshotMemoryStats(
+  stats: SnapshotMemoryStats,
+): SnapshotMemoryStats {
+  return {
+    estimatedBytes: stats.estimatedBytes,
+    sessionCount: stats.sessionCount,
+    eventCount: stats.eventCount,
+    evictionsTotal: stats.evictionsTotal,
+    bytesReclaimedTotal: stats.bytesReclaimedTotal,
+    evictionsByReason: { ...stats.evictionsByReason },
+    overBudget: stats.overBudget,
+  };
+}
+
+function hasSnapshotMemoryChanged(
+  previous: SnapshotMemoryStats | undefined,
+  current: SnapshotMemoryStats,
+): boolean {
+  if (!previous) {
+    return true;
+  }
+  if (
+    previous.estimatedBytes !== current.estimatedBytes ||
+    previous.sessionCount !== current.sessionCount ||
+    previous.eventCount !== current.eventCount ||
+    previous.evictionsTotal !== current.evictionsTotal ||
+    previous.bytesReclaimedTotal !== current.bytesReclaimedTotal ||
+    previous.overBudget !== current.overBudget
+  ) {
+    return true;
+  }
+
+  const previousEntries = Object.entries(previous.evictionsByReason);
+  const currentEntries = Object.entries(current.evictionsByReason);
+  if (previousEntries.length !== currentEntries.length) {
+    return true;
+  }
+  for (const [reason, value] of currentEntries) {
+    if ((previous.evictionsByReason[reason] ?? 0) !== value) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function computeSnapshotEvictionDelta(
+  previous: SnapshotMemoryStats | undefined,
+  current: SnapshotMemoryStats,
+): {
+  evictionsTotal: number;
+  bytesReclaimedTotal: number;
+  evictionsByReason: Record<string, number>;
+} {
+  const previousEvictionsTotal = previous?.evictionsTotal ?? 0;
+  const previousBytesReclaimedTotal = previous?.bytesReclaimedTotal ?? 0;
+  const evictionsByReason: Record<string, number> = {};
+
+  for (const [reason, count] of Object.entries(current.evictionsByReason)) {
+    const priorCount = previous?.evictionsByReason[reason] ?? 0;
+    if (count > priorCount) {
+      evictionsByReason[reason] = count - priorCount;
+    }
+  }
+
+  return {
+    evictionsTotal: Math.max(
+      0,
+      current.evictionsTotal - previousEvictionsTotal,
+    ),
+    bytesReclaimedTotal: Math.max(
+      0,
+      current.bytesReclaimedTotal - previousBytesReclaimedTotal,
+    ),
+    evictionsByReason,
+  };
+}
+
+async function logMemoryTelemetry(options: {
+  operationalLogger: StructuredLogger;
+  daemonMaxMemoryBytes: number;
+  processMemory: Deno.MemoryUsage;
+  snapshotMemory: SnapshotMemoryStats;
+  previousSnapshotMemory?: SnapshotMemoryStats;
+  phase: "heartbeat" | "shutdown";
+  forceSampleLog?: boolean;
+}): Promise<SnapshotMemoryStats> {
+  const {
+    operationalLogger,
+    daemonMaxMemoryBytes,
+    processMemory,
+    snapshotMemory,
+    previousSnapshotMemory,
+    phase,
+    forceSampleLog = false,
+  } = options;
+
+  if (
+    forceSampleLog ||
+    hasSnapshotMemoryChanged(previousSnapshotMemory, snapshotMemory)
+  ) {
+    await operationalLogger.info(
+      "daemon.memory.sample",
+      "Daemon memory sample updated",
+      {
+        phase,
+        daemonMaxMemoryBytes,
+        process: {
+          rss: processMemory.rss,
+          heapTotal: processMemory.heapTotal,
+          heapUsed: processMemory.heapUsed,
+          external: processMemory.external,
+        },
+        snapshots: snapshotMemory,
+      },
+    );
+  }
+
+  const evictionDelta = computeSnapshotEvictionDelta(
+    previousSnapshotMemory,
+    snapshotMemory,
+  );
+  if (evictionDelta.evictionsTotal > 0) {
+    await operationalLogger.info(
+      "daemon.memory.evicted",
+      "Daemon snapshot store evicted sessions",
+      {
+        phase,
+        evictions: evictionDelta.evictionsTotal,
+        bytesReclaimed: evictionDelta.bytesReclaimedTotal,
+        evictionsByReason: evictionDelta.evictionsByReason,
+        snapshotSessionCount: snapshotMemory.sessionCount,
+        snapshotEstimatedBytes: snapshotMemory.estimatedBytes,
+      },
+    );
+  }
+
+  return cloneSnapshotMemoryStats(snapshotMemory);
+}
+
 export async function runDaemonRuntimeLoop(
   options: DaemonRuntimeLoopOptions = {},
 ): Promise<void> {
@@ -499,6 +654,8 @@ export async function runDaemonRuntimeLoop(
   const providerStatusStaleAfterMs = options.providerStatusStaleAfterMs ??
     DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS;
   const exportEnabled = options.exportEnabled ?? true;
+  const daemonMaxMemoryBytes = (options.daemonMaxMemoryMb ?? 200) * 1024 *
+    1024;
 
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(resolveDefaultStatusPath(), now);
@@ -556,8 +713,10 @@ export async function runDaemonRuntimeLoop(
   }
 
   let shouldStop = false;
+  let fatalRuntimeError: Error | undefined;
   let nextHeartbeatAt = now().getTime() + heartbeatIntervalMs;
   const sessionEventStates = new Map<string, SessionEventProcessingState>();
+  let previousSnapshotMemory: SnapshotMemoryStats | undefined;
 
   while (!shouldStop) {
     for (const runner of ingestionRunners) {
@@ -576,6 +735,33 @@ export async function runDaemonRuntimeLoop(
           );
         }
       } catch (error) {
+        if (error instanceof SessionSnapshotMemoryBudgetExceededError) {
+          fatalRuntimeError = error;
+          shouldStop = true;
+          await operationalLogger.error(
+            "daemon.memory_budget.exceeded",
+            "Daemon memory budget exceeded by single session",
+            {
+              provider: runner.provider,
+              sessionId: error.sessionId,
+              estimatedBytes: error.estimatedBytes,
+              daemonMaxMemoryBytes: error.daemonMaxMemoryBytes,
+              error: error.message,
+            },
+          );
+          await auditLogger.record(
+            "daemon.memory_budget.exceeded",
+            "Daemon memory budget exceeded by single session",
+            {
+              provider: runner.provider,
+              sessionId: error.sessionId,
+              estimatedBytes: error.estimatedBytes,
+              daemonMaxMemoryBytes: error.daemonMaxMemoryBytes,
+              error: error.message,
+            },
+          );
+          break;
+        }
         await operationalLogger.error(
           "provider.ingestion.poll.failed",
           "Provider ingestion runner poll failed",
@@ -585,6 +771,10 @@ export async function runDaemonRuntimeLoop(
           },
         );
       }
+    }
+
+    if (shouldStop) {
+      break;
     }
 
     if (sessionSnapshotStore) {
@@ -643,11 +833,34 @@ export async function runDaemonRuntimeLoop(
           providerStatusStaleAfterMs,
         )
         : snapshot.providers;
+
+      const processMemory = Deno.memoryUsage();
+      const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
+        emptySnapshotMemoryStats();
+      previousSnapshotMemory = await logMemoryTelemetry({
+        operationalLogger,
+        daemonMaxMemoryBytes,
+        processMemory,
+        snapshotMemory,
+        previousSnapshotMemory,
+        phase: "heartbeat",
+      });
+
       snapshot = {
         ...snapshot,
         providers,
         generatedAt: currentIso,
         heartbeatAt: currentIso,
+        memory: {
+          daemonMaxMemoryBytes,
+          process: {
+            rss: processMemory.rss,
+            heapTotal: processMemory.heapTotal,
+            heapUsed: processMemory.heapUsed,
+            external: processMemory.external,
+          },
+          snapshots: snapshotMemory,
+        },
       };
       await statusStore.save(snapshot);
       nextHeartbeatAt = currentTimeMs + heartbeatIntervalMs;
@@ -681,12 +894,36 @@ export async function runDaemonRuntimeLoop(
       providerStatusStaleAfterMs,
     )
     : snapshot.providers;
+
+  const processMemory = Deno.memoryUsage();
+  const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
+    emptySnapshotMemoryStats();
+  previousSnapshotMemory = await logMemoryTelemetry({
+    operationalLogger,
+    daemonMaxMemoryBytes,
+    processMemory,
+    snapshotMemory,
+    previousSnapshotMemory,
+    phase: "shutdown",
+    forceSampleLog: true,
+  });
+
   snapshot = {
     ...snapshot,
     providers,
     generatedAt: exitIso,
     heartbeatAt: exitIso,
     daemonRunning: false,
+    memory: {
+      daemonMaxMemoryBytes,
+      process: {
+        rss: processMemory.rss,
+        heapTotal: processMemory.heapTotal,
+        heapUsed: processMemory.heapUsed,
+        external: processMemory.external,
+      },
+      snapshots: snapshotMemory,
+    },
   };
   delete snapshot.daemonPid;
   await statusStore.save(snapshot);
@@ -694,8 +931,15 @@ export async function runDaemonRuntimeLoop(
   await operationalLogger.info(
     "daemon.runtime.stopped",
     "Daemon runtime loop stopped",
-    { pid },
+    {
+      pid,
+      ...(fatalRuntimeError ? { fatalError: fatalRuntimeError.message } : {}),
+    },
   );
+
+  if (fatalRuntimeError) {
+    throw fatalRuntimeError;
+  }
 }
 
 interface HandleControlRequestOptions {
