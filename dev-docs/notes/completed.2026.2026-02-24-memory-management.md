@@ -1,7 +1,7 @@
 ---
 id: hn7t9bp0x9wkhvtcgw4255u
 title: 2026 02 24 Memory Management
-desc: ""
+desc: ''
 updated: 1771976234475
 created: 1771971777228
 ---

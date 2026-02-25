@@ -134,7 +134,7 @@ Expected:
 - JSONL file exists with one `ConversationEvent` JSON object per line.
 - Each line includes `kind`, `eventId`, `provider`, `sessionId`, `timestamp`.
 
-### 6) Queue clean request
+### 6) Run clean (CLI-owned)
 
 ```bash
 deno run -A apps/daemon/src/main.ts clean --all --dry-run
@@ -142,8 +142,9 @@ deno run -A apps/daemon/src/main.ts clean --all --dry-run
 
 Expected:
 
-- Command reports `... request queued ...`.
-- `~/.kato/runtime/control.json` includes queued requests.
+- Command reports `clean completed mode=dry-run ...`.
+- Report includes `logsToFlush=<n>` and `missingFiles=<n>`.
+- No control-plane request is enqueued; `clean` executes immediately in CLI.
 
 ### 7) Stop daemon
 

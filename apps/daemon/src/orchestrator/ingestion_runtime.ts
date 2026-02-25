@@ -6,6 +6,8 @@ export interface SessionSnapshotStatusMetadata {
   eventCount: number;
   truncatedEvents: number;
   lastEventAt?: string;
+  /** File mtime in milliseconds when the session was last ingested. */
+  fileModifiedAtMs?: number;
 }
 
 export interface RuntimeSessionSnapshot {
@@ -22,6 +24,7 @@ export interface SessionSnapshotUpsert {
   sessionId: string;
   cursor: ProviderCursor;
   events: ConversationEvent[];
+  fileModifiedAtMs?: number;
 }
 
 export interface SessionSnapshotStore {
@@ -212,6 +215,9 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
         eventCount: retainedEvents.length,
         truncatedEvents,
         ...(lastEventAt ? { lastEventAt } : {}),
+        ...(input.fileModifiedAtMs !== undefined
+          ? { fileModifiedAtMs: input.fileModifiedAtMs }
+          : {}),
       },
     };
 

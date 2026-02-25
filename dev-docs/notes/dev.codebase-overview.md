@@ -132,6 +132,10 @@ graph TD
 Command handlers do not run daemon business logic directly; they manipulate the
 control plane and rely on the daemon runtime to execute queued work.
 
+Exception: `clean` is intentionally CLI-owned for immediate local hygiene. In
+current behavior, `clean --all` flushes runtime log files directly from the CLI
+path (no daemon queue dependency).
+
 ### 2) Detached Launcher and Permission Envelope
 
 `DenoDetachedDaemonLauncher` computes scoped read/write roots before spawning:
@@ -225,6 +229,9 @@ The daemon emits two channels with independent sinks:
 - `security-audit` for control, policy, and security-relevant events
 
 Runtime startup wires JSONL file sinks under `<runtimeDir>/logs`.
+`StructuredLogger` routes through a LogLayer adapter that preserves JSONL parity
+and falls back to parity emission when npm LogLayer transport loading is
+unavailable.
 
 ## Source-of-Truth Boundaries
 

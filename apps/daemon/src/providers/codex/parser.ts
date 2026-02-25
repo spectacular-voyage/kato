@@ -6,6 +6,11 @@ interface CodexEntry {
   payload?: Record<string, unknown>;
 }
 
+interface PendingRequestUserInputCall {
+  callEventId: string;
+  questions: Array<Record<string, unknown>>;
+}
+
 function stripIdePreamble(text: string): string {
   const marker = "## My request for Codex:\n";
   const idx = text.indexOf(marker);
@@ -39,6 +44,122 @@ function extractMessageText(content: unknown): string {
     .map((item) => String(item["text"] ?? ""))
     .join("\n\n")
     .trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asQuestionList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is Record<string, unknown> =>
+    isRecord(item)
+  );
+}
+
+function normalizeDecisionKey(raw: string, fallbackIndex: number): string {
+  const compact = raw.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return compact.length > 0 ? compact : `decision-${fallbackIndex + 1}`;
+}
+
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function asAnswerList(value: unknown): string[] {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text.length > 0 ? [text] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const fromAnswers = Array.isArray(value["answers"])
+    ? (value["answers"] as unknown[])
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0)
+    : [];
+
+  const fromOtherFields = Object.entries(value)
+    .filter(([key]) => key !== "answers")
+    .flatMap(([, entry]) => {
+      if (typeof entry === "string") {
+        const text = entry.trim();
+        return text.length > 0 ? [text] : [];
+      }
+      if (Array.isArray(entry)) {
+        return entry
+          .map((item) => String(item).trim())
+          .filter((item) => item.length > 0);
+      }
+      return [];
+    });
+
+  return [...fromAnswers, ...fromOtherFields];
+}
+
+function extractRequestUserInputAnswers(
+  output: unknown,
+): Record<string, string[]> | undefined {
+  const parsed = parseMaybeJson(output);
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+
+  const answers = parsed["answers"];
+  if (!isRecord(answers)) {
+    return undefined;
+  }
+
+  const normalized: Record<string, string[]> = {};
+  for (const [questionId, answerValue] of Object.entries(answers)) {
+    if (!isRecord(answerValue) || !("answers" in answerValue)) {
+      continue;
+    }
+    const selectedAnswers = asAnswerList(answerValue);
+    if (selectedAnswers.length > 0) {
+      normalized[questionId] = selectedAnswers;
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function findQuestionEntry(
+  questions: Array<Record<string, unknown>>,
+  key: string,
+): Record<string, unknown> | undefined {
+  return questions.find((question) =>
+    String(question["id"] ?? "") === key ||
+    String(question["question"] ?? "") === key
+  );
+}
+
+function asQuestionOptions(question: Record<string, unknown>): Array<{
+  label: string;
+  description: string;
+}> {
+  return asQuestionList(question["options"]).map((option) => ({
+    label: String(option["label"] ?? ""),
+    description: String(option["description"] ?? ""),
+  }));
 }
 
 function makeByteOffsetCursor(offset: number): ProviderCursor {
@@ -75,6 +196,10 @@ export async function* parseCodexEvents(
 
   let currentByteOffset = 0;
   const timestamp = new Date().toISOString();
+  const pendingRequestUserInputCalls = new Map<
+    string,
+    PendingRequestUserInputCall
+  >();
 
   function makeBase(
     kind: ConversationEvent["kind"],
@@ -304,6 +429,13 @@ export async function* parseCodexEvents(
             } as unknown as ConversationEvent,
             cursor: makeByteOffsetCursor(lineEnd),
           };
+
+          if (name === "request_user_input" && callId.length > 0) {
+            pendingRequestUserInputCalls.set(callId, {
+              callEventId: String(base["eventId"]),
+              questions: asQuestionList(input?.["questions"]),
+            });
+          }
         } else if (
           itemType === "function_call_output" && lineEnd > fromOffset
         ) {
@@ -326,6 +458,129 @@ export async function* parseCodexEvents(
             } as unknown as ConversationEvent,
             cursor: makeByteOffsetCursor(lineEnd),
           };
+
+          const pending = callId.length > 0
+            ? pendingRequestUserInputCalls.get(callId)
+            : undefined;
+          if (callId.length > 0) {
+            pendingRequestUserInputCalls.delete(callId);
+          }
+          const parsedAnswers = extractRequestUserInputAnswers(output);
+
+          // Synthesize request_user_input selections as first-class conversation events.
+          if (pending || parsedAnswers) {
+            const questions = pending?.questions ?? [];
+            const basisEventIds = [
+              ...(pending?.callEventId ? [pending.callEventId] : []),
+              String(base["eventId"]),
+            ];
+
+            if (parsedAnswers) {
+              const answerPairs = Object.entries(parsedAnswers);
+              if (answerPairs.length > 0) {
+                const answeredLines = answerPairs.map(([key, selected]) => {
+                  const questionEntry = findQuestionEntry(questions, key);
+                  const questionText = questionEntry
+                    ? String(questionEntry["question"] ?? key)
+                    : key;
+                  return `- ${questionText}: ${selected.join(", ")}`;
+                }).join("\n");
+
+                const userBase = makeBase(
+                  "message.user",
+                  "response_item.function_call_output.request_user_input",
+                  lineEnd,
+                  1,
+                );
+                yield {
+                  event: {
+                    ...userBase,
+                    kind: "message.user",
+                    role: "user",
+                    content: answeredLines,
+                    phase: "other",
+                  } as unknown as ConversationEvent,
+                  cursor: makeByteOffsetCursor(lineEnd),
+                };
+
+                let decisionIndex = 2;
+                for (const [key, selected] of answerPairs) {
+                  const questionEntry = findQuestionEntry(questions, key);
+                  const questionText = questionEntry
+                    ? String(questionEntry["question"] ?? key)
+                    : key;
+                  const summary = `${questionText} -> ${selected.join(", ")}`;
+                  const questionHeader = questionEntry
+                    ? String(questionEntry["header"] ?? "")
+                    : "";
+                  const options = questionEntry
+                    ? asQuestionOptions(questionEntry)
+                    : [];
+
+                  const decisionBase = makeBase(
+                    "decision",
+                    "response_item.function_call_output.request_user_input",
+                    lineEnd,
+                    decisionIndex,
+                  );
+                  yield {
+                    event: {
+                      ...decisionBase,
+                      kind: "decision",
+                      decisionId: makeEventId(
+                        sessionId,
+                        lineEnd,
+                        "decision",
+                        decisionIndex,
+                      ),
+                      decisionKey: normalizeDecisionKey(key, decisionIndex),
+                      summary,
+                      status: "accepted",
+                      decidedBy: "user",
+                      basisEventIds,
+                      metadata: {
+                        providerQuestionId: key,
+                        ...(questionHeader.length > 0
+                          ? { header: questionHeader }
+                          : {}),
+                        ...(options.length > 0 ? { options } : {}),
+                      },
+                    } as unknown as ConversationEvent,
+                    cursor: makeByteOffsetCursor(lineEnd),
+                  };
+                  decisionIndex += 1;
+                }
+              }
+            } else if (pending) {
+              const rawOutput = String(
+                typeof output === "string" ? output : JSON.stringify(output),
+              ).trim();
+              if (rawOutput.length > 0) {
+                const fallbackQuestion = pending.questions.length === 1
+                  ? String(pending.questions[0]?.["question"] ?? "").trim()
+                  : "";
+                const fallbackContent = fallbackQuestion.length > 0
+                  ? `- ${fallbackQuestion}: ${rawOutput}`
+                  : rawOutput;
+                const userBase = makeBase(
+                  "message.user",
+                  "response_item.function_call_output.request_user_input",
+                  lineEnd,
+                  1,
+                );
+                yield {
+                  event: {
+                    ...userBase,
+                    kind: "message.user",
+                    role: "user",
+                    content: fallbackContent,
+                    phase: "other",
+                  } as unknown as ConversationEvent,
+                  cursor: makeByteOffsetCursor(lineEnd),
+                };
+              }
+            }
+          }
         } else if (itemType === "reasoning" && lineEnd > fromOffset) {
           const summary = payload["summary"];
           if (Array.isArray(summary) && summary.length > 0) {

@@ -1,4 +1,9 @@
-import type { ConversationEvent, ProviderStatus } from "@kato/shared";
+import type {
+  ConversationEvent,
+  DaemonSessionStatus,
+  ProviderStatus,
+} from "@kato/shared";
+import { projectSessionStatus, sortSessionsByRecency } from "@kato/shared";
 import {
   AuditLogger,
   NoopSink,
@@ -10,6 +15,7 @@ import {
   WritePathPolicyGate,
 } from "../policy/mod.ts";
 import {
+  type ActiveRecording,
   RecordingPipeline,
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
@@ -120,18 +126,16 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
 }
 
 function makeRuntimeEventSignature(event: ConversationEvent): string {
-  const base = `${event.kind}\0${event.source.providerEventType}\0${
-    event.source.providerEventId ?? ""
-  }\0${event.timestamp}`;
+  const base = `${event.kind}\0${event.source.providerEventType}\0${event.source.providerEventId ?? ""
+    }\0${event.timestamp}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
     case "message.system":
       return `${base}\0${event.content}`;
     case "tool.call":
-      return `${base}\0${event.toolCallId}\0${event.name}\0${
-        event.description ?? ""
-      }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
+      return `${base}\0${event.toolCallId}\0${event.name}\0${event.description ?? ""
+        }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
     case "tool.result":
       return `${base}\0${event.toolCallId}\0${event.result}`;
     case "thinking":
@@ -491,6 +495,47 @@ function toProviderStatuses(
     }));
 }
 
+function toSessionStatuses(
+  sessionSnapshots: RuntimeSessionSnapshot[],
+  activeRecordings: ActiveRecording[],
+  now: Date,
+  staleAfterMs: number,
+): DaemonSessionStatus[] {
+  const recordingByKey = new Map<string, ActiveRecording>();
+  for (const rec of activeRecordings) {
+    recordingByKey.set(makeSessionProcessingKey(rec.provider, rec.sessionId), rec);
+  }
+
+  const statuses = sessionSnapshots.map((snap) => {
+    const rec = recordingByKey.get(
+      makeSessionProcessingKey(snap.provider, snap.sessionId),
+    );
+    return projectSessionStatus({
+      session: {
+        provider: snap.provider,
+        sessionId: snap.sessionId,
+        updatedAt: snap.metadata.updatedAt,
+        lastEventAt: snap.metadata.lastEventAt,
+        fileModifiedAtMs: snap.metadata.fileModifiedAtMs,
+        events: snap.events,
+      },
+      recording: rec
+        ? {
+          provider: rec.provider,
+          sessionId: rec.sessionId,
+          outputPath: rec.outputPath,
+          startedAt: rec.startedAt,
+          lastWriteAt: rec.lastWriteAt,
+        }
+        : undefined,
+      now,
+      staleAfterMs,
+    });
+  });
+
+  return sortSessionsByRecency(statuses);
+}
+
 function emptySnapshotMemoryStats(): SnapshotMemoryStats {
   return {
     estimatedBytes: 0,
@@ -604,7 +649,7 @@ async function logMemoryTelemetry(options: {
     forceSampleLog ||
     hasSnapshotMemoryChanged(previousSnapshotMemory, snapshotMemory)
   ) {
-    await operationalLogger.info(
+    await operationalLogger.debug(
       "daemon.memory.sample",
       "Daemon memory sample updated",
       {
@@ -826,13 +871,23 @@ export async function runDaemonRuntimeLoop(
     const currentTimeMs = now().getTime();
     if (currentTimeMs >= nextHeartbeatAt) {
       const currentIso = now().toISOString();
+      const heartbeatNow = now();
+      const sessionList = sessionSnapshotStore?.list() ?? [];
       const providers = sessionSnapshotStore
         ? toProviderStatuses(
-          sessionSnapshotStore.list(),
-          now(),
+          sessionList,
+          heartbeatNow,
           providerStatusStaleAfterMs,
         )
         : snapshot.providers;
+      const sessions = sessionSnapshotStore
+        ? toSessionStatuses(
+          sessionList,
+          recordingPipeline.listActiveRecordings(),
+          heartbeatNow,
+          providerStatusStaleAfterMs,
+        )
+        : snapshot.sessions;
 
       const processMemory = Deno.memoryUsage();
       const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
@@ -849,6 +904,7 @@ export async function runDaemonRuntimeLoop(
       snapshot = {
         ...snapshot,
         providers,
+        sessions,
         generatedAt: currentIso,
         heartbeatAt: currentIso,
         memory: {
@@ -887,13 +943,23 @@ export async function runDaemonRuntimeLoop(
   }
 
   const exitIso = now().toISOString();
+  const exitNow = now();
+  const exitSessionList = sessionSnapshotStore?.list() ?? [];
   const providers = sessionSnapshotStore
     ? toProviderStatuses(
-      sessionSnapshotStore.list(),
-      now(),
+      exitSessionList,
+      exitNow,
       providerStatusStaleAfterMs,
     )
     : snapshot.providers;
+  const sessions = sessionSnapshotStore
+    ? toSessionStatuses(
+      exitSessionList,
+      recordingPipeline.listActiveRecordings(),
+      exitNow,
+      providerStatusStaleAfterMs,
+    )
+    : snapshot.sessions;
 
   const processMemory = Deno.memoryUsage();
   const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
@@ -911,6 +977,7 @@ export async function runDaemonRuntimeLoop(
   snapshot = {
     ...snapshot,
     providers,
+    sessions,
     generatedAt: exitIso,
     heartbeatAt: exitIso,
     daemonRunning: false,
@@ -1024,7 +1091,7 @@ async function handleControlRequest(
       : undefined;
     const outputPath = isRecord(payload)
       ? readString(payload["resolvedOutputPath"]) ??
-        readString(payload["outputPath"])
+      readString(payload["outputPath"])
       : undefined;
     const formatRaw = isRecord(payload)
       ? readString(payload["format"])

@@ -16,6 +16,12 @@ const FIXTURE_ABORTED = join(
   "codex-session-aborted.jsonl",
 );
 
+const FIXTURE_REQUEST_USER_INPUT = join(
+  THIS_DIR,
+  "fixtures",
+  "codex-session-request-user-input.jsonl",
+);
+
 const TEST_CTX = { provider: "codex", sessionId: "sess-vscode-001" };
 
 type ParseItem = {
@@ -166,4 +172,137 @@ Deno.test("codex parser populates source fields", async () => {
   const first = results[0]!.event;
   assert(first.source.providerEventType.length > 0);
   assert(first.source.rawCursor !== undefined);
+});
+
+Deno.test("codex parser synthesizes selected request_user_input answers", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const synthesizedUser = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("Choose deploy mode.") &&
+    result.event.content.includes("Blue (Recommended)")
+  );
+  assert(synthesizedUser !== undefined);
+
+  const acceptedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.summary.includes("Choose deploy mode.")
+  );
+  assert(acceptedDecision !== undefined);
+  if (acceptedDecision.event.kind === "decision") {
+    assertStringIncludes(acceptedDecision.event.summary, "Blue (Recommended)");
+    assertEquals(acceptedDecision.event.status, "accepted");
+    assertEquals(acceptedDecision.event.decidedBy, "user");
+  }
+});
+
+Deno.test("codex parser supports free-form request_user_input answers", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const synthesizedUser = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("How should migration run?") &&
+    result.event.content.includes("Run it only on staging first.")
+  );
+  assert(synthesizedUser !== undefined);
+
+  const acceptedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.summary.includes("How should migration run?")
+  );
+  assert(acceptedDecision !== undefined);
+  if (acceptedDecision.event.kind === "decision") {
+    assertStringIncludes(
+      acceptedDecision.event.summary,
+      "Run it only on staging first.",
+    );
+  }
+});
+
+Deno.test("codex parser maps multiple question answers by question id", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const apiDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.summary.includes("API mode?")
+  );
+  assert(apiDecision !== undefined);
+  if (apiDecision.event.kind === "decision") {
+    assertStringIncludes(apiDecision.event.summary, "Public");
+  }
+
+  const logDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.summary.includes("Log mode?")
+  );
+  assert(logDecision !== undefined);
+  if (logDecision.event.kind === "decision") {
+    assertStringIncludes(logDecision.event.summary, "Verbose (Recommended)");
+  }
+
+  const combinedUserMessage = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("API mode?") &&
+    result.event.content.includes("Log mode?")
+  );
+  assert(combinedUserMessage !== undefined);
+});
+
+Deno.test("codex parser falls back to readable message.user on malformed request_user_input output", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const fallbackMessage = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("Malformed output question?") &&
+    result.event.content.includes("not-json-response-payload")
+  );
+  assert(fallbackMessage !== undefined);
+
+  const malformedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.summary.includes("Malformed output question?")
+  );
+  assertEquals(malformedDecision, undefined);
+});
+
+Deno.test("codex parser keeps non request_user_input tool events unchanged", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const execToolCall = results.find((result) =>
+    result.event.kind === "tool.call" &&
+    result.event.name === "exec_command"
+  );
+  assert(execToolCall !== undefined);
+  if (execToolCall.event.kind === "tool.call") {
+    assertStringIncludes(execToolCall.event.description ?? "", "echo ok");
+  }
+
+  const execToolResult = results.find((result) =>
+    result.event.kind === "tool.result" &&
+    result.event.toolCallId === "call-rui-005"
+  );
+  assert(execToolResult !== undefined);
+  if (execToolResult.event.kind === "tool.result") {
+    assertStringIncludes(execToolResult.event.result, "ok");
+  }
 });

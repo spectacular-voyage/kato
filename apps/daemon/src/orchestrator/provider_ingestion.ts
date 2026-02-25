@@ -941,6 +941,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       sessionId,
       cursor: latestCursor,
       events: merged.mergedEvents,
+      fileModifiedAtMs: fileStat.mtime?.getTime(),
     });
     this.cursors.set(sessionId, latestCursor);
 

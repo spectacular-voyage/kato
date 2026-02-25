@@ -32,6 +32,22 @@ export interface MemoryStatus {
   snapshots: MemorySnapshotStats;
 }
 
+export interface DaemonRecordingStatus {
+  outputPath: string;
+  startedAt: string;
+  lastWriteAt: string;
+}
+
+export interface DaemonSessionStatus {
+  provider: string;
+  sessionId: string;
+  snippet?: string;
+  updatedAt: string;
+  lastMessageAt?: string;
+  stale: boolean;
+  recording?: DaemonRecordingStatus;
+}
+
 export interface DaemonStatusSnapshot {
   schemaVersion: number;
   generatedAt: string;
@@ -41,4 +57,5 @@ export interface DaemonStatusSnapshot {
   providers: ProviderStatus[];
   recordings: RecordingStatus;
   memory?: MemoryStatus;
+  sessions?: DaemonSessionStatus[];
 }

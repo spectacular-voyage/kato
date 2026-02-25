@@ -2,7 +2,7 @@
 id: qj35rmg7lnprv1nf706jhh1
 title: 2026 02 23 Improved Status
 desc: ""
-updated: 1771970992600
+updated: 1771998167782
 created: 1771870111637
 ---
 
@@ -26,9 +26,9 @@ Logging-specific work is tracked separately in
 
 This task explicitly depends on:
 
-- [task.2026.2026-02-24-memory-management](./task.2026.2026-02-24-memory-management.md)
+- [task.2026.2026-02-24-memory-management](./completed.2026.2026-02-24-memory-management.md) ✓ Complete
 
-Required prerequisite outputs from that task:
+Required prerequisite outputs from that task (all delivered):
 
 - `RuntimeConfig.daemonMaxMemoryMb`
 - `DaemonStatusSnapshot.memory.daemonMaxMemoryBytes`
@@ -46,7 +46,8 @@ separate memory model.
 2. CLI status output improvements
 3. Shared status projection/formatting logic for daemon + web reuse
 4. Memory-section consumption from prereq task
-5. Tests + docs updates
+5. Live/watch mode
+6. Tests + docs updates
 
 ## Requirements
 
@@ -74,9 +75,11 @@ Rules:
 - Default `kato status` shows active sessions only.
 - `kato status --all` shows both active and stale sessions, and includes stale
   recordings as well.
-- `kato status --json` includes the same richer data model in machine-readable
-  form.
-- `kato status --json --all` should include stale entries as well.
+- `kato status --json` carries the same richer data model in machine-readable
+  form, including the memory section. Text and JSON output must have **parity**:
+  whatever fields appear in text output must also be present in JSON, and
+  vice-versa (no JSON-only or text-only fields except cosmetic formatting).
+- `kato status --json --all` includes stale entries as well.
 
 ### 2) Shared Modeling for CLI + Web
 
@@ -89,21 +92,64 @@ Put reusable status model/projection logic in `shared/`:
 CLI-specific plain text formatting can remain in daemon, but it should consume
 shared projected data.
 
-### 3) "Live status"
+### 3) "Live status" (`--live` / `--watch`)
 
-- instead of returning, the status stays onscreen (maybe fullscreen) and updates
-  in real time
-- including a text-based memory graph would be nice. Keep execution-scope data
-  fixed, and display most recent sessions/recordings.
+A simple **refresh-loop display** — not a full interactive TUI.
 
-### 4) Memory Visibility (Depends on Prereq)
+Design goals (inspired by [melker.sh](https://melker.sh/)):
 
-- `kato status --json` must include the memory section defined by the memory
-  management task.
-- default text `kato status` should include a compact memory summary line (at
-  minimum: rss + snapshot estimated bytes + budget + over-budget flag).
-- any richer visualization (graph/sparkline/live mode) is additive, but must use
-  the same underlying memory fields.
+- Clean, compact fixed-layout sections separated by dividers.
+- Readable at a glance: header, sessions block, memory block.
+- Monospace, no color required but ANSI is fine where the terminal supports it.
+
+Behavior:
+
+- `kato status --live` clears the terminal and redraws the full status block on
+  a configurable interval (default: 2 seconds).
+- Layout is **fixed-height per section** — sessions block shows the N most
+  recent sessions (default 5), not an unbounded scrolling list.
+- Press `q` or `Ctrl+C` to exit live mode.
+- No interactive navigation, no resize handling, no alternate-screen buffer
+  management. This is a refresh loop, not a TUI.
+- `--live` implicitly applies `--all` (stale rows shown with `○` marker).
+
+Example layout:
+
+```text
+kato  ·  daemon running  ·  refreshed 12:34:05
+─────────────────────────────────────────────────
+
+Sessions (5 most recent):
+● claude/abc123: "how do I configure X"
+  -> ~/notes/claude.md
+  recording · started 2h ago · last write 1m ago
+
+○ codex/def456: "refactor the auth module"
+  (stale) no active recording · last message 3d ago
+
+─────────────────────────────────────────────────
+Memory:
+  rss 142 MB / 200 MB budget  ·  snapshots 38 MB
+  sessions 12  ·  events 4820  ·  evictions 0
+```
+
+Out of scope for this task:
+
+- Sparklines or historical memory graphs (additive, future task).
+- Interactive session selection or scrolling.
+- Alternate-screen buffer (`smcup`/`rmcup`) management.
+
+### 4) Memory Visibility
+
+Text and JSON output have full parity on memory fields:
+
+- Default `kato status` (text): compact memory summary line — rss + snapshot
+  estimated bytes + budget + over-budget flag.
+- `kato status --json`: includes the full `memory` section (all fields from the
+  memory-management prereq).
+- `--live` mode: shows the same compact memory block, refreshed each cycle.
+- Over-budget state is visually highlighted (e.g., `⚠ OVER BUDGET`) in text
+  output.
 
 ## Proposed Data Model Changes
 
@@ -141,6 +187,7 @@ Recommended text layout:
 - Add `Sessions:` section with one block per session.
 - Sort by recency (`lastWriteAt`/`updatedAt` desc), then provider/session id.
 - Mark stale rows explicitly when `--all` is used.
+- Add `Memory:` section with compact summary line.
 
 Suggested row style:
 
@@ -152,6 +199,9 @@ Sessions:
 
 ○ codex/<session-id>: "<snippet>"
   (stale) no active recording · last message 2d ago
+
+Memory:
+  rss 142 MB / 200 MB budget  ·  snapshots 38 MB
 ```
 
 Legend:
@@ -169,11 +219,12 @@ Legend:
 
 ### CLI
 
-- Add `status --all` parser support.
+- Add `status --all` and `status --live` parser support.
 - Default filtering: hide stale session rows.
 - `--all`: include stale rows.
-- `--json` returns richer snapshot as-is (filtered when `--all` is absent, or
-  include all with explicit filter metadata; choose one and document).
+- `--live`: refresh-loop mode (implies `--all`).
+- `--json` returns richer snapshot as-is; obeys `--all` filter for parity with
+  text output (full snapshot always available via `--json --all`).
 
 ### Web (`kato-status-web`)
 
@@ -183,64 +234,88 @@ Legend:
 
 ## Implementation Steps
 
-0. Dependency gate
+### 0. Dependency gate
 
-- Verify memory-management task is complete or land required contract/status
-  fields first.
+- [x] Verify memory-management task is complete and contract fields are present.
 
-1. Shared contracts
+### 1. Shared contracts
 
-- Extend `shared/src/contracts/status.ts` with session/recording detail types.
-- Export new types from `shared/src/mod.ts`.
+- [x] Extend `shared/src/contracts/status.ts` with session/recording detail types.
+- [x] Add `DaemonSessionStatus` and `DaemonRecordingStatus` types.
+- [x] Export new types from `shared/src/mod.ts`.
 
-2. Runtime status projection
+### 2. Runtime status projection
 
-- Add projection helper in `apps/daemon/src/orchestrator/daemon_runtime.ts` (or
-  move pure pieces into shared).
-- Persist rich status payload to status store.
+- [x] Add `toSessionStatuses` helper in
+      `apps/daemon/src/orchestrator/daemon_runtime.ts`.
+- [x] Add pure projection helpers in `shared/src/status_projection.ts`.
+- [x] Join session snapshot list with active recordings on heartbeat.
+- [x] Persist rich status payload (sessions + memory) to status store.
 
-3. CLI status command
+### 3. CLI status command
 
-- Extend parser/types for `status --all`.
-- Implement detailed renderer in `apps/daemon/src/cli/commands/status.ts`.
-- Ensure `--json` output carries new fields.
-- Add memory summary rendering sourced from `status.memory`.
+- [x] Extend parser/types for `status --all` and `status --live`.
+- [x] Implement detailed session renderer in
+      `apps/daemon/src/cli/commands/status.ts`.
+- [x] Add compact memory summary line to default text output.
+- [x] Add over-budget visual highlight.
+- [x] Ensure `--json` output carries new session and memory fields (text/JSON
+      parity).
+- [x] Implement `--live` refresh-loop: clear + redraw on interval, exit on `q`
+      or Ctrl+C.
+- [x] Cap live session list at N most recent (default 5).
 
-4. Web view model
+### 4. Web view model
 
-- Update `apps/web/src/main.ts` to consume richer snapshot.
-- Keep web formatting/presentation thin.
+- [x] Update `apps/web/src/main.ts` to consume richer snapshot (sessions +
+      memory).
+- [x] Keep web formatting/presentation thin; reuse shared projection helpers.
 
-5. Documentation
+### 5. Documentation
 
-- Update README command docs for `status --all`.
-- Update `dev.codebase-overview` status model section.
-- Document memory summary fields and their source task dependency.
+- [ ] Update README command docs for `status --all` and `status --live`.
+- [ ] Update `dev.codebase-overview` status model section.
+- [ ] Document memory summary fields and their source task dependency.
+- [ ] Document text/JSON parity contract.
 
 ## Testing Plan
 
-- CLI parser tests for `status --all`.
-- CLI output tests:
-  - default hides stale
-  - `--all` includes stale
-  - displays provider/sessionId/output path/timestamps
-- Runtime tests:
-  - status snapshot includes active recording/session details
-  - stale classification behavior is deterministic
-- Memory tests:
-  - `status --json` includes prereq memory fields unchanged
-  - text output shows memory summary when memory section is present
-- Web model tests for filtering/sorting parity with CLI projection rules.
+- [x] CLI parser tests:
+  - [x] `status --all` flag parsed correctly
+  - [x] `status --live` flag parsed correctly
+  - [x] `status --json --all` combination works
+- [x] CLI output tests:
+  - [x] default hides stale sessions
+  - [x] `--all` includes stale sessions
+  - [x] session block displays provider/sessionId/output path/timestamps
+  - [x] memory summary line present in default text output
+  - [x] over-budget flag shown when `memory.snapshots.overBudget` is true
+  - [x] `--json` and text output have field parity (no JSON-only or text-only
+        fields)
+- [ ] Runtime tests:
+  - [ ] status snapshot includes active recording/session details
+  - [ ] stale classification behavior is deterministic
+  - [ ] heartbeat projection populates memory section from process + store
+- [x] Live mode tests:
+  - [x] session list capped at N most recent
+- [x] Memory tests:
+  - [x] text output shows memory summary when memory section is present
+  - [x] over-budget state reflected in both text and JSON
+- [x] Web model tests:
+  - [x] filtering/sorting parity with CLI projection rules
 
 ## Acceptance Criteria
 
-- `kato status` shows currently recording sessions with provider/session id and
-  destination.
-- `kato status --all` includes stale sessions and stale recording rows.
-- Status surfaces (`--json` and text) include memory information sourced from
-  memory-management fields.
-- Shared status projection/model logic is used by both CLI and web code paths.
-- CI passes with updated tests and docs.
+- [x] `kato status` shows currently recording sessions with provider/session id
+      and destination.
+- [x] `kato status --all` includes stale sessions and stale recording rows.
+- [x] Both text and `--json` output include memory information sourced from
+      memory-management fields (full parity).
+- [x] `kato status --live` provides a periodic refresh-loop display with fixed
+      layout: header, sessions block (capped), memory block.
+- [x] Shared status projection/model logic is used by both CLI and web code
+      paths.
+- [ ] CI passes with updated tests and docs.
 
 ## Open Questions
 
@@ -250,6 +325,7 @@ Legend:
 - Label wording:
   - Keep `last write` terminology (matches current `RecordingPipeline`) or
     introduce `last export` only for export-specific actions?
-- JSON filtering behavior:
-  - Should `--json` always return full snapshot and let clients filter, or
-    should `--json` obey `--all` filtering for parity with text output?
+- Live mode refresh interval:
+  - Hard-coded 2s default, or runtime config / `--interval` flag?
+- Live mode session cap:
+  - Hard-coded 5, or `--count` flag?

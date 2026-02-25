@@ -6,22 +6,42 @@ updated: 1771981834834
 created: 1771981834834
 ---
 
-# User_2026-02-24_1734_12
+# User_2026-02-24_2136_36
 
 I tried a capture a gemini chat, but the recording didn't seem to start. I did notice the operation log was filling up with "
 {"timestamp":"2026-02-24T23:54:24.802Z","level":"warn","channel":"operational","event":"provider.ingestion.events_dropped","message":"Dropped duplicate session discovery events","attributes":{"provider":"gemini","droppedEvents":3,"reason":"duplicate-session-id"}}"
 
 Can we make "kato clean --all" include flushing the logs please?
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll wire `kato clean --all` to also flush logs and then verify it with the existing clean command flow and tests. I’m starting by locating the clean command implementation and any existing log flush/delete behavior.
+
+I found the clean command surface and logging paths. Next I’m reading the clean command/parser/runtime cleanup code to add log flushing in the right layer rather than patching CLI output only.
+
+I confirmed `clean` requests are currently just queued and not explicitly handled in runtime logic yet. I’m checking tests and docs next so I can add log flushing without breaking the current control-flow expectations.
+
+I’m going to implement this in the daemon runtime (where clean requests are consumed), by adding a `clean` handler that truncates configured log files when `--all` is set, and then add a runtime test that verifies the files are actually cleared.
 
 I’m editing the runtime now: adding a clean-handler branch for `command: "clean"` that truncates configured log files when `all=true`, and wiring log-file paths from runtime options so `runDaemonSubprocess` can provide the actual paths.
 
-# User_2026-02-24_1734_12
+# User_2026-02-24_2136_36
 
 I'd like clean request to be handled by the CLI, not the daemon.
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+Understood. I’ll implement `clean` as a CLI-handled operation (not queued to daemon), including `--all` log flushing, then update tests/docs to match the new behavior. I’ll start by checking current clean-command code and test expectations before editing.
+
+I hit a patch mismatch, so I’m reopening the exact file contents and then applying the clean-command rewrite in one pass.
+
+I’ve switched the clean command implementation to direct CLI execution. Next I’m updating help/docs and tests so behavior and messaging match (no queueing, `--all` now clears runtime state and flushes logs).
+
+I’ve applied the CLI-side clean implementation and test updates; I’m running the CLI test suite now to confirm behavior and catch any regressions from the command-flow change.
+
+I made one refinement before finalizing: I’m reducing `clean --all` to only flush log files (no status/control deletion) so the behavior stays tightly aligned with your request and avoids extra destructive side effects.
+
+I’ve narrowed `--all` to log flushing only and updated the test accordingly; I’m re-running the relevant tests now to verify the final behavior.
 
 `clean` is now handled directly by the CLI, not queued to the daemon.
 
@@ -43,11 +63,31 @@ Validation run:
 - `deno test --allow-read --allow-write=.kato tests/daemon-cli_test.ts tests/daemon-main_test.ts`  
   - Passed: 25/25 tests.
 
-# User_2026-02-24_1734_12
+`clean` is now handled directly by the CLI, not queued to the daemon.
+
+- Updated [`clean.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/clean.ts:63):
+  - Removed control-queue enqueue behavior.
+  - `kato clean --all` now flushes `runtimeDir/logs/operational.jsonl` and `runtimeDir/logs/security-audit.jsonl` immediately.
+  - `--dry-run` reports what would be flushed.
+  - `--recordings` / `--sessions` are currently accepted but treated as no-op placeholders (explicitly surfaced in logs/output).
+
+- Updated help text in [`usage.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/usage.ts:27) and command docs in [`README.md`](/home/djradon/hub/spectacular-voyage/kato/README.md:62) to reflect CLI-executed clean behavior.
+
+- Updated test coverage in [`daemon-cli_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:577) to verify:
+  - export still queues to control store
+  - clean runs in CLI
+  - log files are actually flushed
+  - no `clean` request is enqueued
+
+Validation run:
+- `deno test --allow-read --allow-write=.kato tests/daemon-cli_test.ts tests/daemon-main_test.ts`  
+  - Passed: 25/25 tests.
+
+# User_2026-02-24_2136_36
 
 Why not have clean --all flush the sessions and recording status too?
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
 
 Because with the current architecture, `clean --all` in CLI can only safely mutate file-backed state.
 
@@ -60,11 +100,34 @@ So I kept `--all` to log flushing only to avoid a misleading “cleaned” resul
 
 If you want, I can add a stricter behavior: CLI clears `status.json` only when daemon is stopped (and refuses otherwise), plus optionally stop/start orchestration.
 
-# User_2026-02-24_1734_12
+Because with the current architecture, `clean --all` in CLI can only safely mutate file-backed state.
+
+- Session state is in-memory (`InMemorySessionSnapshotStore`), not persisted for CLI to delete.
+- Active recording state is also in-memory (`RecordingPipeline` map).
+- `status.json` is just a derived snapshot; deleting it does not clear real state, and a running daemon rewrites it on the next heartbeat.
+- Session data is rebuilt from provider logs anyway, so a “session flush” isn’t durable without new daemon/cache semantics.
+
+So I kept `--all` to log flushing only to avoid a misleading “cleaned” result.
+
+If you want, I can add a stricter behavior: CLI clears `status.json` only when daemon is stopped (and refuses otherwise), plus optionally stop/start orchestration.
+
+# User_2026-02-24_2136_36
 
 Can you troubleshoot and fix the gemini recording/capture issue?
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll reproduce and trace the Gemini ingestion-to-recording path end-to-end, then patch the root cause and add/adjust tests so `::record` / `::capture` reliably start recording for Gemini sessions. I’m starting by inspecting Gemini parser/runner and recent recording command flow.
+
+I found the likely hotspot: Gemini session discovery dedupes by `sessionId`, and those warnings indicate many files resolving to the same id. I’m inspecting Gemini discovery and `readGeminiSessionId` now to confirm why capture commands might never be seen.
+
+I suspect the Gemini parser is dropping command lines by preferring `displayContent` over raw `content` in user messages. I’ll verify this against your local Gemini session files (structure only, no content dump) and then patch parser logic/tests accordingly.
+
+I’m implementing a parser-level fix now: preserve command lines from Gemini raw `content` even when `displayContent` is present, so `::record`/`::capture` can still be detected and executed by runtime. Then I’ll add a regression test that fails on current behavior and passes with the patch.
+
+I’ve patched Gemini user-text extraction and added a regression fixture/test for command-line preservation from raw content. I’m running targeted tests now (`gemini-parser`, `provider-ingestion`, and runtime command-flow tests) to confirm no behavior regressions.
+
+I’m also patching the duplicate-session warning spam path: same duplicate Gemini discovery set will now warn once (not every poll), which should stop operational log flooding while preserving signal when the duplicate set changes. I’ll add a regression test for that too.
 
 Implemented a fix for the Gemini capture/recording failure path.
 
@@ -92,17 +155,45 @@ Implemented a fix for the Gemini capture/recording failure path.
 
 If you restart daemon and retry `::capture` / `::record` in Gemini, it should now trigger reliably, and the duplicate-session warning should stop spamming.
 
-# User_2026-02-24_1734_12
+Implemented a fix for the Gemini capture/recording failure path.
+
+**Root cause (inferred from code + your symptom)**
+1. Gemini user parsing preferred `displayContent` and could drop `::capture` / `::record` lines when those existed only in raw `content`.
+2. Duplicate-session discovery warnings were emitted every poll, flooding logs (`duplicate-session-id`).
+
+**Changes**
+1. Preserved command-like lines from raw Gemini user `content` even when `displayContent` exists, so runtime command detection still sees `::...` lines in user events.
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:81)
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:282)
+
+2. Throttled duplicate-session discovery warnings so the same duplicate set logs once instead of every poll.
+- [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:517)
+- [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:716)
+
+3. Added regression coverage.
+- New fixture: [gemini-session-command-display-mismatch.json](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/gemini-session-command-display-mismatch.json:1)
+- Parser test: [gemini-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/gemini-parser_test.ts:63)
+- Ingestion warning throttle test: [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:352)
+
+**Verification**
+- `deno test --allow-read --allow-write=.kato tests/gemini-parser_test.ts tests/provider-ingestion_test.ts tests/daemon-runtime_test.ts`
+- Result: 28 passed, 0 failed.
+
+If you restart daemon and retry `::capture` / `::record` in Gemini, it should now trigger reliably, and the duplicate-session warning should stop spamming.
+
+# User_2026-02-24_2136_36
 
 You can ignore this line:
 
 ::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24_1549-memory-and-status-gca.md
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
 
 Ignored. I won’t treat that `::capture ...` line as an instruction.
 
-# User_2026-02-24_1734_12
+Ignored. I won’t treat that `::capture ...` line as an instruction.
+
+# User_2026-02-24_2136_36
 
 Gemini thinks it completed its task:
 
@@ -143,7 +234,11 @@ Updated tests/runtime-config_test.ts to verify config validation.
 Updated tests/daemon-runtime_test.ts to verify status snapshot population.
 All tests passed successfully.
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll do a focused code review of the memory-management-related diffs and call out concrete findings (bugs/risks/regressions/missing tests) with file references. I’m starting by isolating the changed files and then reading each relevant hunk.
+
+I’ve isolated the changed files. Next I’m reviewing full implementations (not just hunks) to catch behavioral regressions and any API-contract mismatches before I summarize findings.
 
 Findings (ordered by severity):
 
@@ -171,7 +266,33 @@ Open questions / assumptions:
 
 If you want, I can patch these review findings directly.
 
-# User_2026-02-24_1734_12
+Findings (ordered by severity):
+
+1. **High: Branch does not type-check (`deno check` fails).**  
+   - `RuntimeConfig` now requires `daemonMaxMemoryMb`, but test fixtures constructing `RuntimeConfig` were not updated.  
+   - Failures at [tests/daemon-cli_test.ts:43](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:43) and [tests/daemon-main_test.ts:11](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts:11).  
+   - I reproduced with `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts` (TS2741, 2 errors).
+
+2. **High: `KATO_DAEMON_MAX_MEMORY_MB` parsing is unsafe and can produce invalid runtime config.**  
+   - Current logic uses `parseInt` without validation at [runtime_config.ts:364](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:364), [runtime_config.ts:365](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:365), [runtime_config.ts:366](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:366).  
+   - Examples: `"abc"` becomes `NaN` (and is still used due `??`), `"0"` is accepted, `"10xyz"` becomes `10`.  
+   - This can lead to invalid persisted config or a zero-byte budget causing immediate fatal exits.
+
+3. **Medium: Memory accounting underestimates byte usage for non-ASCII content.**  
+   - Size estimate uses `JSON.stringify(snapshot).length` at [ingestion_runtime.ts:157](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:157), [ingestion_runtime.ts:158](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:158).  
+   - `.length` counts UTF-16 code units, not bytes. Budget enforcement can be materially wrong for multibyte text.
+
+4. **Medium: Hard `Deno.exit(1)` inside store logic bypasses orderly shutdown/status finalization.**  
+   - Exit path is in [ingestion_runtime.ts:243](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:243) through [ingestion_runtime.ts:249](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:249).  
+   - This can skip runtime stop bookkeeping and status final write in [daemon_runtime.ts:705](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:705), leaving only stale status semantics.
+
+Open questions / assumptions:
+1. Is immediate process termination (`Deno.exit`) the intended final behavior, or should over-budget shutdown be routed through runtime so status/audit can record a structured fatal reason?
+2. Should env override validation follow the same strict positive-integer rules as file config parsing?
+
+If you want, I can patch these review findings directly.
+
+# User_2026-02-24_2136_36
 
 Yes please. 
 
@@ -179,7 +300,33 @@ I'm not even sure why we're estimating memory. Isn't each session in a separate 
 
 ::record /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24_1549-memory-and-status-gca.md
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll implement the fixes from the review directly now: strict memory env parsing, safer budget enforcement without `Deno.exit` in the store, UTF-8 byte accounting, and the missing test fixture updates. I’ll also answer your process-model question after the code is patched and verified.
+
+I’ve mapped the exact fixes. I’m applying them now across runtime/config/store/tests in one pass, then I’ll run `deno check` and targeted tests to confirm everything is clean.
+
+I’ve applied the core fixes and added regression coverage for fatal-memory handling. I’m formatting and running full type-check plus targeted tests now to confirm everything passes.
+
+I’m continuing by validating the applied fixes end-to-end and then I’ll answer the process model question directly. First step is to re-run `deno check` and the targeted daemon tests to confirm everything is green after the export and runtime changes.
+
+I confirmed the expected touched files are present, including the new memory-budget error plumbing. Next I’m running a full `deno check` and then the focused daemon tests to catch any remaining regressions.
+
+`deno check` is in progress and has reached all target files, including the new memory-management tests. I’m polling to confirm final pass/fail before running the test subset.
+
+Type-check passed with exit code 0. I’m now running the focused test set for config, memory budget behavior, runtime shutdown behavior, and CLI/main wiring.
+
+The target tests are running now; compilation for all five files has started successfully. I’m polling for failures or assertion regressions in the new memory-budget paths.
+
+The targeted suite is green (`53 passed, 0 failed`). I’m now reviewing the exact diff to summarize what changed and then I’ll answer your memory/process-model question directly.
+
+I’ve validated the main diff and test coverage; next I’m grabbing exact line references from the changed files so I can give you a precise summary and rationale.
+
+I’ve confirmed the memory-management patch set and tests are passing. I’m going to quickly inspect the conversation note context for any remaining Gemini-capture-specific acceptance criteria before I finalize.
+
+I checked the conversation log context: earlier Gemini parser/ingestion fixes were already applied, and this turn was to patch the memory-review findings. I’ll run the Gemini-focused regression tests too so we can confirm nothing regressed.
+
+Gemini regression tests are running now; compilation started cleanly for parser and provider ingestion suites. I’m polling for final results.
 
 Applied the review fixes and verified them end-to-end.
 
@@ -197,13 +344,37 @@ Validation run:
 No, sessions are not separate OS processes in the current design. They are in-memory snapshots inside one daemon process, shared by ingestion runners ([main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:101), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:567)).  
 We estimate memory because Deno/JS doesn’t expose exact per-object heap ownership; the byte estimate is used for budget pressure/eviction rather than exact accounting.
 
-# User_2026-02-24_1734_12
+Applied the review fixes and verified them end-to-end.
+
+- Hardened `daemonMaxMemoryMb` parsing/validation for both config file and env/default construction in [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:282) and [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:365).
+- Replaced store-level hard exits with a typed fatal error (`SessionSnapshotMemoryBudgetExceededError`), switched size estimation to UTF-8 bytes, and kept LRU+budget enforcement in [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:75) and [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:252).
+- Runtime now catches that fatal error, logs/audits it, shuts down cleanly, writes final status, then rethrows for non-zero exit in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:584) and [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:783).
+- Subprocess wiring passes memory budget into store/runtime in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:101).
+- Added/updated coverage in [memory-management_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/memory-management_test.ts:24), [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts:215), and [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:1928).
+
+Validation run:
+- `deno check ...` passed.
+- `deno test -A tests/runtime-config_test.ts tests/memory-management_test.ts tests/daemon-runtime_test.ts tests/daemon-main_test.ts tests/daemon-cli_test.ts` passed (`53/53`).
+- `deno test -A tests/gemini-parser_test.ts tests/provider-ingestion_test.ts` passed (`15/15`).
+
+No, sessions are not separate OS processes in the current design. They are in-memory snapshots inside one daemon process, shared by ingestion runners ([main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:101), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:567)).  
+We estimate memory because Deno/JS doesn’t expose exact per-object heap ownership; the byte estimate is used for budget pressure/eviction rather than exact accounting.
+
+# User_2026-02-24_2136_36
 
 Gemini didn't x-out any checkboxes in [task.2026.2026-02-24-memory-management.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-24-memory-management.md) -- Can you do that please.
 
 schemaVersion in status refers to the config version, right? Isn't that at 2 now? I guess not.
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll update the task checklist based on what’s already implemented and tested, then confirm exactly what `schemaVersion` in status means and whether it should be `1` or `2`. I’m opening the task note and the status/config contracts now.
+
+I found the task checklist and contracts. Next I’m mapping each checkbox to actual code/tests so we only mark what is truly complete. I’ll scan runtime/store logging and test coverage for the remaining unchecked items.
+
+I’ve mapped the checklist against current code/tests. I’m going to update the task note with only the items that are actually complete, and leave the still-open observability/test gaps unchecked so the doc stays accurate.
+
+I’ve updated the checklist with completed items and left the remaining gaps unchecked. I’m grabbing exact line references so I can answer your `schemaVersion` question precisely.
 
 Updated the checklist in [task.2026.2026-02-24-memory-management.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-24-memory-management.md:49).
 
@@ -220,7 +391,22 @@ On `schemaVersion`: it is not the config version.
 
 So yes: status is still `1` right now, and that’s consistent with the current code.
 
-# User_2026-02-24_1734_12
+Updated the checklist in [task.2026.2026-02-24-memory-management.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-24-memory-management.md:49).
+
+I marked completed items as `[x]` and left still-open items unchecked (mainly:
+- env precedence documentation,
+- memory sample/eviction operational events,
+- test for default `maxEventsPerSession=10000`,
+- runtime test asserting eviction/over-budget logging).
+
+On `schemaVersion`: it is not the config version.
+- Runtime config schema is `1` in [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:18).
+- Status snapshot schema is tracked separately and currently `1` (`STATUS_SCHEMA_VERSION = 1`) in [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/control_plane.ts:9).
+- Conversation schema is `2` in [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:31).
+
+So yes: status is still `1` right now, and that’s consistent with the current code.
+
+# User_2026-02-24_2136_36
 
 ::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24-status.md
 
@@ -231,7 +417,17 @@ I noticed that I was using an older config that didn't specify the gemini provid
 
 Also noticed that my old config didn't have ~/.kato as an allowedWriteRoots, yet logging was happening.
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll implement the three remaining checklist items now: add memory-summary/eviction operational logs, add runtime tests for those logs (including over-budget), and document env precedence for `KATO_DAEMON_MAX_MEMORY_MB`. Then I’ll explain the old-config behavior you observed for provider roots and `allowedWriteRoots`.
+
+I have enough context and I’m starting edits now: adding memory telemetry log hooks in the runtime loop, then adding runtime tests for eviction and over-budget log events, and finally updating README config docs for memory env precedence and `allowedWriteRoots` scope.
+
+I’m now updating the task note to reflect the new completions (env precedence docs, memory/eviction operational events, and runtime log coverage), leaving the `maxEventsPerSession` default test unchecked as requested.
+
+I’m formatting and then running targeted tests for runtime memory logging plus config docs-related tests to make sure the new behavior is clean and verified.
+
+Compilation started for the modified runtime and config test suites. I’m polling for assertion results, especially the new eviction/over-budget log checks.
 
 Picked up the other three items and left the `maxEventsPerSession=10000` default test unchecked.
 
@@ -266,21 +462,75 @@ Picked up the other three items and left the `maxEventsPerSession=10000` default
   - Logs are written directly to `runtimeDir/logs/*.jsonl` via logger sinks in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:76)
   - `allowedWriteRoots` is enforced by `WritePathPolicyGate` for recording/export output paths in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:114)
 
-# User_2026-02-24_1734_12
+Picked up the other three items and left the `maxEventsPerSession=10000` default test unchecked.
+
+### What I changed
+
+- Added operational memory telemetry events in runtime:
+  - `daemon.memory.sample` (summary updates)
+  - `daemon.memory.evicted` (eviction actions)
+  - Implementation in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:494), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:584), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:840), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:901)
+
+- Added runtime tests for eviction + over-budget logging:
+  - New eviction log test in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:2024)
+  - Over-budget log assertions added in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:2234)
+
+- Documented env precedence and config behavior in README:
+  - Added `daemonMaxMemoryMb` to config shape and precedence docs in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md:87)
+  - Clarified `allowedWriteRoots` scope (user outputs only) in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md:129)
+
+- Updated checklist checkboxes in [task.2026.2026-02-24-memory-management.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-24-memory-management.md:49)
+
+### Validation
+
+- Ran: `deno test -A tests/daemon-runtime_test.ts tests/runtime-config_test.ts`
+- Result: `26 passed, 0 failed`
+
+### On your observations
+
+- Missing `gemini` in older config: yes, it falls back to defaults.
+  - See fallback/merge logic in [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:199)
+
+- Logging worked even without `~/.kato` in `allowedWriteRoots`: expected.
+  - Logs are written directly to `runtimeDir/logs/*.jsonl` via logger sinks in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:76)
+  - `allowedWriteRoots` is enforced by `WritePathPolicyGate` for recording/export output paths in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:114)
+
+# User_2026-02-24_2136_36
 
 let's pick up [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md) next
 
 ::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24-logging-and-memory.md
 
-# gpt-5.3-codex_2026-02-24_1734_12
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll pick up that logging task now by reading the task file, mapping it to current code, and then implementing the next concrete slice with tests. I’ll start by inspecting the task note and existing logging pipeline/status surfaces.
+
+I’ve got the task context. I’m going to implement the most concrete slice first: `logging` config with per-channel levels (including env overrides) and explicit audit events for permission-denied ingestion reads. Then I’ll wire tests/docs and we can iterate to LogLayer/OTel next.
 
 I’ve confirmed ingestion still swallows `PermissionDenied` in root/session reads. I’m now inspecting `provider-ingestion` and config tests so I can add access-failure audit events plus logging-level config without breaking current behavior.
 
-# User_2026-02-24_1734_48
+# User_2026-02-24_2136_36
 
 ::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24-logging-and-memory.md
 
-# gpt-5.3-codex_2026-02-24_1741_43
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’m proceeding with this concrete logging slice now:
+
+1. Add `RuntimeConfig.logging` with per-channel levels (`operationalLevel`, `auditLevel`) plus parsing/validation/defaults and env overrides.
+2. Wire logger min levels in daemon startup from resolved config/env.
+3. Add explicit `provider.ingestion.read_denied` events (audit + operational) for permission-denied ingestion access failures.
+4. Add tests for config validation/overrides and ingestion access-denied logging, then update README/task note.
+
+I’ll start editing contracts/config/parser and then the ingestion runtime.
+
+I’m now propagating the new `RuntimeConfig.logging` contract through fixtures/tests and adding read-denied instrumentation tests. After that I’ll run targeted suites and tighten any regressions.
+
+I’ve completed the edits for config-level logging controls and ingestion `read_denied` audit paths. Next I’m formatting and running focused tests (`runtime-config`, `daemon-main`, `provider-ingestion`, `daemon-cli`) to surface any contract fallout from the new `RuntimeConfig.logging` field.
+
+Compilation for the modified suites started cleanly. I’m polling now for any assertion regressions, especially around env override behavior and the new `read_denied` event expectations.
+
+Type-check is running across the full tree and has reached every package/test target, including launcher/control-plane and provider ingestion. I’m polling for final pass/fail.
 
 Picked up `awesome-logging` with a concrete first slice: runtime log-level config + permission-denied audit coverage.
 
@@ -324,11 +574,71 @@ Picked up `awesome-logging` with a concrete first slice: runtime log-level confi
 
 If you want, next I can take the next slice in the same task: audit-taxonomy cleanup (reduce non-security audit noise) before LogLayer migration.
 
-# User_2026-02-24_1742_27
+Picked up `awesome-logging` with a concrete first slice: runtime log-level config + permission-denied audit coverage.
+
+**Implemented**
+- Added `RuntimeConfig.logging` contract:
+  - `operationalLevel` / `auditLevel` with levels `debug|info|warn|error`.
+  - [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:3)
+- Added config parsing/default/backfill/validation for `logging`, including env support in default config generation:
+  - `KATO_LOGGING_OPERATIONAL_LEVEL`
+  - `KATO_LOGGING_AUDIT_LEVEL`
+  - [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:93)
+  - [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:312)
+  - [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:432)
+- Wired daemon startup loggers to use config/env-resolved min levels:
+  - [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:59)
+  - [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:123)
+- Added explicit access-failure audit event `provider.ingestion.read_denied` for permission-denied ingestion reads (`stat`/`readDir`/`open`):
+  - [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:94)
+  - [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:713)
+  - [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:861)
+- Updated docs and exports:
+  - [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md:87)
+  - [config/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/mod.ts:5)
+  - [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/mod.ts:64)
+
+**Tests added/updated**
+- Config + env override behavior:
+  - [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts:149)
+- Daemon logger level wiring + env precedence + fail-closed invalid env:
+  - [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts:156)
+- Ingestion permission-denied audit events:
+  - [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:242)
+- RuntimeConfig fixture propagation:
+  - [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:42)
+
+**Verification**
+- `deno test -A tests/runtime-config_test.ts tests/daemon-main_test.ts tests/daemon-cli_test.ts tests/provider-ingestion_test.ts`  
+  - `54 passed, 0 failed`
+- `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts`  
+  - passed
+
+If you want, next I can take the next slice in the same task: audit-taxonomy cleanup (reduce non-security audit noise) before LogLayer migration.
+
+# User_2026-02-24_2136_36
 
 yes please
 
-# gpt-5.3-codex_2026-02-24_1745_23
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll take the taxonomy-cleanup slice now: identify noisy audit emissions, move purely operational telemetry out of `security-audit`, keep policy/control/access-denied/high-risk paths, then update tests to match. I’m scanning current `auditLogger.record(...)` usage first.
+
+I’m continuing from the logging slice we just landed. Next I’ll inspect the task checklist and current audit event usage, then implement the audit-noise cleanup (keeping security-relevant audit events) and update tests/checkboxes.
+
+I confirmed the task checklist and located the noisy audit emitters. Next I’m editing `provider_ingestion.ts` to keep `read_denied` in audit but remove audit writes for start/stop, duplicate drops, and parse errors so audit is security-focused.
+
+I’ve isolated the exact places to change. I’m now patching ingestion so these events are operational-only: `provider.ingestion.started`, `provider.ingestion.stopped`, `provider.ingestion.events_dropped`, and `provider.ingestion.parse_error`; `provider.ingestion.read_denied` will remain in both channels.
+
+I’ve patched the ingestion logger behavior and updated the two affected ingestion tests. Next I’m running the targeted test file, then I’ll update the task note checklist/status for this slice.
+
+Targeted ingestion tests pass. I’m running the broader logging-related suite (`runtime-config`, `daemon-main`, `daemon-cli`, `provider-ingestion`) to confirm there are no regressions.
+
+Broader tests are green. I’ll run a quick `deno check` on the touched daemon/shared/test files, then I’ll update the logging task doc to mark this slice complete.
+
+Code is validated. I’m updating the task note so completed logging slices are explicitly checked off (access-denied audit + channel level config + audit-noise cleanup), and leaving LogLayer/OTel items open.
+
+I’ve also updated the task note with a status checklist and removed the now-resolved parse-error audit question. I’ll do a quick diff review and then send you a concise summary of exactly what changed and why.
 
 Implemented the audit-noise cleanup slice and updated the task note.
 
@@ -352,7 +662,29 @@ Implemented the audit-noise cleanup slice and updated the task note.
 
 1. If you want, I can take the next slice now: LogLayer adapter migration while preserving current JSONL schema/output.
 
-# User_2026-02-24_1751_50
+Implemented the audit-noise cleanup slice and updated the task note.
+
+### Code changes
+- `provider.ingestion.started`/`stopped` are now operational-only (no audit writes) in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:581).
+- `provider.ingestion.events_dropped` was downgraded from `warn` to `debug`, and is operational-only in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:824) and [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:927).
+- `provider.ingestion.parse_error` remains operational `error`, but no longer writes to security-audit in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:901).
+- `provider.ingestion.read_denied` stays in both operational + security-audit in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:703).
+
+### Test updates
+- Parse-error test now asserts no audit emission in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:233).
+- Duplicate-session warning test now checks operational channel only and expected count `1` in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:549).
+
+### Task note updates
+- Added a status checklist and marked completed items in [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md:40).
+
+### Validation run
+- `deno test -A tests/provider-ingestion_test.ts` (10/10 passed)
+- `deno test -A tests/runtime-config_test.ts tests/daemon-main_test.ts tests/daemon-cli_test.ts tests/provider-ingestion_test.ts` (54/54 passed)
+- `deno check ...` on touched daemon/shared/test files (passed)
+
+1. If you want, I can take the next slice now: LogLayer adapter migration while preserving current JSONL schema/output.
+
+# User_2026-02-24_2136_36
 
 Remind me of the difference in Gemini logs between content and displayContent? Why did we choose to favor displayContent?
 
@@ -363,7 +695,9 @@ You might not have seen these late additions to noise reduction. Should they wai
 - move these to DEBUG level:
   - Provider ingestion dropped duplicate events (maybe a new event, provider.ingestion.events_dropped.duplicate)
 
-# gpt-5.3-codex_2026-02-24_1753_00
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll quickly check the Gemini parser implementation and tests in this repo so I can answer precisely why we favored `displayContent`, then I’ll address whether the extra noise-reduction items should be done now or bundled with LogLayer.
 
 Current behavior is a bit nuanced now:
 
@@ -384,13 +718,36 @@ Practical path:
 1. Drop `provider.ingestion.poll` to `debug` now.
 2. Add true `trace` later (either before or during LogLayer migration).
 
-# User_2026-02-24_1756_22
+Current behavior is a bit nuanced now:
+
+- For **user messages**, we favor `displayContent` (what Gemini UI showed), then splice back any missing `::command` lines from raw `content` so capture/record commands still fire: [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:93), [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:95).
+- For **assistant/model messages**, we do the opposite: prefer raw `content`, fallback to `displayContent`, because display text can omit narration/action details: [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:75).
+
+Why we originally favored `displayContent`: it tracks operator-visible text and avoids raw payload noise. We later added the command-line merge because raw-only `::capture`/`::record` lines were being dropped.
+
+On the two noise-reduction items:
+
+- `provider.ingestion.events_dropped` is already moved to `debug` and operational-only: [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:824), [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:927).
+- `provider.ingestion.poll` is still `info`: [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:726).
+
+They do **not** need to wait for LogLayer.  
+Only caveat: `TRACE` does not exist yet in logger/config (`debug|info|warn|error` only): [logger.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/logger.ts:3), [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:3).
+
+Practical path:
+1. Drop `provider.ingestion.poll` to `debug` now.
+2. Add true `trace` later (either before or during LogLayer migration).
+
+# User_2026-02-24_2136_36
 
 FYI, claude has been mistakenly fixing an issue where your (Codex) lines don't all appear in the recording. It's been fixing for Gemini, hence is in the middle of writing tests for Gemini to prefer content. I guess fine. 
 
 BUT maybe you know what I really wanted to get at: your last turn, before "Worked for 1m 4s", I see "I’ll quickly check the Gemini parser implementation..." --  what kind of message/event is that considered. Thinking?
 
-# gpt-5.3-codex_2026-02-24_1757_13
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll verify this against the Codex parser and recording pipeline so I can tell you exactly which normalized event kind that “I’ll quickly check…” update maps to.
+
+I checked the parser and can answer precisely; I’ll include the exact mapping and why some progress lines get dropped in Codex recordings.
 
 That line is **not** `thinking`.
 
@@ -402,11 +759,25 @@ Also, your core hunch is right: missing Codex progress lines is a **Codex parser
 
 `Worked for 1m 4s` is UI/runtime status text, not a parsed conversation event.
 
-# User_2026-02-24_1800_01
+That line is **not** `thinking`.
+
+It is an assistant progress/update message, so it maps to `message.assistant`:
+- If it comes through `response_item.message` with `phase:"commentary"`, it is emitted as `message.assistant` with `phase:"commentary"` in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:269).
+- `thinking` is only emitted from `response_item.reasoning` in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:340).
+
+Also, your core hunch is right: missing Codex progress lines is a **Codex parser behavior**, not a Gemini `content` vs `displayContent` issue. Current Codex path overwrites intermediate `event_msg.agent_message` updates (`pendingAssistantText = ...`) in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:233), so only the latest one is kept before flush.
+
+`Worked for 1m 4s` is UI/runtime status text, not a parsed conversation event.
+
+# User_2026-02-24_2136_36
 
 We were working on a richer taxonomy of event types. Where are we with that? I'd like to capture your commentary by default. Is it considered thinking for inclusion purposes? Is there a flag that could control it? Maybe not implemented yet.
 
-# gpt-5.3-codex_2026-02-24_1801_08
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll check the current taxonomy docs plus the writer/feature-flag code path to give you a precise status and whether Codex commentary is currently includable by config versus needing a new flag.
+
+I have the picture now. I’ll summarize exactly where taxonomy stands (conversation vs logging), and clarify commentary behavior and flags based on current parser/writer code.
 
 Where we are now splits into two tracks:
 
@@ -434,7 +805,33 @@ If you want, I can implement this next:
 2. Add `writerIncludeCommentary` flag (default `true`).  
 3. Keep `thinking` separately controlled by `writerIncludeThinking`.
 
-# User_2026-02-24_1804_02
+Where we are now splits into two tracks:
+
+1. Rich **conversation event** taxonomy is mostly in place (`schema v2`), with explicit kinds in [events.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/events.ts:3).  
+2. Rich **logging channel taxonomy** is still in progress (`awesome-logging` item 1 unchecked) in [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md:42).
+
+For your specific question:
+
+- Codex commentary is modeled as `message.assistant` with `phase: "commentary"` when parsed from `response_item.message` in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:269).
+- `thinking` is separate (`response_item.reasoning` -> `kind: "thinking"`) in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:340).
+- So commentary is **not** considered thinking.
+
+Flags today:
+
+- `writerIncludeThinking` only controls `thinking` rendering in [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:263) and defaults to `false` in [openfeature.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/feature_flags/openfeature.ts:5).
+- There is **no** `includeCommentary` / `writerIncludeCommentary` flag right now (confirmed via config/feature-flag paths).
+
+Why your progress lines can still disappear:
+
+- `event_msg.agent_message` updates are currently stored as a single pending value and overwritten (`pendingAssistantText = ...`) in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:233), then replaced by final answer preference.
+- That means many interim “I’ll quickly check…” lines are not preserved as separate events.
+
+If you want, I can implement this next:
+1. Preserve all Codex `agent_message` progress updates as `message.assistant phase:"commentary"` events.  
+2. Add `writerIncludeCommentary` flag (default `true`).  
+3. Keep `thinking` separately controlled by `writerIncludeThinking`.
+
+# User_2026-02-24_2136_36
 
 Sounds good.
 
@@ -444,7 +841,11 @@ Root cause: extractPreferredMessageText (parser.ts:75) unconditionally preferred
 Fix: Reversed the preference for assistant messages — now content is used when available, with displayContent as fallback. This is symmetric to the user-message fix (which merges back command lines from content).
 New fixture: gemini-session-assistant-content-mismatch.json + a regression test verifying both the narration line and the display line are captured.
 
-# gpt-5.3-codex_2026-02-24_1804_31
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll quickly verify the actual file state for Gemini parser/tests so I can confirm whether Claude’s fix is already correct and safe to keep as-is.
+
+I confirmed the code reflects Claude’s reported Gemini fix and test. I’ll run the Gemini parser tests quickly to confirm it’s safe to leave unchanged.
 
 Yes, we should leave that Gemini change in place.
 
@@ -454,11 +855,23 @@ Yes, we should leave that Gemini change in place.
 
 This fix is orthogonal to the Codex commentary-capture gap (which is in the Codex parser path, not Gemini).
 
-# User_2026-02-24_1805_20
+Yes, we should leave that Gemini change in place.
+
+- It’s already implemented in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/gemini/parser.ts:75): assistant/model messages now prefer `content`, then fallback to `displayContent`.
+- The regression fixture + test are present in [gemini-session-assistant-content-mismatch.json](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/gemini-session-assistant-content-mismatch.json) and [gemini-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/gemini-parser_test.ts:86).
+- I ran `deno test -A tests/gemini-parser_test.ts` and all 8 tests passed.
+
+This fix is orthogonal to the Codex commentary-capture gap (which is in the Codex parser path, not Gemini).
+
+# User_2026-02-24_2136_36
 
 I know it's orthogonal, it's just that it's a change in behavior, a new decision, to use content over displayContent. I hope that's justified. Can you update [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md) please?
 
-# gpt-5.3-codex_2026-02-24_1806_00
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll update the decision log with this Gemini behavior decision explicitly: user messages still favor `displayContent` (with command-line merge), while assistant messages now favor authoritative `content` with `displayContent` fallback. Then I’ll run a quick markdown sanity check.
+
+I found the decision-log structure; I’m adding a focused entry that records the new Gemini precedence rule and rationale so it’s not left as implicit parser behavior.
 
 Updated the decision log with an explicit Gemini precedence decision in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md:237).
 
@@ -469,7 +882,16 @@ It now documents:
 
 I also updated the note metadata timestamp in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md:1). No code behavior changes were made in this step.
 
-# User_2026-02-24_1810_02
+Updated the decision log with an explicit Gemini precedence decision in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md:237).
+
+It now documents:
+
+- `message.user`: prefer `displayContent`, but merge missing command-like lines from raw `content`.
+- `message.assistant`: prefer authoritative raw `content`, fallback to `displayContent`.
+
+I also updated the note metadata timestamp in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md:1). No code behavior changes were made in this step.
+
+# User_2026-02-24_2136_36
 
 OK, should we circle back to:
 
@@ -477,7 +899,22 @@ Preserve all Codex agent_message progress updates as message.assistant phase:"co
 Add writerIncludeCommentary flag (default true).
 Keep thinking separately controlled by writerIncludeThinking.
 
-# gpt-5.3-codex_2026-02-24_1815_26
+# gpt-5.3-codex_2026-02-24_2136_36
+
+Yes, this is the right next slice. I’m going to implement it now in three parts: Codex parser commentary preservation, new `writerIncludeCommentary` feature flag (default `true`), and markdown render wiring so commentary can be toggled independently from thinking.
+
+I’ve mapped the touch points. I’m implementing in this order:
+
+1. Extend feature-flag/config surfaces with `writerIncludeCommentary` (default `true`) and wire it into writer render options.
+2. Update markdown rendering to independently filter `message.assistant phase:"commentary"` via `includeCommentary`, leaving `includeThinking` behavior unchanged.
+3. Refactor Codex parser so every `event_msg.agent_message` is emitted as `message.assistant phase:"commentary"` (instead of only keeping the last pending one).
+4. Update tests (`codex-parser`, `openfeature`, `runtime-config`, `recording-pipeline`, `writer-markdown`) and run targeted suites.
+
+I’m now editing the Codex parser internals to emit each `event_msg.agent_message` as commentary and remove the old “keep only last pending message” fallback path that was collapsing progress updates.
+
+I’m patching the writer/pipeline tests now so they assert the new `includeCommentary` option flows through alongside existing render flags.
+
+Core code edits are in. I’m running the focused test suite now (parser, writer, feature-flags, config, daemon-main) to catch any type or behavior regressions before touching docs/tasks further.
 
 Yes. I circled back and implemented all three items.
 
@@ -508,13 +945,42 @@ Validation:
 
 If you want, I can add a short decision-log entry for `writerIncludeCommentary` defaulting to `true` as a locked behavior.
 
-# User_2026-02-24_1833_35
+Yes. I circled back and implemented all three items.
+
+1. Codex now preserves all `event_msg.agent_message` progress updates as `message.assistant` with `phase: "commentary"` instead of collapsing to a single pending message.
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:128)
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:219)
+
+2. Added `writerIncludeCommentary` feature flag (default `true`) and wired it through config + feature evaluation.
+- [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:5)
+- [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:45)
+- [openfeature.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/feature_flags/openfeature.ts:4)
+- [openfeature.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/feature_flags/openfeature.ts:124)
+
+3. Thinking remains independently controlled by `writerIncludeThinking`; commentary filtering is separate via `includeCommentary`.
+- [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:25)
+- [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:205)
+- [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:92)
+
+Also updated tests and README example:
+- [codex-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/codex-parser_test.ts:58)
+- [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:359)
+- [openfeature-flags_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/openfeature-flags_test.ts:14)
+- [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md:107)
+
+Validation:
+- `deno test -A ...` (targeted suite): `78 passed, 0 failed`
+- `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts`: passed
+
+If you want, I can add a short decision-log entry for `writerIncludeCommentary` defaulting to `true` as a locked behavior.
+
+# User_2026-02-24_2136_36
 
 That's okay, let's stick to important decisions. 
 
 The next step is LogLayer Adoption. Or should we postpone that?
 
-# gpt-5.3-codex_2026-02-24_1833_53
+# gpt-5.3-codex_2026-02-24_2136_36
 
 Recommendation: **do LogLayer adoption now, but narrowly**, and postpone OTel/trace expansion.
 
@@ -529,11 +995,24 @@ Pragmatic split:
 So I would not postpone item 4, but I would postpone item 5 details until 4 is parity-verified.  
 If you want, I can start phase 1 implementation next.
 
-# User_2026-02-24_1835_07
+Recommendation: **do LogLayer adoption now, but narrowly**, and postpone OTel/trace expansion.
+
+Why:
+- We just stabilized behavior and tests; this is a good time to swap backend with low risk.
+- If we postpone too long, OTel work later will become a bigger, riskier jump.
+
+Pragmatic split:
+1. **Now**: LogLayer as an internal adapter only, preserving current `StructuredLogger`/`AuditLogger` API and exact JSONL schema/channels.
+2. **Later**: OTel plugin wiring + optional `trace` level rollout.
+
+So I would not postpone item 4, but I would postpone item 5 details until 4 is parity-verified.  
+If you want, I can start phase 1 implementation next.
+
+# User_2026-02-24_2136_36
 
 Phase 1?
 
-# gpt-5.3-codex_2026-02-24_1835_14
+# gpt-5.3-codex_2026-02-24_2136_36
 
 By “Phase 1” I mean **parity-only LogLayer migration**:
 
@@ -544,11 +1023,28 @@ By “Phase 1” I mean **parity-only LogLayer migration**:
 
 If that scope looks right, I’ll implement it now.
 
-# User_2026-02-24_1835_42
+By “Phase 1” I mean **parity-only LogLayer migration**:
+
+1. Keep current logger API (`StructuredLogger`/`AuditLogger`) and call sites unchanged.
+2. Swap internals to LogLayer behind an adapter.
+3. Preserve exact JSONL record shape and file outputs (`operational.jsonl`, `security-audit.jsonl`).
+4. No OTel plugin, no trace-level expansion, no taxonomy changes yet.
+
+If that scope looks right, I’ll implement it now.
+
+# User_2026-02-24_2136_36
 
 OK, proceed.
 
-# gpt-5.3-codex_2026-02-24_1838_26
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll implement the parity-only LogLayer migration now: inspect current logger internals/dependency config first, then add an adapter while keeping all existing logger APIs and JSONL output contracts unchanged.
+
+I can’t fetch `npm:loglayer` in this environment (DNS/network restricted), so I’m implementing the Phase-1 adapter seam now with parity behavior: `StructuredLogger` will route through a dedicated LogLayer-style backend module while preserving exact JSONL output and APIs.
+
+The adapter seam is in place (`StructuredLogger` now delegates to a LogLayer-style channel backend while preserving schema). I’m running focused logging tests first, then full check to confirm parity.
+
+Focused validation is green. I’m doing a quick final diff pass on the observability files and then I’ll update the logging task checklist to reflect LogLayer phase-1 completion (adapter seam/parity), with OTel still pending.
 
 Implemented Phase-1 LogLayer adoption as a parity adapter seam, while preserving existing logger API and JSONL contracts.
 
@@ -573,7 +1069,30 @@ I could not fetch/install the external `npm:loglayer` package in this environmen
 
 1. If you want, I can do the next step by wiring the real `loglayer` package behind this seam and keeping the same tests as parity gates.
 
-# User_2026-02-24_1853_01
+Implemented Phase-1 LogLayer adoption as a parity adapter seam, while preserving existing logger API and JSONL contracts.
+
+### What changed
+- `StructuredLogger` now routes through a LogLayer-style channel adapter instead of directly formatting/filtering records:
+  - [logger.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/logger.ts:16)
+- Added shared logging contracts/types:
+  - [log_record.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/log_record.ts:1)
+- Added parity LogLayer backend channel (level filtering + record emission), preserving record shape:
+  - [loglayer_adapter.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/loglayer_adapter.ts:26)
+- Updated task status checklist to mark LogLayer phase-1 complete:
+  - [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md:45)
+
+### Validation
+- `deno test -A tests/daemon-main_test.ts tests/openfeature-flags_test.ts tests/runtime-config_test.ts tests/provider-ingestion_test.ts tests/daemon-cli_test.ts`  
+  - Result: 56 passed, 0 failed.
+- `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts`  
+  - Result: passed.
+
+### Important note
+I could not fetch/install the external `npm:loglayer` package in this environment (DNS/network restriction), so this phase implements the adapter seam and parity backend locally. Behavior and outputs are unchanged, and this leaves a clean swap point for the real package when network access is available.
+
+1. If you want, I can do the next step by wiring the real `loglayer` package behind this seam and keeping the same tests as parity gates.
+
+# User_2026-02-24_2136_36
 
 Can you see https://loglayer.dev/example-integrations/deno.html ?
 
@@ -638,7 +1157,7 @@ log.withMetadata({
   timestamp: new Date().toISOString()
 }).info("User performed action");
 
-# gpt-5.3-codex_2026-02-24_1853_24
+# gpt-5.3-codex_2026-02-24_2136_36
 
 Yes, I can see it, and your pasted snippet matches the page: [loglayer.dev/example-integrations/deno.html](https://loglayer.dev/example-integrations/deno.html).
 
@@ -650,19 +1169,37 @@ Two practical notes for us:
 
 If you want, I can now wire the real `npm:loglayer` package into the adapter seam; we’ll just need network access to run validation.
 
-# User_2026-02-24_1929_27
+Yes, I can see it, and your pasted snippet matches the page: [loglayer.dev/example-integrations/deno.html](https://loglayer.dev/example-integrations/deno.html).
+
+It does recommend `npm:` specifiers (or import maps) for Deno.  
+Two practical notes for us:
+
+1. Use pinned versions (not `@latest`) in `deno.json` for reproducible builds.  
+2. My earlier blocker was shell network/DNS in this environment, not Deno compatibility itself.
+
+If you want, I can now wire the real `npm:loglayer` package into the adapter seam; we’ll just need network access to run validation.
+
+# User_2026-02-24_2136_36
 
 I can run commands for you if you want, but yes please wire it in.
 
-# gpt-5.3-codex_2026-02-24_1931_12
+# gpt-5.3-codex_2026-02-24_2136_36
 
 I’m now replacing the local parity-only channel with a deferred real `npm:loglayer` backend attempt (one-time load, shared cache), with automatic fallback to the existing JSONL parity channel when unavailable. This keeps behavior stable offline but uses LogLayer when available.
 
-# User_2026-02-24_1931_34
+# User_2026-02-24_2136_36
 
 probably import maps is best, since we'll be referencing on every page almost.
 
-# gpt-5.3-codex_2026-02-24_1932_44
+# gpt-5.3-codex_2026-02-24_2136_36
+
+Agreed. I’ll switch the integration to import-map aliases now so we reference `loglayer` centrally in `deno.json`, then update the adapter to resolve through that alias.
+
+Import-map wiring is updated. I’m running a quick check/test subset to ensure no regressions from the alias change.
+
+I hit a TypeScript initialization bug in the new adapter class (`this.options` used too early). I’m fixing that constructor ordering now and rerunning checks/tests.
+
+The alias path is working now and tests passed with package resolution. I’m running the broader suite we’ve been using to confirm nothing regressed across logging + parsing + writer paths.
 
 Implemented import-map based LogLayer wiring.
 
@@ -686,6 +1223,411 @@ Implemented import-map based LogLayer wiring.
 
 If you want, next I can pin `loglayer` to a concrete version in `deno.json` (instead of `@latest`) for reproducible CI.
 
-# User_2026-02-24_2108_54
+Implemented import-map based LogLayer wiring.
+
+### What changed
+- Added LogLayer alias to import map:
+  - [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json)
+- Adapter now resolves LogLayer via import map (`import("loglayer")`) instead of hardcoded npm spec:
+  - [loglayer_adapter.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/loglayer_adapter.ts)
+- `StructuredLogger` continues using the same API, now delegating through the adapter:
+  - [logger.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/logger.ts)
+- Shared log record types split into:
+  - [log_record.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/observability/log_record.ts)
+
+### Behavior
+- Uses `loglayer` when available.
+- Fails over to parity JSONL emission if LogLayer/transport path is unavailable or incompatible, so no logging regression.
+
+### Validation
+- `deno test -A ...` suite: **86 passed, 0 failed**
+- `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts`: **passed**
+
+If you want, next I can pin `loglayer` to a concrete version in `deno.json` (instead of `@latest`) for reproducible CI.
+
+# User_2026-02-24_2136_36
 
 Sure, pin it to latest version please.
+
+# gpt-5.3-codex_2026-02-24_2136_36
+
+I’ll resolve the current latest `loglayer` version from npm, then pin the import-map entry in `deno.json` to that exact version and run a quick check.
+
+Pinned to `9.1.0`. I’m running a quick check to ensure resolution still works and then I’ll confirm lockfile state.
+
+Pinned.
+
+- `loglayer` import-map entry is now `npm:loglayer@9.1.0` in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json).
+- Lockfile now also resolves to `npm:loglayer@9.1.0` in [deno.lock](/home/djradon/hub/spectacular-voyage/kato/deno.lock).
+
+I also re-ran typecheck for the observability adapter/logger path after pinning, and it passes.
+
+Pinned.
+
+- `loglayer` import-map entry is now `npm:loglayer@9.1.0` in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json).
+- Lockfile now also resolves to `npm:loglayer@9.1.0` in [deno.lock](/home/djradon/hub/spectacular-voyage/kato/deno.lock).
+
+I also re-ran typecheck for the observability adapter/logger path after pinning, and it passes.
+
+# User_2026-02-24_2136_36
+
+Still seeing "Provider ingestion poll observed updates" in the logs. Are we defaulting to the wrong LogLevel? I'd say we should do WARN, or else add TRACE and drop the poll event into it.
+
+# gpt-5.3-codex_2026-02-24_2136_36
+
+You’re right to call this out. I’m checking the runtime logging call and defaults now; then I’ll patch `provider.ingestion.poll` down from `info` so it doesn’t appear at default config, and run the relevant tests.
+
+I’ve changed `provider.ingestion.poll` to `debug`, which means it won’t show at the default `operationalLevel: info`. I’m running daemon-runtime/main tests to verify no regressions.
+
+Yep, root cause was exactly that:
+
+- default `operationalLevel` is `info`
+- `provider.ingestion.poll` was being logged at `info`
+
+I changed `provider.ingestion.poll` to `debug` in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts), so it no longer appears at default config.
+
+I ran runtime/main/CLI tests after the change: all pass.
+
+If you still see it, likely causes are:
+1. daemon not restarted yet, or
+2. your effective operational level is `debug` (config or `KATO_LOGGING_OPERATIONAL_LEVEL` override).
+
+`TRACE` is still not implemented in the log-level contract; we can add it as a separate change if you want.
+
+Yep, root cause was exactly that:
+
+- default `operationalLevel` is `info`
+- `provider.ingestion.poll` was being logged at `info`
+
+I changed `provider.ingestion.poll` to `debug` in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts), so it no longer appears at default config.
+
+I ran runtime/main/CLI tests after the change: all pass.
+
+If you still see it, likely causes are:
+1. daemon not restarted yet, or
+2. your effective operational level is `debug` (config or `KATO_LOGGING_OPERATIONAL_LEVEL` override).
+
+`TRACE` is still not implemented in the log-level contract; we can add it as a separate change if you want.
+
+# User_2026-02-24_2137_39
+
+Looks good.
+
+I noticed "1. Event taxonomy and channel ownership" isn't checked off yet, but we're probably close
+
+# gpt-5.3-codex_2026-02-24_2137_44
+
+I’ll quickly review the task checklist and current logging changes, then I’ll either check off item `1. Event taxonomy and channel ownership` or note exactly what’s still missing.
+
+I found the checklist item still unchecked. I’m now verifying whether taxonomy/channel ownership is actually implemented in code (not just discussed), so we can decide if it should be marked done or split into done + follow-up.
+
+Channel ownership in code looks substantially complete (operational-only for routine ingestion, audit for policy/access-denied). I’ll add a short completion note to the task doc and check item 1 as done, while explicitly calling out TRACE as a separate follow-up.
+
+I’m making a small doc-only update now: checking off item 1 and adding a concise “what’s complete vs what remains” note so the checklist reflects reality.
+
+Checked it off and documented why.
+
+Updated [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md#L42):
+- `1. Event taxonomy and channel ownership` is now checked.
+- Added a short “Baseline Ownership Locked (2026-02-25)” note at [line 49](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md#L49), including the remaining follow-up (`trace` level).
+
+Checked it off and documented why.
+
+Updated [task.2026.2026-02-23-awesome-logging.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md#L42):
+- `1. Event taxonomy and channel ownership` is now checked.
+- Added a short “Baseline Ownership Locked (2026-02-25)” note at [line 49](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-awesome-logging.md#L49), including the remaining follow-up (`trace` level).
+
+# User_2026-02-24_2139_14
+
+OK, I think we've made enough progress on awesome-logging. Should I start a new session for [task.2026.2026-02-23-improved-status.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-improved-status.md) ?
+
+# gpt-5.3-codex_2026-02-24_2139_22
+
+Yes, I’d start a new session.
+
+Reasons:
+- `awesome-logging` has a lot of context/history now.
+- `improved-status` is a different slice (contracts/status UX), so a clean thread will be easier to reason about and review.
+
+Quick handoff steps:
+1. Commit or checkpoint current logging work.
+2. Start a new capture/session on [task.2026.2026-02-23-improved-status.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-improved-status.md).
+3. I’ll begin by mapping current `status` contract vs task acceptance criteria.
+
+Yes, I’d start a new session.
+
+Reasons:
+- `awesome-logging` has a lot of context/history now.
+- `improved-status` is a different slice (contracts/status UX), so a clean thread will be easier to reason about and review.
+
+Quick handoff steps:
+1. Commit or checkpoint current logging work.
+2. Start a new capture/session on [task.2026.2026-02-23-improved-status.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-23-improved-status.md).
+3. I’ll begin by mapping current `status` contract vs task acceptance criteria.
+
+# User_2026-02-24_2140_35
+
+just wanted to confirm, there's no place to see the memory estimation we've put in place yet, right?
+
+# gpt-5.3-codex_2026-02-24_2140_41
+
+I’ll quickly verify where memory metrics are exposed right now (status snapshot, CLI, logs) and confirm exactly what is or isn’t visible.
+
+I found memory fields in the status contract and runtime updates. I’m checking the `kato status` command output now to confirm whether those fields are currently surfaced in normal/JSON mode.
+
+Close: there **is** a place, but only in JSON/status snapshot right now.
+
+- `kato status --json` includes `memory.snapshots.estimatedBytes` (plus process memory and eviction counters), because it prints the raw snapshot: [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts#L25)
+- The snapshot contract includes `memory` fields here: [status.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L25)
+- Runtime populates those fields on heartbeat/shutdown: [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L837)
+
+What you’re probably noticing: plain `kato status` (non-JSON) doesn’t render memory yet.
+
+Close: there **is** a place, but only in JSON/status snapshot right now.
+
+- `kato status --json` includes `memory.snapshots.estimatedBytes` (plus process memory and eviction counters), because it prints the raw snapshot: [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts#L25)
+- The snapshot contract includes `memory` fields here: [status.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L25)
+- Runtime populates those fields on heartbeat/shutdown: [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L837)
+
+What you’re probably noticing: plain `kato status` (non-JSON) doesn’t render memory yet.
+
+# User_2026-02-24_2157_52
+
+With the Claude provider, if I submit a command "out-of-turn", it doesn't get picked up.
+
+# gpt-5.3-codex_2026-02-24_2157_59
+
+I’ll reproduce this by inspecting the Claude parser/ingestion path and existing tests for command extraction timing, then I’ll patch the parser so out-of-turn command messages are still discovered.
+
+Next I’m checking whether we already have notes/fixtures for “out-of-turn” Claude entries, because this is likely a parser-format mismatch rather than runtime command handling.
+
+I suspect this is a Claude JSONL shape edge case for interrupted turns (often marked as sidechain or a non-`text` content block). I’m going to sample a real Claude session line from your local `.claude` logs to confirm the exact structure before patching.
+
+I’m going to compare raw Claude user entries vs what `parseClaudeEvents` emits for the same files; that should pinpoint exactly which user message shapes are being dropped.
+
+I’m now checking the daemon logs for `recording.command.*` events filtered to `provider=claude`; that will tell us whether the command is parsed but rejected, or never seen at all.
+
+I confirmed normal Claude commands are being applied. I’m now isolating genuinely “out-of-turn” user entries in Claude logs (interruption shape) to see whether those rows are being filtered by the parser.
+
+I found a likely root cause: some real Claude `user` entries use `message.content` as a plain string (not an array of blocks), and the current parser drops those entirely. I’m inspecting those exact rows now.
+
+I have a concrete parser gap to fix: Claude `user` messages with `message.content` as a raw string are currently ignored, and that can drop command lines. I’m patching the Claude parser to support both string and block-array content, then adding a regression fixture/test.
+
+I’ve applied the parser fix and added a regression fixture/test for string-style Claude user content with a `::capture` line. I’m running the focused parser/fixture tests now, then I’ll run ingestion/runtime command tests to confirm no regressions.
+
+The failures were just permission flags (`deno test` now defaults to no read access). I’m rerunning with `-A` and then executing the key runtime command tests with the same permission mode.
+
+Parser and fixture tests are green. I’ll run the full ingestion/runtime suites now to ensure command-handling behavior still passes end-to-end.
+
+I’ve validated the fix with parser, ingestion, and runtime tests. I’m doing a final diff sanity check now, then I’ll summarize exactly what changed and why this addresses out-of-turn Claude commands.
+
+Fixed a real parser gap that can cause this.
+
+Root cause:
+- Claude `user` entries are not always block arrays; some come as `message.content: string`.
+- The parser only handled array content, so those messages were dropped entirely, including `::capture` / `::record` lines.
+
+What I changed:
+1. Claude parser now accepts both content shapes (`string` and block array) for user/system/assistant text extraction.  
+[parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts#L85)
+2. Added regression fixture for string-style user content containing a command line.  
+[claude-session-user-string-content.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-user-string-content.jsonl)
+3. Added parser test to verify command line preservation from string content.  
+[claude-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/claude-parser_test.ts#L172)
+4. Added fixture-port coverage for the new fixture.  
+[fixtures_port_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures_port_test.ts#L21)
+
+Validation:
+- `deno test -A tests/claude-parser_test.ts tests/fixtures_port_test.ts` passed.
+- `deno test -A tests/provider-ingestion_test.ts` passed.
+- `deno test -A tests/daemon-runtime_test.ts` passed.
+
+Next step:
+1. Restart the daemon so this parser change is active, then retry the out-of-turn command.
+
+Fixed a real parser gap that can cause this.
+
+Root cause:
+- Claude `user` entries are not always block arrays; some come as `message.content: string`.
+- The parser only handled array content, so those messages were dropped entirely, including `::capture` / `::record` lines.
+
+What I changed:
+1. Claude parser now accepts both content shapes (`string` and block array) for user/system/assistant text extraction.  
+[parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts#L85)
+2. Added regression fixture for string-style user content containing a command line.  
+[claude-session-user-string-content.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-user-string-content.jsonl)
+3. Added parser test to verify command line preservation from string content.  
+[claude-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/claude-parser_test.ts#L172)
+4. Added fixture-port coverage for the new fixture.  
+[fixtures_port_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures_port_test.ts#L21)
+
+Validation:
+- `deno test -A tests/claude-parser_test.ts tests/fixtures_port_test.ts` passed.
+- `deno test -A tests/provider-ingestion_test.ts` passed.
+- `deno test -A tests/daemon-runtime_test.ts` passed.
+
+Next step:
+1. Restart the daemon so this parser change is active, then retry the out-of-turn command.
+
+# User_2026-02-24_2204_40
+
+my command was "capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24_2143-improved-status.md" if that helps
+
+# gpt-5.3-codex_2026-02-24_2204_49
+
+That helps. I’m checking the command parser matcher to confirm exactly what it accepts so we can pin this down.
+
+That explains it.
+
+The in-chat command detector currently only matches lines that start with `::` (see [command_detection.ts:26](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/command_detection.ts:26)).  
+So:
+
+- `capture /path` -> treated as normal text
+- `::capture /path` -> treated as control command
+
+If you want, I can add compatibility so bare `capture|record|export|stop` also work at line start.
+
+That explains it.
+
+The in-chat command detector currently only matches lines that start with `::` (see [command_detection.ts:26](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/command_detection.ts:26)).  
+So:
+
+- `capture /path` -> treated as normal text
+- `::capture /path` -> treated as control command
+
+If you want, I can add compatibility so bare `capture|record|export|stop` also work at line start.
+
+# User_2026-02-24_2210_50
+
+No, you're misunderstanding. I'm was just saying, for your troubleshooting, that the command I issued "out-of-turn", in case you wanted to track down what type of event it was.
+
+Speaking of events, the claude provider (at least) doesn't log multiple-choice questions or my responses. I just tested it in my latest Claude session.
+
+# gpt-5.3-codex_2026-02-24_2211_02
+
+Thanks, that clarification helps. I’ll inspect the raw Claude session JSONL for your latest run to find exactly how multiple-choice prompts/answers are encoded, then patch the Claude parser to include them.
+
+I see a likely culprit: Claude emits many nested `progress.data.message` entries that we currently ignore. I’m extracting those from your latest session to confirm if the missing multiple-choice prompt/response lives there.
+
+I found the concrete format: Claude uses `AskUserQuestion` tool calls plus a `tool_result` containing structured `questions/answers`. With tool rendering off by default, those never show in recordings. I’m adding parser synthesis so these become first-class events (message + decision), not just hidden tool calls.
+
+I’m adding a focused parser regression test for `AskUserQuestion` so we capture both the prompt and the selected answer as non-tool-only events.
+
+You’re pointing at the right place: that out-of-turn command is useful as event context, and I’ll focus on the Claude multiple-choice capture gap now. I’m going to inspect the parser/writer path and confirm exactly where those `AskUserQuestion` / answer events get dropped.
+
+I found parser changes already in place for Claude `AskUserQuestion`, including synthesized `decision` events for prompts and answers. I’m running the focused tests now to verify this path still passes with current workspace changes.
+
+The parser now recognizes Claude questionnaire payloads, but I want to validate end-to-end ingestion behavior too (not just unit parsing). I’m running provider/runtime tests to make sure recording still behaves correctly with these added `decision` and synthesized user-message events.
+
+I verified the issue: Claude emits those interactions as `AskUserQuestion` tool traffic, and with tool-call rendering off they effectively disappeared in recordings. I’ve patched the parser so these now become first-class `decision`/`message.user` events and are visible by default. I’ll share exact file refs next.
+
+I confirmed and fixed it: Claude multiple-choice interactions were present in raw logs but only as tool traffic, so they vanished from markdown when tool calls were excluded. The parser now emits them as `decision` plus a synthesized `message.user` summary, and the targeted parser + ingestion/runtime tests all pass.
+
+You were right; the Claude multiple-choice flow was being missed in recordings.
+
+- Your out-of-turn `capture ...` line is a normal Claude `user` message payload (string content), not a special tool event. That path is now explicitly handled in parser text extraction.
+- Root cause for MCQ loss: Claude encodes these as `AskUserQuestion` (`tool_use`) + `toolUseResult.answers` (`tool_result`). With `writerIncludeToolCalls=false`, they were effectively invisible.
+- Fix: synthesize first-class events from that payload so they render by default:
+  - assistant question -> `decision` (`status: proposed`)
+  - user answer -> synthesized `message.user` summary + `decision` (`status: accepted`)
+
+Changed files:
+- [apps/daemon/src/providers/claude/parser.ts:101](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [apps/daemon/src/providers/claude/parser.ts:293](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [apps/daemon/src/providers/claude/parser.ts:421](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [tests/claude-parser_test.ts:195](/home/djradon/hub/spectacular-voyage/kato/tests/claude-parser_test.ts)
+- [tests/fixtures/claude-session-ask-user-question.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-ask-user-question.jsonl)
+- [tests/fixtures/claude-session-user-string-content.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-user-string-content.jsonl)
+- [tests/fixtures_port_test.ts:21](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures_port_test.ts)
+
+Validation run:
+- `deno test -A tests/claude-parser_test.ts tests/fixtures_port_test.ts` (pass)
+- `deno test -A tests/provider-ingestion_test.ts tests/daemon-runtime_test.ts` (pass)
+
+If you restart the daemon and re-test Claude MCQ, the question/answer should now appear in the captured markdown.
+
+You were right; the Claude multiple-choice flow was being missed in recordings.
+
+- Your out-of-turn `capture ...` line is a normal Claude `user` message payload (string content), not a special tool event. That path is now explicitly handled in parser text extraction.
+- Root cause for MCQ loss: Claude encodes these as `AskUserQuestion` (`tool_use`) + `toolUseResult.answers` (`tool_result`). With `writerIncludeToolCalls=false`, they were effectively invisible.
+- Fix: synthesize first-class events from that payload so they render by default:
+  - assistant question -> `decision` (`status: proposed`)
+  - user answer -> synthesized `message.user` summary + `decision` (`status: accepted`)
+
+Changed files:
+- [apps/daemon/src/providers/claude/parser.ts:101](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [apps/daemon/src/providers/claude/parser.ts:293](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [apps/daemon/src/providers/claude/parser.ts:421](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts)
+- [tests/claude-parser_test.ts:195](/home/djradon/hub/spectacular-voyage/kato/tests/claude-parser_test.ts)
+- [tests/fixtures/claude-session-ask-user-question.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-ask-user-question.jsonl)
+- [tests/fixtures/claude-session-user-string-content.jsonl](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures/claude-session-user-string-content.jsonl)
+- [tests/fixtures_port_test.ts:21](/home/djradon/hub/spectacular-voyage/kato/tests/fixtures_port_test.ts)
+
+Validation run:
+- `deno test -A tests/claude-parser_test.ts tests/fixtures_port_test.ts` (pass)
+- `deno test -A tests/provider-ingestion_test.ts tests/daemon-runtime_test.ts` (pass)
+
+If you restart the daemon and re-test Claude MCQ, the question/answer should now appear in the captured markdown.
+
+# User_2026-02-24_2219_47
+
+::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24-logging-and-memory.md
+
+Did we update the dev.* docs and the README with your latest logging and other changes? 
+
+Can you pose a question so we can determine if they get logged in the codex provider?
+
+# gpt-5.3-codex_2026-02-24_2219_58
+
+I’ll verify documentation coverage first by scanning the README and `dev-docs` notes for the recent logging/parser changes, then I’ll patch anything missing. After that I’ll post a concrete question you can answer to test Codex-provider logging.
+
+# gpt-5.3-codex_2026-02-24_2220_06
+
+I found drift risk in docs, so I’m checking defaults and feature-flag values in code against README examples before editing. Then I’ll patch only the mismatches and add a concise decision-log note for the Claude questionnaire capture behavior.
+
+# gpt-5.3-codex_2026-02-24_2220_28
+
+I found at least one definite doc mismatch: `dev.testing.md` still says `clean --all` is queued, but clean is now handled directly by CLI. I’m verifying the exact clean behavior and then I’ll patch README + `dev.*` docs consistently.
+
+# gpt-5.3-codex_2026-02-24_2221_00
+
+I confirmed we still had stale docs: README had old feature-flag defaults, `dev.testing.md` described old daemon-queued clean behavior, and decision docs didn’t capture the recent LogLayer/Claude questionnaire decisions. I’m patching those now.
+
+# gpt-5.3-codex_2026-02-24_2221_33
+
+Docs are patched. I’m doing a quick diff sanity pass to make sure the wording matches actual runtime behavior before I ask the test question.
+
+# gpt-5.3-codex_2026-02-24_2221_44
+
+Yes. I just updated both README and `dev.*` docs for the latest logging/runtime changes:
+
+- [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md)
+  - fixed `featureFlags` defaults (`writerIncludeThinking=false`, `writerIncludeToolCalls=false`)
+  - updated MVP status/limits (provider ingestion/export live, LogLayer adapter noted, clean scope limits clarified)
+- [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md)
+  - corrected `clean --all --dry-run` behavior (CLI-executed, not daemon-queued)
+- [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md)
+  - documented CLI ownership of `clean --all`
+  - documented LogLayer adapter + JSONL parity fallback
+- [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md)
+  - added Phase-1 LogLayer adoption decision
+  - added Claude `AskUserQuestion` projection decision
+
+To test Codex-provider logging, please answer this multiple-choice question with `A`, `B`, or `C`:
+
+Which should we prioritize next in observability?
+- `A` Improve status output UX
+- `B` Add more event taxonomy coverage
+- `C` Tighten log-level defaults further
+
+# User_2026-02-24_2222_35
+
+Hmm, your question here doesn't take the usual question format. I don't know if you know how to trigger the UI-based questions.
+
+# gpt-5.3-codex_2026-02-24_2222_47
+
+You’re right to call that out.
+
+The UI-style prompt only appears when I emit a `request_user_input` tool event. In this session, we’re in `Default` collaboration mode, and that tool is disabled, so I can only ask plain-text questions.
+
+If you want to test the true UI-question logging path, we need a Plan-mode turn/session; then I can trigger a real multiple-choice prompt and we can verify it lands in Codex events.

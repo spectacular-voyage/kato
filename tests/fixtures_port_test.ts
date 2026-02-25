@@ -21,10 +21,13 @@ async function readJson(relativePath: string): Promise<JsonMap> {
 Deno.test("ported fixtures parse as valid JSONL", async () => {
   const files = [
     "claude-session.jsonl",
+    "claude-session-ask-user-question.jsonl",
+    "claude-session-user-string-content.jsonl",
     "codex-session-aborted.jsonl",
     "codex-session-vscode-new.jsonl",
     "codex-session-legacy.jsonl",
     "codex-session-exec.jsonl",
+    "codex-session-request-user-input.jsonl",
   ];
 
   for (const fixture of files) {

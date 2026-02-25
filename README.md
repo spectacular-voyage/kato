@@ -106,8 +106,8 @@ Default config shape:
   },
   "featureFlags": {
     "writerIncludeCommentary": true,
-    "writerIncludeThinking": true,
-    "writerIncludeToolCalls": true,
+    "writerIncludeThinking": false,
+    "writerIncludeToolCalls": false,
     "writerItalicizeUserMessages": false,
     "daemonExportEnabled": true,
     "captureIncludeSystemEvents": false
@@ -151,14 +151,20 @@ Working now:
 - CLI control-plane commands (`init`, `start`, `restart`, `stop`, `status`,
   `export`, `clean`)
 - Detached daemon launcher and heartbeat/status snapshots
+- Provider ingestion for `claude`, `codex`, and `gemini` into event-native
+  session snapshots
+- Provider-backed export pipeline (`markdown` default, `jsonl` optional)
+- Structured operational/audit logging via LogLayer adapter with JSONL parity
+  fallback
 - Path-policy-gated writer pipeline (`record`/`capture`/`export` contracts)
 - Local OpenFeature baseline with config-driven feature flags
 
 Known limits:
 
-- Provider ingestion/session store wiring is still in progress.
-- Export processing requires a wired runtime session loader and may be skipped
-  until provider wiring is complete.
+- `clean --recordings` and `clean --sessions` are accepted but not implemented
+  yet.
+- Session snapshots and provider cursors are in-memory only (restart replays
+  from cursor `0` and relies on dedupe suppression).
 - Service-manager integration (`systemd`, launchd, Windows Service) is
   intentionally deferred post-MVP.
 

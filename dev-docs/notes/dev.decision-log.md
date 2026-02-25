@@ -261,6 +261,52 @@ created: 1771779490894
     - assistant narration present only in raw `content`
   - Revisit this mapping if upstream Gemini schema semantics change.
 
+### LogLayer Adoption (Phase 1 Parity)
+
+- Decision:
+  - Keep `StructuredLogger` / `AuditLogger` contracts and JSONL record schema
+    unchanged.
+  - Route logger internals through a LogLayer adapter seam.
+  - If npm LogLayer is unavailable/incompatible at runtime, fall back to
+    parity JSONL emission without dropping logs.
+- Owner: Kato engineering
+- Date: 2026-02-25
+- Why:
+  - Enables incremental LogLayer adoption without destabilizing existing sinks,
+    tests, or downstream log consumers.
+  - Keeps local/offline behavior deterministic in restricted environments.
+- Tradeoffs:
+  - Adapter adds dynamic import and compatibility handling complexity.
+  - Full LogLayer transport/plugin feature set is not yet guaranteed in all
+    runtime environments.
+- Follow-up tasks:
+  - Add explicit OpenTelemetry plugin wiring and transport configuration once
+    environment/network constraints are settled.
+  - Add compatibility tests for fallback-vs-native LogLayer execution paths.
+
+### Claude Questionnaire Capture Projection
+
+- Decision:
+  - Treat Claude `AskUserQuestion` interactions as first-class canonical events
+    by synthesizing `decision` events and a user answer summary message from
+    `toolUseResult.answers`.
+  - Keep raw `tool.call`/`tool.result` events as-is; decision/message synthesis
+    is additive.
+- Owner: Kato engineering
+- Date: 2026-02-25
+- Why:
+  - Default markdown rendering excludes tool calls; questionnaire prompts and
+    user choices were otherwise effectively invisible in recordings.
+  - Decision-native projection keeps MCQ interactions queryable/exportable even
+    when tool rendering is disabled.
+- Tradeoffs:
+  - Synthesized summaries are a projection, not a byte-for-byte provider
+    transcript.
+  - Mapping depends on current Claude payload shape (`toolUseResult`).
+- Follow-up tasks:
+  - Keep fixture-backed regression coverage for question + answer synthesis.
+  - Add similar decision projection tests for Codex questionnaire flows.
+
 ### Runtime Config Bootstrap
 
 - Decision: Add explicit runtime config bootstrap via `kato init`, with optional

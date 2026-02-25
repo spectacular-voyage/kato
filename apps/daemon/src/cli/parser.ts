@@ -121,7 +121,7 @@ function parseStop(rest: string[]): DaemonCliIntent {
 
 function parseStatus(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
-    boolean: ["help", "json"],
+    boolean: ["help", "json", "all", "live"],
     alias: { h: "help" },
   });
 
@@ -130,9 +130,11 @@ function parseStatus(rest: string[]): DaemonCliIntent {
   }
 
   requireNoPositionals("status", toPositionals(parsed));
+  const live = parsed.live === true;
+  const all = live || parsed.all === true;
   return {
     kind: "command",
-    command: { name: "status", asJson: parsed.json === true },
+    command: { name: "status", asJson: parsed.json === true, all, live },
   };
 }
 

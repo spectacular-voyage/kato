@@ -39,12 +39,23 @@ Make logging high-signal, configurable, and production-ready:
 
 ## Status Checklist
 
-- [ ] 1. Event taxonomy and channel ownership
+- [x] 1. Event taxonomy and channel ownership (baseline ownership locked)
 - [x] 2. Audit coverage for access-failure events
 - [x] 3. Log level configuration
 - [x] 4. LogLayer adoption/migration (phase 1 parity adapter seam)
 - [ ] 5. OpenTelemetry plugin + codebase-wide instrumentation baseline
 - [ ] 6. Tests and docs updates (final pass after LogLayer/OTel)
+
+### Baseline Ownership Locked (2026-02-25)
+
+- `security-audit` now carries policy/control/security-relevant events (for
+  example `policy.decision`, `provider.ingestion.read_denied`).
+- routine ingestion/runtime telemetry is operational-only (`provider.ingestion.started`,
+  `provider.ingestion.stopped`, `provider.ingestion.events_dropped`,
+  `provider.ingestion.poll`, parse/runtime loop health events).
+- noisy audit duplication was removed; access-denied remains explicitly auditable.
+- follow-up: add first-class `trace` level so poll-style telemetry can move from
+  `debug` to `trace` without changing channel ownership.
 
 ## Decisions To Lock
 
