@@ -128,7 +128,9 @@ function extractToolResultText(content: unknown): string {
 
 function asQuestionList(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is Record<string, unknown> => isRecord(item));
+  return value.filter((item): item is Record<string, unknown> =>
+    isRecord(item)
+  );
 }
 
 function asAnswersRecord(value: unknown): Record<string, unknown> | undefined {
@@ -276,7 +278,11 @@ export async function* parseClaudeEvents(
         if (block.type !== "tool_result") continue;
         const toolUseId = String(block["tool_use_id"] ?? "");
         const resultText = extractToolResultText(block["content"]);
-        const toolResultEventId = makeEventId(turnId, "tool.result", toolResultIndex);
+        const toolResultEventId = makeEventId(
+          turnId,
+          "tool.result",
+          toolResultIndex,
+        );
         yield {
           event: {
             ...makeBase("tool.result", toolResultIndex),
@@ -296,28 +302,6 @@ export async function* parseClaudeEvents(
         const { questions, answers } = questionnaire;
         const answerPairs = Object.entries(answers);
         if (answerPairs.length > 0) {
-          const answeredLines = answerPairs.map(([key, value]) => {
-            const questionEntry = questions.find((question) =>
-              String(question["id"] ?? "") === key ||
-              String(question["question"] ?? "") === key
-            );
-            const questionText = questionEntry
-              ? String(questionEntry["question"] ?? key)
-              : key;
-            return `- ${questionText}: ${String(value)}`;
-          }).join("\n");
-
-          yield {
-            event: {
-              ...makeBase("message.user", 1),
-              kind: "message.user",
-              role: "user",
-              content: answeredLines,
-              phase: "other",
-            } as unknown as ConversationEvent,
-            cursor,
-          };
-
           let decisionIndex = 0;
           for (const [key, value] of answerPairs) {
             const questionEntry = questions.find((question) =>
@@ -349,7 +333,9 @@ export async function* parseClaudeEvents(
                 basisEventIds: [...toolResultEventIds],
                 metadata: {
                   providerQuestionId: key,
-                  ...(questionHeader.length > 0 ? { header: questionHeader } : {}),
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
                   ...(options.length > 0 ? { options } : {}),
                 },
               } as unknown as ConversationEvent,
@@ -424,7 +410,9 @@ export async function* parseClaudeEvents(
             const questionText = String(question["question"] ?? "").trim();
             if (questionText.length === 0) continue;
             const questionHeader = String(question["header"] ?? "").trim();
-            const options = asQuestionList(question["options"]).map((option) => ({
+            const options = asQuestionList(question["options"]).map((
+              option,
+            ) => ({
               label: String(option["label"] ?? ""),
               description: String(option["description"] ?? ""),
             }));
@@ -440,7 +428,9 @@ export async function* parseClaudeEvents(
                 decidedBy: "assistant",
                 basisEventIds: [toolCallEventId],
                 metadata: {
-                  ...(questionHeader.length > 0 ? { header: questionHeader } : {}),
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
                   ...(options.length > 0 ? { options } : {}),
                   ...(typeof question["multiSelect"] === "boolean"
                     ? { multiSelect: question["multiSelect"] }

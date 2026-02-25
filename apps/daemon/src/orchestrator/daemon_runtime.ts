@@ -32,6 +32,7 @@ import {
 import type {
   ProviderIngestionRunner,
   RuntimeSessionSnapshot,
+  SessionSnapshotMetadataEntry,
   SessionSnapshotStore,
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
@@ -100,6 +101,7 @@ function readTimeMs(value: string | undefined): number | undefined {
 
 interface SessionEventProcessingState {
   seenEventSignatures: Set<string>;
+  lastSeenFileModifiedAtMs?: number;
 }
 
 interface ProcessInChatRecordingUpdatesOptions {
@@ -360,24 +362,49 @@ async function processInChatRecordingUpdates(
     auditLogger,
   } = options;
 
-  const snapshots = sessionSnapshotStore.list();
+  // Use metadata-only listing to avoid deep-cloning events for every session
+  // on every poll. Only fetch full snapshot (with events) when the file has
+  // actually changed since we last processed it.
+  const metaEntries = sessionSnapshotStore.listMetadataOnly
+    ? sessionSnapshotStore.listMetadataOnly()
+    : sessionSnapshotStore.list();
+
   const activeSessionKeys = new Set<string>();
 
-  for (const snapshot of snapshots) {
-    const provider = readString(snapshot.provider);
-    const sessionId = readString(snapshot.sessionId);
+  for (const entry of metaEntries) {
+    const provider = readString(entry.provider);
+    const sessionId = readString(entry.sessionId);
     if (!provider || !sessionId) continue;
 
     const sessionKey = makeSessionProcessingKey(provider, sessionId);
     activeSessionKeys.add(sessionKey);
 
+    const currentFileModifiedAtMs = entry.metadata.fileModifiedAtMs;
+    const existingState = sessionEventStates.get(sessionKey);
+
+    // Skip event processing if the file hasn't changed since last poll.
+    if (
+      existingState !== undefined &&
+      currentFileModifiedAtMs !== undefined &&
+      currentFileModifiedAtMs === existingState.lastSeenFileModifiedAtMs
+    ) {
+      continue;
+    }
+
+    // File is new or changed — fetch full snapshot (events needed).
+    const fullEntry = "events" in entry
+      ? entry as RuntimeSessionSnapshot
+      : sessionSnapshotStore.get(sessionId);
+    if (!fullEntry) continue;
+
+    const snapshot = fullEntry;
     const signatures = snapshot.events.map(makeRuntimeEventSignature);
     const currentSignatureSet = new Set(signatures);
 
-    const existingState = sessionEventStates.get(sessionKey);
     if (!existingState) {
       sessionEventStates.set(sessionKey, {
         seenEventSignatures: currentSignatureSet,
+        lastSeenFileModifiedAtMs: currentFileModifiedAtMs,
       });
       continue;
     }
@@ -440,6 +467,8 @@ async function processInChatRecordingUpdates(
         );
       }
     }
+
+    existingState.lastSeenFileModifiedAtMs = currentFileModifiedAtMs;
   }
 
   for (const sessionKey of Array.from(sessionEventStates.keys())) {
@@ -450,7 +479,7 @@ async function processInChatRecordingUpdates(
 }
 
 function toProviderStatuses(
-  sessionSnapshots: RuntimeSessionSnapshot[],
+  sessionSnapshots: SessionSnapshotMetadataEntry[],
   now: Date,
   staleAfterMs: number,
 ): ProviderStatus[] {
@@ -496,7 +525,7 @@ function toProviderStatuses(
 }
 
 function toSessionStatuses(
-  sessionSnapshots: RuntimeSessionSnapshot[],
+  sessionSnapshots: SessionSnapshotMetadataEntry[],
   activeRecordings: ActiveRecording[],
   now: Date,
   staleAfterMs: number,
@@ -517,7 +546,7 @@ function toSessionStatuses(
         updatedAt: snap.metadata.updatedAt,
         lastEventAt: snap.metadata.lastEventAt,
         fileModifiedAtMs: snap.metadata.fileModifiedAtMs,
-        events: snap.events,
+        snippet: snap.metadata.snippet,
       },
       recording: rec
         ? {
@@ -872,7 +901,8 @@ export async function runDaemonRuntimeLoop(
     if (currentTimeMs >= nextHeartbeatAt) {
       const currentIso = now().toISOString();
       const heartbeatNow = now();
-      const sessionList = sessionSnapshotStore?.list() ?? [];
+      const sessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
+        sessionSnapshotStore?.list() ?? [];
       const providers = sessionSnapshotStore
         ? toProviderStatuses(
           sessionList,
@@ -944,7 +974,8 @@ export async function runDaemonRuntimeLoop(
 
   const exitIso = now().toISOString();
   const exitNow = now();
-  const exitSessionList = sessionSnapshotStore?.list() ?? [];
+  const exitSessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
+    sessionSnapshotStore?.list() ?? [];
   const providers = sessionSnapshotStore
     ? toProviderStatuses(
       exitSessionList,

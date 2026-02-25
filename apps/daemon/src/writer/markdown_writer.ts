@@ -283,11 +283,21 @@ export function renderEventsToMarkdown(
       parts.push(thinkingParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "decision") {
-      const decisionParts = [
-        "",
-        `**Decision [${event.decisionKey}]:** ${event.summary}`,
-        `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
-      ];
+      const metadata = event.metadata;
+      const questionnaireDecision = event.status === "accepted" &&
+        typeof metadata === "object" &&
+        metadata !== null &&
+        "providerQuestionId" in metadata;
+      const decisionParts = questionnaireDecision
+        ? [
+          "",
+          `**Decision [${event.decisionKey}]:** ${event.summary}`,
+        ]
+        : [
+          "",
+          `**Decision [${event.decisionKey}]:** ${event.summary}`,
+          `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
+        ];
       parts.push(decisionParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "provider.info") {

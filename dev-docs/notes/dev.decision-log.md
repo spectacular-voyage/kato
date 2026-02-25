@@ -371,6 +371,111 @@ created: 1771779490894
   - Keep runtime/internal IDs on `crypto.randomUUID()` unless explicitly
     user-facing.
 
+### Rich Session Status Model
+
+- Decision:
+  - Extend `DaemonStatusSnapshot` with `sessions?: DaemonSessionStatus[]`,
+    replacing provider-aggregate-only status for `kato status` output.
+  - `DaemonSessionStatus` fields: `provider`, `sessionId`, `snippet?`,
+    `updatedAt`, `lastMessageAt?`, `stale`, `recording?`.
+  - `DaemonRecordingStatus` fields: `outputPath`, `startedAt`, `lastWriteAt`.
+  - Add `kato status --all` (show stale sessions) and `kato status --live`
+    (periodic refresh-loop display, TTY-only, 2s interval, 5-session cap).
+  - Text and JSON output have full parity: same fields in both modes.
+  - Shared projection logic in `shared/src/status_projection.ts` reused by
+    daemon, CLI, and web.
+- Owner: Kato engineering
+- Date: 2026-02-24
+- Why:
+  - Previous status output only showed aggregate counts; operators could not see
+    which sessions were recording or where output was going.
+  - Web (`kato-status-web`) and CLI share identical filtering/sorting logic by
+    using shared helpers instead of duplicating staleness thresholds.
+- Tradeoffs:
+  - `sessions` is additive/optional on snapshot; old status files remain valid.
+  - `DaemonStatusSnapshot.providers` aggregate kept for backward compatibility.
+- Follow-up tasks:
+  - Remove legacy `providers` aggregate when all consumers use `sessions`.
+  - Add `--interval` and `--count` flags for live mode if needed.
+
+### File Mtime as Primary Staleness Signal
+
+- Decision:
+  - Use `fileModifiedAtMs` (OS-level file mtime from `Deno.stat()`) as the
+    primary staleness signal for session status, preferred over `lastEventAt`.
+  - `lastEventAt` is a fallback. If neither is available, session is stale.
+  - Do not use `updatedAt` for staleness: it resets to `now()` on every daemon
+    restart, making all sessions appear fresh after a restart.
+  - Stale threshold: `DEFAULT_STATUS_STALE_AFTER_MS = 5 * 60_000` (5 min),
+    defined in `shared/src/status_projection.ts`.
+- Owner: Kato engineering
+- Date: 2026-02-24
+- Why:
+  - `lastEventAt` is unreliable for Codex sessions because the Codex parser
+    stamps all events with ingestion time, not actual message time.
+  - File mtime is provider-agnostic and reflects true last-write time at the OS
+    level.
+- Tradeoffs:
+  - `fileModifiedAtMs` is absent for sessions ingested before this change; those
+    fall back to `lastEventAt`.
+  - A session with no `lastEventAt` and no `fileModifiedAtMs` is treated as
+    stale (fail-safe).
+- Follow-up tasks:
+  - Fix Codex parser to use actual message timestamps where available.
+
+### Snippet Caching in Snapshot Metadata
+
+- Decision:
+  - Compute and cache `snippet` (first non-blank user message, newlines
+    stripped, truncated to 60 chars) in `SessionSnapshotStatusMetadata` during
+    `upsert()`.
+  - Status projection reads `metadata.snippet` directly; events are not accessed
+    in the heartbeat or polling hot paths.
+- Owner: Kato engineering
+- Date: 2026-02-24
+- Why:
+  - Events are expensive to clone (`structuredClone` on all events per session).
+    Caching the snippet eliminates the only reason status projection needed events.
+  - With snippet in metadata, `toProviderStatuses` and `toSessionStatuses`
+    require only metadata — enabling `listMetadataOnly()` in all hot paths.
+- Tradeoffs:
+  - Snippet is computed once at ingest, not dynamically re-derived. If the first
+    user message changes (edge case: file truncation and re-ingest), snippet
+    updates on next upsert.
+- Follow-up tasks:
+  - None.
+
+### listMetadataOnly() as Hot-Path Replacement for list()
+
+- Decision:
+  - Add `listMetadataOnly(): SessionSnapshotMetadataEntry[]` to
+    `SessionSnapshotStore` interface (optional method for backward compatibility).
+  - `listMetadataOnly()` returns `{ provider, sessionId, metadata }` tuples
+    without cloning the events array — O(n sessions) shallow copy only.
+  - `processInChatRecordingUpdates` uses `listMetadataOnly()` + mtime comparison
+    to skip sessions whose file hasn't changed; fetches full snapshot via `get()`
+    only for changed sessions.
+  - Heartbeat `toProviderStatuses` and `toSessionStatuses` accept
+    `SessionSnapshotMetadataEntry[]` and use `listMetadataOnly()`.
+  - `list()` (deep clone) is reserved for shutdown and test harnesses.
+- Owner: Kato engineering
+- Date: 2026-02-24
+- Why:
+  - `list()` was calling `structuredClone(snapshot)` for every session every
+    1–5 seconds, causing steady `heapUsed` growth (~7 MB/min observed with 53
+    sessions / 15,500 events).
+  - With snippet cached in metadata, no hot path needs events from `list()`.
+- Tradeoffs:
+  - `listMetadataOnly()` is optional on the interface; callers must fall back to
+    `list()` when it is absent (test harnesses without the method).
+  - Events for changed sessions are still cloned once via `get()` in the polling
+    path; this is acceptable (only changed sessions, typically 0–1 per poll).
+- Follow-up tasks:
+  - Track remaining heap growth after these fixes; if still present, profile to
+    identify next allocation source.
+  - Consider adding idle-time eviction of stale session snapshots to bound total
+    snapshot memory (currently deferred per memory-management task).
+
 ### Runtime Read Scope From Config
 
 - Decision:

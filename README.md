@@ -2,6 +2,12 @@
 
 Own your AI conversations.
 
+## Advantages
+
+- IDE extensions don't let you copy what you want, and don't always let you copy-as-markdown
+- let you centralize conversation from multiple provider in a single location
+- let you decentralize conversations into multiple locations
+
 ## Quickstart
 
 Prerequisites:

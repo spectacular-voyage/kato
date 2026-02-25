@@ -151,16 +151,23 @@ This makes the long-lived daemon process narrower than a broad `-A` profile.
 
 1. initialize status snapshot (`daemonRunning: true`)
 2. start ingestion runners
-3. each poll cycle:
+3. each poll cycle (every ~1s):
    - poll ingestion runners
+   - process in-chat recording commands via `processInChatRecordingUpdates`
    - consume control requests from queue
    - update recording summary
-   - on heartbeat boundary, recompute provider status and persist `status.json`
+   - on heartbeat boundary (~5s), recompute provider/session status and persist `status.json`
 4. stop ingestion runners on shutdown
 5. write terminal status (`daemonRunning: false`)
 
-Important: provider status aggregation is heartbeat-scoped (not every poll) to
-avoid unnecessary full snapshot cloning on hot loops.
+**Performance constraint:** hot-path functions (`processInChatRecordingUpdates`
+and heartbeat projection) must not call `list()` on the snapshot store because
+`list()` deep-clones all events via `structuredClone`. Instead:
+
+- `processInChatRecordingUpdates` uses `listMetadataOnly()` (no event cloning)
+  and skips sessions whose file mtime has not changed since last poll.
+- Heartbeat projection (`toProviderStatuses`, `toSessionStatuses`) also uses
+  `listMetadataOnly()` — events are not needed after snippet caching (see §5).
 
 ### 4) Ingestion Pipeline
 
@@ -186,12 +193,42 @@ Per runner responsibilities:
 - stores `ConversationEvent[]` with `conversationSchemaVersion: 2`
 - upsert is copy-safe (clones inputs/outputs)
 - metadata carries:
-  - `updatedAt` (ingestion-time)
-  - `eventCount`
-  - `truncatedEvents`
-  - optional `lastEventAt`
+  - `updatedAt` (ingestion-time, resets on every upsert — do not use for staleness)
+  - `eventCount`, `truncatedEvents`
+  - `lastEventAt` (timestamp of last parsed event — provider-accuracy varies)
+  - `fileModifiedAtMs` (OS-level file mtime — most reliable staleness signal)
+  - `snippet` (first non-blank user message, truncated to 60 chars, computed at
+    upsert to avoid re-scanning events on every poll)
 
-`status.providers` is derived from this store, not from parser internals.
+`list()` returns full deep-cloned snapshots (events included). **Avoid in hot
+paths.** Use `listMetadataOnly()` when only metadata fields are needed — it
+returns `SessionSnapshotMetadataEntry[]` with no event cloning.
+
+`status.providers` and `status.sessions` are both derived from this store on
+heartbeat, not from parser internals.
+
+### 5a) Status Projection
+
+Status fields visible in `kato status` / `status.json` are computed by
+`shared/src/status_projection.ts`:
+
+- `extractSnippet(events)` — first non-blank user message, newlines stripped,
+  truncated at 60 chars.
+- `isSessionStale(ts, now, staleAfterMs)` — compares a timestamp against the
+  stale threshold (default 5 min, `DEFAULT_STATUS_STALE_AFTER_MS`).
+- `projectSessionStatus(opts)` — builds a `DaemonSessionStatus` from metadata
+  + optional recording join. Staleness precedence: `fileModifiedAtMs` (primary)
+  → `lastEventAt` (fallback) → absent = stale.
+- `filterSessionsForDisplay(sessions, opts)` — filter active/stale + sort by
+  recency.
+
+`DaemonSessionStatus` and `DaemonRecordingStatus` are defined in
+`shared/src/contracts/status.ts` and exported from `shared/src/mod.ts`.
+
+**Known issue (codex provider):** the Codex parser sets all event timestamps to
+ingestion time (`new Date().toISOString()`), so `lastEventAt` is unreliable for
+Codex sessions. File mtime (`fileModifiedAtMs`) is the correct staleness signal
+for Codex.
 
 ### 6) Export/Writer Path
 
@@ -245,11 +282,15 @@ unavailable.
 
 ### Ingestion to Status Flow
 
-1. provider file changes
-2. runner parses incremental messages
-3. snapshot store upsert
-4. heartbeat recompute of provider aggregates
-5. write `status.json`
+1. provider file changes (detected by file watcher or discovery poll)
+2. runner parses incremental events, calls `upsert()` with:
+   - merged events, updated cursor, `fileModifiedAtMs` from `Deno.stat()`
+   - `upsert()` caches `snippet` and `lastEventAt` in metadata
+3. `processInChatRecordingUpdates` (every poll, 1s): calls `listMetadataOnly()`,
+   skips sessions whose `fileModifiedAtMs` is unchanged, fetches full snapshot
+   via `get()` only for changed sessions, appends new events to active recordings
+4. heartbeat (~5s): calls `listMetadataOnly()`, projects `providers` and
+   `sessions` from metadata (no event access needed), writes `status.json`
 
 ### Ingestion to Export Flow
 

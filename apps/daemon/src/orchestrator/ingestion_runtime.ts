@@ -1,4 +1,5 @@
 import type { ConversationEvent, ProviderCursor } from "@kato/shared";
+import { extractSnippet } from "@kato/shared";
 import { utf8ByteLength } from "../utils/text.ts";
 
 export interface SessionSnapshotStatusMetadata {
@@ -8,6 +9,8 @@ export interface SessionSnapshotStatusMetadata {
   lastEventAt?: string;
   /** File mtime in milliseconds when the session was last ingested. */
   fileModifiedAtMs?: number;
+  /** First non-blank user message, truncated. Cached to avoid re-scanning events. */
+  snippet?: string;
 }
 
 export interface RuntimeSessionSnapshot {
@@ -27,10 +30,18 @@ export interface SessionSnapshotUpsert {
   fileModifiedAtMs?: number;
 }
 
+export interface SessionSnapshotMetadataEntry {
+  provider: string;
+  sessionId: string;
+  metadata: SessionSnapshotStatusMetadata;
+}
+
 export interface SessionSnapshotStore {
   upsert(snapshot: SessionSnapshotUpsert): RuntimeSessionSnapshot;
   get(sessionId: string): RuntimeSessionSnapshot | undefined;
   list(): RuntimeSessionSnapshot[];
+  /** Returns metadata only — no event cloning. Use when events are not needed. */
+  listMetadataOnly?(): SessionSnapshotMetadataEntry[];
   getMemoryStats?(): SnapshotMemoryStats;
 }
 
@@ -203,6 +214,7 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     );
     const updatedAt = this.now().toISOString();
     const lastEventAt = readLastEventAt(retainedEvents);
+    const snippet = extractSnippet(retainedEvents);
 
     const snapshot: RuntimeSessionSnapshot = {
       provider,
@@ -215,6 +227,7 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
         eventCount: retainedEvents.length,
         truncatedEvents,
         ...(lastEventAt ? { lastEventAt } : {}),
+        ...(snippet !== undefined ? { snippet } : {}),
         ...(input.fileModifiedAtMs !== undefined
           ? { fileModifiedAtMs: input.fileModifiedAtMs }
           : {}),
@@ -253,6 +266,19 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     const snapshots = Array.from(this.snapshots.values(), cloneSnapshot);
     snapshots.reverse();
     return snapshots;
+  }
+
+  listMetadataOnly(): SessionSnapshotMetadataEntry[] {
+    const entries: SessionSnapshotMetadataEntry[] = [];
+    for (const snap of this.snapshots.values()) {
+      entries.push({
+        provider: snap.provider,
+        sessionId: snap.sessionId,
+        metadata: { ...snap.metadata },
+      });
+    }
+    entries.reverse();
+    return entries;
   }
 
   private enforceBudget(): void {

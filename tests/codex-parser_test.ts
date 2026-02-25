@@ -186,7 +186,7 @@ Deno.test("codex parser synthesizes selected request_user_input answers", async 
     result.event.content.includes("Choose deploy mode.") &&
     result.event.content.includes("Blue (Recommended)")
   );
-  assert(synthesizedUser !== undefined);
+  assertEquals(synthesizedUser, undefined);
 
   const acceptedDecision = results.find((result) =>
     result.event.kind === "decision" &&
@@ -212,7 +212,7 @@ Deno.test("codex parser supports free-form request_user_input answers", async ()
     result.event.content.includes("How should migration run?") &&
     result.event.content.includes("Run it only on staging first.")
   );
-  assert(synthesizedUser !== undefined);
+  assertEquals(synthesizedUser, undefined);
 
   const acceptedDecision = results.find((result) =>
     result.event.kind === "decision" &&
@@ -257,7 +257,7 @@ Deno.test("codex parser maps multiple question answers by question id", async ()
     result.event.content.includes("API mode?") &&
     result.event.content.includes("Log mode?")
   );
-  assert(combinedUserMessage !== undefined);
+  assertEquals(combinedUserMessage, undefined);
 });
 
 Deno.test("codex parser falls back to readable message.user on malformed request_user_input output", async () => {

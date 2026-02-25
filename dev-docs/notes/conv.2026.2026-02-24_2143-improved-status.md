@@ -457,14 +457,229 @@ one more little tweak: the session slug should be based on the first line of the
 
 Small change in `extractSnippet` — walk forward instead of backward:
 
-# claude-sonnet-4.6_2026-02-24_2304_32
-
 Now fix the two tests that assumed last-message behaviour:
-
-# claude-sonnet-4.6_2026-02-24_2304_40
 
 Also the blank-content test — `continue` now skips blanks and tries later messages, so the test needs to verify that a blank first message falls through to the next non-blank one:
 
-# claude-sonnet-4.6_2026-02-24_2304_54
-
 34/34. Session labels will now always show the opening message of the conversation, staying stable for the lifetime of the session.
+
+# User_2026-02-24_2306_11
+
+rss memory just keeps climbing, even when there's no conversational activity and no recording.
+
+# claude-sonnet-4.6_2026-02-24_2306_56
+
+A few things to check and consider:
+
+**First, look at whether `heapUsed` is also climbing:**
+```bash
+kato status --json | jq '.memory.process'
+```
+
+This distinguishes two different problems:
+
+- **`heapUsed` climbing** → actual memory leak — objects allocated but not GC'd. Likely culprit: the 1-second polling loop creating short-lived objects V8 isn't collecting aggressively enough between tight polling intervals.
+
+- **`heapUsed` stable, RSS climbing** → V8 holding onto deallocated pages (normal V8 behavior). The GC ran but didn't return pages to the OS. Usually harmless but alarming to watch.
+
+**The larger issue: your snapshot estimator is off by ~25x.** RSS is at 843 MB with "31 MB of snapshots." The estimator only counts UTF-8 byte lengths of content strings, but each `ConversationEvent` in V8 is a full JavaScript object with field overhead, `structuredClone()` creates extra copies, and V8's heap has per-object overhead of 32–64 bytes minimum. The budget check (`daemonMaxMemoryBytes = 200 MB`) compares against the estimated 31 MB and never fires — hence `evictions: 0` despite 843 MB RSS.
+
+This is a pre-existing gap in the memory management task: the estimator needs to account for V8 object overhead, or the budget should compare against `process.rss` rather than `snapshots.estimatedBytes`. That's a separate task to track.
+
+**For the steady growth without activity:** the most likely cause is the 1-second file stat/poll loop generating constant small allocations that V8 isn't collecting during idle periods. Deno doesn't expose a GC trigger, but you could test by bumping `pollIntervalMs` higher (e.g., 5 seconds when no file changes are detected) to reduce pressure.
+
+# User_2026-02-24_2307_57
+
+heap keeps climbing
+
+.kato
+❯ kato status --json | jq '.memory.process'                                                                                                                                       23:06:07 
+{
+  "rss": 775041024,
+  "heapTotal": 461643776,
+  "heapUsed": 409640608,
+  "external": 3344644
+}
+
+~/.kato
+❯ kato status --json | jq '.memory.process'                                                                                                                                       23:07:26 
+{
+  "rss": 711688192,
+  "heapTotal": 468197376,
+  "heapUsed": 416190344,
+  "external": 3343584
+}
+
+# claude-sonnet-4.6_2026-02-24_2309_04
+
+`heapUsed` at 410-416 MB and climbing with 31 MB of estimated snapshot storage — the estimator is off by ~13x and the budget never fires. But the growth itself has a more specific cause.
+
+Every heartbeat (every 5 seconds) calls `sessionSnapshotStore.list()`, which does `structuredClone(events)` for every session. With 53 sessions × ~293 events each = ~15,500 events deep-cloned every 5 seconds. V8 can't collect the old clones fast enough, so the heap ratchets up.
+
+The fix with the smallest blast radius: **cache the snippet in `SessionSnapshotStatusMetadata`** during `upsert()`. Then `toSessionStatuses` reads `snap.metadata.snippet` instead of calling `extractSnippet(snap.events)` — eliminating the only reason the heartbeat needs event content. That unblocks eventually removing event-cloning from the `list()` hot path entirely.
+
+That said, this is a meaningful refactor across several files. Should I open a new task note for it, or do you want to tackle it now?
+
+# User_2026-02-24_2312_28
+
+New task note it @dev-docs/notes/task.2026.2026-02-24-memory-leak.md. 
+
+I've entered plan mode. What is extractSnippet for?
+
+# claude-sonnet-4.6_2026-02-24_2312_41
+
+`extractSnippet` produces the session label shown in `kato status`:
+
+```
+● claude/abc123: "how do I configure X"
+```
+
+It scans the events array (forward, since we changed it to first message) to find the first non-blank `message.user` event and truncates it to 60 chars. It's called once per session on every heartbeat via `toSessionStatuses` → `projectSessionStatus` → `extractSnippet(snap.events)`.
+
+The problem: to call it, `toSessionStatuses` needs the events — which forces `sessionSnapshotStore.list()` to deep-clone all events on every heartbeat. If we instead compute and cache the snippet in `SessionSnapshotStatusMetadata` during `upsert()` (which already has the events), the heartbeat can read `snap.metadata.snippet` and never needs events at all.
+
+That's the core of the proposed fix. Let me explore the full scope before writing the task note.
+
+Critical finding from exploration: `list()` is called not just in the heartbeat (every 5s) but also in `processInChatRecordingUpdates` which runs **every poll cycle (every 1 second)**. That's the bigger pressure point.
+
+Let me write the task note and plan now.
+
+Exactly — compute it once in `upsert()` when events are already in hand, cache it in metadata, done. Let me implement Fix 1 now.
+
+**Step 1:** Add `snippet?` to metadata and import `extractSnippet`:
+
+**Step 2:** Compute and store it in `upsert()`:
+
+**Step 3:** Update `SessionProjectionInput` — `events` becomes optional, add `snippet?`:
+
+**Step 4:** Update `projectSessionStatus` to prefer the cached snippet:
+
+**Step 5:** Update `toSessionStatuses` in `daemon_runtime.ts` — pass `snippet`, drop `events`:
+
+Done. The snippet is now computed once in `upsert()` (when the file is read), cached in `metadata.snippet`, and read directly from there on every heartbeat — no event iteration in the hot path. `kato restart` to pick it up.
+
+Fix 2 (the polling loop call in `processInChatRecordingUpdates`) is the bigger win and is tracked in the task note. Want to do that now or leave it for a separate session?
+
+# User_2026-02-24_2316_55
+
+For Fix 2, can't we use mtime to decide whether to scan for recording commands?
+
+# claude-sonnet-4.6_2026-02-24_2317_01
+
+Yes — if a session's file mtime hasn't changed since the last poll, there's no new content, so no recording commands can have appeared. Let me look at `processInChatRecordingUpdates` to see how to wire that in:
+
+Good instinct. The mtime check alone isn't enough — `list()` still deep-clones ALL events to build the snapshot array even before any event processing happens. The real fix is:
+
+1. Add a `listMetadataOnly()` to the store — cheap, no event cloning
+2. In `processInChatRecordingUpdates`, call `listMetadataOnly()` first, track mtime per session, then call `get(sessionId)` only for sessions whose mtime has changed
+
+This reduces event cloning from "all 53 sessions every second" to "only sessions with actual file changes (usually 0-1 during idle)."
+
+**Step 1:** Add `SessionSnapshotMetadataEntry` and `listMetadataOnly()` to the store interface and implementation:
+
+Now find `list()` in `InMemorySessionSnapshotStore` and add `listMetadataOnly()` next to it:
+
+**Step 2:** Add `lastSeenFileModifiedAtMs` to `SessionEventProcessingState` and update `ProcessInChatRecordingUpdatesOptions`:
+
+**Step 3:** Rewrite `processInChatRecordingUpdates` to use `listMetadataOnly()` + mtime skip + targeted `get()`:
+
+Now I need to export `SessionSnapshotMetadataEntry` and fix the `RuntimeSessionSnapshot` import needed for the type guard:
+
+The type is inferred through the return value — the explicit import isn't needed.
+
+55/55. Clean.
+
+After `kato restart`, the polling loop will:
+- Call the cheap `listMetadataOnly()` (metadata structs only, no event cloning) on every 1-second poll
+- Skip all sessions whose `fileModifiedAtMs` hasn't changed
+- Only call `get(sessionId)` (one full clone) for sessions with actual file changes — typically 0–1 per poll during idle
+
+Combined with Fix 1 (snippet caching eliminating event iteration from the heartbeat), the dominant sources of allocation in the hot paths are now gone.
+
+# User_2026-02-24_2321_13
+
+Still climbing with no recording going on.
+
+::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24_2143-improved-status.md
+
+# claude-sonnet-4.6_2026-02-24_2321_52
+
+The heartbeat still calls `sessionSnapshotStore.list()` every 5 seconds — Fix 2 only addressed the 1-second polling loop. The heartbeat `list()` is still deep-cloning all 15,500 events every 5 seconds.
+
+After Fix 1, both `toProviderStatuses` and `toSessionStatuses` only need metadata fields — no events at all. Let me switch the heartbeat to `listMetadataOnly()` too:
+
+Both functions only touch `.provider`, `.sessionId`, and `.metadata.*` — no events. I'll change both to accept `SessionSnapshotMetadataEntry[]` and switch the heartbeat call:
+
+Expected — the type isn't used yet. Let me update both function signatures and the heartbeat call together:
+
+Now switch both heartbeat and shutdown calls to `listMetadataOnly()`:
+
+Now the shutdown block:
+
+Now `RuntimeSessionSnapshot` may be unused — check:
+
+Clean. Now `list()` (with its `structuredClone`) is no longer called anywhere in the hot path — neither the 1-second poll nor the 5-second heartbeat. It's only used at shutdown and in the test harnesses. `kato restart` to pick this up.
+
+# User_2026-02-24_2324_19
+
+can you change snippet extraction to strip out newlines. We could replace with a unicode character symbolizing a newline, or some regular ASCII character. Just don't want any newlines in the snippets"
+
+# claude-sonnet-4.6_2026-02-24_2324_39
+
+Newlines (`\n`, `\r\n`, `\r`) are replaced with a space before trimming and truncating. "line one\nline two" → `"line one line two"`. Tests still pass since none of the existing test strings contained newlines.
+
+# User_2026-02-24_2326_30
+
+Much better
+
+::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-24_2143-improved-status.md
+
+# claude-sonnet-4.6_2026-02-24_2326_36
+
+Glad it's working. Let me save notes from this session to memory.
+
+# claude-sonnet-4.6_2026-02-24_2328_48
+
+Fair enough. Let me read the current state of both doc files first.
+
+# claude-sonnet-4.6_2026-02-24_2329_07
+
+Both files need significant updates. I'll do them in parallel.
+
+**For `dev.codebase-overview.md`:** snapshot store metadata fields are stale, the status flow is outdated, and the new shared `status_projection.ts` module and `listMetadataOnly()` pattern aren't documented.
+
+**For `dev.decision-log.md`:** needs new entries for the rich status model, mtime-based staleness, snippet caching, and `listMetadataOnly()` optimization.
+
+I don't think a new dev file is needed yet — the status projection is well captured in the decision log and the codebase overview can reference `shared/src/status_projection.ts` where appropriate.
+
+# claude-sonnet-4.6_2026-02-24_2329_52
+
+Now the decision log — adding new entries for this session's work:
+
+# claude-sonnet-4.6_2026-02-24_2330_35
+
+Both files updated. Summary of what changed:
+
+**`dev.codebase-overview.md`:**
+- Runtime loop §3 now documents the `listMetadataOnly()` constraint and why `list()` is banned from hot paths
+- Snapshot store §5 updated with all new metadata fields (`fileModifiedAtMs`, `snippet`), `listMetadataOnly()`, and the known Codex timestamp issue
+- New §5a documents the shared status projection module and `DaemonSessionStatus`
+- Ingestion-to-status flow rewritten to reflect the full current path
+
+**`dev.decision-log.md`:** four new entries covering the rich session status model, file mtime staleness, snippet caching, and the `listMetadataOnly()` optimization.
+
+# User_2026-02-25_0728_16
+
+OK, anything left?
+
+# <synthetic>_2026-02-25_0728_17
+
+API Error: Rate limit reached
+
+# User_2026-02-25_0734_07
+
+Anything left?
+
+# <synthetic>_2026-02-25_0734_09
+
+API Error: Rate limit reached

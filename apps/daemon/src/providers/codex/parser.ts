@@ -478,32 +478,7 @@ export async function* parseCodexEvents(
             if (parsedAnswers) {
               const answerPairs = Object.entries(parsedAnswers);
               if (answerPairs.length > 0) {
-                const answeredLines = answerPairs.map(([key, selected]) => {
-                  const questionEntry = findQuestionEntry(questions, key);
-                  const questionText = questionEntry
-                    ? String(questionEntry["question"] ?? key)
-                    : key;
-                  return `- ${questionText}: ${selected.join(", ")}`;
-                }).join("\n");
-
-                const userBase = makeBase(
-                  "message.user",
-                  "response_item.function_call_output.request_user_input",
-                  lineEnd,
-                  1,
-                );
-                yield {
-                  event: {
-                    ...userBase,
-                    kind: "message.user",
-                    role: "user",
-                    content: answeredLines,
-                    phase: "other",
-                  } as unknown as ConversationEvent,
-                  cursor: makeByteOffsetCursor(lineEnd),
-                };
-
-                let decisionIndex = 2;
+                let decisionIndex = 1;
                 for (const [key, selected] of answerPairs) {
                   const questionEntry = findQuestionEntry(questions, key);
                   const questionText = questionEntry
@@ -660,36 +635,22 @@ export async function* parseCodexEvents(
           : undefined;
 
         if (answersRecord) {
-          const answeredLines = Object.entries(answersRecord)
-            .map(([key, val]) => `- ${key}: ${String(val)}`)
-            .join("\n");
-
-          const userBase = makeBase(
-            "message.user",
-            "request_user_input",
-            lineEnd,
-            2,
-          );
-          yield {
-            event: {
-              ...userBase,
-              kind: "message.user",
-              role: "user",
-              content: answeredLines,
-            } as unknown as ConversationEvent,
-            cursor: makeByteOffsetCursor(lineEnd),
-          };
-
           // decision events: one per answered question
           const questionsList = Array.isArray(questions)
             ? questions as Array<Record<string, unknown>>
             : [];
-          let decisionIndex = 3;
+          let decisionIndex = 2;
           for (const [key, val] of Object.entries(answersRecord)) {
             const questionEntry = questionsList.find((q) => q["id"] === key);
             const questionText = questionEntry
               ? String(questionEntry["question"] ?? key)
               : key;
+            const questionHeader = questionEntry
+              ? String(questionEntry["header"] ?? "")
+              : "";
+            const options = questionEntry
+              ? asQuestionOptions(questionEntry)
+              : [];
             const decisionBase = makeBase(
               "decision",
               "request_user_input",
@@ -715,6 +676,13 @@ export async function* parseCodexEvents(
                   String(toolCallBase["eventId"]),
                   String(toolResultBase["eventId"]),
                 ],
+                metadata: {
+                  providerQuestionId: key,
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
+                  ...(options.length > 0 ? { options } : {}),
+                },
               } as unknown as ConversationEvent,
               cursor: makeByteOffsetCursor(lineEnd),
             };

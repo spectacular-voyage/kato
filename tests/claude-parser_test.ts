@@ -216,7 +216,7 @@ Deno.test("claude parser synthesizes decision events for AskUserQuestion prompts
     result.event.kind === "message.user" &&
     result.event.content.includes("shared contracts")
   );
-  assert(synthesizedUser !== undefined);
+  assertEquals(synthesizedUser, undefined);
 
   const acceptedDecision = results.find((result) =>
     result.event.kind === "decision" &&

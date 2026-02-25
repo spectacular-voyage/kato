@@ -398,7 +398,9 @@ Deno.test(
       },
     );
     assertEquals(
-      withoutCommentary.includes("I am checking the parser implementation now."),
+      withoutCommentary.includes(
+        "I am checking the parser implementation now.",
+      ),
       false,
     );
     assertStringIncludes(withoutCommentary, "internal reasoning trace");
@@ -415,6 +417,79 @@ Deno.test(
     assertStringIncludes(
       withCommentary,
       "I am checking the parser implementation now.",
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown renders questionnaire accepted decisions as a single line",
+  () => {
+    const questionnaireDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-1",
+      decisionKey: "decision-line-policy",
+      summary: "decision_line_policy -> Show both (Recommended)",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_line_policy",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnaireDecision], {
+      includeFrontmatter: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [decision-line-policy]:** decision_line_policy -> Show both (Recommended)",
+    );
+    assertEquals(rendered.includes("*Status: accepted"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown keeps status line for non-questionnaire decisions",
+  () => {
+    const genericDecision: ConversationEvent = {
+      eventId: "decision-generic-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-generic-1",
+      decisionKey: "export-format",
+      summary: "Use markdown export",
+      status: "accepted",
+      decidedBy: "assistant",
+      basisEventIds: ["event-1"],
+      source: {
+        providerEventType: "system",
+        providerEventId: "decision-generic-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([genericDecision], {
+      includeFrontmatter: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [export-format]:** Use markdown export",
+    );
+    assertStringIncludes(
+      rendered,
+      "*Status: accepted — decided by: assistant*",
     );
   },
 );

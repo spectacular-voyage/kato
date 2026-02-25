@@ -21,7 +21,10 @@ export interface SessionProjectionInput {
   lastEventAt?: string;
   /** File mtime in ms — most reliable staleness signal, provider-agnostic. */
   fileModifiedAtMs?: number;
-  events: ConversationEvent[];
+  /** Pre-computed snippet from metadata. Preferred over scanning events. */
+  snippet?: string;
+  /** Events array — only needed when snippet is not cached. */
+  events?: ConversationEvent[];
 }
 
 export interface RecordingProjectionInput {
@@ -42,7 +45,7 @@ export function extractSnippet(
 ): string | undefined {
   for (const ev of events) {
     if (ev.kind === "message.user") {
-      const text = ev.content.trim();
+      const text = ev.content.replace(/\r?\n|\r/g, " ").trim();
       if (text.length === 0) continue;
       if (text.length <= SNIPPET_MAX_CHARS) return text;
       return text.slice(0, SNIPPET_MAX_CHARS - 1) + "…";
@@ -98,7 +101,7 @@ export function projectSessionStatus(opts: {
   const result: DaemonSessionStatus = {
     provider: session.provider,
     sessionId: session.sessionId,
-    snippet: extractSnippet(session.events),
+    snippet: session.snippet ?? extractSnippet(session.events ?? []),
     updatedAt: session.updatedAt,
     lastMessageAt: session.lastEventAt,
     stale,
