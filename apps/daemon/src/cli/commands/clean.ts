@@ -1,3 +1,4 @@
+import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 
 export interface CleanCommandOptions {
@@ -7,47 +8,127 @@ export interface CleanCommandOptions {
   sessionsDays?: number;
 }
 
+type PathMutationResult = "missing" | "flushed" | "would-flush";
+
+interface CleanExecutionStats {
+  logFilesFlushed: number;
+  logFilesWouldFlush: number;
+  missingFiles: number;
+  skippedScopes: string[];
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function flushFileIfExists(
+  path: string,
+  dryRun: boolean,
+): Promise<PathMutationResult> {
+  if (!(await pathExists(path))) {
+    return "missing";
+  }
+
+  if (dryRun) {
+    return "would-flush";
+  }
+
+  await Deno.writeTextFile(path, "");
+  return "flushed";
+}
+
+function applyMutationResult(
+  result: PathMutationResult,
+  stats: CleanExecutionStats,
+): void {
+  if (result === "missing") {
+    stats.missingFiles += 1;
+    return;
+  }
+  if (result === "flushed") {
+    stats.logFilesFlushed += 1;
+    return;
+  }
+  stats.logFilesWouldFlush += 1;
+}
+
 export async function runCleanCommand(
   ctx: DaemonCliCommandContext,
   options: CleanCommandOptions,
 ): Promise<void> {
-  const request = await ctx.controlStore.enqueue({
-    command: "clean",
-    payload: {
-      all: options.all,
-      dryRun: options.dryRun,
-      ...(options.recordingsDays !== undefined
-        ? { recordingsDays: options.recordingsDays }
-        : {}),
-      ...(options.sessionsDays !== undefined
-        ? { sessionsDays: options.sessionsDays }
-        : {}),
-      requestedByPid: ctx.runtime.pid,
-    },
-  });
+  const stats: CleanExecutionStats = {
+    logFilesFlushed: 0,
+    logFilesWouldFlush: 0,
+    missingFiles: 0,
+    skippedScopes: [],
+  };
+
+  if (options.all) {
+    for (
+      const path of [
+        join(ctx.runtime.runtimeDir, "logs", "operational.jsonl"),
+        join(ctx.runtime.runtimeDir, "logs", "security-audit.jsonl"),
+      ]
+    ) {
+      applyMutationResult(
+        await flushFileIfExists(path, options.dryRun),
+        stats,
+      );
+    }
+  } else {
+    if (options.recordingsDays !== undefined) {
+      stats.skippedScopes.push("recordings");
+    }
+    if (options.sessionsDays !== undefined) {
+      stats.skippedScopes.push("sessions");
+    }
+  }
+
+  if (stats.skippedScopes.length > 0) {
+    await ctx.operationalLogger.warn(
+      "clean.scope_unimplemented",
+      "Clean scope accepted but not yet implemented in CLI",
+      {
+        scopes: [...stats.skippedScopes],
+      },
+    );
+  }
 
   await ctx.operationalLogger.info(
-    "clean.requested",
-    "Cleanup enqueued from CLI",
+    "clean.completed",
+    "Clean command handled in CLI",
     {
-      requestId: request.requestId,
       all: options.all,
       dryRun: options.dryRun,
       recordingsDays: options.recordingsDays,
       sessionsDays: options.sessionsDays,
-      controlPath: ctx.runtime.controlPath,
+      logFilesFlushed: stats.logFilesFlushed,
+      logFilesWouldFlush: stats.logFilesWouldFlush,
+      missingFiles: stats.missingFiles,
+      skippedScopes: [...stats.skippedScopes],
     },
   );
   await ctx.auditLogger.command("clean", {
-    requestId: request.requestId,
     all: options.all,
     dryRun: options.dryRun,
     recordingsDays: options.recordingsDays,
     sessionsDays: options.sessionsDays,
+    logFilesFlushed: stats.logFilesFlushed,
+    logFilesWouldFlush: stats.logFilesWouldFlush,
+    missingFiles: stats.missingFiles,
+    skippedScopes: [...stats.skippedScopes],
   });
 
   const mode = options.dryRun ? "dry-run" : "execute";
-  const parts: string[] = [`clean request queued mode=${mode}`];
+  const parts: string[] = [`clean completed mode=${mode}`];
   if (options.all) {
     parts.push("all=true");
   }
@@ -57,7 +138,15 @@ export async function runCleanCommand(
   if (options.sessionsDays !== undefined) {
     parts.push(`sessions=${options.sessionsDays}d`);
   }
-  parts.push(`requestId=${request.requestId}`);
+  if (options.dryRun) {
+    parts.push(`logsToFlush=${stats.logFilesWouldFlush}`);
+  } else {
+    parts.push(`logsFlushed=${stats.logFilesFlushed}`);
+  }
+  parts.push(`missingFiles=${stats.missingFiles}`);
+  if (stats.skippedScopes.length > 0) {
+    parts.push(`scopesNotImplemented=${stats.skippedScopes.join(",")}`);
+  }
 
   ctx.runtime.writeStdout(`${parts.join(" ")}\n`);
 }

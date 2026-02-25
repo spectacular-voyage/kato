@@ -60,7 +60,9 @@ Supported commands:
     object per line.
   - When `--output` is omitted, the daemon chooses a default path.
 - `clean [--all|--recordings <days>|--sessions <days>] [--dry-run]`
-  - Queue cleanup request.
+  - Run cleanup immediately in the CLI.
+  - `--all` flushes runtime logs.
+  - `--recordings` and `--sessions` are currently accepted placeholders.
 
 Usage help:
 

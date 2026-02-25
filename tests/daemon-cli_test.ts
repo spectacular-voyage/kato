@@ -574,53 +574,70 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
   assertEquals(controlStore.requests[0]?.command, "stop");
 });
 
-Deno.test("runDaemonCli queues export and clean one-off operations", async () => {
-  const controlStore = makeInMemoryControlStore();
-  const statusStore = makeInMemoryStatusStore();
-  const runtimeDir = ".kato/test-runtime";
-  const allowPathPolicy = makePathPolicyGate("allow");
-  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const runtimeDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-cli-clean-",
+  });
 
-  const exportHarness = makeRuntimeHarness(runtimeDir);
-  const exportCode = await runDaemonCli(
-    ["export", "session-42", "--output", "exports/session-42.md"],
-    {
-      runtime: exportHarness.runtime,
+  try {
+    const controlStore = makeInMemoryControlStore();
+    const statusStore = makeInMemoryStatusStore();
+    const allowPathPolicy = makePathPolicyGate("allow");
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+
+    const exportHarness = makeRuntimeHarness(runtimeDir);
+    const exportCode = await runDaemonCli(
+      ["export", "session-42", "--output", "exports/session-42.md"],
+      {
+        runtime: exportHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+        pathPolicyGate: allowPathPolicy,
+      },
+    );
+    assertEquals(exportCode, 0);
+    assertStringIncludes(
+      exportHarness.stdout.join(""),
+      "export request queued",
+    );
+    assertEquals(controlStore.requests[0]?.command, "export");
+    assertEquals(
+      controlStore.requests[0]?.payload?.["sessionId"],
+      "session-42",
+    );
+
+    const logsDir = `${runtimeDir}/logs`;
+    const operationalLogPath = `${logsDir}/operational.jsonl`;
+    const auditLogPath = `${logsDir}/security-audit.jsonl`;
+    await Deno.mkdir(logsDir, { recursive: true });
+    await Deno.writeTextFile(operationalLogPath, '{"old":"operational"}\n');
+    await Deno.writeTextFile(auditLogPath, '{"old":"audit"}\n');
+
+    const cleanHarness = makeRuntimeHarness(runtimeDir);
+    const cleanCode = await runDaemonCli(["clean", "--all"], {
+      runtime: cleanHarness.runtime,
       defaultRuntimeConfig,
       configStore,
       statusStore,
       controlStore: controlStore.store,
       pathPolicyGate: allowPathPolicy,
-    },
-  );
-  assertEquals(exportCode, 0);
-  assertStringIncludes(exportHarness.stdout.join(""), "export request queued");
-  assertEquals(controlStore.requests[0]?.command, "export");
-  assertEquals(
-    controlStore.requests[0]?.payload?.["sessionId"],
-    "session-42",
-  );
-
-  const cleanHarness = makeRuntimeHarness(runtimeDir);
-  const cleanCode = await runDaemonCli([
-    "clean",
-    "--recordings",
-    "14",
-    "--dry-run",
-  ], {
-    runtime: cleanHarness.runtime,
-    defaultRuntimeConfig,
-    configStore,
-    statusStore,
-    controlStore: controlStore.store,
-    pathPolicyGate: allowPathPolicy,
-  });
-  assertEquals(cleanCode, 0);
-  assertStringIncludes(cleanHarness.stdout.join(""), "clean request queued");
-  assertEquals(controlStore.requests[1]?.command, "clean");
-  assertEquals(controlStore.requests[1]?.payload?.["recordingsDays"], 14);
-  assertEquals(controlStore.requests[1]?.payload?.["dryRun"], true);
+    });
+    assertEquals(cleanCode, 0);
+    assertStringIncludes(cleanHarness.stdout.join(""), "clean completed");
+    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=2");
+    assertEquals(controlStore.requests.length, 1);
+    assertEquals(await Deno.readTextFile(operationalLogPath), "");
+    assertEquals(await Deno.readTextFile(auditLogPath), "");
+  } finally {
+    await Deno.remove(runtimeDir, { recursive: true });
+  }
 });
 
 Deno.test("runDaemonCli denies export when path policy rejects output path", async () => {

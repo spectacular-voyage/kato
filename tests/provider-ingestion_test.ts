@@ -349,6 +349,77 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
   });
 });
 
+Deno.test("FileProviderIngestionRunner logs duplicate session discovery warnings once per duplicate set", async () => {
+  await withTempDir("provider-ingestion-duplicate-sessions-", async (dir) => {
+    const sessionFileA = join(dir, "session-dup-a.jsonl");
+    const sessionFileB = join(dir, "session-dup-b.jsonl");
+    await Deno.writeTextFile(sessionFileA, "placeholder\n");
+    await Deno.writeTextFile(sessionFileB, "placeholder\n");
+
+    const sink = new CaptureSink();
+    const operationalLogger = new StructuredLogger([sink], {
+      channel: "operational",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T20:16:00.000Z"),
+    });
+    const auditLogger = new AuditLogger(
+      new StructuredLogger([sink], {
+        channel: "security-audit",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T20:16:00.000Z"),
+      }),
+    );
+
+    const harness = makeWatchHarness();
+    const runner = new FileProviderIngestionRunner({
+      provider: "test-provider",
+      watchRoots: [dir],
+      sessionSnapshotStore: new InMemorySessionSnapshotStore(),
+      watchFs: harness.watchFn,
+      operationalLogger,
+      auditLogger,
+      discoveryIntervalMs: 0,
+      discoverSessions() {
+        return Promise.resolve([
+          {
+            sessionId: "shared-session-id",
+            filePath: sessionFileA,
+            modifiedAtMs: Date.now(),
+          },
+          {
+            sessionId: "shared-session-id",
+            filePath: sessionFileB,
+            modifiedAtMs: Date.now() - 1,
+          },
+        ]);
+      },
+      parseEvents(
+        _filePath: string,
+        _fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        return (async function* () {})();
+      },
+    });
+
+    await runner.start();
+    await runner.poll();
+    await runner.poll();
+    await runner.stop();
+
+    const duplicateDiscoveryWarnings = sink.records.filter((record) =>
+      record.event === "provider.ingestion.events_dropped" &&
+      record.attributes?.["reason"] === "duplicate-session-id"
+    );
+    assertEquals(duplicateDiscoveryWarnings.length, 2);
+    assert(
+      duplicateDiscoveryWarnings.every((record) =>
+        Array.isArray(record.attributes?.["duplicateSessionIds"])
+      ),
+    );
+  });
+});
+
 Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", async () => {
   await withTempDir("provider-ingestion-claude-", async (dir) => {
     const projectDir = join(dir, "project-1");

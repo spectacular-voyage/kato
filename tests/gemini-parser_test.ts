@@ -5,6 +5,11 @@ import { parseGeminiEvents } from "../apps/daemon/src/providers/gemini/mod.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const FIXTURE = join(THIS_DIR, "fixtures", "gemini-session.json");
+const COMMAND_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "gemini-session-command-display-mismatch.json",
+);
 const TEST_CTX = { provider: "gemini", sessionId: "sess-gemini-001" };
 
 type ParseItem = {
@@ -51,6 +56,24 @@ Deno.test("gemini parser prefers displayContent over content for user messages",
       !firstUser.event.content.includes(
         "raw user text that should be ignored",
       ),
+    );
+  }
+});
+
+Deno.test("gemini parser preserves control-command lines from raw user content", async () => {
+  const results = await collectEvents(COMMAND_FIXTURE);
+  const firstUser = results.find((result) =>
+    result.event.kind === "message.user"
+  );
+  assert(firstUser !== undefined);
+  if (firstUser.event.kind === "message.user") {
+    assertStringIncludes(firstUser.event.content, "::capture notes/gemini.md");
+    assertStringIncludes(
+      firstUser.event.content,
+      "Please help with this project.",
+    );
+    assert(
+      !firstUser.event.content.includes("raw-only body text"),
     );
   }
 });

@@ -514,6 +514,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
+  private lastDuplicateDiscoveryWarningKey: string | undefined;
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
 
@@ -695,6 +696,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     sessions: ProviderSessionFile[],
   ): Promise<ProviderSessionFile[]> {
     const bySessionId = new Map<string, ProviderSessionFile>();
+    const duplicateSessionIds = new Set<string>();
     let droppedEvents = 0;
 
     const sorted = [...sessions].sort((a, b) => {
@@ -707,10 +709,20 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         bySessionId.set(session.sessionId, session);
       } else {
         droppedEvents += 1;
+        duplicateSessionIds.add(session.sessionId);
       }
     }
 
     if (droppedEvents > 0) {
+      const warningKey = `${droppedEvents}:${
+        Array.from(duplicateSessionIds)
+          .sort()
+          .join(",")
+      }`;
+      if (this.lastDuplicateDiscoveryWarningKey === warningKey) {
+        return Array.from(bySessionId.values());
+      }
+      this.lastDuplicateDiscoveryWarningKey = warningKey;
       await this.operationalLogger.warn(
         "provider.ingestion.events_dropped",
         "Dropped duplicate session discovery events",
@@ -718,6 +730,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           provider: this.provider,
           droppedEvents,
           reason: "duplicate-session-id",
+          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
         },
       );
       await this.auditLogger.record(
@@ -727,8 +740,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           provider: this.provider,
           droppedEvents,
           reason: "duplicate-session-id",
+          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
         },
       );
+    } else {
+      this.lastDuplicateDiscoveryWarningKey = undefined;
     }
 
     return Array.from(bySessionId.values());

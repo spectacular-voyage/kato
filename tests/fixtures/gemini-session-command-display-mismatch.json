@@ -1,0 +1,29 @@
+{
+  "sessionId": "gemini-fixture-session-cmd",
+  "startTime": "2026-02-24T11:00:00.000Z",
+  "lastUpdated": "2026-02-24T11:00:20.000Z",
+  "messages": [
+    {
+      "id": "u1",
+      "timestamp": "2026-02-24T11:00:01.000Z",
+      "type": "user",
+      "displayContent": [
+        {
+          "text": "Please help with this project."
+        }
+      ],
+      "content": [
+        {
+          "text": "::capture notes/gemini.md\nPlease help with this project.\nraw-only body text"
+        }
+      ]
+    },
+    {
+      "id": "a1",
+      "timestamp": "2026-02-24T11:00:10.000Z",
+      "type": "gemini",
+      "model": "gemini-2.0-pro",
+      "content": "Acknowledged."
+    }
+  ]
+}

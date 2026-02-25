@@ -25,7 +25,7 @@ const GLOBAL_USAGE_BODY = [
   "  export <session-id> [--output <path>]",
   "                        Queue one-off export request",
   "  clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
-  "                        Queue cleanup request",
+  "                        Run cleanup immediately in CLI",
   "",
   "Run `kato help <command>` for command-specific usage.",
 ].join("\n");
@@ -64,7 +64,8 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   clean: [
     "Usage: kato clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
     "",
-    "Queues a cleanup request for recordings/session metadata.",
+    "Runs cleanup in CLI. --all flushes runtime logs.",
+    "--recordings/--sessions are accepted but currently no-op placeholders.",
   ].join("\n"),
 };
 

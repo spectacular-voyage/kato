@@ -78,6 +78,38 @@ function extractPreferredMessageText(message: Record<string, unknown>): string {
   return extractText(message["content"]);
 }
 
+const COMMAND_LINE_PATTERN = /^\s*::[a-z][a-z0-9-]*(?:\s+.+)?\s*$/i;
+
+function collectCommandLikeLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && COMMAND_LINE_PATTERN.test(line));
+}
+
+// Gemini displayContent can omit raw control-command lines; preserve any
+// command-like lines from raw content so runtime command detection still works.
+function extractPreferredUserMessageText(
+  message: Record<string, unknown>,
+): string {
+  const display = normalizeText(extractText(message["displayContent"]));
+  const content = normalizeText(extractText(message["content"]));
+
+  if (display.length === 0) return content;
+  if (content.length === 0) return display;
+
+  const displayCommands = new Set(collectCommandLikeLines(display));
+  const missingCommands = collectCommandLikeLines(content).filter((line) =>
+    !displayCommands.has(line)
+  );
+
+  if (missingCommands.length === 0) {
+    return display;
+  }
+
+  return `${missingCommands.join("\n")}\n${display}`.trim();
+}
+
 function extractThoughts(value: unknown): string[] {
   if (!Array.isArray(value)) {
     const single = normalizeText(extractText(value));
@@ -248,7 +280,7 @@ export async function* parseGeminiEvents(
     });
 
     if (messageType === "user") {
-      const text = normalizeText(extractPreferredMessageText(rawMessage));
+      const text = extractPreferredUserMessageText(rawMessage);
       if (text.length > 0) {
         yield {
           event: {
