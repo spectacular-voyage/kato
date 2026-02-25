@@ -71,8 +71,6 @@ export async function* parseCodexEvents(
   let model: string | undefined;
   let currentTurnId: string | undefined;
 
-  let userMsgEnd = -1;
-  let pendingAssistantText: string | undefined;
   let turnFinalized = false;
 
   let currentByteOffset = 0;
@@ -105,32 +103,6 @@ export async function* parseCodexEvents(
     };
   }
 
-  function* flushPendingAssistant(
-    newUserLineStart: number,
-  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
-    if (!pendingAssistantText || turnFinalized || userMsgEnd < fromOffset) {
-      return;
-    }
-    const text = pendingAssistantText;
-    turnFinalized = true;
-    pendingAssistantText = undefined;
-    const base = makeBase(
-      "message.assistant",
-      "event_msg.agent_message",
-      newUserLineStart,
-    );
-    yield {
-      event: {
-        ...base,
-        kind: "message.assistant",
-        role: "assistant",
-        content: normalizeText(text),
-        ...(model ? { model } : {}),
-      } as unknown as ConversationEvent,
-      cursor: makeByteOffsetCursor(newUserLineStart),
-    };
-  }
-
   function* finalizeAssistant(
     text: string,
     lineEnd: number,
@@ -139,7 +111,6 @@ export async function* parseCodexEvents(
   ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
     if (turnFinalized || lineEnd <= fromOffset) return;
     turnFinalized = true;
-    pendingAssistantText = undefined;
     const base = makeBase("message.assistant", providerEventType, lineEnd);
     yield {
       event: {
@@ -154,12 +125,33 @@ export async function* parseCodexEvents(
     };
   }
 
+  function* emitAssistantCommentary(
+    text: string,
+    lineEnd: number,
+    providerEventType: string,
+  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
+    if (lineEnd <= fromOffset || turnFinalized) return;
+    const normalized = normalizeText(text);
+    if (normalized.length === 0) return;
+    const base = makeBase("message.assistant", providerEventType, lineEnd);
+    yield {
+      event: {
+        ...base,
+        kind: "message.assistant",
+        role: "assistant",
+        content: normalized,
+        ...(model ? { model } : {}),
+        phase: "commentary",
+      } as unknown as ConversationEvent,
+      cursor: makeByteOffsetCursor(lineEnd),
+    };
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     const hasNewline = i < lines.length - 1;
     const lineBytes = utf8ByteLength(line) + (hasNewline ? 1 : 0);
-    const lineStart = currentByteOffset;
-    const lineEnd = lineStart + lineBytes;
+    const lineEnd = currentByteOffset + lineBytes;
     currentByteOffset = lineEnd;
 
     if (line.trim().length === 0) {
@@ -197,14 +189,10 @@ export async function* parseCodexEvents(
           const text = normalizeText(stripIdePreamble(rawText));
 
           if (lineEnd > fromOffset) {
-            yield* flushPendingAssistant(lineStart);
-
-            pendingAssistantText = undefined;
             turnFinalized = false;
 
             const savedTurnId = currentTurnId;
             currentTurnId = undefined;
-            userMsgEnd = lineEnd;
 
             if (text) {
               const base = makeBase(
@@ -225,15 +213,16 @@ export async function* parseCodexEvents(
               };
             }
           } else {
-            pendingAssistantText = undefined;
             turnFinalized = false;
             currentTurnId = undefined;
-            userMsgEnd = lineEnd;
           }
         } else if (msgType === "agent_message") {
-          if (!turnFinalized) {
-            pendingAssistantText = String(payload["message"] ?? "");
-          }
+          const text = String(payload["message"] ?? "");
+          yield* emitAssistantCommentary(
+            text,
+            lineEnd,
+            "event_msg.agent_message",
+          );
         } else if (msgType === "task_complete") {
           if (!turnFinalized) {
             const lastMessage = payload["last_agent_message"];
@@ -426,7 +415,6 @@ export async function* parseCodexEvents(
             lineEnd,
             2,
           );
-          userMsgEnd = lineEnd;
           yield {
             event: {
               ...userBase,
@@ -481,24 +469,5 @@ export async function* parseCodexEvents(
         break;
       }
     }
-  }
-
-  // Flush any remaining pending assistant text at end of file
-  if (pendingAssistantText && !turnFinalized && userMsgEnd >= fromOffset) {
-    const base = makeBase(
-      "message.assistant",
-      "event_msg.agent_message",
-      currentByteOffset,
-    );
-    yield {
-      event: {
-        ...base,
-        kind: "message.assistant",
-        role: "assistant",
-        content: normalizeText(pendingAssistantText),
-        ...(model ? { model } : {}),
-      } as unknown as ConversationEvent,
-      cursor: makeByteOffsetCursor(currentByteOffset),
-    };
   }
 }

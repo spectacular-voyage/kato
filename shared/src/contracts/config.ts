@@ -3,6 +3,7 @@ export type ConfigSource = "local-file" | "centralized-service";
 export type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface RuntimeFeatureFlags {
+  writerIncludeCommentary: boolean;
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
   writerItalicizeUserMessages: boolean;

@@ -127,6 +127,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
         controlPath: join(runtimeDir, "control.json"),
         allowedWriteRoots: [root],
         featureFlags: {
+          writerIncludeCommentary: true,
           writerIncludeThinking: true,
           writerIncludeToolCalls: true,
           writerItalicizeUserMessages: false,

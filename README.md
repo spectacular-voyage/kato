@@ -105,6 +105,7 @@ Default config shape:
     ]
   },
   "featureFlags": {
+    "writerIncludeCommentary": true,
     "writerIncludeThinking": true,
     "writerIncludeToolCalls": true,
     "writerItalicizeUserMessages": false,

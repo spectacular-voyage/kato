@@ -14,6 +14,7 @@ Deno.test("OpenFeature bootstrap uses deterministic local defaults", () => {
 
   assertEquals(settings.exportEnabled, true);
   assertEquals(settings.writerRenderOptions, {
+    includeCommentary: true,
     includeThinking: false,
     includeToolCalls: false,
     italicizeUserMessages: false,
@@ -26,6 +27,7 @@ Deno.test("OpenFeature bootstrap applies local overrides", () => {
   const client = bootstrapOpenFeature({
     ...defaults,
     daemonExportEnabled: false,
+    writerIncludeCommentary: false,
     writerIncludeThinking: false,
     writerIncludeToolCalls: false,
     writerItalicizeUserMessages: true,
@@ -37,6 +39,7 @@ Deno.test("OpenFeature bootstrap applies local overrides", () => {
 
   assertEquals(settings.exportEnabled, false);
   assertEquals(settings.writerRenderOptions, {
+    includeCommentary: false,
     includeThinking: false,
     includeToolCalls: false,
     italicizeUserMessages: true,

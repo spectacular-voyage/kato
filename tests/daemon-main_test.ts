@@ -20,6 +20,7 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
       gemini: ["/sessions/gemini"],
     },
     featureFlags: {
+      writerIncludeCommentary: true,
       writerIncludeThinking: false,
       writerIncludeToolCalls: false,
       writerItalicizeUserMessages: true,

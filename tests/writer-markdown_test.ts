@@ -355,3 +355,66 @@ Deno.test(
     assertEquals(rendered.includes("second-thought"), false);
   },
 );
+
+Deno.test(
+  "renderEventsToMarkdown can exclude assistant commentary independently of thinking",
+  () => {
+    const commentary: ConversationEvent = {
+      eventId: "assistant-commentary-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "I am checking the parser implementation now.",
+      phase: "commentary",
+      source: {
+        providerEventType: "response_item.message.commentary",
+        providerEventId: "assistant-commentary-1",
+      },
+    } as unknown as ConversationEvent;
+    const thinking: ConversationEvent = {
+      eventId: "thinking-visible-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "thinking",
+      content: "internal reasoning trace",
+      source: { providerEventType: "thinking", providerEventId: "think-1" },
+    } as unknown as ConversationEvent;
+    const finalAnswer = makeEvent(
+      "assistant-final-1",
+      "message.assistant",
+      "Final answer.",
+      "2026-02-22T10:00:02.000Z",
+    );
+
+    const withoutCommentary = renderEventsToMarkdown(
+      [commentary, thinking, finalAnswer],
+      {
+        includeFrontmatter: false,
+        includeCommentary: false,
+        includeThinking: true,
+      },
+    );
+    assertEquals(
+      withoutCommentary.includes("I am checking the parser implementation now."),
+      false,
+    );
+    assertStringIncludes(withoutCommentary, "internal reasoning trace");
+    assertStringIncludes(withoutCommentary, "Final answer.");
+
+    const withCommentary = renderEventsToMarkdown(
+      [commentary, thinking, finalAnswer],
+      {
+        includeFrontmatter: false,
+        includeCommentary: true,
+        includeThinking: true,
+      },
+    );
+    assertStringIncludes(
+      withCommentary,
+      "I am checking the parser implementation now.",
+    );
+  },
+);

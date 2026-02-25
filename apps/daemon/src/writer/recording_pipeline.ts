@@ -92,6 +92,7 @@ export interface RecordingPipelineOptions {
   jsonlWriter?: JsonlConversationWriter;
   defaultRenderOptions?: Pick<
     MarkdownRenderOptions,
+    | "includeCommentary"
     | "includeThinking"
     | "includeToolCalls"
     | "italicizeUserMessages"
@@ -149,6 +150,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private readonly jsonlWriter: JsonlConversationWriter | undefined;
   private readonly defaultRenderOptions: Pick<
     MarkdownRenderOptions,
+    | "includeCommentary"
     | "includeThinking"
     | "includeToolCalls"
     | "italicizeUserMessages"

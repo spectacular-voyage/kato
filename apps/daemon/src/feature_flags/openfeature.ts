@@ -2,6 +2,7 @@ import type { RuntimeFeatureFlags } from "@kato/shared";
 import type { MarkdownRenderOptions } from "../writer/mod.ts";
 
 const DEFAULT_RUNTIME_FEATURE_FLAGS: RuntimeFeatureFlags = {
+  writerIncludeCommentary: true,
   writerIncludeThinking: false,
   writerIncludeToolCalls: false,
   writerItalicizeUserMessages: false,
@@ -29,6 +30,7 @@ function cloneRuntimeFeatureFlags(
   value: RuntimeFeatureFlags,
 ): RuntimeFeatureFlags {
   return {
+    writerIncludeCommentary: value.writerIncludeCommentary,
     writerIncludeThinking: value.writerIncludeThinking,
     writerIncludeToolCalls: value.writerIncludeToolCalls,
     writerItalicizeUserMessages: value.writerItalicizeUserMessages,
@@ -86,7 +88,10 @@ export interface DaemonFeatureSettings {
   writerRenderOptions:
     & Pick<
       MarkdownRenderOptions,
-      "includeThinking" | "includeToolCalls" | "italicizeUserMessages"
+      | "includeCommentary"
+      | "includeThinking"
+      | "includeToolCalls"
+      | "italicizeUserMessages"
     >
     & { includeSystemEvents: boolean };
 }
@@ -116,6 +121,11 @@ export function evaluateDaemonFeatureSettings(
     ),
     captureIncludeSystemEvents,
     writerRenderOptions: {
+      includeCommentary: client.getBooleanValue(
+        "writerIncludeCommentary",
+        defaults.writerIncludeCommentary,
+        context,
+      ),
       includeThinking: client.getBooleanValue(
         "writerIncludeThinking",
         defaults.writerIncludeThinking,

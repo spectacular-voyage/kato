@@ -22,6 +22,7 @@ export interface MarkdownRenderOptions {
   title?: string;
   now?: () => Date;
   makeFrontmatterId?: (title: string) => string;
+  includeCommentary?: boolean;
   includeToolCalls?: boolean;
   includeThinking?: boolean;
   italicizeUserMessages?: boolean;
@@ -147,6 +148,7 @@ export function renderEventsToMarkdown(
   options: MarkdownRenderOptions = {},
 ): string {
   const includeFrontmatter = options.includeFrontmatter !== false;
+  const includeCommentary = options.includeCommentary ?? true;
   const includeToolCalls = options.includeToolCalls ?? true;
   const includeThinking = options.includeThinking ?? true;
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
@@ -198,6 +200,13 @@ export function renderEventsToMarkdown(
   for (const event of events) {
     if (isMessageEvent(event)) {
       if (event.kind === "message.system" && !includeSystemEvents) {
+        continue;
+      }
+      if (
+        event.kind === "message.assistant" &&
+        event.phase === "commentary" &&
+        !includeCommentary
+      ) {
         continue;
       }
 

@@ -43,6 +43,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
+  "writerIncludeCommentary",
   "writerIncludeThinking",
   "writerIncludeToolCalls",
   "writerItalicizeUserMessages",

@@ -55,18 +55,34 @@ Deno.test("codex parser strips IDE preamble from user message", async () => {
   }
 });
 
-Deno.test("codex parser prefers final_answer over intermediate agent messages", async () => {
+Deno.test("codex parser preserves agent progress commentary and final answers", async () => {
   const results = await collectEvents(FIXTURE_VSCODE);
   const assistantEvents = results.filter(
     (r) => r.event.kind === "message.assistant",
   );
-  // At least 2 assistant messages for 2 turns.
+  // Two progress updates + one final answer in turn 1 + one final in turn 2.
   assert(assistantEvents.length >= 2);
-  const firstAssistant = assistantEvents[0]!.event;
-  if (firstAssistant.kind === "message.assistant") {
-    assertStringIncludes(firstAssistant.content, "JWT tokens");
-    assert(!firstAssistant.content.includes("I'm analyzing your project"));
-    assert(!firstAssistant.content.includes("Let me check the existing code"));
+  const commentaryEvents = assistantEvents.filter((item) =>
+    item.event.kind === "message.assistant" &&
+    item.event.phase === "commentary"
+  );
+  assert(commentaryEvents.length >= 2);
+  const commentaryTexts = commentaryEvents
+    .map((item) =>
+      item.event.kind === "message.assistant" ? item.event.content : ""
+    )
+    .join("\n");
+  assertStringIncludes(commentaryTexts, "I'm analyzing your project");
+  assertStringIncludes(commentaryTexts, "Let me check the existing code");
+
+  const finalEvents = assistantEvents.filter((item) =>
+    item.event.kind === "message.assistant" &&
+    item.event.phase === "final"
+  );
+  assert(finalEvents.length >= 2);
+  const firstFinal = finalEvents[0]!.event;
+  if (firstFinal.kind === "message.assistant") {
+    assertStringIncludes(firstFinal.content, "JWT tokens");
   }
 });
 

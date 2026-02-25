@@ -476,3 +476,70 @@ OK, should we circle back to:
 Preserve all Codex agent_message progress updates as message.assistant phase:"commentary" events.
 Add writerIncludeCommentary flag (default true).
 Keep thinking separately controlled by writerIncludeThinking.
+
+# gpt-5.3-codex_2026-02-24_1815_26
+
+Yes. I circled back and implemented all three items.
+
+1. Codex now preserves all `event_msg.agent_message` progress updates as `message.assistant` with `phase: "commentary"` instead of collapsing to a single pending message.
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:128)
+- [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts:219)
+
+2. Added `writerIncludeCommentary` feature flag (default `true`) and wired it through config + feature evaluation.
+- [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:5)
+- [runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts:45)
+- [openfeature.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/feature_flags/openfeature.ts:4)
+- [openfeature.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/feature_flags/openfeature.ts:124)
+
+3. Thinking remains independently controlled by `writerIncludeThinking`; commentary filtering is separate via `includeCommentary`.
+- [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:25)
+- [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:205)
+- [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:92)
+
+Also updated tests and README example:
+- [codex-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/codex-parser_test.ts:58)
+- [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:359)
+- [openfeature-flags_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/openfeature-flags_test.ts:14)
+- [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md:107)
+
+Validation:
+- `deno test -A ...` (targeted suite): `78 passed, 0 failed`
+- `deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts`: passed
+
+If you want, I can add a short decision-log entry for `writerIncludeCommentary` defaulting to `true` as a locked behavior.
+
+# User_2026-02-24_1833_35
+
+That's okay, let's stick to important decisions. 
+
+The next step is LogLayer Adoption. Or should we postpone that?
+
+# gpt-5.3-codex_2026-02-24_1833_53
+
+Recommendation: **do LogLayer adoption now, but narrowly**, and postpone OTel/trace expansion.
+
+Why:
+- We just stabilized behavior and tests; this is a good time to swap backend with low risk.
+- If we postpone too long, OTel work later will become a bigger, riskier jump.
+
+Pragmatic split:
+1. **Now**: LogLayer as an internal adapter only, preserving current `StructuredLogger`/`AuditLogger` API and exact JSONL schema/channels.
+2. **Later**: OTel plugin wiring + optional `trace` level rollout.
+
+So I would not postpone item 4, but I would postpone item 5 details until 4 is parity-verified.  
+If you want, I can start phase 1 implementation next.
+
+# User_2026-02-24_1835_07
+
+Phase 1?
+
+# gpt-5.3-codex_2026-02-24_1835_14
+
+By “Phase 1” I mean **parity-only LogLayer migration**:
+
+1. Keep current logger API (`StructuredLogger`/`AuditLogger`) and call sites unchanged.
+2. Swap internals to LogLayer behind an adapter.
+3. Preserve exact JSONL record shape and file outputs (`operational.jsonl`, `security-audit.jsonl`).
+4. No OTel plugin, no trace-level expansion, no taxonomy changes yet.
+
+If that scope looks right, I’ll implement it now.
