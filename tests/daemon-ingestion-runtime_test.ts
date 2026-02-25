@@ -194,3 +194,96 @@ Deno.test("InMemorySessionSnapshotStore validates retention policy bounds", () =
     "maxEventsPerSession",
   );
 });
+
+Deno.test("InMemorySessionSnapshotStore evicts due to memory pressure", () => {
+  // Budget is in MB, so we need to work with integer values.
+  // 1 MB = 1024 * 1024 bytes. Each session with large events will consume ~30KB,
+  // so 1 MB budget allows ~33 sessions before eviction kicks in.
+  const store = new InMemorySessionSnapshotStore({
+    daemonMaxMemoryMb: 1, // 1 MB budget (exact value doesn't matter, just needs to trigger eviction)
+    retention: {
+      maxSessions: 100, // plenty of room by count
+      maxEventsPerSession: 100,
+    },
+    now: () => new Date("2026-02-25T12:00:00.000Z"),
+  });
+
+  // Create events with large content to exceed memory budget.
+  // Each event with ~100 KB of content helps accumulate to exceed 1 MB budget.
+  const largeContent = "x".repeat(100000);
+
+  const event1 = {
+    eventId: "e1",
+    provider: "test",
+    sessionId: "session-1",
+    timestamp: "2026-02-25T12:00:00.000Z",
+    kind: "message.assistant" as const,
+    role: "assistant" as const,
+    content: largeContent,
+    source: { providerEventType: "assistant", providerEventId: "e1" },
+  } as unknown as ConversationEvent;
+
+  const event2 = {
+    eventId: "e2",
+    provider: "test",
+    sessionId: "session-1",
+    timestamp: "2026-02-25T12:00:01.000Z",
+    kind: "message.user" as const,
+    role: "user" as const,
+    content: largeContent,
+    source: { providerEventType: "user", providerEventId: "e2" },
+  } as unknown as ConversationEvent;
+
+  // Add first session (fits within budget)
+  store.upsert({
+    provider: "test",
+    sessionId: "session-1",
+    cursor: { kind: "byte-offset", value: 100 },
+    events: [event1, event2],
+  });
+
+  let stats = store.getMemoryStats();
+  assertEquals(stats.evictionsTotal, 0, "No evictions yet");
+  assertEquals(stats.sessionCount, 1);
+
+  // Add second session (still fits)
+  store.upsert({
+    provider: "test",
+    sessionId: "session-2",
+    cursor: { kind: "byte-offset", value: 200 },
+    events: [event1, event2],
+  });
+
+  stats = store.getMemoryStats();
+  assertEquals(stats.sessionCount, 2);
+
+  // Add sessions until we exceed budget
+  // Each session is ~200 KB, so 6 sessions * 200 KB = ~1.2 MB, exceeding 1 MB budget
+  for (let i = 3; i <= 6; i++) {
+    store.upsert({
+      provider: "test",
+      sessionId: `session-${i}`,
+      cursor: { kind: "byte-offset", value: i * 100 },
+      events: [event1, event2],
+    });
+  }
+
+  stats = store.getMemoryStats();
+
+  // At least one session should be evicted to stay under budget
+  assertEquals(stats.evictionsTotal > 0, true);
+  assertEquals((stats.evictionsByReason["memory_pressure"] ?? 0) > 0, true);
+
+  // Verify at least the oldest session was evicted
+  assertEquals(store.get("session-1"), undefined, "session-1 was evicted");
+
+  // At least one newer session should still exist
+  const remainingSessions = [2, 3, 4, 5, 6].filter((i) =>
+    store.get(`session-${i}`) !== undefined
+  );
+  assertEquals(
+    remainingSessions.length > 0,
+    true,
+    "At least one recent session still exists",
+  );
+});

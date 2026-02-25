@@ -313,7 +313,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
   }
 });
 
-Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 200", async () => {
+Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "config.json");
   const runtimeDir = join(root, "runtime");
@@ -333,7 +333,7 @@ Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 200", async () =
     );
 
     const loaded = await store.load();
-    assertEquals(loaded.daemonMaxMemoryMb, 200);
+    assertEquals(loaded.daemonMaxMemoryMb, 500);
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }

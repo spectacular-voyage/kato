@@ -65,7 +65,7 @@ export interface DaemonRuntimeLoopOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
+const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 60 * 60_000;
 const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 
 function sleep(ms: number): Promise<void> {
@@ -110,6 +110,7 @@ interface ProcessInChatRecordingUpdatesOptions {
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
+  processEventsFromMs: number;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -360,6 +361,7 @@ async function processInChatRecordingUpdates(
     recordingPipeline,
     operationalLogger,
     auditLogger,
+    processEventsFromMs,
   } = options;
 
   // Use metadata-only listing to avoid deep-cloning events for every session
@@ -401,17 +403,26 @@ async function processInChatRecordingUpdates(
     const signatures = snapshot.events.map(makeRuntimeEventSignature);
     const currentSignatureSet = new Set(signatures);
 
+    const state = existingState ?? {
+      seenEventSignatures: new Set<string>(),
+      lastSeenFileModifiedAtMs: currentFileModifiedAtMs,
+    };
     if (!existingState) {
-      sessionEventStates.set(sessionKey, {
-        seenEventSignatures: currentSignatureSet,
-        lastSeenFileModifiedAtMs: currentFileModifiedAtMs,
-      });
-      continue;
+      for (let i = 0; i < snapshot.events.length; i += 1) {
+        const event = snapshot.events[i];
+        if (!event) continue;
+        const signature = signatures[i] ?? makeRuntimeEventSignature(event);
+        const eventTimeMs = readTimeMs(event.timestamp);
+        if (eventTimeMs === undefined || eventTimeMs < processEventsFromMs) {
+          state.seenEventSignatures.add(signature);
+        }
+      }
+      sessionEventStates.set(sessionKey, state);
     }
 
-    for (const seenSignature of Array.from(existingState.seenEventSignatures)) {
+    for (const seenSignature of Array.from(state.seenEventSignatures)) {
       if (!currentSignatureSet.has(seenSignature)) {
-        existingState.seenEventSignatures.delete(seenSignature);
+        state.seenEventSignatures.delete(seenSignature);
       }
     }
 
@@ -420,8 +431,8 @@ async function processInChatRecordingUpdates(
       if (!event) continue;
 
       const signature = signatures[i] ?? makeRuntimeEventSignature(event);
-      if (existingState.seenEventSignatures.has(signature)) continue;
-      existingState.seenEventSignatures.add(signature);
+      if (state.seenEventSignatures.has(signature)) continue;
+      state.seenEventSignatures.add(signature);
 
       // Only apply control commands from message.user events.
       if (event.kind === "message.user") {
@@ -468,7 +479,7 @@ async function processInChatRecordingUpdates(
       }
     }
 
-    existingState.lastSeenFileModifiedAtMs = currentFileModifiedAtMs;
+    state.lastSeenFileModifiedAtMs = currentFileModifiedAtMs;
   }
 
   for (const sessionKey of Array.from(sessionEventStates.keys())) {
@@ -764,6 +775,7 @@ export async function runDaemonRuntimeLoop(
   let snapshot = createDefaultStatusSnapshot(now());
   snapshot = { ...snapshot, daemonRunning: true, daemonPid: pid };
   await statusStore.save(snapshot);
+  const processEventsFromMs = now().getTime();
 
   await operationalLogger.info(
     "daemon.runtime.started",
@@ -859,6 +871,7 @@ export async function runDaemonRuntimeLoop(
           recordingPipeline,
           operationalLogger,
           auditLogger,
+          processEventsFromMs,
         });
       } catch (error) {
         await operationalLogger.error(
