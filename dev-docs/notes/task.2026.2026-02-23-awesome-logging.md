@@ -2,7 +2,7 @@
 id: 451qv7hh06v1gwe3dklz0i5
 title: 2026 02 23 Awesome Logging
 desc: ""
-updated: 1771983577193
+updated: 1771997844711
 created: 1771871047984
 ---
 
@@ -42,7 +42,7 @@ Make logging high-signal, configurable, and production-ready:
 - [ ] 1. Event taxonomy and channel ownership
 - [x] 2. Audit coverage for access-failure events
 - [x] 3. Log level configuration
-- [ ] 4. LogLayer adoption/migration
+- [x] 4. LogLayer adoption/migration (phase 1 parity adapter seam)
 - [ ] 5. OpenTelemetry plugin + codebase-wide instrumentation baseline
 - [ ] 6. Tests and docs updates (final pass after LogLayer/OTel)
 

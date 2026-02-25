@@ -723,7 +723,7 @@ export async function runDaemonRuntimeLoop(
       try {
         const result = await runner.poll();
         if (result.sessionsUpdated > 0 || result.eventsObserved > 0) {
-          await operationalLogger.info(
+          await operationalLogger.debug(
             "provider.ingestion.poll",
             "Provider ingestion poll observed updates",
             {

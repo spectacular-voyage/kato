@@ -27,7 +27,8 @@
     "dependencies": [
       "jsr:@std/assert@1",
       "jsr:@std/cli@1",
-      "jsr:@std/path@1"
+      "jsr:@std/path@1",
+      "npm:loglayer@9.1.0"
     ]
   }
 }

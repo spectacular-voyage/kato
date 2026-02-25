@@ -1,26 +1,11 @@
 import { dirname } from "@std/path";
+import {
+  createLogLayerChannel,
+  type LogLayerChannelLike,
+} from "./loglayer_adapter.ts";
+import type { LogLevel, LogRecord, LogSink } from "./log_record.ts";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
-
-export interface LogRecord {
-  timestamp: string;
-  level: LogLevel;
-  channel: "operational" | "security-audit";
-  event: string;
-  message: string;
-  attributes?: Record<string, unknown>;
-}
-
-export interface LogSink {
-  write(record: LogRecord): Promise<void> | void;
-}
-
-const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-};
+export type { LogLevel, LogRecord, LogSink } from "./log_record.ts";
 
 export interface StructuredLoggerOptions {
   minLevel?: LogLevel;
@@ -29,17 +14,18 @@ export interface StructuredLoggerOptions {
 }
 
 export class StructuredLogger {
-  private readonly minLevel: LogLevel;
-  private readonly channel: LogRecord["channel"];
-  private readonly now: () => Date;
+  private readonly channelLogger: LogLayerChannelLike;
 
   constructor(
     private readonly sinks: readonly LogSink[],
     options: StructuredLoggerOptions,
   ) {
-    this.minLevel = options.minLevel ?? "info";
-    this.channel = options.channel;
-    this.now = options.now ?? (() => new Date());
+    this.channelLogger = createLogLayerChannel({
+      channel: options.channel,
+      minLevel: options.minLevel ?? "info",
+      now: options.now ?? (() => new Date()),
+      transports: this.sinks,
+    });
   }
 
   async log(
@@ -48,24 +34,7 @@ export class StructuredLogger {
     message: string,
     attributes?: Record<string, unknown>,
   ): Promise<void> {
-    if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[this.minLevel]) {
-      return;
-    }
-
-    const record: LogRecord = {
-      timestamp: this.now().toISOString(),
-      level,
-      channel: this.channel,
-      event,
-      message,
-      ...(attributes && Object.keys(attributes).length > 0
-        ? { attributes }
-        : {}),
-    };
-
-    for (const sink of this.sinks) {
-      await sink.write(record);
-    }
+    await this.channelLogger.log({ level, event, message, attributes });
   }
 
   debug(
