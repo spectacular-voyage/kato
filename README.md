@@ -122,7 +122,7 @@ Default config shape:
     "operationalLevel": "info",
     "auditLevel": "info"
   },
-  "daemonMaxMemoryMb": 200
+  "daemonMaxMemoryMb": 500
 }
 ```
 

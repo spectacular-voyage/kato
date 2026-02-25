@@ -1319,7 +1319,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
         "m1",
         "message.user",
         "::record @notes/old.md\nold command",
-        "2026-02-22T10:00:00.000Z",
+        "2026-02-22T09:59:59.000Z",
       );
       const newCommandMessage = makeEvent(
         "m2",
@@ -1724,6 +1724,347 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
   assertEquals(rotatedTargets, ["notes/captured.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
+
+Deno.test(
+  "runDaemonRuntimeLoop applies in-chat ::capture on first seen snapshot when event is newer than daemon start",
+  async () => {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-first-seen-capture",
+            cursor: { kind: "byte-offset", value: 10 },
+            events: [
+              makeEvent(
+                "m1",
+                "message.user",
+                "::capture notes/first-seen.md",
+                "2026-02-22T10:00:01.000Z",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        if (pollCount >= 2) {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        }
+        return Promise.resolve([]);
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const callOrder: string[] = [];
+    const captureTargets: string[] = [];
+    const rotatedTargets: string[] = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording(input) {
+        callOrder.push("record");
+        rotatedTargets.push(input.targetPath);
+        const nowIso = "2026-02-22T10:00:01.000Z";
+        return Promise.resolve({
+          recordingId: "rec-first-seen",
+          provider: input.provider,
+          sessionId: input.sessionId,
+          outputPath: input.targetPath,
+          startedAt: nowIso,
+          lastWriteAt: nowIso,
+        });
+      },
+      captureSnapshot(input) {
+        callOrder.push("capture");
+        captureTargets.push(input.targetPath);
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({
+          appended: false,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(callOrder, ["capture", "record"]);
+    assertEquals(captureTargets, ["notes/first-seen.md"]);
+    assertEquals(rotatedTargets, ["notes/first-seen.md"]);
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop does not replay in-chat commands older than daemon start on first seen snapshot",
+  async () => {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-prestart-capture",
+            cursor: { kind: "byte-offset", value: 10 },
+            events: [
+              makeEvent(
+                "old-capture",
+                "message.user",
+                "::capture notes/old-command.md",
+                "2026-02-22T09:59:59.000Z",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        if (pollCount >= 2) {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        }
+        return Promise.resolve([]);
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let captureCalls = 0;
+    let recordCalls = 0;
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        recordCalls += 1;
+        throw new Error("should not be called");
+      },
+      captureSnapshot() {
+        captureCalls += 1;
+        throw new Error("should not be called");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({
+          appended: false,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(captureCalls, 0);
+    assertEquals(recordCalls, 0);
+  },
+);
 
 Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing reports errors", async () => {
   let currentStatus: DaemonStatusSnapshot = {

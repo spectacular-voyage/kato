@@ -683,3 +683,7 @@ Anything left?
 # <synthetic>_2026-02-25_0734_09
 
 API Error: Rate limit reached
+
+# <synthetic>_2026-02-25_0739_32
+
+Prompt is too long

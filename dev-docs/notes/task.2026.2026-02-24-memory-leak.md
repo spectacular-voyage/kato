@@ -2,7 +2,7 @@
 id: t78zclylrptbtn05ityl4rm
 title: 2026 02 24 Memory Leak
 desc: ''
-updated: 1772003421990
+updated: 1772034557412
 created: 1772003421990
 ---
 
@@ -93,9 +93,9 @@ Files:
 
 ## Acceptance Criteria
 
-- [ ] `heapUsed` stabilizes under idle conditions (no conversational activity)
-- [ ] `evictions` fire when `daemonMaxMemoryMb` is exceeded under load
-- [ ] `deno task ci` passes
+- [x] `heapUsed` stabilizes under idle conditions (no conversational activity)
+- [x] `evictions` fire when `daemonMaxMemoryMb` is exceeded under load
+- [x] `deno task ci` passes
 
 ## Open Questions
 

@@ -13,7 +13,7 @@ import {
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
-const DEFAULT_DAEMON_MAX_MEMORY_MB = 200;
+const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
   "debug",
   "info",
@@ -488,8 +488,8 @@ export function createDefaultRuntimeConfig(options: {
     : undefined;
   const resolvedDaemonMaxMemoryMb = options.daemonMaxMemoryMb ??
     (parsedEnvMemoryMb !== undefined &&
-        Number.isInteger(parsedEnvMemoryMb) &&
-        parsedEnvMemoryMb > 0
+      Number.isInteger(parsedEnvMemoryMb) &&
+      parsedEnvMemoryMb > 0
       ? parsedEnvMemoryMb
       : undefined) ??
     DEFAULT_DAEMON_MAX_MEMORY_MB;
@@ -520,7 +520,7 @@ export function createDefaultRuntimeConfig(options: {
 }
 
 export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
-  constructor(private readonly configPath: string) {}
+  constructor(private readonly configPath: string) { }
 
   async load(): Promise<RuntimeConfig> {
     const raw = await Deno.readTextFile(this.configPath);
