@@ -575,7 +575,8 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
 
     const existingFrontmatter = await extractExistingFrontmatter(outputPath);
     if (existingFrontmatter) {
-      const hasAccretiveInputs = (options.frontmatterRecordingIds?.length ?? 0) >
+      const hasAccretiveInputs =
+        (options.frontmatterRecordingIds?.length ?? 0) >
           0 ||
         (options.frontmatterTags?.length ?? 0) > 0;
       const mergedFrontmatter = hasAccretiveInputs

@@ -350,3 +350,274 @@ I’ve fixed the merge gating logic in `markdown_writer.ts`; next I’m patching
 **Planning targeted test runs**
 
 </details>
+
+<details>
+<summary>Thinking</summary>
+
+**Revising poll test with watch harness**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1053_43
+
+The failing sentinel test didn’t re-ingest on the second poll because the session wasn’t marked dirty. I’m adjusting the test to simulate a file modify event between polls so we can verify “no second recovery at offset 0.”
+
+<details>
+<summary>Thinking</summary>
+
+**Running subset tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Running full test suite**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Checking code formatting**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reporting current plan and next steps**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1054_37
+
+I implemented the review fixes and the remaining step is to format the touched files and re-run the test suite to confirm everything is clean. I’m checking the current workspace state now, then I’ll apply formatting and validate.
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting committed changes**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1054_39
+
+I confirmed there are only two unstaged files left in this workspace state; I’ll inspect the diff to verify whether only test formatting remains before running checks.
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying code status and formatting**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1054_45
+
+I found one remaining functional edit in `tests/provider-ingestion_test.ts` plus the conversation note file; I’ll run formatting and tests next to confirm the code path is still green.
+
+<details>
+<summary>Thinking</summary>
+
+**Deciding formatting and testing strategy**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1054_53
+
+`deno fmt --check` flagged one test file, so I’m formatting that file now and then running the full test suite to make sure nothing regressed.
+
+<details>
+<summary>Thinking</summary>
+
+**Running full repo format check**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Running targeted formatting and tests**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1055_09
+
+Repo-wide `deno fmt --check` is noisy because there are many pre-existing unformatted docs/files unrelated to this task, so I’m limiting checks to the touched files and validating with targeted tests for the implemented fixes.
+
+<details>
+<summary>Thinking</summary>
+
+**Running targeted tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Checking current git status**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing recent commits**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1055_24
+
+Targeted tests are passing (`36 passed, 0 failed`). I’m now checking what remains uncommitted so I can report exactly what is still open versus already addressed.
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing uncommitted test changes**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying unresolved review points**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting username config handling**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1055_43
+
+I’m verifying the remaining Claude comments against current code so I can answer precisely which issues are still open and which are now closed.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning deeper markdown_writer review**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting snippet ingestion logic**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying config loading and participant logic**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting default username handling**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing remaining minor issues**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing test changes and summarizing implementation**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning commit file display**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning runtime-config test check**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning line number gathering**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Preparing test context extraction**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Preparing to add line numbers for config defaults**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Assessing remaining uncommitted test changes**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Deciding test run for update**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1057_00
+
+I’ve validated the focused areas from the review; I’ll do one full `deno task test` pass now so I can report any remaining open issues with confidence.
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying clean git status**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing implemented fixes and open issues**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1057_32
+
+Implemented and validated.
+
+1. Fixed the frontmatter merge fragility by switching to parse + structured re-render (no raw line surgery), and kept tags/recordingIds accretive in [frontmatter.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/frontmatter.ts:231).  
+2. Fixed the `includeFrontmatter=false` gating bug so accretive fields still merge on existing files in [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:486) and [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:576).  
+3. Added Codex snippet-recovery guardrails: file-size cap + null sentinel cache to prevent repeated full-file retries in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:123) and [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:1404).  
+4. Added/updated tests in [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:166) and [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:428).
+
+Validation:
+- `deno test --allow-read --allow-write=.kato --allow-env=HOME,USERPROFILE,KATO_HOME tests/writer-markdown_test.ts tests/provider-ingestion_test.ts`
+- `deno task test`
+- Result: `248 passed, 0 failed`.
+
+Remaining open items from Claude’s list are minor:
+1. `defaultParticipantUsername` still uses `string` with `""` default in [config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts:19).  
+2. `resolveConversationTitle` call dedup/memoization in daemon runtime is still an optimization opportunity.

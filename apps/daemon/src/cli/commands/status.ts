@@ -118,7 +118,9 @@ function summarizeRecordingsFromSessions(
   return {
     activeRecordings: activeSessionsWithRecording.length,
     destinations: new Set(
-      activeSessionsWithRecording.map((session) => session.recording!.outputPath),
+      activeSessionsWithRecording.map((session) =>
+        session.recording!.outputPath
+      ),
     ).size,
   };
 }

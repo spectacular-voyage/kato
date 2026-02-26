@@ -260,7 +260,10 @@ Deno.test(
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "recordingIds: [rec-old, rec-new]");
-      assertStringIncludes(content, "tags: [provider.codex, kind.message.assistant]");
+      assertStringIncludes(
+        content,
+        "tags: [provider.codex, kind.message.assistant]",
+      );
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await Deno.remove(root, { recursive: true }).catch(() => {});
