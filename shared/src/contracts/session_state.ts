@@ -107,10 +107,14 @@ function isRecordingPeriod(value: unknown): value is SessionRecordingPeriodV1 {
   ) {
     return false;
   }
-  if (value["startedAt"] !== undefined && typeof value["startedAt"] !== "string") {
+  if (
+    value["startedAt"] !== undefined && typeof value["startedAt"] !== "string"
+  ) {
     return false;
   }
-  if (value["stoppedAt"] !== undefined && typeof value["stoppedAt"] !== "string") {
+  if (
+    value["stoppedAt"] !== undefined && typeof value["stoppedAt"] !== "string"
+  ) {
     return false;
   }
   if (
@@ -152,7 +156,9 @@ function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
   ) {
     return false;
   }
-  if (value["createdAt"] !== undefined && typeof value["createdAt"] !== "string") {
+  if (
+    value["createdAt"] !== undefined && typeof value["createdAt"] !== "string"
+  ) {
     return false;
   }
   if (
@@ -164,7 +170,9 @@ function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
   return true;
 }
 
-export function isSessionMetadataV1(value: unknown): value is SessionMetadataV1 {
+export function isSessionMetadataV1(
+  value: unknown,
+): value is SessionMetadataV1 {
   if (!isRecord(value)) {
     return false;
   }

@@ -144,16 +144,18 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
 }
 
 function makeRuntimeEventSignature(event: ConversationEvent): string {
-  const base = `${event.kind}\0${event.source.providerEventType}\0${event.source.providerEventId ?? ""
-    }\0${event.timestamp}`;
+  const base = `${event.kind}\0${event.source.providerEventType}\0${
+    event.source.providerEventId ?? ""
+  }\0${event.timestamp}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
     case "message.system":
       return `${base}\0${event.content}`;
     case "tool.call":
-      return `${base}\0${event.toolCallId}\0${event.name}\0${event.description ?? ""
-        }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
+      return `${base}\0${event.toolCallId}\0${event.name}\0${
+        event.description ?? ""
+      }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
     case "tool.result":
       return `${base}\0${event.toolCallId}\0${event.result}`;
     case "thinking":
@@ -239,7 +241,9 @@ function makeDefaultRecordingDestinationPath(
 ): string {
   const iso = now.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "Z");
   const shortSession = sessionId.slice(0, 8);
-  const fileName = `${sanitizeFilenamePart(provider)}-${shortSession}-${iso}.md`;
+  const fileName = `${
+    sanitizeFilenamePart(provider)
+  }-${shortSession}-${iso}.md`;
   return join(resolveDefaultRecordingRootDir(), fileName);
 }
 
@@ -382,7 +386,9 @@ async function applyPersistentStopCommand(
     }
   } else if (normalizedArg.toLowerCase().startsWith("dest:")) {
     const destination = normalizeCommandTargetPath(normalizedArg.slice(5));
-    targets = destination ? resolveRecordingsByDestination(metadata, destination) : [];
+    targets = destination
+      ? resolveRecordingsByDestination(metadata, destination)
+      : [];
   } else {
     const idMatches = resolveRecordingsByIdPrefix(metadata, normalizedArg);
     const destMatches = resolveRecordingsByDestination(metadata, normalizedArg);
@@ -941,7 +947,9 @@ async function processInChatRecordingUpdates(
   }
 }
 
-function readRecordingStartedAt(recording: SessionMetadataV1["recordings"][number]): string {
+function readRecordingStartedAt(
+  recording: SessionMetadataV1["recordings"][number],
+): string {
   for (let i = recording.periods.length - 1; i >= 0; i -= 1) {
     const period = recording.periods[i];
     if (period?.startedAt) {
@@ -1048,7 +1056,9 @@ async function processPersistentRecordingUpdates(
 
       try {
         if (!recordingPipeline.appendToDestination) {
-          throw new Error("Recording pipeline does not support appendToDestination");
+          throw new Error(
+            "Recording pipeline does not support appendToDestination",
+          );
         }
         await recordingPipeline.appendToDestination({
           provider,
@@ -1166,11 +1176,16 @@ function toSessionStatuses(
 ): DaemonSessionStatus[] {
   const recordingByKey = new Map<string, ActiveRecording>();
   for (const rec of activeRecordings) {
-    recordingByKey.set(makeSessionProcessingKey(rec.provider, rec.sessionId), rec);
+    recordingByKey.set(
+      makeSessionProcessingKey(rec.provider, rec.sessionId),
+      rec,
+    );
   }
 
   const statuses = sessionSnapshots.map((snap) => {
-    const metadata = sessionMetadataByKey?.get(`${snap.provider}:${snap.sessionId}`);
+    const metadata = sessionMetadataByKey?.get(
+      `${snap.provider}:${snap.sessionId}`,
+    );
     const rec = recordingByKey.get(
       makeSessionProcessingKey(snap.provider, snap.sessionId),
     );
@@ -1827,7 +1842,7 @@ async function handleControlRequest(
       : undefined;
     const outputPath = isRecord(payload)
       ? readString(payload["resolvedOutputPath"]) ??
-      readString(payload["outputPath"])
+        readString(payload["outputPath"])
       : undefined;
     const formatRaw = isRecord(payload)
       ? readString(payload["format"])

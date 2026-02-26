@@ -964,13 +964,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let stateMetadata: SessionMetadataV1 | undefined;
     if (this.sessionStateStore) {
       try {
-        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata({
-          provider: this.provider,
-          providerSessionId: sessionId,
-          sourceFilePath: session.filePath,
-          initialCursor: this.cursors.get(sessionId) ??
-            makeDefaultSessionCursor(this.provider),
-        });
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+          {
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sourceFilePath: session.filePath,
+            initialCursor: this.cursors.get(sessionId) ??
+              makeDefaultSessionCursor(this.provider),
+          },
+        );
         this.failedClosedSessions.delete(`${this.provider}:${sessionId}`);
       } catch (error) {
         if (error instanceof SessionStateLoadError) {
@@ -1002,7 +1004,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
     }
 
-    let existingCursor = stateMetadata?.ingestCursor ?? this.cursors.get(sessionId);
+    let existingCursor = stateMetadata?.ingestCursor ??
+      this.cursors.get(sessionId);
     const resumeSource = stateMetadata
       ? "persisted"
       : this.cursors.has(sessionId)
@@ -1092,7 +1095,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
         if (!anchorsEqual(expectedAnchor, currentAnchor)) {
           const previousOffset = fromOffset;
-          const realignedIndex = findGeminiAnchorIndex(messages, expectedAnchor);
+          const realignedIndex = findGeminiAnchorIndex(
+            messages,
+            expectedAnchor,
+          );
           if (realignedIndex === undefined) {
             fromOffset = 0;
             existingCursor = makeItemIndexCursor(0);
@@ -1139,7 +1145,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
         recording.desiredState === "on"
       );
-      const shouldAppendTwin = this.autoGenerateSnapshots || hasActiveRecordings;
+      const shouldAppendTwin = this.autoGenerateSnapshots ||
+        hasActiveRecordings;
       if (shouldAppendTwin) {
         let twinExists = true;
         try {
@@ -1147,7 +1154,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         } catch (error) {
           if (error instanceof Deno.errors.NotFound) {
             twinExists = false;
-          } else if (await this.handleReadDenied(error, "stat", stateMetadata.twinPath)) {
+          } else if (
+            await this.handleReadDenied(error, "stat", stateMetadata.twinPath)
+          ) {
             return { updated: false, eventsObserved: 0 };
           } else {
             throw error;
@@ -1187,10 +1196,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               )
             ) {
               bootstrapEvents.push(event);
-              if (cursor.kind === "byte-offset" || cursor.kind === "item-index") {
+              if (
+                cursor.kind === "byte-offset" || cursor.kind === "item-index"
+              ) {
                 const current = resolveCursorPosition(bootstrapCursor);
                 const incoming = resolveCursorPosition(cursor);
-                if (cursor.kind !== bootstrapCursor.kind || incoming > current) {
+                if (
+                  cursor.kind !== bootstrapCursor.kind || incoming > current
+                ) {
                   bootstrapCursor = cursor;
                 }
               } else {
@@ -1289,9 +1302,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
         recording.desiredState === "on"
       );
-      const shouldAppendTwin = this.autoGenerateSnapshots || hasActiveRecordings;
+      const shouldAppendTwin = this.autoGenerateSnapshots ||
+        hasActiveRecordings;
       let appendedTwinCount = 0;
-      let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> = [];
+      let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
+        [];
 
       if (shouldAppendTwin && incomingEvents.length > 0) {
         const twinDrafts = mapConversationEventsToTwin({
@@ -1337,7 +1352,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               nextAnchor = buildGeminiMessageAnchor(message);
             }
           } catch (error) {
-            if (!(await this.handleReadDenied(error, "open", session.filePath))) {
+            if (
+              !(await this.handleReadDenied(error, "open", session.filePath))
+            ) {
               throw error;
             }
           }
@@ -1348,10 +1365,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         }
       }
 
-      const cursorChanged = !cursorsEqual(stateMetadata.ingestCursor, latestCursor);
-      const fileMtimeChanged = stateMetadata.lastObservedMtimeMs !== fileModifiedAtMs;
-      const sourceFileChanged = stateMetadata.sourceFilePath !== session.filePath;
-      if (cursorChanged || fileMtimeChanged || sourceFileChanged || anchorChanged) {
+      const cursorChanged = !cursorsEqual(
+        stateMetadata.ingestCursor,
+        latestCursor,
+      );
+      const fileMtimeChanged =
+        stateMetadata.lastObservedMtimeMs !== fileModifiedAtMs;
+      const sourceFileChanged =
+        stateMetadata.sourceFilePath !== session.filePath;
+      if (
+        cursorChanged || fileMtimeChanged || sourceFileChanged || anchorChanged
+      ) {
         stateMetadata.ingestCursor = latestCursor;
         stateMetadata.lastObservedMtimeMs = fileModifiedAtMs;
         stateMetadata.sourceFilePath = session.filePath;
@@ -1367,16 +1391,19 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
       if (shouldHydrateSnapshot) {
         if (shouldAppendTwin) {
-          const existingSnapshotEvents = currentSnapshot?.provider === this.provider
-            ? currentSnapshot.events
-            : undefined;
+          const existingSnapshotEvents =
+            currentSnapshot?.provider === this.provider
+              ? currentSnapshot.events
+              : undefined;
 
           if (!existingSnapshotEvents) {
             const twinEvents = await this.sessionStateStore.readTwinEvents(
               stateMetadata,
               1,
             );
-            const rebuiltSnapshotEvents = mapTwinEventsToConversation(twinEvents);
+            const rebuiltSnapshotEvents = mapTwinEventsToConversation(
+              twinEvents,
+            );
             this.sessionSnapshotStore.upsert({
               provider: this.provider,
               sessionId,
@@ -1388,7 +1415,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             const appendedSnapshotEvents = mapTwinEventsToConversation(
               appendedTwinEvents,
             );
-            const merged = mergeEvents(existingSnapshotEvents, appendedSnapshotEvents);
+            const merged = mergeEvents(
+              existingSnapshotEvents,
+              appendedSnapshotEvents,
+            );
             if (merged.droppedEvents > 0) {
               await this.operationalLogger.debug(
                 "provider.ingestion.events_dropped",
@@ -1557,8 +1587,8 @@ export function createDefaultProviderIngestionRunners(
 ): ProviderIngestionRunner[] {
   const resolveAutoGenerate = (provider: "claude" | "codex" | "gemini") =>
     options.providerAutoGenerateSnapshots?.[provider] ??
-    options.globalAutoGenerateSnapshots ??
-    false;
+      options.globalAutoGenerateSnapshots ??
+      false;
 
   return [
     createClaudeIngestionRunner({

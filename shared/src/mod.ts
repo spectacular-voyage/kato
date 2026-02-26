@@ -48,9 +48,9 @@ export type {
   DecisionStatus,
 } from "./contracts/events.ts";
 export {
-  SESSION_TWIN_SCHEMA_VERSION,
   isSessionTwinEventV1,
   isSessionTwinKind,
+  SESSION_TWIN_SCHEMA_VERSION,
 } from "./contracts/session_twin.ts";
 export type {
   SessionTwinEventSource,
@@ -61,9 +61,9 @@ export type {
 } from "./contracts/session_twin.ts";
 export {
   DAEMON_CONTROL_SCHEMA_VERSION,
-  SESSION_METADATA_SCHEMA_VERSION,
   isDaemonControlIndexV1,
   isSessionMetadataV1,
+  SESSION_METADATA_SCHEMA_VERSION,
 } from "./contracts/session_state.ts";
 export type {
   DaemonControlIndexV1,

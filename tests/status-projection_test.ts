@@ -181,8 +181,18 @@ Deno.test("projectSessionStatus marks old session as stale", () => {
 
 Deno.test("filterSessionsForDisplay excludes stale when includeStale=false", () => {
   const sessions = [
-    { provider: "claude", sessionId: "a", stale: false, updatedAt: "2026-02-24T10:00:00.000Z" },
-    { provider: "claude", sessionId: "b", stale: true, updatedAt: "2026-02-24T09:00:00.000Z" },
+    {
+      provider: "claude",
+      sessionId: "a",
+      stale: false,
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
+    {
+      provider: "claude",
+      sessionId: "b",
+      stale: true,
+      updatedAt: "2026-02-24T09:00:00.000Z",
+    },
   ];
   const result = filterSessionsForDisplay(sessions as never, {
     includeStale: false,
@@ -193,8 +203,18 @@ Deno.test("filterSessionsForDisplay excludes stale when includeStale=false", () 
 
 Deno.test("filterSessionsForDisplay includes stale when includeStale=true", () => {
   const sessions = [
-    { provider: "claude", sessionId: "a", stale: false, updatedAt: "2026-02-24T10:00:00.000Z" },
-    { provider: "claude", sessionId: "b", stale: true, updatedAt: "2026-02-24T09:00:00.000Z" },
+    {
+      provider: "claude",
+      sessionId: "a",
+      stale: false,
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
+    {
+      provider: "claude",
+      sessionId: "b",
+      stale: true,
+      updatedAt: "2026-02-24T09:00:00.000Z",
+    },
   ];
   const result = filterSessionsForDisplay(sessions as never, {
     includeStale: true,
@@ -204,8 +224,18 @@ Deno.test("filterSessionsForDisplay includes stale when includeStale=true", () =
 
 Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
   const sessions = [
-    { provider: "claude", sessionId: "older", stale: false, updatedAt: "2026-02-24T09:00:00.000Z" },
-    { provider: "claude", sessionId: "newer", stale: false, updatedAt: "2026-02-24T10:00:00.000Z" },
+    {
+      provider: "claude",
+      sessionId: "older",
+      stale: false,
+      updatedAt: "2026-02-24T09:00:00.000Z",
+    },
+    {
+      provider: "claude",
+      sessionId: "newer",
+      stale: false,
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
   ];
   const result = filterSessionsForDisplay(sessions as never, {
     includeStale: true,
@@ -229,7 +259,11 @@ Deno.test("sortSessionsByRecency uses lastWriteAt over updatedAt", () => {
       sessionId: "with-rec",
       stale: false,
       updatedAt: "2026-02-24T09:00:00.000Z",
-      recording: { outputPath: "/out.md", startedAt: "2026-02-24T09:00:00.000Z", lastWriteAt: "2026-02-24T12:00:00.000Z" },
+      recording: {
+        outputPath: "/out.md",
+        startedAt: "2026-02-24T09:00:00.000Z",
+        lastWriteAt: "2026-02-24T12:00:00.000Z",
+      },
     },
   ];
   const result = sortSessionsByRecency(sessions as never);

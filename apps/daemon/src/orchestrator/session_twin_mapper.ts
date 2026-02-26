@@ -52,7 +52,11 @@ function makeBaseDraft(
   kind: SessionTwinEventV1["kind"],
   emitIndex: number,
 ): TwinEventDraft {
-  const providerTimestamp = eventTimestampForTwin(event, input.provider, input.mode);
+  const providerTimestamp = eventTimestampForTwin(
+    event,
+    input.provider,
+    input.mode,
+  );
   const capturedAt = readCapturedAt(input.mode, input.capturedAt);
 
   return {
@@ -208,7 +212,11 @@ export function mapConversationEventsToTwin(
           ...(event.phase ? { phase: event.phase } : {}),
         });
         const commands = toKatoCommandPayloads(event.content);
-        for (let commandIndex = 0; commandIndex < commands.length; commandIndex++) {
+        for (
+          let commandIndex = 0;
+          commandIndex < commands.length;
+          commandIndex++
+        ) {
           emitWith(
             "user.kato-command",
             commands[commandIndex]!,
@@ -250,7 +258,9 @@ export function mapConversationEventsToTwin(
             ...(metadata.providerQuestionId
               ? { providerQuestionId: metadata.providerQuestionId }
               : {}),
-            ...(metadata.options.length > 0 ? { options: metadata.options } : {}),
+            ...(metadata.options.length > 0
+              ? { options: metadata.options }
+              : {}),
             ...(metadata.multiSelect !== undefined
               ? { multiSelect: metadata.multiSelect }
               : {}),
@@ -352,7 +362,9 @@ export function mapTwinEventsToConversation(
           role: "user",
           content: text,
           ...(typeof event.payload["phase"] === "string"
-            ? { phase: event.payload["phase"] as "commentary" | "final" | "other" }
+            ? {
+              phase: event.payload["phase"] as "commentary" | "final" | "other",
+            }
             : {}),
         } as ConversationEvent);
         break;
@@ -381,7 +393,9 @@ export function mapTwinEventsToConversation(
           content: text,
           ...(event.model ? { model: event.model } : {}),
           ...(typeof event.payload["phase"] === "string"
-            ? { phase: event.payload["phase"] as "commentary" | "final" | "other" }
+            ? {
+              phase: event.payload["phase"] as "commentary" | "final" | "other",
+            }
             : {}),
         } as ConversationEvent);
         break;

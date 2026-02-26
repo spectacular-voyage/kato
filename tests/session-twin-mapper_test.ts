@@ -51,7 +51,9 @@ Deno.test("mapConversationEventsToTwin emits canonical kinds and command events"
   assert(twin.some((event) => event.kind === "assistant.message"));
   assert(twin.some((event) => event.kind === "user.kato-command"));
 
-  const commandEvents = twin.filter((event) => event.kind === "user.kato-command");
+  const commandEvents = twin.filter((event) =>
+    event.kind === "user.kato-command"
+  );
   assertEquals(commandEvents.length, 2);
   assertEquals(commandEvents[0]?.payload["command"], "start");
   assertEquals(commandEvents[1]?.payload["command"], "stop");
@@ -107,4 +109,3 @@ Deno.test("mapTwinEventsToConversation round-trips message events", () => {
   assertEquals(roundTrip[0]?.kind, "message.user");
   assertEquals(roundTrip[1]?.kind, "message.assistant");
 });
-

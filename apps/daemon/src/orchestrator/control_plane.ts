@@ -1,6 +1,10 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
 import { dirname, join } from "@std/path";
-import { expandHomePath, readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
+import {
+  expandHomePath,
+  readOptionalEnv,
+  resolveHomeDir,
+} from "../utils/env.ts";
 
 const DEFAULT_RUNTIME_DIR_FALLBACK = ".kato/runtime";
 const DEFAULT_KATO_DIRNAME = ".kato";

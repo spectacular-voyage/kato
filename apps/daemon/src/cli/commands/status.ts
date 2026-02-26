@@ -30,7 +30,9 @@ function renderSessionRow(s: DaemonSessionStatus, now: Date): string {
   const marker = s.stale ? "○" : "●";
   const label = s.snippet ? `"${s.snippet}"` : "(no user message)";
   const sessionIdentity = s.providerSessionId
-    ? `${s.provider}/${s.sessionShortId ?? s.sessionId} (${s.providerSessionId})`
+    ? `${s.provider}/${
+      s.sessionShortId ?? s.sessionId
+    } (${s.providerSessionId})`
     : `${s.provider}/${s.sessionId}`;
   const header = `${marker} ${sessionIdentity}: ${label}`;
 
@@ -68,8 +70,10 @@ function renderMemorySection(snapshot: DaemonStatusSnapshot): string | null {
   const snapshotBytes = formatBytes(mem.snapshots.estimatedBytes);
   const overBudget = mem.snapshots.overBudget ? "  ⚠ OVER BUDGET" : "";
 
-  const line1 = `  rss ${rssMb} MB / ${budgetMb} MB budget  ·  snapshots ${snapshotBytes}${overBudget}`;
-  const line2 = `  sessions ${mem.snapshots.sessionCount}  ·  events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
+  const line1 =
+    `  rss ${rssMb} MB / ${budgetMb} MB budget  ·  snapshots ${snapshotBytes}${overBudget}`;
+  const line2 =
+    `  sessions ${mem.snapshots.sessionCount}  ·  events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
   return [line1, line2].join("\n");
 }
 
@@ -183,7 +187,9 @@ async function runLiveMode(
       const stale = isStatusSnapshotStale(snapshot, now);
 
       const refreshedAt = now.toTimeString().slice(0, 8);
-      const header = `kato  ·  ${snapshot.daemonRunning ? "daemon running" : "daemon stopped"}  ·  refreshed ${refreshedAt}`;
+      const header = `kato  ·  ${
+        snapshot.daemonRunning ? "daemon running" : "daemon stopped"
+      }  ·  refreshed ${refreshedAt}`;
 
       const body = renderStatusText(snapshot, {
         showAll: true,

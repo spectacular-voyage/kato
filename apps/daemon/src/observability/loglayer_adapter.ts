@@ -34,7 +34,9 @@ interface LogLayerModuleShape {
   LogLayer?: LogLayerConstructor;
 }
 
-let cachedLogLayerModulePromise: Promise<LogLayerModuleShape | null> | undefined;
+let cachedLogLayerModulePromise:
+  | Promise<LogLayerModuleShape | null>
+  | undefined;
 
 async function loadLogLayerModule(): Promise<LogLayerModuleShape | null> {
   if (cachedLogLayerModulePromise) {
@@ -87,7 +89,10 @@ class JsonlParityLogLayerChannel implements LogLayerChannelLike {
       return;
     }
 
-    await writeRecordToSinks(toRecord(entry, this.options), this.options.transports);
+    await writeRecordToSinks(
+      toRecord(entry, this.options),
+      this.options.transports,
+    );
   }
 }
 

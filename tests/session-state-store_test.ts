@@ -95,4 +95,3 @@ Deno.test("PersistentSessionStateStore persists metadata and rebuilds daemon ind
     assertEquals(rebuiltIndex.sessions[0]?.sessionKey, "codex:session-1");
   });
 });
-

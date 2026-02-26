@@ -105,7 +105,9 @@ export function projectSessionStatus(opts: {
   const result: DaemonSessionStatus = {
     provider: session.provider,
     sessionId: session.sessionId,
-    ...(session.sessionShortId ? { sessionShortId: session.sessionShortId } : {}),
+    ...(session.sessionShortId
+      ? { sessionShortId: session.sessionShortId }
+      : {}),
     ...(session.providerSessionId
       ? { providerSessionId: session.providerSessionId }
       : {}),

@@ -11,7 +11,11 @@ import {
   createDefaultRuntimeFeatureFlags,
   mergeRuntimeFeatureFlags,
 } from "../feature_flags/mod.ts";
-import { expandHomePath, readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
+import {
+  expandHomePath,
+  readOptionalEnv,
+  resolveHomeDir,
+} from "../utils/env.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
@@ -57,11 +61,12 @@ const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "codex",
   "gemini",
 ];
-const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> = [
-  "claude",
-  "codex",
-  "gemini",
-];
+const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> =
+  [
+    "claude",
+    "codex",
+    "gemini",
+  ];
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -525,8 +530,8 @@ export function createDefaultRuntimeConfig(options: {
     : undefined;
   const resolvedDaemonMaxMemoryMb = options.daemonMaxMemoryMb ??
     (parsedEnvMemoryMb !== undefined &&
-      Number.isInteger(parsedEnvMemoryMb) &&
-      parsedEnvMemoryMb > 0
+        Number.isInteger(parsedEnvMemoryMb) &&
+        parsedEnvMemoryMb > 0
       ? parsedEnvMemoryMb
       : undefined) ??
     DEFAULT_DAEMON_MAX_MEMORY_MB;
@@ -562,7 +567,7 @@ export function createDefaultRuntimeConfig(options: {
 }
 
 export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
-  constructor(private readonly configPath: string) { }
+  constructor(private readonly configPath: string) {}
 
   async load(): Promise<RuntimeConfig> {
     const raw = await Deno.readTextFile(this.configPath);

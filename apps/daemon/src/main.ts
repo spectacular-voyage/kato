@@ -18,8 +18,8 @@ import {
   InMemorySessionSnapshotStore,
   PersistentSessionStateStore,
   resolveDefaultDaemonControlIndexPath,
-  resolveDefaultSessionsDir,
   resolveDefaultRuntimeDir,
+  resolveDefaultSessionsDir,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
 import {

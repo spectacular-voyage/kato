@@ -1,9 +1,6 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
-import {
-  CliUsageError,
-  parseDaemonCliArgs,
-} from "../apps/daemon/src/mod.ts";
+import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import { renderStatusText } from "../apps/daemon/src/cli/commands/status.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
@@ -67,7 +64,12 @@ function makeSnapshot(
     sessions,
     memory: {
       daemonMaxMemoryBytes: 200 * 1024 * 1024,
-      process: { rss: 80 * 1024 * 1024, heapTotal: 60 * 1024 * 1024, heapUsed: 40 * 1024 * 1024, external: 1 * 1024 * 1024 },
+      process: {
+        rss: 80 * 1024 * 1024,
+        heapTotal: 60 * 1024 * 1024,
+        heapUsed: 40 * 1024 * 1024,
+        external: 1 * 1024 * 1024,
+      },
       snapshots: {
         estimatedBytes: 20 * 1024 * 1024,
         sessionCount: 3,
@@ -84,7 +86,11 @@ function makeSnapshot(
 const NOW = new Date("2026-02-24T10:00:00.000Z");
 
 Deno.test("renderStatusText: no sessions shows (none)", () => {
-  const out = renderStatusText(makeSnapshot([]), { showAll: false, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -102,7 +108,11 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
       lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
     },
   }];
-  const out = renderStatusText(makeSnapshot(sessions), { showAll: false, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "● claude/abc123");
   assertStringIncludes(out, "how do I configure X");
   assertStringIncludes(out, "/home/user/notes.md");
@@ -124,7 +134,11 @@ Deno.test("renderStatusText: stale session hidden by default", () => {
       stale: true,
     },
   ];
-  const out = renderStatusText(makeSnapshot(sessions), { showAll: false, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "claude/active");
   assertEquals(out.includes("codex/stale"), false);
 });
@@ -138,30 +152,45 @@ Deno.test("renderStatusText: --all includes stale session with circle marker", (
       stale: true,
     },
   ];
-  const out = renderStatusText(makeSnapshot(sessions), { showAll: true, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "○ codex/stale");
   assertStringIncludes(out, "(stale)");
 });
 
 Deno.test("renderStatusText: memory summary line present", () => {
-  const out = renderStatusText(makeSnapshot([]), { showAll: false, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "Memory:");
   assertStringIncludes(out, "MB budget");
   assertStringIncludes(out, "snapshots");
 });
 
 Deno.test("renderStatusText: over-budget shows warning", () => {
-  const out = renderStatusText(makeSnapshot([], true), { showAll: false, now: NOW, stale: false });
+  const out = renderStatusText(makeSnapshot([], true), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+  });
   assertStringIncludes(out, "OVER BUDGET");
 });
 
 Deno.test("renderStatusText: sessionCap limits displayed sessions", () => {
-  const sessions: DaemonSessionStatus[] = Array.from({ length: 10 }, (_, i) => ({
-    provider: "claude",
-    sessionId: `s${i}`,
-    updatedAt: new Date(NOW.getTime() - i * 60_000).toISOString(),
-    stale: false,
-  }));
+  const sessions: DaemonSessionStatus[] = Array.from(
+    { length: 10 },
+    (_, i) => ({
+      provider: "claude",
+      sessionId: `s${i}`,
+      updatedAt: new Date(NOW.getTime() - i * 60_000).toISOString(),
+      stale: false,
+    }),
+  );
   const out = renderStatusText(makeSnapshot(sessions), {
     showAll: true,
     sessionCap: 3,
@@ -179,8 +208,18 @@ Deno.test("renderStatusText: sessionCap limits displayed sessions", () => {
 
 Deno.test("toStatusViewModel: sessions field populated from snapshot", () => {
   const sessions: DaemonSessionStatus[] = [
-    { provider: "claude", sessionId: "a", stale: false, updatedAt: "2026-02-24T10:00:00.000Z" },
-    { provider: "codex", sessionId: "b", stale: true, updatedAt: "2026-02-24T09:00:00.000Z" },
+    {
+      provider: "claude",
+      sessionId: "a",
+      stale: false,
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
+    {
+      provider: "codex",
+      sessionId: "b",
+      stale: true,
+      updatedAt: "2026-02-24T09:00:00.000Z",
+    },
   ];
   const snapshot = makeSnapshot(sessions);
   const vm = toStatusViewModel(snapshot, { includeStale: false });
@@ -191,8 +230,18 @@ Deno.test("toStatusViewModel: sessions field populated from snapshot", () => {
 
 Deno.test("toStatusViewModel: includeStale=true includes stale sessions", () => {
   const sessions: DaemonSessionStatus[] = [
-    { provider: "claude", sessionId: "a", stale: false, updatedAt: "2026-02-24T10:00:00.000Z" },
-    { provider: "codex", sessionId: "b", stale: true, updatedAt: "2026-02-24T09:00:00.000Z" },
+    {
+      provider: "claude",
+      sessionId: "a",
+      stale: false,
+      updatedAt: "2026-02-24T10:00:00.000Z",
+    },
+    {
+      provider: "codex",
+      sessionId: "b",
+      stale: true,
+      updatedAt: "2026-02-24T09:00:00.000Z",
+    },
   ];
   const snapshot = makeSnapshot(sessions);
   const vm = toStatusViewModel(snapshot, { includeStale: true });

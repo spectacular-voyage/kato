@@ -718,14 +718,19 @@ export async function* parseCodexEvents(
               ...proposedDecisionBase,
               kind: "decision",
               decisionId: proposedDecisionId,
-              decisionKey: normalizeDecisionKey(providerQuestionId, decisionIndex),
+              decisionKey: normalizeDecisionKey(
+                providerQuestionId,
+                decisionIndex,
+              ),
               summary: questionText,
               status: "proposed",
               decidedBy: "assistant",
               basisEventIds: [String(toolCallBase["eventId"])],
               metadata: {
                 providerQuestionId,
-                ...(questionHeader.length > 0 ? { header: questionHeader } : {}),
+                ...(questionHeader.length > 0
+                  ? { header: questionHeader }
+                  : {}),
                 ...(options.length > 0 ? { options } : {}),
                 ...(typeof question["multiSelect"] === "boolean"
                   ? { multiSelect: question["multiSelect"] }

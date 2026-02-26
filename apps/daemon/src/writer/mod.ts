@@ -16,9 +16,9 @@ export {
 export { JsonlConversationWriter } from "./jsonl_writer.ts";
 export type {
   ActiveRecording,
-  AppendToDestinationInput,
   AppendToActiveRecordingInput,
   AppendToActiveRecordingResult,
+  AppendToDestinationInput,
   ExportFormat,
   RecordingPipelineLike,
   RecordingPipelineOptions,

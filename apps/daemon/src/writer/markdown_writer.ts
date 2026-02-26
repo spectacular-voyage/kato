@@ -238,7 +238,8 @@ export function renderEventsToMarkdown(
           previousEvent.turnId === event.turnId &&
           previousEvent.content.trim() === normalizedContent
         ) {
-          const keepFinalOverCommentary = previousEvent.phase === "commentary" &&
+          const keepFinalOverCommentary =
+            previousEvent.phase === "commentary" &&
             event.phase === "final";
           if (!keepFinalOverCommentary) {
             continue;

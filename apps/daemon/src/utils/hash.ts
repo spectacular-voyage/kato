@@ -21,9 +21,10 @@ export function stableStringify(value: unknown): string {
   }
   if (isRecordValue(value)) {
     const keys = Object.keys(value).sort();
-    return `{${keys.map((key) =>
-      `${JSON.stringify(key)}:${stableStringify(value[key])}`
-    ).join(",")}}`;
+    return `{${
+      keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+        .join(",")
+    }}`;
   }
   return JSON.stringify(String(value));
 }

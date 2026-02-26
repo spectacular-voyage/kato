@@ -173,4 +173,3 @@ export function isSessionTwinEventV1(
 
   return isRecord(value["payload"]);
 }
-

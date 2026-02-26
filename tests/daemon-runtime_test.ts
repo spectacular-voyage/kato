@@ -2751,7 +2751,9 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
         throw new Error("enqueue should not be called");
       },
       markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) => request.requestId === requestId);
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
         if (idx >= 0) {
           requests.splice(0, idx + 1);
         }
@@ -2867,7 +2869,9 @@ Deno.test("runDaemonRuntimeLoop performs session twin cleanup at shutdown", asyn
       throw new Error("enqueue should not be called");
     },
     markProcessed(requestId: string) {
-      const idx = requests.findIndex((request) => request.requestId === requestId);
+      const idx = requests.findIndex((request) =>
+        request.requestId === requestId
+      );
       if (idx >= 0) {
         requests.splice(0, idx + 1);
       }
@@ -3052,7 +3056,9 @@ Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple
         throw new Error("enqueue should not be called");
       },
       markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) => request.requestId === requestId);
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
         if (idx >= 0) {
           requests.splice(0, idx + 1);
         }
@@ -3262,7 +3268,9 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
         throw new Error("enqueue should not be called");
       },
       markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) => request.requestId === requestId);
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
         if (idx >= 0) {
           requests.splice(0, idx + 1);
         }
@@ -3447,7 +3455,9 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
         throw new Error("enqueue should not be called");
       },
       markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) => request.requestId === requestId);
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
         if (idx >= 0) {
           requests.splice(0, idx + 1);
         }
@@ -3516,7 +3526,9 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
       : join(".kato", "recordings");
     assert(
       recording!.destination.startsWith(expectedRoot),
-      `expected recording destination to start with ${expectedRoot}, got ${recording!.destination}`,
+      `expected recording destination to start with ${expectedRoot}, got ${
+        recording!.destination
+      }`,
     );
   } finally {
     await Deno.remove(stateDir, { recursive: true });

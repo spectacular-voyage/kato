@@ -54,7 +54,9 @@ interface TwinAppendResult {
   droppedAsDuplicate: number;
 }
 
-export type SessionStateLoadFailureReason = "invalid_json" | "unsupported_schema";
+export type SessionStateLoadFailureReason =
+  | "invalid_json"
+  | "unsupported_schema";
 
 export class SessionStateLoadError extends Error {
   readonly reason: SessionStateLoadFailureReason;
@@ -65,7 +67,9 @@ export class SessionStateLoadError extends Error {
     metadataPath: string,
     message?: string,
   ) {
-    super(message ?? `Session metadata load failed (${reason}): ${metadataPath}`);
+    super(
+      message ?? `Session metadata load failed (${reason}): ${metadataPath}`,
+    );
     this.name = "SessionStateLoadError";
     this.reason = reason;
     this.metadataPath = metadataPath;
@@ -113,7 +117,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
       ? { lastObservedMtimeMs: metadata.lastObservedMtimeMs }
       : {}),
     ingestCursor: cloneCursor(metadata.ingestCursor),
-    ...(metadata.ingestAnchor ? { ingestAnchor: { ...metadata.ingestAnchor } } : {}),
+    ...(metadata.ingestAnchor
+      ? { ingestAnchor: { ...metadata.ingestAnchor } }
+      : {}),
     twinPath: metadata.twinPath,
     nextTwinSeq: metadata.nextTwinSeq,
     recentFingerprints: [...metadata.recentFingerprints],
@@ -164,7 +170,10 @@ async function ensureDir(path: string): Promise<void> {
   await Deno.mkdir(path, { recursive: true });
 }
 
-async function writeTextAtomically(path: string, content: string): Promise<void> {
+async function writeTextAtomically(
+  path: string,
+  content: string,
+): Promise<void> {
   await ensureDir(dirname(path));
   const tmpPath = `${path}.tmp-${crypto.randomUUID()}`;
   let file: Deno.FsFile | undefined;
@@ -182,7 +191,10 @@ async function writeTextAtomically(path: string, content: string): Promise<void>
   await Deno.rename(tmpPath, path);
 }
 
-async function writeJsonAtomically(path: string, value: unknown): Promise<void> {
+async function writeJsonAtomically(
+  path: string,
+  value: unknown,
+): Promise<void> {
   await writeTextAtomically(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -219,7 +231,9 @@ function cloneSessionTwinEvent(event: SessionTwinEventV1): SessionTwinEventV1 {
   return structuredClone(event);
 }
 
-function cloneDaemonControlIndex(index: DaemonControlIndexV1): DaemonControlIndexV1 {
+function cloneDaemonControlIndex(
+  index: DaemonControlIndexV1,
+): DaemonControlIndexV1 {
   return {
     schemaVersion: index.schemaVersion,
     updatedAt: index.updatedAt,
@@ -240,7 +254,8 @@ export class PersistentSessionStateStore {
     const katoDir = options.katoDir ?? resolveDefaultKatoDir();
     this.daemonControlIndexPath = options.daemonControlIndexPath ??
       resolveDefaultDaemonControlIndexPath(katoDir);
-    this.sessionsDir = options.sessionsDir ?? resolveDefaultSessionsDir(katoDir);
+    this.sessionsDir = options.sessionsDir ??
+      resolveDefaultSessionsDir(katoDir);
     this.now = options.now ?? (() => new Date());
     this.makeSessionId = options.makeSessionId ?? (() => crypto.randomUUID());
     this.recentFingerprintLimit = options.recentFingerprintLimit ??
@@ -266,7 +281,10 @@ export class PersistentSessionStateStore {
       return cloneSessionMetadata(cached);
     }
 
-    const { metadataPath, twinPath } = toSessionFilePaths(this.sessionsDir, input);
+    const { metadataPath, twinPath } = toSessionFilePaths(
+      this.sessionsDir,
+      input,
+    );
     const existing = await this.loadMetadataFromDisk(metadataPath);
     if (existing) {
       this.metadataCache.set(sessionKey, existing);
