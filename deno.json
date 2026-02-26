@@ -2,7 +2,7 @@
   "exclude": ["stenobot/"],
   "tasks": {
     "dev": "deno task dev:daemon",
-    "dev:daemon": "deno run --watch=apps/daemon/src,shared/src apps/daemon/src/main.ts",
+    "dev:daemon": "deno run --watch=apps/daemon/src,shared/src apps/daemon/src/main.ts __daemon-run",
     "dev:web": "deno run --watch=apps/web/src,shared/src apps/web/src/main.ts",
     "dev:cloud": "deno run --watch=apps/cloud/src,shared/src apps/cloud/src/main.ts",
     "dev:root": "deno run --watch main.ts",
@@ -10,7 +10,7 @@
     "fmt:check": "deno fmt --check deno.json main.ts main_test.ts apps shared tests",
     "lint": "deno lint main.ts main_test.ts apps shared tests",
     "check": "deno check main.ts main_test.ts apps/**/*.ts shared/**/*.ts tests/**/*.ts",
-    "test": "deno test --allow-read --allow-write=.kato main_test.ts tests/**/*.ts",
+    "test": "deno test --allow-read --allow-write=.kato --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE main_test.ts tests/**/*.ts",
     "ci": "deno task fmt:check && deno task lint && deno task check --frozen && deno task test --frozen"
   },
   "imports": {
