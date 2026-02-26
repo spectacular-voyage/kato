@@ -319,9 +319,6 @@ function readTimestamp(event: SessionTwinEventV1): string {
   if (fromProvider.length > 0) return fromProvider;
   const fromCapturedAt = normalizeText(event.time?.capturedAt);
   if (fromCapturedAt.length > 0) return fromCapturedAt;
-  if (event.session.provider === "codex") {
-    return "";
-  }
   return "";
 }
 

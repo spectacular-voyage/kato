@@ -371,6 +371,55 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "MarkdownConversationWriter preserves whitespace in unchanged frontmatter scalar fields",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "customPadded: '  keep me padded  '",
+          "tags: [topic.seed]",
+          "---",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant follow-up",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        frontmatterRecordingIds: ["rec-new"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "customPadded: '  keep me padded  '");
+      assertStringIncludes(content, "recordingIds: [rec-new]");
+      assertStringIncludes(content, "assistant follow-up");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
 Deno.test("MarkdownConversationWriter create respects includeFrontmatter false", async () => {
   const root = makeSandboxRoot();
   const outputPath = join(root, "conversation.md");

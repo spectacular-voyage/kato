@@ -1320,3 +1320,173 @@ Validation:
 
 You should also rename the key in your local config:
 - `includeMessageEventKinds` -> `includeConversationEventKinds` in [kato-config.yaml](/home/djradon/.kato/kato-config.yaml).
+
+# User_2026-02-26_1337_54
+
+coderabbit has some more comments:
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/daemon/src/cli/commands/status.ts`:
+- Around line 133-138: The current mapping for normalizedSessions marks a
+session stale when lastMessageAt is missing; instead, update the logic in the
+normalizedSessions creation so that if lastMessageAt exists you call
+isSessionStale(lastMessageAt, now), otherwise fall back to using
+session.updatedAt (i.e., isSessionStale(session.updatedAt, now)) and only
+default to true if neither timestamp exists; reference normalizedSessions,
+snapshot.sessions, isSessionStale, lastMessageAt, updatedAt and now when making
+the change.
+
+In `@apps/daemon/src/writer/frontmatter.ts`:
+- Around line 70-81: formatInlineYamlScalar currently trims the input string
+which causes leading/trailing whitespace to be lost when
+mergeAccretiveFrontmatterFields re-renders the whole frontmatter; update the
+logic so whitespace is preserved: stop unconditionally calling value.trim() in
+formatInlineYamlScalar and instead operate on the raw value while making
+decisions (SAFE_INLINE_YAML_SCALAR test and isAmbiguousYamlScalar) against the
+untrimmed string or its safely-normalized form, returning either the original
+value (possibly quoted) to preserve leading/trailing spaces or a quoted form
+only when necessary; ensure mergeAccretiveFrontmatterFields continues to use the
+original serialized field values when available so unchanged fields keep their
+original whitespace.
+
+---
+
+Duplicate comments:
+In `@apps/daemon/src/cli/commands/status.ts`:
+- Around line 110-126: summarizeRecordingsFromSessions currently ignores an
+existing aggregated snapshot and recomputes totals from per-session rows (which
+undercounts multi-recording sessions); change the function to return the
+provided fallback snapshot recordings when it is present (e.g., if fallback !=
+null) instead of recomputing, and only compute activeRecordings/destinations
+from sessions when fallback is undefined — refer to
+summarizeRecordingsFromSessions, sessions, fallback, and session.recording to
+locate and apply the change.
+
+---
+
+Nitpick comments:
+In `@apps/daemon/src/orchestrator/session_twin_mapper.ts`:
+- Around line 317-326: The conditional branch in readTimestamp that checks
+event.session.provider === "codex" is redundant because the function already
+returns "" unconditionally afterward; remove the dead codex-specific branch (or
+replace it with a single inline comment) inside readTimestamp to avoid dead code
+and clarify intent that codex backfills yield empty timestamps, keeping the
+existing normalizeText checks for providerTimestamp and capturedAt intact.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning cautious inspection**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1338_05
+
+I’ll verify each CodeRabbit finding against the current code first, then patch only the ones that are still valid and run focused tests for the touched areas. I’m starting with `status.ts`, `frontmatter.ts`, and `session_twin_mapper.ts`.
+
+<details>
+<summary>Thinking</summary>
+
+**Analyzing fallback handling logic**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Assessing whitespace preservation in frontmatter merge**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning whitespace preservation test**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1338_58
+
+I’ve confirmed all three findings are still valid in current code. I’m patching `status.ts` and `session_twin_mapper.ts` now, then handling the frontmatter whitespace case plus a regression test.
+
+<details>
+<summary>Thinking</summary>
+
+**Refocusing on functions tooling**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Patching scalar formatting preserving whitespace**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1339_21
+
+I’ve applied the `status` and `session_twin_mapper` fixes. I’m now patching `formatInlineYamlScalar` to preserve leading/trailing whitespace and then adding a regression test that exercises frontmatter merge with padded strings.
+
+<details>
+<summary>Thinking</summary>
+
+**Adding regression test for whitespace preservation**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning targeted test runs**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1339_45
+
+I added a regression test for frontmatter whitespace preservation. I’ll now run focused tests for `status`, `frontmatter/writer`, and `session_twin_mapper` behavior before a full suite pass.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning full Deno task test**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing comment fixes and tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing verified fixes with test references**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1340_23
+
+Validated each CodeRabbit finding against current code and fixed only the ones still valid. All 4 were valid.
+
+1. `status` stale derivation fallback fixed in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:133).  
+Now uses `lastMessageAt`, else `updatedAt`, else `true`.
+
+2. `status` recording summary fallback fixed in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:110).  
+Now returns snapshot `fallback` when present, and only computes from sessions when fallback is missing.
+
+3. Frontmatter scalar whitespace preservation fixed in [frontmatter.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/frontmatter.ts:70).  
+`formatInlineYamlScalar` no longer trims away edge whitespace.  
+Also ensured merge migration/continuity for legacy key in [frontmatter.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/frontmatter.ts:292) and added tests:
+- [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:323)
+- [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:374)
+
+4. Dead Codex branch in `readTimestamp` removed in [session_twin_mapper.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/session_twin_mapper.ts:317).
+
+Validation:
+- `deno test ... tests/improved-status_test.ts tests/writer-markdown_test.ts tests/session-twin-mapper_test.ts`
+- `deno task test`
+- Result: `253 passed, 0 failed`.

@@ -111,7 +111,12 @@ function summarizeRecordingsFromSessions(
   sessions: DaemonSessionStatus[] | undefined,
   fallback: DaemonStatusSnapshot["recordings"],
 ): DaemonStatusSnapshot["recordings"] {
-  if (!sessions) return fallback;
+  if (fallback !== undefined) {
+    return fallback;
+  }
+  if (!sessions) {
+    return { activeRecordings: 0, destinations: 0 };
+  }
   const activeSessionsWithRecording = sessions.filter((session) =>
     !session.stale && session.recording !== undefined
   );
@@ -134,6 +139,8 @@ function normalizeSnapshotForStatusDisplay(
     ...session,
     stale: session.lastMessageAt
       ? isSessionStale(session.lastMessageAt, now)
+      : session.updatedAt
+      ? isSessionStale(session.updatedAt, now)
       : true,
   }));
   return {

@@ -68,16 +68,18 @@ function isAmbiguousYamlScalar(value: string): boolean {
 }
 
 function formatInlineYamlScalar(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return quoteYaml(trimmed);
+  if (value.length === 0) {
+    return quoteYaml(value);
   }
+  const hasEdgeWhitespace = value !== value.trim();
   if (
-    SAFE_INLINE_YAML_SCALAR.test(trimmed) && !isAmbiguousYamlScalar(trimmed)
+    !hasEdgeWhitespace &&
+    SAFE_INLINE_YAML_SCALAR.test(value) &&
+    !isAmbiguousYamlScalar(value)
   ) {
-    return trimmed;
+    return value;
   }
-  return quoteYaml(trimmed);
+  return quoteYaml(value);
 }
 
 function renderInlineYamlArray(values: string[]): string {
