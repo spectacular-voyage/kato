@@ -1,4 +1,5 @@
 import type {
+  ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeFeatureFlags,
@@ -10,6 +11,7 @@ import {
   createDefaultRuntimeFeatureFlags,
   mergeRuntimeFeatureFlags,
 } from "../feature_flags/mod.ts";
+import { expandHomePath, readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "config.json";
@@ -51,6 +53,11 @@ const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
   "captureIncludeSystemEvents",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
+  "claude",
+  "codex",
+  "gemini",
+];
+const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> = [
   "claude",
   "codex",
   "gemini",
@@ -157,28 +164,8 @@ function parseRuntimeLoggingConfig(
   return resolved;
 }
 
-function resolveHomeDir(): string | undefined {
-  return readOptionalEnv("HOME") ?? readOptionalEnv("USERPROFILE");
-}
-
 function expandHome(path: string): string {
-  if (!path.startsWith("~")) {
-    return path;
-  }
-
-  const home = resolveHomeDir();
-  if (!home) {
-    return path;
-  }
-
-  if (path === "~") {
-    return home;
-  }
-  if (path.startsWith("~/") || path.startsWith("~\\")) {
-    return join(home, path.slice(2));
-  }
-
-  return path;
+  return expandHomePath(path);
 }
 
 function collapseHome(path: string): string {
@@ -310,6 +297,40 @@ function parseProviderSessionRoots(
   return mergeProviderSessionRoots(overrides);
 }
 
+function parseProviderAutoGenerateSnapshots(
+  value: unknown,
+): ProviderAutoGenerateSnapshots | undefined {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (
+      !PROVIDER_AUTO_SNAPSHOT_KEYS.includes(
+        key as keyof ProviderAutoGenerateSnapshots,
+      )
+    ) {
+      return undefined;
+    }
+  }
+
+  const parsed: ProviderAutoGenerateSnapshots = {};
+  for (const key of PROVIDER_AUTO_SNAPSHOT_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (typeof candidate !== "boolean") {
+      return undefined;
+    }
+    parsed[key] = candidate;
+  }
+  return parsed;
+}
+
 function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -361,6 +382,26 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!providerSessionRoots) {
     return undefined;
   }
+  const providerAutoGenerateSnapshots = parseProviderAutoGenerateSnapshots(
+    value["providerAutoGenerateSnapshots"],
+  );
+  if (!providerAutoGenerateSnapshots) {
+    return undefined;
+  }
+  const globalAutoGenerateSnapshots = value["globalAutoGenerateSnapshots"] ===
+      undefined
+    ? false
+    : value["globalAutoGenerateSnapshots"];
+  if (typeof globalAutoGenerateSnapshots !== "boolean") {
+    return undefined;
+  }
+  const cleanSessionStatesOnShutdown = value["cleanSessionStatesOnShutdown"] ===
+      undefined
+    ? false
+    : value["cleanSessionStatesOnShutdown"];
+  if (typeof cleanSessionStatesOnShutdown !== "boolean") {
+    return undefined;
+  }
 
   let daemonMaxMemoryMb = DEFAULT_DAEMON_MAX_MEMORY_MB;
   if ("daemonMaxMemoryMb" in value) {
@@ -378,25 +419,13 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     controlPath,
     allowedWriteRoots: allowedWriteRoots.map((root) => expandHome(root)),
     providerSessionRoots,
+    globalAutoGenerateSnapshots,
+    providerAutoGenerateSnapshots,
+    cleanSessionStatesOnShutdown,
     featureFlags,
     logging,
     daemonMaxMemoryMb,
   };
-}
-
-function readOptionalEnv(name: string): string | undefined {
-  try {
-    const value = Deno.env.get(name);
-    if (value === undefined || value.length === 0) {
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotCapable) {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 async function writeJsonAtomically(
@@ -419,6 +448,11 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     providerSessionRoots: cloneProviderSessionRoots(
       config.providerSessionRoots,
     ),
+    globalAutoGenerateSnapshots: config.globalAutoGenerateSnapshots ?? false,
+    providerAutoGenerateSnapshots: {
+      ...(config.providerAutoGenerateSnapshots ?? {}),
+    },
+    cleanSessionStatesOnShutdown: config.cleanSessionStatesOnShutdown ?? false,
     featureFlags: { ...config.featureFlags },
     logging: { ...config.logging },
     daemonMaxMemoryMb: config.daemonMaxMemoryMb,
@@ -436,6 +470,9 @@ export function createDefaultRuntimeConfig(options: {
   controlPath: string;
   allowedWriteRoots: string[];
   providerSessionRoots?: Partial<ProviderSessionRoots>;
+  globalAutoGenerateSnapshots?: boolean;
+  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
+  cleanSessionStatesOnShutdown?: boolean;
   featureFlags?: Partial<RuntimeFeatureFlags>;
   logging?: Partial<RuntimeLoggingConfig>;
   daemonMaxMemoryMb?: number;
@@ -513,6 +550,11 @@ export function createDefaultRuntimeConfig(options: {
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),
       gemini: providerSessionRoots.gemini.map((root) => serializePath(root)),
     },
+    globalAutoGenerateSnapshots: options.globalAutoGenerateSnapshots ?? false,
+    providerAutoGenerateSnapshots: {
+      ...(options.providerAutoGenerateSnapshots ?? {}),
+    },
+    cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,
     featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
     logging: resolvedLogging,
     daemonMaxMemoryMb: resolvedDaemonMaxMemoryMb,

@@ -1,5 +1,5 @@
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
   resolveDefaultConfigPath,
@@ -16,6 +16,9 @@ import {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
   InMemorySessionSnapshotStore,
+  PersistentSessionStateStore,
+  resolveDefaultDaemonControlIndexPath,
+  resolveDefaultSessionsDir,
   resolveDefaultRuntimeDir,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
@@ -26,6 +29,7 @@ import {
   StructuredLogger,
 } from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
+import { readOptionalEnv } from "./utils/env.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
@@ -39,21 +43,6 @@ export interface RunDaemonSubprocessOptions {
 function writeToStderr(text: string): void {
   const encoder = new TextEncoder();
   Deno.stderr.writeSync(encoder.encode(text));
-}
-
-function readOptionalEnv(name: string): string | undefined {
-  try {
-    const value = Deno.env.get(name);
-    if (value === undefined || value.length === 0) {
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotCapable) {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 function parseLogLevelOverride(name: string): LogLevel | undefined {
@@ -160,8 +149,17 @@ export async function runDaemonSubprocess(
     now,
     daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
   });
+  const katoDir = dirname(runtimeConfig.runtimeDir);
+  const sessionStateStore = new PersistentSessionStateStore({
+    daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(katoDir),
+    sessionsDir: resolveDefaultSessionsDir(katoDir),
+    now,
+  });
   const ingestionRunners = createDefaultProviderIngestionRunners({
     sessionSnapshotStore,
+    sessionStateStore,
+    globalAutoGenerateSnapshots: runtimeConfig.globalAutoGenerateSnapshots,
+    providerAutoGenerateSnapshots: runtimeConfig.providerAutoGenerateSnapshots,
     claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
     codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
     geminiSessionRoots: runtimeConfig.providerSessionRoots.gemini,
@@ -193,6 +191,7 @@ export async function runDaemonSubprocess(
       recordingPipeline,
       ingestionRunners,
       sessionSnapshotStore,
+      sessionStateStore,
       loadSessionSnapshot(sessionId: string) {
         const snapshot = sessionSnapshotStore.get(sessionId);
         if (!snapshot) {
@@ -205,6 +204,7 @@ export async function runDaemonSubprocess(
         });
       },
       exportEnabled: featureSettings.exportEnabled,
+      cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       operationalLogger,
       auditLogger,
       daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,

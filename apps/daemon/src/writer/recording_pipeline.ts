@@ -62,6 +62,14 @@ export interface AppendToActiveRecordingInput {
   title?: string;
 }
 
+export interface AppendToDestinationInput {
+  provider: string;
+  sessionId: string;
+  targetPath: string;
+  events: ConversationEvent[];
+  title?: string;
+}
+
 export interface AppendToActiveRecordingResult {
   appended: boolean;
   deduped: boolean;
@@ -77,6 +85,9 @@ export interface RecordingPipelineLike {
   appendToActiveRecording(
     input: AppendToActiveRecordingInput,
   ): Promise<AppendToActiveRecordingResult>;
+  appendToDestination?(
+    input: AppendToDestinationInput,
+  ): Promise<MarkdownWriteResult>;
   stopRecording(provider: string, sessionId: string): boolean;
   getActiveRecording(
     provider: string,
@@ -312,6 +323,23 @@ export class RecordingPipeline implements RecordingPipelineLike {
       deduped: writeResult.deduped,
       recording: cloneRecording(activeRecording),
     };
+  }
+
+  async appendToDestination(
+    input: AppendToDestinationInput,
+  ): Promise<MarkdownWriteResult> {
+    const decision = await this.evaluatePathPolicy({
+      commandName: "record",
+      provider: input.provider,
+      sessionId: input.sessionId,
+      targetPath: input.targetPath,
+    });
+    const outputPath = decision.canonicalTargetPath ?? input.targetPath;
+    return await this.writer.appendEvents(
+      outputPath,
+      input.events,
+      this.makeWriterOptions(input.title),
+    );
   }
 
   stopRecording(provider: string, sessionId: string): boolean {

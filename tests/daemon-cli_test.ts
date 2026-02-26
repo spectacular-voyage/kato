@@ -1,4 +1,9 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
@@ -250,6 +255,7 @@ function makePathPolicyGate(
 
 function makeDaemonLauncher(
   launchedPid: number,
+  onLaunch?: () => Promise<void> | void,
 ): {
   launchedCount: { value: number };
   launcher: DaemonProcessLauncherLike;
@@ -258,11 +264,31 @@ function makeDaemonLauncher(
   return {
     launchedCount,
     launcher: {
-      launchDetached() {
+      async launchDetached() {
         launchedCount.value += 1;
-        return Promise.resolve(launchedPid);
+        if (onLaunch) {
+          await onLaunch();
+        }
+        return launchedPid;
       },
     },
+  };
+}
+
+function makeStartupAckCallback(
+  statusStore: DaemonStatusSnapshotStoreLike,
+  daemonPid: number,
+  heartbeatAt: string = "2026-02-22T10:00:00.000Z",
+): () => Promise<void> {
+  return async () => {
+    const snapshot = await statusStore.load();
+    await statusStore.save({
+      ...snapshot,
+      daemonRunning: true,
+      daemonPid,
+      generatedAt: heartbeatAt,
+      heartbeatAt,
+    });
   };
 }
 
@@ -418,7 +444,10 @@ Deno.test(
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
-    const daemonLauncher = makeDaemonLauncher(31337);
+    const daemonLauncher = makeDaemonLauncher(
+      31337,
+      makeStartupAckCallback(statusStore, 31337),
+    );
     const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
     const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
 
@@ -449,7 +478,10 @@ Deno.test(
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
-    const daemonLauncher = makeDaemonLauncher(31337);
+    const daemonLauncher = makeDaemonLauncher(
+      31337,
+      makeStartupAckCallback(statusStore, 31337),
+    );
     const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
     const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
 
@@ -529,7 +561,10 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
       destinations: 2,
     },
   });
-  const daemonLauncher = makeDaemonLauncher(31337);
+  const daemonLauncher = makeDaemonLauncher(
+    31337,
+    makeStartupAckCallback(statusStore, 31337),
+  );
   const runtimeDir = ".kato/test-runtime";
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
@@ -650,6 +685,155 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
   }
 });
 
+Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const rootDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-cli-clean-sessions-",
+  });
+  const runtimeDir = `${rootDir}/runtime`;
+
+  try {
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const controlStore = makeInMemoryControlStore();
+    const statusStore = makeInMemoryStatusStore();
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const harness = makeRuntimeHarness(runtimeDir);
+
+    const sessionsDir = `${rootDir}/sessions`;
+    await Deno.mkdir(sessionsDir, { recursive: true });
+    const oldMetaPath = `${sessionsDir}/old.meta.json`;
+    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
+    const recentMetaPath = `${sessionsDir}/recent.meta.json`;
+    const recentTwinPath = `${sessionsDir}/recent.twin.jsonl`;
+
+    for (
+      const path of [oldMetaPath, oldTwinPath, recentMetaPath, recentTwinPath]
+    ) {
+      await Deno.writeTextFile(path, "{}\n");
+    }
+
+    const oldTime = new Date("2026-02-01T00:00:00.000Z");
+    const recentTime = new Date("2026-02-25T00:00:00.000Z");
+    await Deno.utime(oldMetaPath, oldTime, oldTime);
+    await Deno.utime(oldTwinPath, oldTime, oldTime);
+    await Deno.utime(recentMetaPath, recentTime, recentTime);
+    await Deno.utime(recentTwinPath, recentTime, recentTime);
+
+    const code = await runDaemonCli(["clean", "--sessions", "7"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "clean completed");
+    assertStringIncludes(harness.stdout.join(""), "sessionsDeleted=1");
+    assertStringIncludes(harness.stdout.join(""), "sessionFilesDeleted=2");
+
+    await assertRejects(
+      () => Deno.stat(oldMetaPath),
+      Deno.errors.NotFound,
+    );
+    await assertRejects(
+      () => Deno.stat(oldTwinPath),
+      Deno.errors.NotFound,
+    );
+    await Deno.stat(recentMetaPath);
+    await Deno.stat(recentTwinPath);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const rootDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-cli-clean-sessions-dry-",
+  });
+  const runtimeDir = `${rootDir}/runtime`;
+
+  try {
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const controlStore = makeInMemoryControlStore();
+    const statusStore = makeInMemoryStatusStore();
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const harness = makeRuntimeHarness(runtimeDir);
+
+    const sessionsDir = `${rootDir}/sessions`;
+    await Deno.mkdir(sessionsDir, { recursive: true });
+    const oldMetaPath = `${sessionsDir}/old.meta.json`;
+    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
+    await Deno.writeTextFile(oldMetaPath, "{}\n");
+    await Deno.writeTextFile(oldTwinPath, "{}\n");
+    const oldTime = new Date("2026-02-01T00:00:00.000Z");
+    await Deno.utime(oldMetaPath, oldTime, oldTime);
+    await Deno.utime(oldTwinPath, oldTime, oldTime);
+
+    const code = await runDaemonCli(
+      ["clean", "--sessions", "7", "--dry-run"],
+      {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      },
+    );
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "sessionsToDelete=1");
+    assertStringIncludes(harness.stdout.join(""), "sessionFilesToDelete=2");
+    await Deno.stat(oldMetaPath);
+    await Deno.stat(oldTwinPath);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonCli clean --sessions refuses while daemon is running", async () => {
+  const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 1234,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
+  const harness = makeRuntimeHarness(runtimeDir);
+
+  const code = await runDaemonCli(["clean", "--sessions", "7"], {
+    runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore: controlStore.store,
+  });
+
+  assertEquals(code, 1);
+  assertStringIncludes(
+    harness.stderr.join(""),
+    "Refusing clean --sessions while daemon is running",
+  );
+});
+
 Deno.test("runDaemonCli denies export when path policy rejects output path", async () => {
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore();
@@ -711,7 +895,10 @@ Deno.test("runDaemonCli stop resets stale running status without queueing", asyn
 Deno.test("runDaemonCli restart starts daemon when not running", async () => {
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore();
-  const daemonLauncher = makeDaemonLauncher(31337);
+  const daemonLauncher = makeDaemonLauncher(
+    31337,
+    makeStartupAckCallback(statusStore, 31337),
+  );
   const runtimeDir = ".kato/test-runtime";
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
@@ -736,7 +923,15 @@ Deno.test("runDaemonCli restart queues stop and then starts daemon when running"
   const runtimeDir = ".kato/test-runtime";
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
-  const daemonLauncher = makeDaemonLauncher(31337);
+  const daemonLauncher = makeDaemonLauncher(31337, async () => {
+    currentStatus = {
+      ...currentStatus,
+      daemonRunning: true,
+      daemonPid: 31337,
+      generatedAt: "2026-02-22T10:00:02.000Z",
+      heartbeatAt: "2026-02-22T10:00:02.000Z",
+    };
+  });
 
   let currentStatus: DaemonStatusSnapshot = {
     schemaVersion: 1,

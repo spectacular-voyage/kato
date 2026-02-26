@@ -2,8 +2,10 @@ import type {
   ConversationEvent,
   DaemonSessionStatus,
   ProviderStatus,
+  SessionMetadataV1,
 } from "@kato/shared";
 import { projectSessionStatus, sortSessionsByRecency } from "@kato/shared";
+import { join } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -19,6 +21,7 @@ import {
   RecordingPipeline,
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
+import { resolveHomeDir } from "../utils/env.ts";
 import {
   createDefaultStatusSnapshot,
   type DaemonControlRequest,
@@ -37,6 +40,7 @@ import type {
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
 import { SessionSnapshotMemoryBudgetExceededError } from "./ingestion_runtime.ts";
+import type { PersistentSessionStateStore } from "./session_state_store.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -49,6 +53,7 @@ export interface DaemonRuntimeLoopOptions {
   recordingPipeline?: RecordingPipelineLike;
   ingestionRunners?: ProviderIngestionRunner[];
   sessionSnapshotStore?: SessionSnapshotStore;
+  sessionStateStore?: PersistentSessionStateStore;
   loadSessionSnapshot?: (
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
@@ -59,6 +64,7 @@ export interface DaemonRuntimeLoopOptions {
   pollIntervalMs?: number;
   providerStatusStaleAfterMs?: number;
   daemonMaxMemoryMb?: number;
+  cleanSessionStatesOnShutdown?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -111,6 +117,15 @@ interface ProcessInChatRecordingUpdatesOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   processEventsFromMs: number;
+}
+
+interface ProcessPersistentRecordingUpdatesOptions {
+  sessionSnapshotStore: SessionSnapshotStore;
+  sessionStateStore: PersistentSessionStateStore;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+  now: () => Date;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -186,6 +201,443 @@ function normalizeCommandTargetPath(
   normalized = unwrapMatchingDelimiters(normalized);
 
   return normalized.length > 0 ? normalized : undefined;
+}
+
+interface PersistentRecordingCommandContext {
+  provider: string;
+  providerSessionId: string;
+  events: ConversationEvent[];
+  eventIndex: number;
+  event: ConversationEvent & { kind: "message.user" };
+  metadata: SessionMetadataV1;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+  now: () => Date;
+}
+
+function resolveDefaultRecordingRootDir(): string {
+  const home = resolveHomeDir();
+  if (home) {
+    return join(home, ".kato", "recordings");
+  }
+  return join(".kato", "recordings");
+}
+
+function sanitizeFilenamePart(value: string): string {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(
+    /-+/g,
+    "-",
+  ).replace(/^-+|-+$/g, "");
+  return normalized.length > 0 ? normalized : "recording";
+}
+
+function makeDefaultRecordingDestinationPath(
+  provider: string,
+  sessionId: string,
+  now: Date,
+): string {
+  const iso = now.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "Z");
+  const shortSession = sessionId.slice(0, 8);
+  const fileName = `${sanitizeFilenamePart(provider)}-${shortSession}-${iso}.md`;
+  return join(resolveDefaultRecordingRootDir(), fileName);
+}
+
+function readCommandCursor(metadata: SessionMetadataV1): number {
+  const raw = metadata.commandCursor;
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) {
+    return 0;
+  }
+  return raw;
+}
+
+function writeCommandCursor(metadata: SessionMetadataV1, cursor: number): void {
+  metadata.commandCursor = Math.max(0, Math.floor(cursor));
+}
+
+function openRecordingPeriod(
+  metadata: SessionMetadataV1,
+  recordingId: string,
+  startedCursor: number,
+  nowIso: string,
+  startedBySeq: number,
+): void {
+  const recording = metadata.recordings.find((entry) =>
+    entry.recordingId === recordingId
+  );
+  if (!recording) return;
+  recording.periods.push({
+    startedCursor,
+    startedAt: nowIso,
+    startedBySeq,
+  });
+}
+
+function closeRecordingPeriod(
+  metadata: SessionMetadataV1,
+  recordingId: string,
+  stoppedCursor: number,
+  nowIso: string,
+  stoppedBySeq: number,
+): void {
+  const recording = metadata.recordings.find((entry) =>
+    entry.recordingId === recordingId
+  );
+  if (!recording) return;
+
+  for (let i = recording.periods.length - 1; i >= 0; i -= 1) {
+    const period = recording.periods[i];
+    if (!period || period.stoppedCursor !== undefined) continue;
+    period.stoppedCursor = stoppedCursor;
+    period.stoppedAt = nowIso;
+    period.stoppedBySeq = stoppedBySeq;
+    return;
+  }
+}
+
+function activeSessionRecordings(
+  metadata: SessionMetadataV1,
+): SessionMetadataV1["recordings"] {
+  return metadata.recordings.filter((entry) => entry.desiredState === "on");
+}
+
+function resolveRecordingsByDestination(
+  metadata: SessionMetadataV1,
+  destination: string,
+): SessionMetadataV1["recordings"] {
+  return activeSessionRecordings(metadata).filter((entry) =>
+    entry.destination === destination
+  );
+}
+
+function resolveRecordingsByIdPrefix(
+  metadata: SessionMetadataV1,
+  prefix: string,
+): SessionMetadataV1["recordings"] {
+  const normalized = prefix.trim().toLowerCase();
+  if (normalized.length < 8) {
+    return [];
+  }
+  return activeSessionRecordings(metadata).filter((entry) =>
+    entry.recordingId.toLowerCase().startsWith(normalized)
+  );
+}
+
+async function applyPersistentStopCommand(
+  metadata: SessionMetadataV1,
+  commandArgument: string | undefined,
+  eventIndex: number,
+  provider: string,
+  providerSessionId: string,
+  eventId: string,
+  operationalLogger: StructuredLogger,
+  auditLogger: AuditLogger,
+  now: () => Date,
+): Promise<boolean> {
+  const nowIso = now().toISOString();
+  const stopSeq = eventIndex + 1;
+  const active = activeSessionRecordings(metadata);
+  if (active.length === 0) {
+    return false;
+  }
+
+  let targets: SessionMetadataV1["recordings"] = [];
+  const normalizedArg = normalizeCommandTargetPath(commandArgument);
+  if (!normalizedArg) {
+    targets = active;
+  } else if (normalizedArg.toLowerCase().startsWith("id:")) {
+    const prefix = normalizedArg.slice(3).trim();
+    targets = resolveRecordingsByIdPrefix(metadata, prefix);
+    if (prefix.length < 8) {
+      await operationalLogger.warn(
+        "recording.command.stop.invalid_prefix",
+        "Ignoring stop target because recording id prefix is too short",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId,
+          argument: commandArgument,
+          minPrefixLength: 8,
+        },
+      );
+      return false;
+    }
+    if (targets.length > 1) {
+      await operationalLogger.warn(
+        "recording.command.stop.ambiguous",
+        "Recording id prefix matched multiple active recordings",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId,
+          argument: commandArgument,
+          candidates: targets.map((entry) => ({
+            recordingId: entry.recordingId,
+            recordingShortId: entry.recordingId.slice(0, 8),
+            destination: entry.destination,
+          })),
+        },
+      );
+      return false;
+    }
+  } else if (normalizedArg.toLowerCase().startsWith("dest:")) {
+    const destination = normalizeCommandTargetPath(normalizedArg.slice(5));
+    targets = destination ? resolveRecordingsByDestination(metadata, destination) : [];
+  } else {
+    const idMatches = resolveRecordingsByIdPrefix(metadata, normalizedArg);
+    const destMatches = resolveRecordingsByDestination(metadata, normalizedArg);
+    const byId = new Set(idMatches.map((entry) => entry.recordingId));
+    const union = [...idMatches];
+    for (const candidate of destMatches) {
+      if (!byId.has(candidate.recordingId)) {
+        union.push(candidate);
+      }
+    }
+    if (idMatches.length > 0 && destMatches.length > 0) {
+      await operationalLogger.warn(
+        "recording.command.stop.ambiguous",
+        "Bare ::stop target matched both destination and recording id prefix; stopping all matches",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId,
+          argument: commandArgument,
+          idMatches: idMatches.map((entry) => entry.recordingId.slice(0, 8)),
+          destinationMatches: destMatches.map((entry) => entry.destination),
+        },
+      );
+    }
+    targets = union;
+  }
+
+  if (targets.length === 0) {
+    await operationalLogger.warn(
+      "recording.command.stop.not_found",
+      "No active recording matched stop target",
+      {
+        provider,
+        sessionId: providerSessionId,
+        eventId,
+        argument: commandArgument,
+      },
+    );
+    return false;
+  }
+
+  for (const target of targets) {
+    target.desiredState = "off";
+    closeRecordingPeriod(
+      metadata,
+      target.recordingId,
+      stopSeq,
+      nowIso,
+      stopSeq,
+    );
+  }
+
+  await auditLogger.record(
+    "recording.command.stop.applied",
+    "Stopped active recording targets",
+    {
+      provider,
+      sessionId: providerSessionId,
+      eventId,
+      targets: targets.map((entry) => ({
+        recordingId: entry.recordingId,
+        destination: entry.destination,
+      })),
+    },
+  );
+
+  return true;
+}
+
+async function applyPersistentControlCommandsForEvent(
+  ctx: PersistentRecordingCommandContext,
+): Promise<boolean> {
+  const {
+    provider,
+    providerSessionId,
+    events,
+    eventIndex,
+    event,
+    metadata,
+    recordingPipeline,
+    operationalLogger,
+    auditLogger,
+    now,
+  } = ctx;
+
+  const detection = detectInChatControlCommands(event.content);
+  if (detection.commands.length === 0 && detection.errors.length === 0) {
+    return false;
+  }
+
+  if (detection.errors.length > 0) {
+    const parseErrors = detection.errors.map((error) => ({
+      line: error.line,
+      reason: error.reason,
+    }));
+    await operationalLogger.warn(
+      "recording.command.parse_error",
+      "Skipping in-chat control commands because at least one command line is invalid",
+      {
+        provider,
+        sessionId: providerSessionId,
+        eventId: event.eventId,
+        parseErrors,
+      },
+    );
+    await auditLogger.record(
+      "recording.command.parse_error",
+      "In-chat control command parse error",
+      {
+        provider,
+        sessionId: providerSessionId,
+        eventId: event.eventId,
+        parseErrors,
+      },
+    );
+    return false;
+  }
+
+  const snapshotSlice = events.slice(0, eventIndex + 1);
+  const writeCursor = eventIndex + 1;
+  let metadataChanged = false;
+
+  for (const command of detection.commands) {
+    const canonicalCommand = command.name === "record" ? "start" : command.name;
+    const targetPath = normalizeCommandTargetPath(command.argument);
+    const defaultDestination = makeDefaultRecordingDestinationPath(
+      provider,
+      metadata.sessionId,
+      now(),
+    );
+    const destination = targetPath ?? defaultDestination;
+
+    try {
+      if (canonicalCommand === "start") {
+        const recordingId = crypto.randomUUID();
+        const nowIso = now().toISOString();
+        metadata.recordings.push({
+          recordingId,
+          destination,
+          desiredState: "on",
+          writeCursor,
+          createdAt: nowIso,
+          periods: [],
+        });
+        openRecordingPeriod(
+          metadata,
+          recordingId,
+          writeCursor,
+          nowIso,
+          writeCursor,
+        );
+        metadataChanged = true;
+      } else if (canonicalCommand === "capture") {
+        await recordingPipeline.captureSnapshot({
+          provider,
+          sessionId: providerSessionId,
+          targetPath: destination,
+          events: snapshotSlice,
+          title: providerSessionId,
+        });
+        const recordingId = crypto.randomUUID();
+        const nowIso = now().toISOString();
+        metadata.recordings.push({
+          recordingId,
+          destination,
+          desiredState: "on",
+          writeCursor,
+          createdAt: nowIso,
+          periods: [],
+        });
+        openRecordingPeriod(
+          metadata,
+          recordingId,
+          writeCursor,
+          nowIso,
+          writeCursor,
+        );
+        metadataChanged = true;
+      } else if (canonicalCommand === "export") {
+        if (!targetPath) {
+          await operationalLogger.warn(
+            "recording.command.invalid_target",
+            "Skipping in-chat export because target path is missing",
+            {
+              provider,
+              sessionId: providerSessionId,
+              eventId: event.eventId,
+              command: command.name,
+            },
+          );
+          continue;
+        }
+        await recordingPipeline.exportSnapshot({
+          provider,
+          sessionId: providerSessionId,
+          targetPath,
+          events: snapshotSlice,
+          title: providerSessionId,
+        });
+      } else if (canonicalCommand === "stop") {
+        const stopped = await applyPersistentStopCommand(
+          metadata,
+          command.argument,
+          eventIndex,
+          provider,
+          providerSessionId,
+          event.eventId,
+          operationalLogger,
+          auditLogger,
+          now,
+        );
+        metadataChanged = metadataChanged || stopped;
+      }
+
+      await operationalLogger.info(
+        "recording.command.applied",
+        "Applied in-chat control command",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId: event.eventId,
+          command: canonicalCommand,
+          ...(targetPath ? { targetPath } : {}),
+          ...(targetPath ? {} : { targetPath: destination }),
+        },
+      );
+    } catch (error) {
+      await operationalLogger.error(
+        "recording.command.failed",
+        "Failed to apply in-chat control command",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId: event.eventId,
+          command: canonicalCommand,
+          ...(targetPath ? { targetPath } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      await auditLogger.record(
+        "recording.command.failed",
+        "In-chat control command failed",
+        {
+          provider,
+          sessionId: providerSessionId,
+          eventId: event.eventId,
+          command: canonicalCommand,
+          ...(targetPath ? { targetPath } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+
+  return metadataChanged;
 }
 
 async function applyControlCommandsForEvent(
@@ -489,6 +941,176 @@ async function processInChatRecordingUpdates(
   }
 }
 
+function readRecordingStartedAt(recording: SessionMetadataV1["recordings"][number]): string {
+  for (let i = recording.periods.length - 1; i >= 0; i -= 1) {
+    const period = recording.periods[i];
+    if (period?.startedAt) {
+      return period.startedAt;
+    }
+  }
+  return recording.createdAt ?? "";
+}
+
+async function processPersistentRecordingUpdates(
+  options: ProcessPersistentRecordingUpdatesOptions,
+): Promise<void> {
+  const {
+    sessionSnapshotStore,
+    sessionStateStore,
+    recordingPipeline,
+    operationalLogger,
+    auditLogger,
+    now,
+  } = options;
+
+  const snapshots = sessionSnapshotStore.listMetadataOnly
+    ? sessionSnapshotStore.listMetadataOnly()
+    : sessionSnapshotStore.list();
+  if (snapshots.length === 0) {
+    return;
+  }
+
+  const metadataList = await sessionStateStore.listSessionMetadata();
+  const metadataBySessionKey = new Map<string, SessionMetadataV1>();
+  for (const metadata of metadataList) {
+    metadataBySessionKey.set(
+      metadata.sessionKey,
+      metadata as SessionMetadataV1,
+    );
+  }
+
+  for (const entry of snapshots) {
+    const provider = readString(entry.provider);
+    const providerSessionId = readString(entry.sessionId);
+    if (!provider || !providerSessionId) {
+      continue;
+    }
+    const snapshot = "events" in entry
+      ? entry as RuntimeSessionSnapshot
+      : sessionSnapshotStore.get(providerSessionId);
+    if (!snapshot) {
+      continue;
+    }
+
+    const sessionKey = `${provider}:${providerSessionId}`;
+    let metadata = metadataBySessionKey.get(sessionKey);
+    if (!metadata) {
+      metadata = await sessionStateStore.getOrCreateSessionMetadata({
+        provider,
+        providerSessionId,
+        sourceFilePath: `[unknown:${provider}:${providerSessionId}]`,
+        initialCursor: snapshot.cursor,
+      }) as SessionMetadataV1;
+      metadataBySessionKey.set(sessionKey, metadata);
+    }
+
+    let metadataChanged = false;
+    const commandCursor = readCommandCursor(metadata);
+    for (let i = commandCursor; i < snapshot.events.length; i += 1) {
+      const event = snapshot.events[i];
+      if (!event || event.kind !== "message.user") {
+        continue;
+      }
+      const changed = await applyPersistentControlCommandsForEvent({
+        provider,
+        providerSessionId,
+        events: snapshot.events,
+        eventIndex: i,
+        event: event as ConversationEvent & { kind: "message.user" },
+        metadata,
+        recordingPipeline,
+        operationalLogger,
+        auditLogger,
+        now,
+      });
+      metadataChanged = metadataChanged || changed;
+    }
+    if (commandCursor !== snapshot.events.length) {
+      writeCommandCursor(metadata, snapshot.events.length);
+      metadataChanged = true;
+    }
+
+    const activeRecordings = activeSessionRecordings(metadata);
+    for (const recording of activeRecordings) {
+      const clampedCursor = Math.max(
+        0,
+        Math.min(recording.writeCursor, snapshot.events.length),
+      );
+      if (clampedCursor !== recording.writeCursor) {
+        recording.writeCursor = clampedCursor;
+        metadataChanged = true;
+      }
+
+      const pendingEvents = snapshot.events.slice(clampedCursor);
+      if (pendingEvents.length === 0) {
+        continue;
+      }
+
+      try {
+        if (!recordingPipeline.appendToDestination) {
+          throw new Error("Recording pipeline does not support appendToDestination");
+        }
+        await recordingPipeline.appendToDestination({
+          provider,
+          sessionId: providerSessionId,
+          targetPath: recording.destination,
+          events: pendingEvents,
+          title: providerSessionId,
+        });
+        recording.writeCursor = snapshot.events.length;
+        metadataChanged = true;
+      } catch (error) {
+        await operationalLogger.error(
+          "recording.append.failed",
+          "Failed to append events to persistent recording destination",
+          {
+            provider,
+            sessionId: providerSessionId,
+            recordingId: recording.recordingId,
+            destination: recording.destination,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        await auditLogger.record(
+          "recording.append.failed",
+          "Failed to append events to persistent recording destination",
+          {
+            provider,
+            sessionId: providerSessionId,
+            recordingId: recording.recordingId,
+            destination: recording.destination,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+
+    if (metadataChanged) {
+      await sessionStateStore.saveSessionMetadata(metadata);
+    }
+  }
+}
+
+function toActiveRecordingsFromMetadata(
+  entries: SessionMetadataV1[],
+): ActiveRecording[] {
+  const recordings: ActiveRecording[] = [];
+  for (const metadata of entries) {
+    for (const recording of metadata.recordings) {
+      if (recording.desiredState !== "on") continue;
+      recordings.push({
+        recordingId: recording.recordingId,
+        provider: metadata.provider,
+        sessionId: metadata.providerSessionId,
+        outputPath: recording.destination,
+        startedAt: readRecordingStartedAt(recording) || metadata.updatedAt,
+        lastWriteAt: metadata.updatedAt,
+      });
+    }
+  }
+  return recordings;
+}
+
 function toProviderStatuses(
   sessionSnapshots: SessionSnapshotMetadataEntry[],
   now: Date,
@@ -540,6 +1162,7 @@ function toSessionStatuses(
   activeRecordings: ActiveRecording[],
   now: Date,
   staleAfterMs: number,
+  sessionMetadataByKey?: Map<string, SessionMetadataV1>,
 ): DaemonSessionStatus[] {
   const recordingByKey = new Map<string, ActiveRecording>();
   for (const rec of activeRecordings) {
@@ -547,13 +1170,16 @@ function toSessionStatuses(
   }
 
   const statuses = sessionSnapshots.map((snap) => {
+    const metadata = sessionMetadataByKey?.get(`${snap.provider}:${snap.sessionId}`);
     const rec = recordingByKey.get(
       makeSessionProcessingKey(snap.provider, snap.sessionId),
     );
     return projectSessionStatus({
       session: {
         provider: snap.provider,
-        sessionId: snap.sessionId,
+        sessionId: metadata?.sessionId ?? snap.sessionId,
+        ...(metadata ? { sessionShortId: metadata.sessionId.slice(0, 8) } : {}),
+        ...(metadata ? { providerSessionId: metadata.providerSessionId } : {}),
         updatedAt: snap.metadata.updatedAt,
         lastEventAt: snap.metadata.lastEventAt,
         fileModifiedAtMs: snap.metadata.fileModifiedAtMs,
@@ -563,6 +1189,10 @@ function toSessionStatuses(
         ? {
           provider: rec.provider,
           sessionId: rec.sessionId,
+          ...(rec.recordingId ? { recordingId: rec.recordingId } : {}),
+          ...(rec.recordingId
+            ? { recordingShortId: rec.recordingId.slice(0, 8) }
+            : {}),
           outputPath: rec.outputPath,
           startedAt: rec.startedAt,
           lastWriteAt: rec.lastWriteAt,
@@ -739,6 +1369,8 @@ export async function runDaemonRuntimeLoop(
   const providerStatusStaleAfterMs = options.providerStatusStaleAfterMs ??
     DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS;
   const exportEnabled = options.exportEnabled ?? true;
+  const cleanSessionStatesOnShutdown = options.cleanSessionStatesOnShutdown ??
+    false;
   const daemonMaxMemoryBytes = (options.daemonMaxMemoryMb ?? 200) * 1024 *
     1024;
 
@@ -760,6 +1392,7 @@ export async function runDaemonRuntimeLoop(
     });
   const ingestionRunners = options.ingestionRunners ?? [];
   const sessionSnapshotStore = options.sessionSnapshotStore;
+  const sessionStateStore = options.sessionStateStore;
   const loadSessionSnapshot = options.loadSessionSnapshot ??
     (sessionSnapshotStore
       ? (sessionId: string) => {
@@ -865,14 +1498,25 @@ export async function runDaemonRuntimeLoop(
 
     if (sessionSnapshotStore) {
       try {
-        await processInChatRecordingUpdates({
-          sessionSnapshotStore,
-          sessionEventStates,
-          recordingPipeline,
-          operationalLogger,
-          auditLogger,
-          processEventsFromMs,
-        });
+        if (sessionStateStore) {
+          await processPersistentRecordingUpdates({
+            sessionSnapshotStore,
+            sessionStateStore,
+            recordingPipeline,
+            operationalLogger,
+            auditLogger,
+            now,
+          });
+        } else {
+          await processInChatRecordingUpdates({
+            sessionSnapshotStore,
+            sessionEventStates,
+            recordingPipeline,
+            operationalLogger,
+            auditLogger,
+            processEventsFromMs,
+          });
+        }
       } catch (error) {
         await operationalLogger.error(
           "recording.command.processing_failed",
@@ -901,7 +1545,18 @@ export async function runDaemonRuntimeLoop(
       if (shouldStop) break;
     }
 
-    const recordingSummary = recordingPipeline.getRecordingSummary();
+    const summaryMetadata = sessionStateStore
+      ? await sessionStateStore.listSessionMetadata()
+      : undefined;
+    const activeRecordingsForStatus = summaryMetadata
+      ? toActiveRecordingsFromMetadata(summaryMetadata)
+      : recordingPipeline.listActiveRecordings();
+    const recordingSummary = {
+      activeRecordings: activeRecordingsForStatus.length,
+      destinations: new Set(
+        activeRecordingsForStatus.map((recording) => recording.outputPath),
+      ).size,
+    };
     snapshot = {
       ...snapshot,
       recordings: {
@@ -916,6 +1571,15 @@ export async function runDaemonRuntimeLoop(
       const heartbeatNow = now();
       const sessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
         sessionSnapshotStore?.list() ?? [];
+      const heartbeatMetadata = sessionStateStore
+        ? await sessionStateStore.listSessionMetadata()
+        : undefined;
+      const heartbeatMetadataByKey = heartbeatMetadata
+        ? new Map(heartbeatMetadata.map((entry) => [entry.sessionKey, entry]))
+        : undefined;
+      const heartbeatActiveRecordings = heartbeatMetadata
+        ? toActiveRecordingsFromMetadata(heartbeatMetadata)
+        : recordingPipeline.listActiveRecordings();
       const providers = sessionSnapshotStore
         ? toProviderStatuses(
           sessionList,
@@ -926,9 +1590,10 @@ export async function runDaemonRuntimeLoop(
       const sessions = sessionSnapshotStore
         ? toSessionStatuses(
           sessionList,
-          recordingPipeline.listActiveRecordings(),
+          heartbeatActiveRecordings,
           heartbeatNow,
           providerStatusStaleAfterMs,
+          heartbeatMetadataByKey,
         )
         : snapshot.sessions;
 
@@ -985,10 +1650,36 @@ export async function runDaemonRuntimeLoop(
     }
   }
 
+  if (cleanSessionStatesOnShutdown && sessionStateStore) {
+    const cleanupResult = await sessionStateStore.deleteSessionTwinFiles();
+    if (cleanupResult.failed > 0) {
+      await operationalLogger.warn(
+        "session.state.cleanup.partial_failure",
+        "Failed to remove one or more session twin files during shutdown cleanup",
+        cleanupResult,
+      );
+    } else {
+      await operationalLogger.info(
+        "session.state.cleanup.completed",
+        "Removed persisted session twin files during shutdown cleanup",
+        cleanupResult,
+      );
+    }
+  }
+
   const exitIso = now().toISOString();
   const exitNow = now();
   const exitSessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
     sessionSnapshotStore?.list() ?? [];
+  const exitMetadata = sessionStateStore
+    ? await sessionStateStore.listSessionMetadata()
+    : undefined;
+  const exitMetadataByKey = exitMetadata
+    ? new Map(exitMetadata.map((entry) => [entry.sessionKey, entry]))
+    : undefined;
+  const exitActiveRecordings = exitMetadata
+    ? toActiveRecordingsFromMetadata(exitMetadata)
+    : recordingPipeline.listActiveRecordings();
   const providers = sessionSnapshotStore
     ? toProviderStatuses(
       exitSessionList,
@@ -999,9 +1690,10 @@ export async function runDaemonRuntimeLoop(
   const sessions = sessionSnapshotStore
     ? toSessionStatuses(
       exitSessionList,
-      recordingPipeline.listActiveRecordings(),
+      exitActiveRecordings,
       exitNow,
       providerStatusStaleAfterMs,
+      exitMetadataByKey,
     )
     : snapshot.sessions;
 

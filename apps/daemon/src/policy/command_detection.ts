@@ -1,4 +1,9 @@
-export type InChatControlCommandName = "record" | "capture" | "export" | "stop";
+export type InChatControlCommandName =
+  | "start"
+  | "record"
+  | "capture"
+  | "export"
+  | "stop";
 
 export interface InChatControlCommand {
   name: InChatControlCommandName;
@@ -82,24 +87,30 @@ function parseCommandLine(
   };
 
   if (name === "stop") {
-    if (argument && argument.length > 0) {
-      return {
-        error: {
-          ...commandBase,
-          reason: "Command '::stop' does not accept arguments",
-        },
-      };
-    }
-
     return {
       command: {
         ...commandBase,
         name,
+        ...(argument && argument.length > 0 ? { argument } : {}),
       },
     };
   }
 
-  if (name === "record" || name === "capture" || name === "export") {
+  if (
+    name === "start" ||
+    name === "record" ||
+    name === "capture"
+  ) {
+    return {
+      command: {
+        ...commandBase,
+        name,
+        ...(argument && argument.length > 0 ? { argument } : {}),
+      },
+    };
+  }
+
+  if (name === "export") {
     if (!argument || argument.length === 0) {
       return {
         error: {
@@ -109,13 +120,7 @@ function parseCommandLine(
       };
     }
 
-    return {
-      command: {
-        ...commandBase,
-        name,
-        argument,
-      },
-    };
+    return { command: { ...commandBase, name, argument } };
   }
 
   return {

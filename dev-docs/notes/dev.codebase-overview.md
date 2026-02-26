@@ -28,14 +28,19 @@ For implementation constraints and security invariants, also see:
 - **Provider**: external conversation source (currently `claude`, `codex`,
   `gemini`) represented as session log files under configured roots.
 - **Session**: one provider conversation identified by a provider-specific
-  `sessionId`.
+  `providerSessionId`, plus a kato-generated `sessionId` UUID for daemon/status
+  targeting.
+- **SessionTwin**: kato-native canonical JSONL event stream per session
+  (`*.twin.jsonl`) used for durable replay/export/write-cursor tracking.
+- **Session metadata**: per-session durable state (`*.meta.json`) with ingest
+  cursor, dedupe fingerprints, command cursor, and recording state.
 - **ConversationEvent**: typed canonical event record (kind: `message.user`,
   `message.assistant`, `tool.call`, `tool.result`, `thinking`, `decision`,
   `provider.info`, etc.) with base fields `eventId`, `provider`, `sessionId`,
   `timestamp`, `turnId?`, and `source` (provider-native identity).
-- **Runtime session snapshot**: normalized in-memory state for a session
-  (provider, cursor, `conversationSchemaVersion: 2`, bounded events list, status
-  metadata). This is the canonical runtime state for export and provider status.
+- **Runtime session snapshot**: normalized in-memory projection of SessionTwin
+  state (provider, cursor, `conversationSchemaVersion: 2`, bounded events list,
+  status metadata) used by status/export paths while daemon is running.
 - **Control plane**: filesystem IPC boundary between CLI and daemon:
   `control.json` (requests) and `status.json` (daemon snapshot).
 - **Recording/writer pipeline**: module chain that converts event snapshots into
@@ -64,6 +69,9 @@ graph TD
     CONFIG[~/.kato/config.json]
     CONTROL[~/.kato/runtime/control.json]
     STATUS[~/.kato/runtime/status.json]
+    SESSIONMETA[~/.kato/sessions/*.meta.json]
+    SESSIONTWIN[~/.kato/sessions/*.twin.jsonl]
+    DCTRL[~/.kato/daemon-control.json]
     LOGS[provider session logs .jsonl/.json]
     OUTPUT[exports .md]
     OPLOG[operational.jsonl]
@@ -75,6 +83,7 @@ graph TD
     LAUNCHER[Detached Launcher]
     RUNTIME[runDaemonRuntimeLoop]
     INGEST[Provider Ingestion Runners]
+    PERSIST[PersistentSessionStateStore]
     SNAPSHOT[InMemorySessionSnapshotStore]
     WRITER[RecordingPipeline + MarkdownWriter/JsonlWriter]
     POLICY[WritePathPolicyGate]
@@ -91,12 +100,17 @@ graph TD
 
   RUNTIME --> INGEST
   INGEST --> LOGS
+  INGEST --> PERSIST
   INGEST --> SNAPSHOT
 
   RUNTIME --> SNAPSHOT
+  RUNTIME --> PERSIST
   RUNTIME --> CONTROL
   RUNTIME --> STATUS
   RUNTIME --> WRITER
+  PERSIST --> SESSIONMETA
+  PERSIST --> SESSIONTWIN
+  PERSIST --> DCTRL
   WRITER --> POLICY
   WRITER --> OUTPUT
 
@@ -112,8 +126,9 @@ graph TD
 | Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
 | Config          | Validate and default runtime config              | config schema rules           | `~/.kato/config.json`, env           | `~/.kato/config.json`        | `apps/daemon/src/config/runtime_config.ts`           |
 | Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
-| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | session snapshot store, logs | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Snapshot store  | Canonical session state for runtime              | per-session snapshots         | ingestion upserts                    | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
+| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | SessionTwin + snapshots      | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
+| Session state   | Persistent session metadata/twin/index           | per-session durable artifacts | ingestion/runtime updates            | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
+| Snapshot store  | Runtime projection for status/command processing | per-session snapshots         | ingestion/session-state projections  | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
 | Writer pipeline | Render/export markdown or JSONL with path gates  | active recordings map         | export requests + event snapshots    | .md/.jsonl files, logs       | `apps/daemon/src/writer/*`                           |
 | Policy          | Deny/allow write destinations, command detection | none                          | config + command text                | decisions/events             | `apps/daemon/src/policy/*`                           |
 | Observability   | structured operational + audit records           | none                          | events from runtime/ingestion/writer | JSONL sinks                  | `apps/daemon/src/observability/*`                    |
@@ -178,11 +193,13 @@ Per runner responsibilities:
 
 - discover session files from provider roots
 - watch filesystem changes with debounce
-- maintain in-memory cursor map per session
+- resume ingest cursor from persisted session metadata
 - parse new log content from last cursor
-- merge/dedupe events against existing snapshot (signature includes kind, source
-  fields, and content)
-- upsert into shared snapshot store
+- map parser `ConversationEvent` output into canonical SessionTwin event kinds
+  (see `dev.event-kinds.md`)
+- append to SessionTwin with bounded recent-fingerprint dedupe
+- update persisted ingest cursor/metadata, then project SessionTwin back into
+  runtime snapshot store
 - emit operational and audit events for starts/errors/cursor updates/drops
 
 ### 5) Snapshot Store and State Semantics
@@ -275,7 +292,8 @@ unavailable.
 - `config.json`: canonical runtime settings and policy-relevant roots/flags.
 - `control.json`: canonical queued daemon commands from CLI.
 - `status.json`: canonical externally readable daemon status snapshot.
-- in-memory snapshot store: canonical live session state while daemon runs.
+- session metadata + SessionTwin files: canonical durable session state.
+- in-memory snapshot store: runtime projection/cache while daemon runs.
 - exported markdown: derived artifact, never the runtime source of truth.
 
 ## Key Interaction Flows

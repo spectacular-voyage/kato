@@ -43,6 +43,27 @@ export {
   createGeminiIngestionRunner,
   FileProviderIngestionRunner,
 } from "./provider_ingestion.ts";
+export type {
+  GetOrCreateSessionMetadataInput,
+  PersistentSessionStateStoreOptions,
+  SessionStateIdentity,
+  SessionStateLocation,
+} from "./session_state_store.ts";
+export {
+  makeDefaultSessionCursor,
+  PersistentSessionStateStore,
+  resolveDefaultDaemonControlIndexPath,
+  resolveDefaultKatoDir,
+  resolveDefaultSessionsDir,
+} from "./session_state_store.ts";
+export type {
+  MapConversationEventsToTwinInput,
+  TwinToConversationOptions,
+} from "./session_twin_mapper.ts";
+export {
+  mapConversationEventsToTwin,
+  mapTwinEventsToConversation,
+} from "./session_twin_mapper.ts";
 export type { DaemonProcessLauncherLike } from "./launcher.ts";
 export { DenoDetachedDaemonLauncher } from "./launcher.ts";
 export { runDaemonRuntimeLoop } from "./daemon_runtime.ts";

@@ -1,5 +1,6 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
 import { dirname, join } from "@std/path";
+import { expandHomePath, readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
 
 const DEFAULT_RUNTIME_DIR_FALLBACK = ".kato/runtime";
 const DEFAULT_KATO_DIRNAME = ".kato";
@@ -186,25 +187,6 @@ function cloneRequest(request: DaemonControlRequest): DaemonControlRequest {
   };
 }
 
-function readEnvOptional(key: string): string | undefined {
-  try {
-    const value = Deno.env.get(key);
-    if (value === undefined || value.length === 0) {
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotCapable) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-function resolveHomeDir(): string | undefined {
-  return readEnvOptional("HOME") ?? readEnvOptional("USERPROFILE");
-}
-
 async function writeJsonAtomically(path: string, data: unknown): Promise<void> {
   const dir = dirname(path);
   await Deno.mkdir(dir, { recursive: true });
@@ -249,21 +231,9 @@ export function isStatusSnapshotStale(
 }
 
 export function resolveDefaultRuntimeDir(): string {
-  const runtimeDirOverride = readEnvOptional("KATO_RUNTIME_DIR");
+  const runtimeDirOverride = readOptionalEnv("KATO_RUNTIME_DIR");
   if (runtimeDirOverride) {
-    // Expand leading ~ so users can set KATO_RUNTIME_DIR=~/.kato/runtime.
-    if (runtimeDirOverride.startsWith("~")) {
-      const home = resolveHomeDir();
-      if (home) {
-        if (runtimeDirOverride === "~") {
-          return home;
-        }
-        if (runtimeDirOverride.startsWith("~/")) {
-          return join(home, runtimeDirOverride.slice(2));
-        }
-      }
-    }
-    return runtimeDirOverride;
+    return expandHomePath(runtimeDirOverride);
   }
 
   const homeDir = resolveHomeDir();
@@ -277,14 +247,14 @@ export function resolveDefaultRuntimeDir(): string {
 export function resolveDefaultStatusPath(
   runtimeDir = resolveDefaultRuntimeDir(),
 ): string {
-  return readEnvOptional("KATO_DAEMON_STATUS_PATH") ??
+  return readOptionalEnv("KATO_DAEMON_STATUS_PATH") ??
     join(runtimeDir, STATUS_FILENAME);
 }
 
 export function resolveDefaultControlPath(
   runtimeDir = resolveDefaultRuntimeDir(),
 ): string {
-  return readEnvOptional("KATO_DAEMON_CONTROL_PATH") ??
+  return readOptionalEnv("KATO_DAEMON_CONTROL_PATH") ??
     join(runtimeDir, CONTROL_FILENAME);
 }
 

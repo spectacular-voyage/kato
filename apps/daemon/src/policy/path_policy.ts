@@ -1,4 +1,5 @@
 import { basename, dirname, isAbsolute, relative, resolve } from "@std/path";
+import { readOptionalEnv } from "../utils/env.ts";
 
 const DEFAULT_ALLOWED_WRITE_ROOT = ".";
 
@@ -16,21 +17,6 @@ export interface WritePathPolicyGateLike {
 
 export interface WritePathPolicyGateOptions {
   allowedRoots: string[];
-}
-
-function readOptionalEnv(name: string): string | undefined {
-  try {
-    const value = Deno.env.get(name);
-    if (value === undefined || value.length === 0) {
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotCapable) {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 function parseAllowedRootsFromEnv(raw: string): string[] {

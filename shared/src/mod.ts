@@ -18,6 +18,7 @@ export type {
 } from "./contracts/ipc.ts";
 export type {
   ConfigSource,
+  ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeConfigMetadata,
@@ -46,3 +47,30 @@ export type {
   DecisionPayload,
   DecisionStatus,
 } from "./contracts/events.ts";
+export {
+  SESSION_TWIN_SCHEMA_VERSION,
+  isSessionTwinEventV1,
+  isSessionTwinKind,
+} from "./contracts/session_twin.ts";
+export type {
+  SessionTwinEventSource,
+  SessionTwinEventTime,
+  SessionTwinEventV1,
+  SessionTwinKind,
+  SessionTwinSourceCursor,
+} from "./contracts/session_twin.ts";
+export {
+  DAEMON_CONTROL_SCHEMA_VERSION,
+  SESSION_METADATA_SCHEMA_VERSION,
+  isDaemonControlIndexV1,
+  isSessionMetadataV1,
+} from "./contracts/session_state.ts";
+export type {
+  DaemonControlIndexV1,
+  DaemonControlSessionIndexEntryV1,
+  RecordingDesiredState,
+  SessionIngestAnchorV1,
+  SessionMetadataV1,
+  SessionRecordingPeriodV1,
+  SessionRecordingStateV1,
+} from "./contracts/session_state.ts";

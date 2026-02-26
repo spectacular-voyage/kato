@@ -41,6 +41,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Usage: kato start",
     "",
     "Starts daemon runtime in detached background mode.",
+    "Returns success after daemon heartbeat acknowledges startup.",
   ].join("\n"),
   restart: [
     "Usage: kato restart",
@@ -69,8 +70,11 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   clean: [
     "Usage: kato clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
     "",
-    "Runs cleanup in CLI. --all flushes runtime logs.",
-    "--recordings/--sessions are accepted but currently no-op placeholders.",
+    "Runs cleanup in CLI.",
+    "--all flushes runtime logs.",
+    "--sessions deletes persisted session twins/metadata older than <days>.",
+    "--sessions refuses to run while daemon status is actively running.",
+    "--recordings is accepted but currently a no-op placeholder.",
   ].join("\n"),
 };
 

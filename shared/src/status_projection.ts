@@ -17,6 +17,8 @@ const SNIPPET_MAX_CHARS = 60;
 export interface SessionProjectionInput {
   provider: string;
   sessionId: string;
+  sessionShortId?: string;
+  providerSessionId?: string;
   updatedAt: string;
   lastEventAt?: string;
   /** File mtime in ms — most reliable staleness signal, provider-agnostic. */
@@ -30,6 +32,8 @@ export interface SessionProjectionInput {
 export interface RecordingProjectionInput {
   provider: string;
   sessionId: string;
+  recordingId?: string;
+  recordingShortId?: string;
   outputPath: string;
   startedAt: string;
   lastWriteAt: string;
@@ -101,6 +105,10 @@ export function projectSessionStatus(opts: {
   const result: DaemonSessionStatus = {
     provider: session.provider,
     sessionId: session.sessionId,
+    ...(session.sessionShortId ? { sessionShortId: session.sessionShortId } : {}),
+    ...(session.providerSessionId
+      ? { providerSessionId: session.providerSessionId }
+      : {}),
     snippet: session.snippet ?? extractSnippet(session.events ?? []),
     updatedAt: session.updatedAt,
     lastMessageAt: session.lastEventAt,
@@ -109,6 +117,10 @@ export function projectSessionStatus(opts: {
 
   if (recording) {
     const rec: DaemonRecordingStatus = {
+      ...(recording.recordingId ? { recordingId: recording.recordingId } : {}),
+      ...(recording.recordingShortId
+        ? { recordingShortId: recording.recordingShortId }
+        : {}),
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
       lastWriteAt: recording.lastWriteAt,

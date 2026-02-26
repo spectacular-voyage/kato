@@ -33,6 +33,8 @@ export interface MemoryStatus {
 }
 
 export interface DaemonRecordingStatus {
+  recordingId?: string;
+  recordingShortId?: string;
   outputPath: string;
   startedAt: string;
   lastWriteAt: string;
@@ -41,6 +43,8 @@ export interface DaemonRecordingStatus {
 export interface DaemonSessionStatus {
   provider: string;
   sessionId: string;
+  sessionShortId?: string;
+  providerSessionId?: string;
   snippet?: string;
   updatedAt: string;
   lastMessageAt?: string;

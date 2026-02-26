@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import type { ConversationEvent, DaemonStatusSnapshot } from "@kato/shared";
 import {
   AuditLogger,
@@ -6,6 +7,7 @@ import {
   type DaemonStatusSnapshotStoreLike,
   InMemorySessionSnapshotStore,
   type LogRecord,
+  PersistentSessionStateStore,
   type ProviderIngestionRunner,
   type RecordingPipelineLike,
   runDaemonRuntimeLoop,
@@ -2119,7 +2121,7 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
       const invalidCommandMessage = makeEvent(
         "invalid",
         "message.user",
-        "::record\n::record notes/should-not-run.md",
+        "::export\n::record notes/should-not-run.md",
         "2026-02-22T10:00:01.000Z",
       );
 
@@ -2584,4 +2586,939 @@ Deno.test("runDaemonRuntimeLoop shuts down cleanly on fatal memory-budget error"
       record.channel === "security-audit"
     ),
   );
+});
+
+Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-persistent-",
+  });
+  try {
+    const statusHistory: DaemonStatusSnapshot[] = [];
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+          ...(currentStatus.sessions
+            ? { sessions: [...currentStatus.sessions] }
+            : {}),
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+          ...(snapshot.sessions ? { sessions: [...snapshot.sessions] } : {}),
+        };
+        statusHistory.push(currentStatus);
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-persist-1234",
+    });
+
+    const makeLocalEvent = (
+      id: string,
+      kind: "message.user" | "message.assistant",
+      content: string,
+      timestamp: string,
+    ): ConversationEvent => ({
+      eventId: id,
+      provider: "codex",
+      sessionId: "session-persist",
+      timestamp,
+      kind,
+      role: kind === "message.user" ? "user" : "assistant",
+      content,
+      source: {
+        providerEventType: kind === "message.user" ? "user" : "assistant",
+        providerEventId: id,
+      },
+    } as ConversationEvent);
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        const startCommand = makeLocalEvent(
+          "u-start",
+          "message.user",
+          "::start /tmp/persistent-recording.md",
+          "2026-02-22T10:00:00.000Z",
+        );
+        const assistantMessage = makeLocalEvent(
+          "a-1",
+          "message.assistant",
+          "captured assistant event",
+          "2026-02-22T10:00:01.000Z",
+        );
+        const stopCommand = makeLocalEvent(
+          "u-stop",
+          "message.user",
+          "::stop",
+          "2026-02-22T10:00:02.000Z",
+        );
+
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-persist",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [startCommand],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        if (pollCount === 2) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-persist",
+            cursor: { kind: "byte-offset", value: 2 },
+            events: [startCommand, assistantMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        if (pollCount === 3) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-persist",
+            cursor: { kind: "byte-offset", value: 3 },
+            events: [startCommand, assistantMessage, stopCommand],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:02.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:03.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 4 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) => request.requestId === requestId);
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const appendCalls: number[] = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination(input) {
+        appendCalls.push(input.events.length);
+        return Promise.resolve({
+          mode: "append",
+          outputPath: input.targetPath,
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(appendCalls, [1]);
+    const metadataList = await sessionStateStore.listSessionMetadata();
+    assertEquals(metadataList.length, 1);
+    const recording = metadataList[0]?.recordings[0];
+    assertExists(recording);
+    assertEquals(recording?.desiredState, "off");
+    assertEquals(recording?.writeCursor, 2);
+
+    const lastStatus = statusHistory[statusHistory.length - 1];
+    assertExists(lastStatus);
+    const session = lastStatus.sessions?.[0];
+    assertExists(session);
+    assertEquals(session?.providerSessionId, "session-persist");
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop performs session twin cleanup at shutdown", async () => {
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: { activeRecordings: 0, destinations: 0 },
+  };
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+      };
+      return Promise.resolve();
+    },
+  };
+
+  const requests = [{
+    requestId: "req-stop-cleanup",
+    requestedAt: "2026-02-22T10:00:00.000Z",
+    command: "stop" as const,
+  }];
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(requests.map((request) => ({ ...request })));
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called");
+    },
+    markProcessed(requestId: string) {
+      const idx = requests.findIndex((request) => request.requestId === requestId);
+      if (idx >= 0) {
+        requests.splice(0, idx + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  const callOrder: string[] = [];
+  const sessionStateStore = {
+    listSessionMetadata() {
+      callOrder.push("list");
+      return Promise.resolve([]);
+    },
+    deleteSessionTwinFiles() {
+      callOrder.push("cleanup");
+      return Promise.resolve({ deleted: 0, failed: 0 });
+    },
+  } as unknown as PersistentSessionStateStore;
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    sessionStateStore,
+    cleanSessionStatesOnShutdown: true,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+    pid: 4242,
+    heartbeatIntervalMs: 50,
+    pollIntervalMs: 10,
+  });
+
+  assert(callOrder.length > 0);
+  assertEquals(callOrder[0], "list");
+  assert(callOrder.includes("cleanup"));
+});
+
+Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple recordings", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-multi-recording-",
+  });
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-multi-rec-1234",
+    });
+
+    const mk = (
+      id: string,
+      kind: "message.user" | "message.assistant",
+      content: string,
+      timestamp: string,
+    ): ConversationEvent => ({
+      eventId: id,
+      provider: "codex",
+      sessionId: "session-multi-rec",
+      timestamp,
+      kind,
+      role: kind === "message.user" ? "user" : "assistant",
+      content,
+      source: {
+        providerEventType: kind === "message.user" ? "user" : "assistant",
+        providerEventId: id,
+      },
+    } as ConversationEvent);
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        const e1 = mk(
+          "u-start-a",
+          "message.user",
+          "::start /tmp/multi-a.md",
+          "2026-02-22T10:00:00.000Z",
+        );
+        const e2 = mk(
+          "a-1",
+          "message.assistant",
+          "first message",
+          "2026-02-22T10:00:01.000Z",
+        );
+        const e3 = mk(
+          "u-start-b",
+          "message.user",
+          "::start /tmp/multi-b.md",
+          "2026-02-22T10:00:02.000Z",
+        );
+        const e4 = mk(
+          "a-2",
+          "message.assistant",
+          "second message",
+          "2026-02-22T10:00:03.000Z",
+        );
+
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-multi-rec",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [e1, e2],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 2,
+          });
+        }
+        if (pollCount === 2) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-multi-rec",
+            cursor: { kind: "byte-offset", value: 2 },
+            events: [e1, e2, e3, e4],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 2,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-multi-recording",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 3 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) => request.requestId === requestId);
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const appendByDestination = new Map<string, string[]>();
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination(input) {
+        const ids = input.events.map((event) => event.eventId);
+        const current = appendByDestination.get(input.targetPath) ?? [];
+        appendByDestination.set(input.targetPath, [...current, ...ids]);
+        return Promise.resolve({
+          mode: "append",
+          outputPath: input.targetPath,
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(
+      appendByDestination.get("/tmp/multi-a.md"),
+      ["a-1", "u-start-b", "a-2"],
+    );
+    assertEquals(appendByDestination.get("/tmp/multi-b.md"), ["a-2"]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and destination matches", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-ambiguous-stop-",
+  });
+  try {
+    const sink = new CaptureSink();
+    const operationalLogger = new StructuredLogger([sink], {
+      channel: "operational",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const auditLogger = new AuditLogger(
+      new StructuredLogger([sink], {
+        channel: "security-audit",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      }),
+    );
+
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-ambiguous-stop-1234",
+    });
+    const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-ambiguous-stop",
+      sourceFilePath: "/tmp/mock-session.jsonl",
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    metadata.recordings = [
+      {
+        recordingId: "deadbeef-1111-1111-1111-111111111111",
+        destination: "deadbeef",
+        desiredState: "on",
+        writeCursor: 0,
+        periods: [{ startedCursor: 0 }],
+      },
+      {
+        recordingId: "deadbeef-2222-2222-2222-222222222222",
+        destination: "/tmp/other-destination.md",
+        desiredState: "on",
+        writeCursor: 0,
+        periods: [{ startedCursor: 0 }],
+      },
+    ];
+    await sessionStateStore.saveSessionMetadata(metadata);
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-ambiguous-stop",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [{
+              eventId: "u-stop-ambiguous",
+              provider: "codex",
+              sessionId: "session-ambiguous-stop",
+              timestamp: "2026-02-22T10:00:00.000Z",
+              kind: "message.user",
+              role: "user",
+              content: "::stop deadbeef",
+              source: {
+                providerEventType: "user",
+                providerEventId: "u-stop-ambiguous",
+              },
+            } as ConversationEvent],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:01.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-ambiguous-case",
+      requestedAt: "2026-02-22T10:00:02.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) => request.requestId === requestId);
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+      operationalLogger,
+      auditLogger,
+    });
+
+    const after = await sessionStateStore.listSessionMetadata();
+    const item = after.find((entry) =>
+      entry.providerSessionId === "session-ambiguous-stop"
+    );
+    assertExists(item);
+    assertEquals(
+      item!.recordings.map((recording) => recording.desiredState),
+      ["off", "off"],
+    );
+    assert(
+      sink.records.some((record) =>
+        record.event === "recording.command.stop.ambiguous" &&
+        record.channel === "operational"
+      ),
+    );
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-default-destination-",
+  });
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "defaultdest-session-abcdef12",
+    });
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-default-destination",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [{
+              eventId: "u-start-default",
+              provider: "codex",
+              sessionId: "session-default-destination",
+              timestamp: "2026-02-22T10:00:00.000Z",
+              kind: "message.user",
+              role: "user",
+              content: "::start",
+              source: {
+                providerEventType: "user",
+                providerEventId: "u-start-default",
+              },
+            } as ConversationEvent, {
+              eventId: "a-default-1",
+              provider: "codex",
+              sessionId: "session-default-destination",
+              timestamp: "2026-02-22T10:00:01.000Z",
+              kind: "message.assistant",
+              role: "assistant",
+              content: "assistant output",
+              source: {
+                providerEventType: "assistant",
+                providerEventId: "a-default-1",
+              },
+            } as ConversationEvent],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 2,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:01.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-default-destination",
+      requestedAt: "2026-02-22T10:00:02.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) => request.requestId === requestId);
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination() {
+        return Promise.resolve({
+          mode: "append",
+          outputPath: "/tmp/default-path.md",
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    const metadata = await sessionStateStore.listSessionMetadata();
+    const session = metadata.find((entry) =>
+      entry.providerSessionId === "session-default-destination"
+    );
+    assertExists(session);
+    const recording = session!.recordings[0];
+    assertExists(recording);
+    const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE");
+    const expectedRoot = home
+      ? join(home, ".kato", "recordings")
+      : join(".kato", "recordings");
+    assert(
+      recording!.destination.startsWith(expectedRoot),
+      `expected recording destination to start with ${expectedRoot}, got ${recording!.destination}`,
+    );
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
 });

@@ -22,6 +22,12 @@ export interface ProviderSessionRoots {
   gemini: string[];
 }
 
+export interface ProviderAutoGenerateSnapshots {
+  claude?: boolean;
+  codex?: boolean;
+  gemini?: boolean;
+}
+
 export interface RuntimeConfig {
   schemaVersion: 1;
   runtimeDir: string;
@@ -29,6 +35,9 @@ export interface RuntimeConfig {
   controlPath: string;
   allowedWriteRoots: string[];
   providerSessionRoots: ProviderSessionRoots;
+  globalAutoGenerateSnapshots?: boolean;
+  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
+  cleanSessionStatesOnShutdown?: boolean;
   featureFlags: RuntimeFeatureFlags;
   logging: RuntimeLoggingConfig;
   daemonMaxMemoryMb: number;

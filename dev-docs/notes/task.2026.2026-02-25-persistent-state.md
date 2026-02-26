@@ -6,452 +6,175 @@ updated: 1772078700892
 created: 1772036537917
 ---
 
-## Goal
+# User_2026-02-25_0826_40
 
-Persist daemon control state and per-session twin state across daemon restarts, without replay-driven timestamp corruption.
+A recent change (maybe the first-line one) caused changes in all the codex conversations. (You could see with git status). Basically it triggered reprocessing of all those files, and with the codex timestamping issue, all the timestamped headings got updated to now.
 
-## Why This Exists
+So we have to figure out how to not re-try processing. It might require persistent state. Also, we need to figure out how to get accurate timestamps for Codex conversation, and it seems like we'll have to capture full session snapshots. In cases where we don't have a good timestamp for the event, we shouldn't create one (i.e., now() as a fallback), and just omit them from the headings.
 
-1. Restart/reload currently reprocesses provider logs too aggressively.
-2. Codex backprocessing can assign false timestamps when `now()` fallback is used.
-3. We need durable state for multi-recording workflows per session.
+I've created a new task.2026.2026-02-25-persistent-state.md for us to flush out this ticket. What do you think?
 
-## Resolved Decisions
+# claude-haiku-4-5.20251001_2026-02-25_0826_55
 
-### Persistent Artifacts
+I think this is exactly the right direction. The task file is currently just a shell, so let me break down what I see as the core issues and how your approach addresses them:
 
-1. **Daemon control index**: `~/.kato/daemon-control.json`
-   - Lightweight index of known sessions and pointers to per-session metadata.
-   - No global config snapshot persisted here.
+## The Problem
 
-2. **Session metadata**: `~/.kato/sessions/{session-key}.meta.json`
-   - Exists once kato knows about the session.
-   - `session-key` uses `{provider}:{providerSessionId}`.
-   - Stores source identity, ingest cursor, last observed mtime, and recording metadata.
+1. **Reprocessing without tracking**: Files are being reprocessed because there's no persistent record of which events have already been ingested/processed
+2. **Timestamp fallback trap**: Using `now()` as a fallback for missing timestamps creates false timestamps that overwrite accurate ones on reprocessing
+3. **No session snapshots for Codex**: Codex conversations lack the full context needed to extract accurate event timestamps
 
-3. **Session twin log (optional)**: `~/.kato/sessions/{session-key}.twin.jsonl`
-   - Kato-native intermediary representation.
-   - Stores normalized events and optional timestamps.
-   - Deleted on shutdown if `cleanSessionStatesOnShutdown=true`.
+## Your Approach (which I think is solid)
 
-### Session And Recording Model
+1. **Persistent state** to track processed events
+   - Could be a simple hash/set of processed event IDs or a last-processed timestamp per file
+   - Should survive daemon restarts
 
-- A session has many recordings.
-- A recording belongs to exactly one session.
-- Recording state is `on`/`off` plus per-recording cursor.
+2. **Capture full session snapshots** for Codex
+   - Gets you the actual event timestamps from the source data
+   - Avoids the guessing game entirely
 
-### Recording Identifiers
+3. **Omit timestamps when uncertain**
+   - Much better than using `now()` — a missing timestamp is at least honest
+   - Allows downstream consumers to handle missing data gracefully
 
-- Each recording gets a UUID (`recordingId`).
-- Human-facing status should show a short prefix alias (for example `7d14af8e`) and full UUID.
-- Commands may target destination path or recording ID (full UUID or unambiguous prefix).
+## Questions to Flush Out in the Task
 
-### In-Chat Command Semantics
+Before implementing, I'd suggest documenting:
 
-- `::start`: create a new recording for the session in the default destination.
-- `::stop`: stop all active recordings for the session.
-- `::stop <destination-or-recording-id>`: stop the matching recording(s) by destination or recording UUID/prefix.
-- `::stop id:<recording-id-or-prefix>` and `::stop dest:<destination>` are explicit forms.
-- For bare `::stop <arg>`, if both destination and recording-id-prefix resolution match: stop both matches and log an ambiguity warning.
+- **Where should persistent state live?** (`~/.kato/` state file? daemon memory with periodic flush?)
+- **What granularity?** Track by file path, by event ID, or by last-processed timestamp?
+- **What triggers reprocessing?** (file modification time? explicit user flag? never after first ingest?)
+- **Session snapshot capture strategy** — how do you invoke full snapshots for Codex conversations?
+- **Backwards compat** — what about files already processed with `now()` timestamps?
 
-### Cursors
+Want me to help you flesh out the task file with these considerations, or would you rather run with a first implementation?
 
-Two cursors only:
+# User_2026-02-25_0849_17
 
-1. **Ingest cursor** (per session): source-provider position.
-2. **Recording cursor** (per recording): position in session twin log.
+Yes, two separate types of state: control state, which tracks recording-to-session mapping, intended recording state (so we can automatically pick up processing after daemon restarts), and the "last-processed" event ID; and session state, i.e., a serialization of the current in-memory conversation in our desired kato-specific representation, where we can write timestamps in realtime for Codex conversations that we're processing. This is a major rewrite. 
 
-No separate snapshot cursor.
+Yes, persistent state can live in ~/.kato. 
 
-### Provider-Specific Ingest Cursor Rules
+For granularity, eventIDs seems correct. We should probably record last-processed (by kato) timestamp too. 
 
-- Claude/Codex ingest cursor: byte-offset.
-- Gemini ingest cursor: item-index with a lightweight anchor guard (`messageId` if present, otherwise hash of normalized message payload).
-- On resume mismatch (source rewrite/reorder): attempt anchor re-sync; if not found, replay from start into the existing twin log with dedupe suppression (no destructive twin truncation/rebuild in v1).
+Probably we need a daemon flag of cleanSessionStatesOnShutdown, as a security measure. 
 
-### Write Ordering And Crash Semantics (v1)
+We should process session state generation in order of reverse mtime? and only create new persistent session state for sessions with mtime greater than the daemon startup time... ? i.e., we don't want to have to create session state for all old session that don't have them yet, only active ones.
 
-Processing order for one session update batch:
+Any other questions?
 
-1. Read provider source from persisted ingest cursor.
-2. Translate to `SessionTwinEventV1[]`.
-3. Append translated events to `.twin.jsonl`.
-4. Persist session metadata with updated ingest cursor/anchor.
-5. Append translated events to each active recording destination from that recording's `writeCursor`.
-6. Persist session metadata with updated per-recording `writeCursor`.
-7. Update daemon control index last (cache only).
+reprocessing of session states should be manual. There's a question of which sessions should be processed. Probably not all, but if we don't process all codex states as they happen, we won't have any basis for accurate timestamping if we decide to record later. I guess we can set a preference per-provider-session-root (autoGenerateSnapshots) of whether to generate session state for alll conversations. So we'll need an updated config schema. 
 
-Rules:
+We don't need to worry about backwards compatibility. 
 
-- Session metadata writes are atomic (`tmp` + `fsync` + rename), never in-place overwrite.
-- Daemon control index is rebuildable cache; per-session metadata is authoritative.
-- v1 favors avoiding data loss over avoiding duplicate tails: recording cursor advances only after successful output write.
-- Crash between steps may replay a tail segment; replay must remain safe via twin dedupe and recording cursor checks.
+I'd expect you to have more questions.
 
-### Session And Recording IDs (CLI/Status Contract v1)
+# claude-haiku-4-5.20251001_2026-02-25_0849_35
 
-- `sessionId`: kato-generated UUID for session identity in status/CLI.
-- `sessionShortId`: first 8 characters of `sessionId` (human shorthand).
-- `recordingId`: kato-generated UUID for recording identity in status/CLI.
-- `recordingShortId`: first 8 characters of `recordingId` (human shorthand).
-- `providerSessionId`: provider-native session identifier, retained separately.
-- Internal session key remains `{provider}:{providerSessionId}` for storage/index paths.
+Excellent framing. This is definitely a major rewrite but the separation of concerns is clean. I have quite a few questions:
 
-Prefix resolution behavior:
+**Critical design questions:**
 
-- Prefix matching is type-specific (`sessionId` prefixes only against sessions, `recordingId` prefixes only against recordings).
-- No match: return not-found error.
-- Multiple matches: return ambiguity error with candidate short IDs and destinations; require a longer prefix or full UUID.
+1. **Control state structure**: Is this a single file (e.g., `~/.kato/control-state.json`) or per-recording/per-session? What does "recording-to-session mapping" look like — one-to-one or can one recording come from multiple sessions?
 
-### Default Destination Policy (v1)
+2. **Session state format & lifecycle**: 
+   - What's the "kato-specific representation"? Structured JSON with events + timestamps?
+   - When is session state created? On first event? Only when `autoGenerateSnapshots=true`?
+   - If a session is still active and we're writing to it in realtime, how do we handle concurrent reads (e.g., export queries)?
+   - Is session state *always* "live" or does it get finalized when a session ends?
 
-- Working-directory inference from provider metadata is deferred.
-- If `::start` or `::capture` has no destination argument, use `~/.kato/recordings/`.
-- Runtime generates destination filename under that directory (provider + short IDs + timestamp), ensuring no accidental overwrite.
-
-### Twin Growth Policy (v1)
-
-- Session twin logs are unbounded in v1 (no rotation/compaction/retention policy yet).
-- Growth controls are deferred to future cleanup/maintenance work.
-
-### Event Identity And Dedupe
-
-- Primary identity key for translated events:
-  - session key
-  - source cursor (`kind` + `value`)
-  - `emitIndex`
-  - canonical kind
-  - source provider event metadata (`providerEventType`, `providerEventId` when present)
-- Fallback dedupe key when source identity is unstable/missing:
-  - hash of normalized canonical payload (excluding timestamps, seq, cursors)
-- Translation append path should keep a bounded recent-fingerprint set per session to suppress duplicates during replay/re-sync.
-
-### Timestamp Policy
-
-- Live ingestion: record kato receive time (`capturedAt`).
-- Provider timestamp may be included when trustworthy.
-- Backprocessing (notably Codex): omit timestamps if uncertain.
-- Never synthesize with `now()` fallback.
-
-### Twin Gating
-
-- `autoGenerateSnapshots=true`: update twin log on watcher-detected source changes.
-- `autoGenerateSnapshots=false`: update twin log only while a recording is `on`.
-- Export/capture with no twin state: build on demand from source.
-- For Codex on-demand backprocessing: omit uncertain timestamps.
-
-### On-Demand Twin Persistence
-
-- On-demand twin generation should persist to `.twin.jsonl` by default.
-- Rationale: avoids repeated full re-translation and provides stable cursor base for subsequent recording/export actions.
-- If `cleanSessionStatesOnShutdown=true`, persisted twin log is still removed at daemon shutdown.
-
-### Translation Cleanup Policy ("Junk")
-
-Strip transport/UI artifacts, not semantic conversation content:
-
-- Remove IDE preambles/wrappers and other known scaffolding blocks.
-- Strip ANSI escape sequences.
-- Drop empty text payloads.
-- Keep decision/tool/message semantics intact.
-- Unknown provider artifacts should be preserved as `provider.raw` (not silently dropped) unless explicitly denylisted.
-
-### Security
-
-- `cleanSessionStatesOnShutdown`: delete twin logs on shutdown, keep metadata/control index.
-- Future secure mode (deferred): in-memory-only twin state.
-
-### Config Additions
-
-- `globalAutoGenerateSnapshots: boolean` (default `false`)
-- per-provider-root `autoGenerateSnapshots?: boolean`
-- `cleanSessionStatesOnShutdown?: boolean`
-
-## Session Twin Schema (Draft v1)
-
-```ts
-type SessionTwinKind =
-  | "user.message"
-  | "user.kato-command"
-  | "assistant.message"
-  | "assistant.thinking"
-  | "assistant.decision.prompt"
-  | "user.decision.response"
-  | "assistant.tool.call"
-  | "assistant.tool.result"
-  | "system.message"
-  | "provider.info"
-  | "provider.raw";
-
-type SourceCursor =
-  | { kind: "byte-offset"; value: number }
-  | { kind: "item-index"; value: number }
-  | { kind: "opaque"; value: string };
-
-interface SessionTwinEventV1 {
-  schemaVersion: 1;
-  session: { provider: string; providerSessionId: string; sessionId: string };
-  seq: number;
-  kind: SessionTwinKind;
-  source: {
-    providerEventType: string;
-    providerEventId?: string;
-    cursor: SourceCursor;
-    emitIndex: number;
-  };
-  time?: {
-    providerTimestamp?: string;
-    capturedAt?: string;
-  };
-  turnId?: string;
-  model?: string;
-  payload: Record<string, unknown>;
-}
-```
-
-`user.kato-command` payload draft:
-
-```ts
-{
-  command: "start" | "stop" | "capture" | "record" | "export";
-  rawArgument?: string;
-  target?:
-    | { kind: "all" }
-    | { kind: "destination"; value: string }
-    | { kind: "recording-id"; value: string; match: "exact" | "prefix" };
-}
-```
-
-Session metadata recording entry draft:
-
-```ts
-{
-  recordingId: string;       // UUID
-  destination: string;
-  desiredState: "on" | "off";
-  writeCursor: number;       // current position in twin JSONL
-  createdAt?: string;        // when the recording object was first created
-  periods: Array<{
-    startedCursor: number;   // writeCursor at explicit ::start
-    stoppedCursor?: number;  // writeCursor at explicit ::stop
-    startedAt?: string;      // optional wall-clock metadata
-    stoppedAt?: string;      // optional wall-clock metadata
-    startedBySeq?: number;   // seq of user.kato-command that started this period
-    stoppedBySeq?: number;   // seq of user.kato-command that stopped this period
-  }>;
-}
-```
-
-`periods` tracks explicit user-intent runs only:
-
-- Append a new period on explicit `::start`.
-- Set `stoppedCursor` (and optionally `stoppedAt`) on explicit `::stop`.
-- Daemon restarts do not create new periods and do not close/open periods automatically.
-- The currently active period has no `stoppedCursor`.
-
-Correlation rule: decision prompts/responses and tool calls/results must use
-explicit identifiers (for example `decisionId`, `providerQuestionId`,
-`toolCallId`) rather than relying only on file ordering.
-
-### Recording ID Prefix Rules
-
-- Minimum accepted prefix length: 8 characters.
-- Prefix must resolve to exactly one active recording in session scope.
-- If 0 matches: return "recording not found".
-- If >1 matches: return ambiguity error with candidate short IDs and destinations.
-
-### Compatibility/Migration Strategy
-
-- No backwards migration required for previously exported markdown/JSONL artifacts.
-- Runtime migration approach:
-  1. Keep provider parsers producing current `ConversationEvent`.
-  2. Add deterministic `ConversationEvent -> SessionTwinEventV1` mapping layer.
-  3. Persist SessionTwin as new durable intermediary state.
-  4. Shift recording/export pipeline to read from SessionTwin.
-- If persisted session metadata/twin schema version is unsupported, fail closed for that session and require rebuild from source.
-
-## Open Issues (Resolved)
-
-- [x] Final naming: use **SessionTwin** for the intermediary event model and `.twin.jsonl` artifact.
-- [x] Final `session-key` path strategy: use `{provider}:{providerSessionId}` composite key.
-- [x] Provider-specific ingest cursor under rewrites: byte-offset for Claude/Codex; item-index + anchor guard for Gemini.
-- [x] Dedupe fallback: normalized canonical payload hash when source identity is unstable.
-- [x] Twin "junk" policy: strip transport artifacts, preserve semantics, keep unknowns as `provider.raw`.
-- [x] On-demand twin persistence: persist by default.
-- [x] `::stop <arg>` precedence: ambiguity on bare arg stops both destination and recording-id-prefix matches; explicit `id:` / `dest:` still recommended.
-- [x] Recording ID prefix policy: min length 8, must be unambiguous.
-- [x] Compatibility/migration approach: adapter-layer transition from `ConversationEvent` to SessionTwin.
-- [x] Write-order atomicity/crash semantics: twin append -> metadata ingest cursor -> recording append -> metadata recording cursor; daemon index last.
-- [x] Gemini re-sync policy: anchor re-sync first, then replay-from-start with dedupe into existing twin log.
-- [x] CLI/status identity contract: kato UUIDs for session/recording plus short IDs; provider session ID kept as source identity.
-- [x] Default destination fallback: empty `::start`/`::capture` writes under `~/.kato/recordings/`.
-- [x] Twin growth policy: explicitly unbounded for v1.
-
-## Implementation Plan (Phased Checklist)
-
-### Phase 0: Foundations (contracts + paths + schema)
-
-- [ ] Add shared contracts for SessionTwin and session metadata schemas (v1), with strict runtime validators.
-  - `shared/src/contracts/session_twin.ts` (new)
-  - `shared/src/contracts/session_state.ts` (new)
-  - Export from `shared/src/mod.ts`
-- [ ] Add schema version constants and helpers for state files.
-  - `DAEMON_CONTROL_SCHEMA_VERSION = 1`
-  - `SESSION_METADATA_SCHEMA_VERSION = 1`
-  - `SESSION_TWIN_SCHEMA_VERSION = 1`
-- [ ] Add canonical path helpers for persistent artifacts.
-  - `apps/daemon/src/orchestrator/control_plane.ts` (or new `state_paths.ts`)
-  - Include `~/.kato/sessions/{provider}:{providerSessionId}.meta.json`
-  - Include `~/.kato/sessions/{provider}:{providerSessionId}.twin.jsonl`
-- [ ] Add session/recording short-id helpers (8-char prefixes, ambiguity checks).
-
-Exit criteria:
-- New schema files compile and validate happy-path fixtures.
-- Path helpers resolve deterministically for all providers.
-
-### Phase 1: Persistent State Stores
-
-- [ ] Implement daemon control index store with atomic read/write.
-  - Track known sessions and metadata file pointers only (cache semantics).
-- [ ] Implement per-session metadata store with atomic write (`tmp` + rename).
-  - Fields: source identity, ingest cursor/anchor, recording entries, write cursors.
-- [ ] Implement SessionTwin append/read helpers.
-  - Append-only writer for `.twin.jsonl`
-  - Incremental read from `writeCursor`
-  - Bounded recent fingerprint cache for dedupe suppression
-- [ ] Add bootstrap/rebuild path:
-  - If daemon control index missing/corrupt, rebuild from session metadata files.
-
-Exit criteria:
-- State survives daemon restart in local integration tests.
-- Corrupt daemon index does not break startup (rebuild works).
-
-### Phase 2: Event Mapping To SessionTwin
-
-- [ ] Add deterministic mapper: `ConversationEvent -> SessionTwinEventV1`.
-  - Preserve `source.cursor` + `emitIndex`
-  - Map provider/tool/decision kinds per `dev.event-kinds.md`
-  - Emit `user.kato-command` derived events from user text commands
-- [ ] Implement timestamp policy in mapper/runtime:
-  - `capturedAt` on live ingestion path
-  - `providerTimestamp` only when trustworthy
-  - No `now()` fallback for uncertain timestamps
-- [ ] Add golden tests per provider (Claude/Codex/Gemini fixtures).
-
-Exit criteria:
-- Stable mapping snapshots for fixture corpus.
-- No synthetic timestamps in backprocessing scenarios.
-
-### Phase 3: Ingestion Runtime Integration
-
-- [ ] Wire metadata ingest cursor load/save into provider ingestion startup/loop.
-  - `apps/daemon/src/orchestrator/provider_ingestion.ts`
-  - `apps/daemon/src/orchestrator/ingestion_runtime.ts`
-- [ ] Implement Gemini anchor guard re-sync:
-  - Try anchor re-align first
-  - Fallback replay-from-start into existing twin log with dedupe suppression
-- [ ] Write ordering implementation:
-  1. Read source from ingest cursor
-  2. Map to SessionTwin
-  3. Append to twin log
-  4. Persist ingest cursor/anchor
-  5. Feed active recordings from recording cursors
-  6. Persist recording cursors
-  7. Update daemon index last
-- [ ] Add crash/restart tests for replay safety and cursor recovery.
-
-Exit criteria:
-- Restart resumes from persisted cursor for Claude/Codex/Gemini.
-- Anchor mismatch fallback does not duplicate emitted outputs.
-
-### Phase 4: Recording Pipeline Migration To SessionTwin
-
-- [ ] Add recording append path that consumes SessionTwin events by `writeCursor`.
-  - `apps/daemon/src/writer/recording_pipeline.ts`
-  - Keep markdown/jsonl writer outputs unchanged initially.
-- [ ] Replace direct append-from-new-events path with twin-cursor-driven append.
-- [ ] Support multi-recording per session with independent `writeCursor`.
-- [ ] Keep `::capture` behavior: one-shot snapshot + start/rotate behavior per current semantics.
-
-Exit criteria:
-- Multiple recordings per session progress independently without interference.
-- Existing recording output format remains backward-compatible.
-
-### Phase 5: In-Chat Commands And ID UX
-
-- [ ] Update in-chat command target resolution for `::stop`.
-  - `::stop` => stop all session recordings
-  - `::stop id:<prefix>` and `::stop dest:<path>` explicit targeting
-  - Bare ambiguous arg => stop both matches, log warning
-- [ ] Introduce kato UUIDs + short IDs in runtime state for sessions/recordings.
-- [ ] Keep provider-native `providerSessionId` alongside kato `sessionId`.
-- [ ] Default destination behavior for empty `::start`/`::capture` => `~/.kato/recordings/` generated filename.
-
-Exit criteria:
-- Prefix collisions handled deterministically.
-- Status and logs expose both full UUID and short ID.
-
-### Phase 6: Status/CLI Surfacing
-
-- [ ] Extend daemon status snapshot contract with SessionTwin-aware identifiers/cursors.
-  - `shared/src/contracts/status.ts`
-  - `apps/daemon/src/orchestrator/daemon_runtime.ts`
-- [ ] Update CLI status output (`--json`, plain, `--live`) to include:
-  - `sessionId`, `sessionShortId`, `providerSessionId`
-  - `recordingId`, `recordingShortId`, destination, desiredState
-  - ambiguity/not-found command diagnostics in logs/status fields
-- [ ] Ensure no `clean --sessions` behavior changes in this task (explicitly deferred).
-
-Exit criteria:
-- `kato status` is sufficient to target `::stop id:<prefix>` reliably.
-- JSON status consumers get stable fields.
-
-### Phase 7: Hardening, Migration, Rollout
-
-- [ ] Startup migration behavior:
-  - No legacy artifact migration required
-  - Build twin on-demand when missing
-  - Fail closed on unsupported schema version and request rebuild
-- [ ] Add end-to-end tests:
-  - restart persistence
-  - Gemini rewrite/resync
-  - multi-recording cursor independence
-  - ambiguous stop behavior
-  - default destination behavior
-- [ ] Add metrics/logging:
-  - cursor resume source
-  - replay + dedupe suppression counts
-  - anchor mismatch events
-- [ ] Rollout guard:
-  - runtime config gate (temporary) for SessionTwin path until stable
-  - remove gate after soak
-
-Exit criteria:
-- Full daemon restart scenario passes on fixture-backed integration tests.
-- Twin path is default and stable.
-
-### Suggested PR Sequence
-
-- [ ] PR1: Contracts + schema validators + path helpers.
-- [ ] PR2: Persistent stores (daemon index/session metadata/twin I/O).
-- [ ] PR3: Event mapper + timestamp policy + provider fixture tests.
-- [ ] PR4: Ingestion runtime cursor persistence + Gemini re-sync fallback.
-- [ ] PR5: Recording pipeline migration to twin cursors + multi-recording support.
-- [ ] PR6: Command resolution + status/CLI identifier surfacing.
-- [ ] PR7: E2E hardening + rollout gate removal.
-
-## Out Of Scope (For Now)
-
-- Manual session bootstrap CLI (`kato session-state create`)
-- Backwards compatibility with previously generated incorrect timestamps
-- In-memory-only secure mode implementation (tracked as future hardening)
-- `clean --sessions` semantics (including single-session targeting and daemon-running coordination)
-
-## Discussion Summary (Cleaned)
-
-- We converged on one daemon artifact plus two per-session artifacts.
-- We agreed timestamps must be omitted when uncertain (especially Codex backprocessing).
-- We agreed session updates are gated by `recording=on` or `autoGenerateSnapshots=true`.
-- We agreed export/capture can build state on demand when missing.
-- We introduced a kato-native SessionTwin schema as an intermediary source of truth.
-- We now explicitly support recording-level control and human-friendly short UUID references for sessions and recordings
+3. **Event ID semantics**:
+   - Who generates event IDs and how do we ensure they're stable/deterministic across daemon restarts (so reprocessing doesn't generate new IDs)?
+   - Is an event ID unique per session, or globally across all provider sessions?
+
+4. **Last-processed tracking**: Per-recording, per-session, or global? If we have multiple recordings from the same session, do they share a last-processed cursor?
+
+5. **Recording state lifecycle**: What are the valid states for "intended recording state"? (`pending` → `in_progress` → `completed`? with `failed`?) How do we recover mid-stream if a daemon crashes?
+
+6. **Codex timestamp capture**: When you say "write timestamps in realtime for Codex conversations", are these:
+   - Sourced from Codex API metadata (most accurate)?
+   - Captured when kato receives the event?
+   - Some blend (e.g., API timestamp if available, else receive time)?
+
+7. **cleanSessionStatesOnShutdown scope**: Does this mean:
+   - Delete all session state files?
+   - Or just flush in-memory buffers?
+   - Or conditional cleanup (only for "open" sessions)?
+   - Should this also apply to control state, or just session state?
+
+**Secondary but important:**
+
+8. **Config schema for autoGenerateSnapshots**: Is this per `providerSessionRoot` or global default + per-root override?
+
+9. **Old sessions without state**: If we only create session state for mtime > daemon startup, and a user exports a recording from an old session, what happens? Do we synthesize state on-demand?
+
+Which of these would you like to lock down first?
+
+# User_2026-02-25_1114_29
+
+Let's discuss. 
+
+::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-25-persistent-state.md
+
+1. Maybe we want both a daemon-level control state and per-session? Session control states could keep track of multiple recordings. I'd like to support multiple recordsings per session, but it's session->recordings... a recording couldn't have multiple sessions; it's just that a session could have multiple recordings. And then the daemon control state could link to multiple session control states? Separation would be good in the case that we go multi-threaded, to avoid contention over a single file.
+
+2. I think the kato-specific representation could be jsonl list of events (with timestamps). Session state is created either"
+- when autoGenerateSnapshots is true: daemon detects a file modification
+- when autoGenerateSnapshots is false: only when a recording is first triggered. 
+Does that make sense? Why would concurrent reads be a problem?
+A session could always come back to life, but we should have a clean command that removes the session state file and then if autoGenerateSnapshots is false, new session activity wouldn't automatically cause it to be recreated.
+
+3. The only way I can think of to generate event IDs deterministically is to use a hash of the content+sessionID. But maybe we don't need IDs? We could just use line numbers? If we need IDs, then content+sessionID hash is effectively unique globally.
+
+4. Last-processed is per-recording. Multiple recordings should each have their own  last-processed cursor.
+
+5. For recording state, could we just simplify it to "on" or "off", and then depend on the cursor for crash recovery?
+
+6. If by Codex API metadata you mean make a network call, definitely no. I was thinking, yes, if the event comes from a "live" read, use kato's time; If kato is back-processing, do not record a timestamp.
+
+7. cleanSessionStatesOnShutdown  means, yes, delete all session state files. control state is probably safe to persist. The idea here is, some users might not want copies of their conversations hanging around. This means that when the daemon starts again and scoped activity is detected in codex logs, there will be no timestamps for older events. But in "record" situations (as opposed to capture), that might not matter.
+
+8. Yes, autoGenerateSnapshots should have a global setting (maybe globalAutoGenerateSnapshots, probably default or not specified is false) as well as allowing override by providerSessionRoot. Maybe when we "init" a new config file, we can do an interactive prompt to make sure people understand the security implications. 
+
+9. If there is an old session, there would no need to create a session state? If cleanSessionStatesOnShutdown happened, there is no session state to export. But maybe we should have a way to create a new session state on the CLI in addition to that triggered by mtime detection or recording trigger.
+
+## Implementation Status (2026-02-26)
+
+- [x] Added persistent daemon/session state artifacts under `~/.kato`:
+      `daemon-control.json`, `sessions/*.meta.json`, `sessions/*.twin.jsonl`.
+- [x] Added SessionTwin contracts and mapper aligned with canonical kinds in
+      `dev.event-kinds.md`.
+- [x] Persisted provider ingest cursors across restarts.
+- [x] Persisted session recording state and per-recording write cursors across restarts.
+- [x] Wired in-chat command semantics for persistent recordings:
+      `::start`, `::capture`, `::stop`, `::stop id:<prefix>`, `::stop dest:<path>`,
+      and ambiguous bare `::stop <arg>` union behavior.
+- [x] Moved `cleanSessionStatesOnShutdown` cleanup to shutdown timing.
+- [x] Added Gemini cursor-anchor realignment and replay-from-start fallback when
+      anchors are missing.
+- [x] Hardened startup migration behavior with explicit fail-closed handling for
+      invalid/unsupported session metadata.
+- [x] Added SessionTwin golden tests across Claude/Codex/Gemini fixtures.
+- [x] Added runtime E2E-style coverage for multi-recording cursor independence,
+      ambiguous `::stop`, and default destination behavior.
+- [x] Fixed symlink-escape path policy coverage and verified deny behavior.
+- [x] Updated persistence docs in `README.md` and `dev-docs/notes/dev.*` notes.
+- [x] Validation: `deno test -A` passes (`213 passed, 0 failed`).
+- [x] Follow-up: add dedicated clean command wiring for persisted session
+      twins/metadata (`clean --sessions`) with running-daemon safety.
+- [x] Follow-up: add explicit daemon startup handshake/ack to remove optimistic
+      running-status writes before daemon confirmation.
+
+## Post-review Refinements (2026-02-26)
+
+- [x] Extracted duplicated `readOptionalEnv` / `resolveHomeDir` helpers into
+      shared daemon utility module (`apps/daemon/src/utils/env.ts`) and removed
+      local duplicates.
+- [x] Replaced large raw SessionTwin fingerprint payload strings with compact
+      hashed fingerprints (`FNV-1a`) persisted in session metadata.
+- [x] Avoided full twin replay on each ingestion cycle when an in-memory snapshot
+      exists by merging only appended twin events into the snapshot.
+- [x] Removed redundant `MutableSessionMetadata` alias in daemon runtime.
+- [x] Aligned provider auto-generate-snapshot typing to shared
+      `ProviderAutoGenerateSnapshots` contract.

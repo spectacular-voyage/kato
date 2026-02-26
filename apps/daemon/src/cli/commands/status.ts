@@ -29,11 +29,21 @@ function formatBytes(bytes: number): string {
 function renderSessionRow(s: DaemonSessionStatus, now: Date): string {
   const marker = s.stale ? "○" : "●";
   const label = s.snippet ? `"${s.snippet}"` : "(no user message)";
-  const header = `${marker} ${s.provider}/${s.sessionId}: ${label}`;
+  const sessionIdentity = s.providerSessionId
+    ? `${s.provider}/${s.sessionShortId ?? s.sessionId} (${s.providerSessionId})`
+    : `${s.provider}/${s.sessionId}`;
+  const header = `${marker} ${sessionIdentity}: ${label}`;
 
   const lines: string[] = [header];
 
   if (s.recording) {
+    if (s.recording.recordingShortId || s.recording.recordingId) {
+      lines.push(
+        `  recording id ${s.recording.recordingShortId ?? "?"} (${
+          s.recording.recordingId ?? "unknown"
+        })`,
+      );
+    }
     lines.push(`  -> ${s.recording.outputPath}`);
     const started = formatRelativeTime(s.recording.startedAt, now);
     const lastWrite = formatRelativeTime(s.recording.lastWriteAt, now);
