@@ -1275,6 +1275,19 @@ function toActiveRecordingsFromMetadata(
   return recordings;
 }
 
+function filterCurrentRecordings(
+  recordings: ActiveRecording[],
+  now: Date,
+  staleAfterMs: number,
+): ActiveRecording[] {
+  const nowMs = now.getTime();
+  return recordings.filter((recording) => {
+    const lastWriteAtMs = readTimeMs(recording.lastWriteAt);
+    if (lastWriteAtMs === undefined) return false;
+    return nowMs - lastWriteAtMs <= staleAfterMs;
+  });
+}
+
 function toProviderStatuses(
   sessionSnapshots: SessionSnapshotMetadataEntry[],
   now: Date,
@@ -1760,9 +1773,14 @@ export async function runDaemonRuntimeLoop(
       summaryMetadataDirty = true;
     }
     const summaryMetadata = await loadSummaryMetadata();
-    const activeRecordingsForStatus = summaryMetadata
+    const rawActiveRecordingsForStatus = summaryMetadata
       ? toActiveRecordingsFromMetadata(summaryMetadata)
       : recordingPipeline.listActiveRecordings();
+    const activeRecordingsForStatus = filterCurrentRecordings(
+      rawActiveRecordingsForStatus,
+      now(),
+      providerStatusStaleAfterMs,
+    );
     const recordingSummary = {
       activeRecordings: activeRecordingsForStatus.length,
       destinations: new Set(

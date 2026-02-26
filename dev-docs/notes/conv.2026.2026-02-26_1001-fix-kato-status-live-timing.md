@@ -645,3 +645,78 @@ I’ve narrowed snippet recovery to Codex only and fixed the new test fixture so
 **Assessing additional state store need**
 
 </details>
+
+<details>
+<summary>Thinking</summary>
+
+**Validating regex with full tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying daemon restart necessity**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning test line gathering**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning capture line range**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing snippet repair implementation**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1039_53
+
+Implemented a targeted fix for the snippet drift you reported.
+
+1. Codex resumed-session snippet recovery:
+- On resumed Codex sessions (`fromOffset > 0`), ingestion now recovers the first user snippet from source and uses it as an authoritative override.
+- Code: [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:871), [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:1400), [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:1538)
+
+2. Snapshot upsert supports snippet correction:
+- Added `snippetOverride` so recovered snippet can replace a stale mid-conversation snippet.
+- Code: [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:25), [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:220)
+
+3. Your Codex backfill timestamp preference remains:
+- Codex backfill keeps time as unknown (no synthetic captured time).
+- Code: [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts:1310), [session_twin_mapper.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/session_twin_mapper.ts:322)
+
+Tests passed:
+- `deno test -A tests/daemon-ingestion-runtime_test.ts tests/provider-ingestion_test.ts tests/status-projection_test.ts tests/session-twin-mapper_test.ts tests/improved-status_test.ts`
+
+To see this live, restart the daemon so it runs the patched code; snippet repair will apply on the next Codex user-message ingest for that session.
+
+# User_2026-02-26_1039_53
+
+Interesting collateral. I'd expect the first event to always be user, but I guess you never know.
+
+<details>
+<summary>Thinking</summary>
+
+**Confirming event source nuances**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1040_03
+
+Correct. The “first event is user” assumption only holds for full-from-start ingestion.
+
+In real runs we can start mid-stream (persisted cursor, tail replay, recovery), so the first event we *see* may be assistant/tool/system. That’s why I constrained snippet recovery to Codex resumed sessions and only when a new user event appears, so we fix the wrong snippet without adding constant extra parses.
+
+If you want, I can add a lightweight warning metric for sessions that never contain a user message.
