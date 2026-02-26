@@ -35,7 +35,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates a default local runtime config at ~/.kato/config.json when missing.",
+    "Creates a default local runtime config at ~/.kato/kato-config.yaml when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",

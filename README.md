@@ -99,7 +99,7 @@ under `~/.kato/recordings/`.
 
 Default paths:
 
-- Config: `~/.kato/config.json`
+- Config: `~/.kato/kato-config.yaml`
 - Status: `~/.kato/runtime/status.json`
 - Control queue: `~/.kato/runtime/control.json`
 - Daemon session index cache: `~/.kato/daemon-control.json`
@@ -112,43 +112,34 @@ Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
 
 Default config shape:
 
-```json
-{
-  "schemaVersion": 1,
-  "runtimeDir": "~/.kato/runtime",
-  "statusPath": "~/.kato/runtime/status.json",
-  "controlPath": "~/.kato/runtime/control.json",
-  "allowedWriteRoots": [
-    "."
-  ],
-  "providerSessionRoots": {
-    "claude": [
-      "~/.claude/projects"
-    ],
-    "codex": [
-      "~/.codex/sessions"
-    ],
-    "gemini": [
-      "~/.gemini/tmp"
-    ]
-  },
-  "globalAutoGenerateSnapshots": false,
-  "providerAutoGenerateSnapshots": {},
-  "cleanSessionStatesOnShutdown": false,
-  "featureFlags": {
-    "writerIncludeCommentary": true,
-    "writerIncludeThinking": false,
-    "writerIncludeToolCalls": false,
-    "writerItalicizeUserMessages": false,
-    "daemonExportEnabled": true,
-    "captureIncludeSystemEvents": false
-  },
-  "logging": {
-    "operationalLevel": "info",
-    "auditLevel": "info"
-  },
-  "daemonMaxMemoryMb": 500
-}
+```yaml
+schemaVersion: 1
+runtimeDir: ~/.kato/runtime
+statusPath: ~/.kato/runtime/status.json
+controlPath: ~/.kato/runtime/control.json
+allowedWriteRoots:
+  - .
+providerSessionRoots:
+  claude:
+    - ~/.claude/projects
+  codex:
+    - ~/.codex/sessions
+  gemini:
+    - ~/.gemini/tmp
+globalAutoGenerateSnapshots: false
+providerAutoGenerateSnapshots: {}
+cleanSessionStatesOnShutdown: false
+featureFlags:
+  writerIncludeCommentary: true
+  writerIncludeThinking: false
+  writerIncludeToolCalls: false
+  writerItalicizeUserMessages: false
+  daemonExportEnabled: true
+  captureIncludeSystemEvents: false
+logging:
+  operationalLevel: info
+  auditLevel: info
+daemonMaxMemoryMb: 500
 ```
 
 Notes:

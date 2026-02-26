@@ -1,9 +1,11 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { dirname, join } from "@std/path";
+import { stringify } from "@std/yaml";
 import {
   createDefaultRuntimeConfig,
   createDefaultRuntimeFeatureFlags,
   createDefaultRuntimeLoggingConfig,
+  resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
 } from "../apps/daemon/src/mod.ts";
@@ -15,7 +17,7 @@ function makeSandboxRoot(): string {
 Deno.test("RuntimeConfigFileStore initializes missing config atomically", async () => {
   const root = makeSandboxRoot();
   const runtimeDir = join(root, "runtime");
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const defaultConfig = createDefaultRuntimeConfig({
     runtimeDir,
     statusPath: join(runtimeDir, "status.json"),
@@ -53,14 +55,14 @@ Deno.test("RuntimeConfigFileStore initializes missing config atomically", async 
 
 Deno.test("RuntimeConfigFileStore rejects unsupported schema", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const store = new RuntimeConfigFileStore(configPath);
 
   try {
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 2,
         runtimeDir: join(root, "runtime"),
         statusPath: join(root, "runtime", "status.json"),
@@ -79,9 +81,46 @@ Deno.test("RuntimeConfigFileStore rejects unsupported schema", async () => {
   }
 });
 
-Deno.test("RuntimeConfigFileStore backfills default feature flags and provider roots for legacy config", async () => {
+Deno.test("RuntimeConfigFileStore rejects non-yaml config path", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const runtimeDir = join(root, "runtime");
+  const configPath = join(root, "kato-config.json");
+  const defaultConfig = createDefaultRuntimeConfig({
+    runtimeDir,
+    statusPath: join(runtimeDir, "status.json"),
+    controlPath: join(runtimeDir, "control.json"),
+    allowedWriteRoots: [root],
+  });
+  const store = new RuntimeConfigFileStore(configPath);
+
+  await assertRejects(
+    () => store.ensureInitialized(defaultConfig),
+    Error,
+    ".yaml",
+  );
+});
+
+Deno.test("RuntimeConfigFileStore rejects invalid YAML", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(configPath, "schemaVersion: [\n");
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "invalid YAML",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore supports YAML comments", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -89,7 +128,39 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      [
+        "# kato runtime config",
+        "schemaVersion: 1",
+        `runtimeDir: ${runtimeDir}`,
+        `statusPath: ${join(runtimeDir, "status.json")}`,
+        `controlPath: ${join(runtimeDir, "control.json")}`,
+        "allowedWriteRoots:",
+        `  - ${root}`,
+        "# optional: provider roots omitted for default backfill",
+        "",
+      ].join("\n"),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.schemaVersion, 1);
+    assertEquals(loaded.runtimeDir, runtimeDir);
+    assertEquals(loaded.controlPath, join(runtimeDir, "control.json"));
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore backfills default feature flags and provider roots for missing optional sections", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -113,7 +184,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
 
 Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -121,7 +192,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -150,7 +221,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
 
 Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -158,7 +229,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -183,7 +254,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
 
 Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -191,7 +262,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async (
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -217,7 +288,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async (
 
 Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merges defaults", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
   const claudeOverride = join(root, "claude-only-root");
@@ -227,7 +298,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -251,7 +322,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
 
 Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -259,7 +330,7 @@ Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => 
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -284,7 +355,7 @@ Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => 
 
 Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -292,7 +363,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -316,7 +387,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
 
 Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -324,7 +395,7 @@ Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () =
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -342,7 +413,7 @@ Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () =
 
 Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -350,7 +421,7 @@ Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => 
     await Deno.mkdir(root, { recursive: true });
     await Deno.writeTextFile(
       configPath,
-      JSON.stringify({
+      stringify({
         schemaVersion: 1,
         runtimeDir,
         statusPath: join(runtimeDir, "status.json"),
@@ -369,7 +440,7 @@ Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => 
 
 Deno.test("RuntimeConfigFileStore rejects invalid daemonMaxMemoryMb", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "config.json");
+  const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -386,7 +457,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid daemonMaxMemoryMb", async () =
     for (const value of invalidValues) {
       await Deno.writeTextFile(
         configPath,
-        JSON.stringify({
+        stringify({
           schemaVersion: 1,
           runtimeDir,
           statusPath: join(runtimeDir, "status.json"),
@@ -449,6 +520,11 @@ Deno.test("createDefaultRuntimeConfig derives katoDir from runtimeDir", () => {
   });
 
   assertEquals(config.katoDir, ".kato");
+});
+
+Deno.test("resolveDefaultConfigPath defaults to kato-config.yaml beside runtime dir", () => {
+  const resolved = resolveDefaultConfigPath(".kato/runtime");
+  assertEquals(resolved, ".kato/kato-config.yaml");
 });
 
 Deno.test("createDefaultRuntimeConfig accepts explicit katoDir override", () => {
