@@ -159,7 +159,7 @@ function renderTopSummarySection(
   const { daemonText, activeCount, staleCount, width, recordingSummary } = opts;
   const memoryLines = buildMemoryLines(snapshot);
   const recordingLine =
-    `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale`;
+    `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale sessions`;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
     return [

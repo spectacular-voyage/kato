@@ -1275,19 +1275,32 @@ function toActiveRecordingsFromMetadata(
   return recordings;
 }
 
-function summarizeRecordingStatusFromSessions(
+function summarizeRecordingStatus(
+  activeRecordings: ActiveRecording[],
   sessions: DaemonSessionStatus[] | undefined,
 ): { activeRecordings: number; destinations: number } {
-  if (!sessions) {
+  if (!sessions || activeRecordings.length === 0) {
     return { activeRecordings: 0, destinations: 0 };
   }
-  const activeRecordings = sessions.filter((session) =>
-    !session.stale && session.recording !== undefined
+  const activeSessionKeys = new Set(
+    sessions
+      .filter((session) => !session.stale)
+      .map((session) =>
+        makeSessionProcessingKey(
+          session.provider,
+          session.providerSessionId ?? session.sessionId,
+        )
+      ),
+  );
+  const active = activeRecordings.filter((recording) =>
+    activeSessionKeys.has(
+      makeSessionProcessingKey(recording.provider, recording.sessionId),
+    )
   );
   return {
-    activeRecordings: activeRecordings.length,
+    activeRecordings: active.length,
     destinations: new Set(
-      activeRecordings.map((session) => session.recording!.outputPath),
+      active.map((recording) => recording.outputPath),
     ).size,
   };
 }
@@ -1809,7 +1822,10 @@ export async function runDaemonRuntimeLoop(
           heartbeatMetadataByKey,
         )
         : snapshot.sessions;
-      const recordingSummary = summarizeRecordingStatusFromSessions(sessions);
+      const recordingSummary = summarizeRecordingStatus(
+        heartbeatActiveRecordings,
+        sessions,
+      );
 
       const processMemory = Deno.memoryUsage();
       const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
@@ -1912,7 +1928,10 @@ export async function runDaemonRuntimeLoop(
       exitMetadataByKey,
     )
     : snapshot.sessions;
-  const recordingSummary = summarizeRecordingStatusFromSessions(sessions);
+  const recordingSummary = summarizeRecordingStatus(
+    exitActiveRecordings,
+    sessions,
+  );
 
   const processMemory = Deno.memoryUsage();
   const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??

@@ -377,16 +377,7 @@ Deno.test("FileProviderIngestionRunner recovers first-user snippet when resuming
         return (async function* () {
           if (fromOffset === 100) {
             yield {
-              event: {
-                ...makeEvent("resume-late", "2026-02-26T10:00:10.000Z"),
-                kind: "message.user",
-                role: "user",
-                content: "late user message",
-                source: {
-                  providerEventType: "user",
-                  providerEventId: "resume-late",
-                },
-              } as ConversationEvent,
+              event: makeEvent("resume-late", "2026-02-26T10:00:10.000Z"),
               cursor: { kind: "byte-offset" as const, value: 110 },
             };
             return;

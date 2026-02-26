@@ -164,6 +164,37 @@ Deno.test(
 );
 
 Deno.test(
+  "MarkdownConversationWriter quotes ambiguous scalar-like frontmatter strings",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e1",
+          "message.user",
+          "hello",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ], {
+        includeFrontmatter: true,
+        frontmatterRecordingIds: ["123", "true", "null", "~", "rec-safe"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        content,
+        "recordingIds: ['123', 'true', 'null', '~', rec-safe]",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
   "MarkdownConversationWriter append accretively updates recordingIds and tags in existing frontmatter",
   async () => {
     const root = makeSandboxRoot();

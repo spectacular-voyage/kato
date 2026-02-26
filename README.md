@@ -165,7 +165,9 @@ Notes:
   - `includeFrontmatterInMarkdownRecordings` (default `true`)
   - `includeUpdatedInFrontmatter` (default `false`)
   - `addParticipantUsernameToFrontmatter` (default `false`)
-  - `defaultParticipantUsername` fallback when username inclusion is enabled
+  - `defaultParticipantUsername` preferred username when username inclusion is enabled.
+    Fallback order is: `defaultParticipantUsername` -> `USER`/`USERNAME` env
+    vars -> home-directory basename.
   - `includeConversationKinds` to add `kind.*` tags (default `false`)
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).

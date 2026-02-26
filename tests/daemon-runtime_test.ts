@@ -3741,6 +3741,8 @@ Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple
       ["a-1", "u-start-b", "a-2"],
     );
     assertEquals(appendByDestination.get("/tmp/multi-b.md"), ["a-2"]);
+    assertEquals(currentStatus.recordings.activeRecordings, 2);
+    assertEquals(currentStatus.recordings.destinations, 2);
   } finally {
     await Deno.remove(stateDir, { recursive: true });
   }

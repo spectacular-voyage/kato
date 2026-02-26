@@ -126,7 +126,7 @@ Deno.test("mapConversationEventsToTwin backfill keeps capturedAt when provided",
   assertEquals(roundTrip[0]?.timestamp, "2026-02-26T11:00:00.000Z");
 });
 
-Deno.test("mapTwinEventsToConversation uses unknown for codex backfill without timestamps", () => {
+Deno.test("mapTwinEventsToConversation uses empty timestamp for codex backfill without timestamps", () => {
   const twin = mapConversationEventsToTwin({
     provider: "codex",
     providerSessionId: "provider-session-4",
@@ -136,5 +136,5 @@ Deno.test("mapTwinEventsToConversation uses unknown for codex backfill without t
   });
 
   const roundTrip = mapTwinEventsToConversation(twin);
-  assertEquals(roundTrip[0]?.timestamp, "unknown");
+  assertEquals(roundTrip[0]?.timestamp, "");
 });

@@ -281,6 +281,7 @@ Deno.test("renderStatusText: narrow width keeps lines within width", () => {
   assertEquals(tooWideLine, undefined);
   assertStringIncludes(out, "memory:");
   assertStringIncludes(out, "recordings:");
+  assertStringIncludes(out, "stale sessions");
 });
 
 Deno.test("renderStatusText: wide width keeps two-column summary", () => {

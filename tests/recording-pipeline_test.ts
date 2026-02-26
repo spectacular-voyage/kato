@@ -154,6 +154,33 @@ Deno.test("RecordingPipeline evaluates policy before record writer start", async
   assertEquals(writerSpy.calls[0]?.hasNow, true);
 });
 
+Deno.test("RecordingPipeline normalizes caller-provided recordingId", async () => {
+  const order: string[] = [];
+  const writerSpy = makeWriterSpy(order);
+  const pipeline = new RecordingPipeline({
+    pathPolicyGate: makeSequencedPathPolicyGate(["allow", "allow"], order),
+    writer: writerSpy.writer,
+    makeRecordingId: () => "generated-recording-id",
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+  });
+
+  const trimmed = await pipeline.startOrRotateRecording({
+    provider: "codex",
+    sessionId: "session-trim",
+    targetPath: "notes/record.md",
+    recordingId: "  rec-user-1  ",
+  });
+  assertEquals(trimmed.recordingId, "rec-user-1");
+
+  const generated = await pipeline.startOrRotateRecording({
+    provider: "codex",
+    sessionId: "session-trim",
+    targetPath: "notes/record-2.md",
+    recordingId: "   ",
+  });
+  assertEquals(generated.recordingId, "generated-recording-id");
+});
+
 Deno.test(
   "RecordingPipeline denied record rotation keeps existing active recording",
   async () => {

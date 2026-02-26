@@ -320,7 +320,7 @@ function readTimestamp(event: SessionTwinEventV1): string {
   const fromCapturedAt = normalizeText(event.time?.capturedAt);
   if (fromCapturedAt.length > 0) return fromCapturedAt;
   if (event.session.provider === "codex") {
-    return "unknown";
+    return "";
   }
   return "";
 }

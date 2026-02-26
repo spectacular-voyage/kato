@@ -1398,16 +1398,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
-    const incomingHasUserMessage = incomingEvents.some((event) =>
-      event.kind === "message.user"
-    );
     const cachedSnippet = this.sourceSnippetBySessionId.get(sessionId);
     let snippetOverride = cachedSnippet ?? undefined;
     if (
       cachedSnippet === undefined &&
       this.provider === "codex" &&
-      fromOffset > 0 &&
-      incomingHasUserMessage
+      fromOffset > 0
     ) {
       if ((fileStat.size ?? 0) > MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES) {
         this.sourceSnippetBySessionId.set(sessionId, null);

@@ -228,7 +228,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const outputPath = decision.canonicalTargetPath ?? input.targetPath;
     const nowIso = this.now().toISOString();
     const sessionKey = makeSessionKey(input.provider, input.sessionId);
-    const recordingId = input.recordingId ?? this.makeRecordingId();
+    const normalizedRecordingId = input.recordingId?.trim();
+    const recordingId = normalizedRecordingId &&
+        normalizedRecordingId.length > 0
+      ? normalizedRecordingId
+      : this.makeRecordingId();
     const nextRecording: ActiveRecording = {
       recordingId,
       provider: input.provider,

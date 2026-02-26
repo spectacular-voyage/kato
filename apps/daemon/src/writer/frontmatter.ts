@@ -55,12 +55,26 @@ function quoteYaml(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+const SAFE_INLINE_YAML_SCALAR = /^[A-Za-z0-9._/@:-]+$/;
+
+function isAmbiguousYamlScalar(value: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(value);
+  } catch {
+    return false;
+  }
+  return typeof parsed !== "string";
+}
+
 function formatInlineYamlScalar(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
     return quoteYaml(trimmed);
   }
-  if (/^[A-Za-z0-9._/@:-]+$/.test(trimmed)) {
+  if (
+    SAFE_INLINE_YAML_SCALAR.test(trimmed) && !isAmbiguousYamlScalar(trimmed)
+  ) {
     return trimmed;
   }
   return quoteYaml(trimmed);
