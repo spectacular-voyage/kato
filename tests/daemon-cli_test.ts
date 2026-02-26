@@ -4,6 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { dirname } from "@std/path";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
@@ -316,6 +317,20 @@ Deno.test("cli parser enforces clean action flags", () => {
   );
 });
 
+Deno.test("cli parser accepts clean --logs", () => {
+  const parsed = parseDaemonCliArgs(["clean", "--logs"]);
+  assertEquals(parsed.kind, "command");
+  if (parsed.kind !== "command") {
+    return;
+  }
+  assertEquals(parsed.command.name, "clean");
+  if (parsed.command.name !== "clean") {
+    return;
+  }
+  assertEquals(parsed.command.all, true);
+  assertEquals(parsed.command.dryRun, false);
+});
+
 Deno.test("cli parser accepts status --json", () => {
   const parsed = parseDaemonCliArgs(["status", "--json"]);
   assertEquals(parsed.kind, "command");
@@ -621,12 +636,14 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
 
 Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
   await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const runtimeDir = await Deno.makeTempDir({
+  const rootDir = await Deno.makeTempDir({
     dir: ".kato/test-tmp",
     prefix: "daemon-cli-clean-",
   });
+  const runtimeDir = `${rootDir}/runtime`;
 
   try {
+    await Deno.mkdir(runtimeDir, { recursive: true });
     const controlStore = makeInMemoryControlStore();
     const statusStore = makeInMemoryStatusStore();
     const allowPathPolicy = makePathPolicyGate("allow");
@@ -657,6 +674,16 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
       controlStore.requests[0]?.payload?.["sessionId"],
       "session-42",
     );
+    const exportsLogPath = `${dirname(runtimeDir)}/exports.jsonl`;
+    const exportsLogRaw = await Deno.readTextFile(exportsLogPath);
+    const queuedEntry = JSON.parse(exportsLogRaw.trim()) as {
+      status: string;
+      requestId: string;
+      sessionId: string;
+    };
+    assertEquals(queuedEntry.status, "queued");
+    assertEquals(queuedEntry.requestId, "req-1");
+    assertEquals(queuedEntry.sessionId, "session-42");
 
     const logsDir = `${runtimeDir}/logs`;
     const operationalLogPath = `${logsDir}/operational.jsonl`;
@@ -666,7 +693,7 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     await Deno.writeTextFile(auditLogPath, '{"old":"audit"}\n');
 
     const cleanHarness = makeRuntimeHarness(runtimeDir);
-    const cleanCode = await runDaemonCli(["clean", "--all"], {
+    const cleanCode = await runDaemonCli(["clean", "--logs"], {
       runtime: cleanHarness.runtime,
       defaultRuntimeConfig,
       configStore,
@@ -676,12 +703,13 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     });
     assertEquals(cleanCode, 0);
     assertStringIncludes(cleanHarness.stdout.join(""), "clean completed");
-    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=2");
+    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=3");
     assertEquals(controlStore.requests.length, 1);
     assertEquals(await Deno.readTextFile(operationalLogPath), "");
     assertEquals(await Deno.readTextFile(auditLogPath), "");
+    assertEquals(await Deno.readTextFile(exportsLogPath), "");
   } finally {
-    await Deno.remove(runtimeDir, { recursive: true });
+    await Deno.remove(rootDir, { recursive: true });
   }
 });
 

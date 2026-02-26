@@ -22,6 +22,7 @@ import {
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
 import { resolveHomeDir } from "../utils/env.ts";
+import { appendExportsLogEntry } from "../utils/exports_log.ts";
 import {
   createDefaultStatusSnapshot,
   type DaemonControlRequest,
@@ -44,6 +45,7 @@ import {
   makeDefaultSessionCursor,
   type PersistentSessionStateStore,
 } from "./session_state_store.ts";
+import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -67,6 +69,7 @@ export interface DaemonRuntimeLoopOptions {
   pollIntervalMs?: number;
   providerStatusStaleAfterMs?: number;
   daemonMaxMemoryMb?: number;
+  exportsLogPath?: string;
   cleanSessionStatesOnShutdown?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -216,6 +219,7 @@ interface PersistentRecordingCommandContext {
   eventIndex: number;
   event: ConversationEvent & { kind: "message.user" };
   metadata: SessionMetadataV1;
+  sessionStateStore: PersistentSessionStateStore;
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
@@ -329,6 +333,83 @@ function resolveRecordingsByIdPrefix(
   return activeSessionRecordings(metadata).filter((entry) =>
     entry.recordingId.toLowerCase().startsWith(normalized)
   );
+}
+
+function matchesCaptureBoundaryEvent(
+  candidate: ConversationEvent,
+  commandEvent: ConversationEvent & { kind: "message.user" },
+): boolean {
+  if (candidate.kind !== "message.user") {
+    return false;
+  }
+  if (
+    candidate.source.providerEventType !== commandEvent.source.providerEventType
+  ) {
+    return false;
+  }
+
+  const candidateProviderEventId = candidate.source.providerEventId;
+  const commandProviderEventId = commandEvent.source.providerEventId;
+  if (
+    typeof candidateProviderEventId === "string" &&
+    candidateProviderEventId.length > 0 &&
+    typeof commandProviderEventId === "string" &&
+    commandProviderEventId.length > 0
+  ) {
+    return candidateProviderEventId === commandProviderEventId;
+  }
+
+  if (candidate.content !== commandEvent.content) {
+    return false;
+  }
+
+  if (
+    candidate.timestamp.length > 0 &&
+    commandEvent.timestamp.length > 0 &&
+    candidate.timestamp !== commandEvent.timestamp
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function resolveCaptureEventsFromTwinStart(
+  metadata: SessionMetadataV1,
+  snapshotSlice: ConversationEvent[],
+  commandEvent: ConversationEvent & { kind: "message.user" },
+  sessionStateStore: PersistentSessionStateStore,
+): Promise<ConversationEvent[]> {
+  let twinEvents: Awaited<
+    ReturnType<PersistentSessionStateStore["readTwinEvents"]>
+  >;
+  try {
+    twinEvents = await sessionStateStore.readTwinEvents(metadata, 1);
+  } catch {
+    return snapshotSlice;
+  }
+  if (twinEvents.length === 0) {
+    return snapshotSlice;
+  }
+
+  const twinConversation = mapTwinEventsToConversation(twinEvents);
+  if (twinConversation.length === 0) {
+    return snapshotSlice;
+  }
+
+  let boundaryIndex = -1;
+  for (let i = 0; i < twinConversation.length; i += 1) {
+    const candidate = twinConversation[i];
+    if (!candidate) continue;
+    if (matchesCaptureBoundaryEvent(candidate, commandEvent)) {
+      boundaryIndex = i;
+    }
+  }
+
+  if (boundaryIndex >= 0) {
+    return twinConversation.slice(0, boundaryIndex + 1);
+  }
+  return twinConversation;
 }
 
 async function applyPersistentStopCommand(
@@ -472,6 +553,7 @@ async function applyPersistentControlCommandsForEvent(
     eventIndex,
     event,
     metadata,
+    sessionStateStore,
     recordingPipeline,
     operationalLogger,
     auditLogger,
@@ -514,6 +596,7 @@ async function applyPersistentControlCommandsForEvent(
   const snapshotSlice = events.slice(0, eventIndex + 1);
   const writeCursor = eventIndex + 1;
   let metadataChanged = false;
+  let captureEvents: ConversationEvent[] | undefined;
 
   for (const command of detection.commands) {
     const canonicalCommand = command.name === "record" ? "start" : command.name;
@@ -558,11 +641,19 @@ async function applyPersistentControlCommandsForEvent(
         );
         metadataChanged = true;
       } else if (canonicalCommand === "capture") {
+        if (!captureEvents) {
+          captureEvents = await resolveCaptureEventsFromTwinStart(
+            metadata,
+            snapshotSlice,
+            event,
+            sessionStateStore,
+          );
+        }
         const captureResult = await recordingPipeline.captureSnapshot({
           provider,
           sessionId: providerSessionId,
           targetPath: destination,
-          events: snapshotSlice,
+          events: captureEvents,
           title: providerSessionId,
         });
         resolvedDestination = captureResult.outputPath;
@@ -1047,6 +1138,7 @@ async function processPersistentRecordingUpdates(
         eventIndex: i,
         event: event as ConversationEvent & { kind: "message.user" },
         metadata,
+        sessionStateStore,
         recordingPipeline,
         operationalLogger,
         auditLogger,
@@ -1405,6 +1497,7 @@ export async function runDaemonRuntimeLoop(
   const providerStatusStaleAfterMs = options.providerStatusStaleAfterMs ??
     DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS;
   const exportEnabled = options.exportEnabled ?? true;
+  const exportsLogPath = options.exportsLogPath;
   const cleanSessionStatesOnShutdown = options.cleanSessionStatesOnShutdown ??
     false;
   const daemonMaxMemoryBytes = (options.daemonMaxMemoryMb ?? 200) * 1024 *
@@ -1576,6 +1669,8 @@ export async function runDaemonRuntimeLoop(
         sessionStateStore,
         loadSessionSnapshot,
         exportEnabled,
+        exportsLogPath,
+        now,
         operationalLogger,
         auditLogger,
       });
@@ -1791,6 +1886,8 @@ interface HandleControlRequestOptions {
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
   exportEnabled: boolean;
+  exportsLogPath?: string;
+  now: () => Date;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
 }
@@ -1932,6 +2029,30 @@ async function warnExportSkipped(
   await auditLogger.record(event, message, details);
 }
 
+async function appendExportHistoryEntrySafely(
+  exportsLogPath: string | undefined,
+  entry: Parameters<typeof appendExportsLogEntry>[1],
+  operationalLogger: StructuredLogger,
+): Promise<void> {
+  if (!exportsLogPath) {
+    return;
+  }
+  try {
+    await appendExportsLogEntry(exportsLogPath, entry);
+  } catch (error) {
+    await operationalLogger.warn(
+      "daemon.control.export.history_write_failed",
+      "Failed to append export history event",
+      {
+        requestId: entry.requestId,
+        status: entry.status,
+        exportsLogPath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
+}
+
 async function handleControlRequest(
   options: HandleControlRequestOptions,
 ): Promise<boolean> {
@@ -1942,6 +2063,8 @@ async function handleControlRequest(
     sessionStateStore,
     loadSessionSnapshot,
     exportEnabled,
+    exportsLogPath,
+    now,
     operationalLogger,
     auditLogger,
   } = options;
@@ -1963,16 +2086,6 @@ async function handleControlRequest(
   );
 
   if (request.command === "export") {
-    if (!exportEnabled) {
-      await operationalLogger.warn(
-        "daemon.control.export.disabled",
-        "Export request skipped because feature flag is disabled",
-        { requestId: request.requestId },
-      );
-      await controlStore.markProcessed(request.requestId);
-      return false;
-    }
-
     const payload = request.payload;
     const sessionId = isRecord(payload)
       ? readString(payload["sessionId"])
@@ -1986,6 +2099,59 @@ async function handleControlRequest(
       : undefined;
     const format: "markdown" | "jsonl" | undefined =
       formatRaw === "markdown" || formatRaw === "jsonl" ? formatRaw : undefined;
+    const baseHistoryEntry = {
+      recordedAt: now().toISOString(),
+      requestId: request.requestId,
+      requestedAt: request.requestedAt,
+      ...(sessionId ? { sessionId } : {}),
+      ...(outputPath ? { outputPath } : {}),
+      ...(format ? { format } : {}),
+    } as const;
+    const recordExportFailed = async (
+      reason: string,
+      extra?: {
+        error?: string;
+        matchedBy?: string;
+      },
+    ): Promise<void> => {
+      await appendExportHistoryEntrySafely(
+        exportsLogPath,
+        {
+          ...baseHistoryEntry,
+          status: "failed",
+          reason,
+          ...(extra?.error ? { error: extra.error } : {}),
+          ...(extra?.matchedBy ? { matchedBy: extra.matchedBy } : {}),
+        },
+        operationalLogger,
+      );
+    };
+    const recordExportSucceeded = async (
+      provider: string,
+      matchedBy?: string,
+    ): Promise<void> => {
+      await appendExportHistoryEntrySafely(
+        exportsLogPath,
+        {
+          ...baseHistoryEntry,
+          status: "succeeded",
+          provider,
+          ...(matchedBy ? { matchedBy } : {}),
+        },
+        operationalLogger,
+      );
+    };
+
+    if (!exportEnabled) {
+      await operationalLogger.warn(
+        "daemon.control.export.disabled",
+        "Export request skipped because feature flag is disabled",
+        { requestId: request.requestId },
+      );
+      await recordExportFailed("export_disabled");
+      await controlStore.markProcessed(request.requestId);
+      return false;
+    }
 
     if (!sessionId || !outputPath) {
       await operationalLogger.warn(
@@ -1993,6 +2159,7 @@ async function handleControlRequest(
         "Export request payload is missing required fields",
         { requestId: request.requestId, payload },
       );
+      await recordExportFailed("invalid_payload");
     } else if (!loadSessionSnapshot) {
       await warnExportSkipped(
         "daemon.control.export.unhandled",
@@ -2001,6 +2168,7 @@ async function handleControlRequest(
         operationalLogger,
         auditLogger,
       );
+      await recordExportFailed("snapshot_loader_unavailable");
     } else {
       try {
         const sessionResolution = await resolveExportSessionLookup(
@@ -2023,6 +2191,9 @@ async function handleControlRequest(
             operationalLogger,
             auditLogger,
           );
+          await recordExportFailed("session_selector_ambiguous", {
+            matchedBy: sessionResolution.matchedBy,
+          });
           await controlStore.markProcessed(request.requestId);
           return false;
         }
@@ -2045,6 +2216,11 @@ async function handleControlRequest(
             operationalLogger,
             auditLogger,
           );
+          await recordExportFailed("session_snapshot_not_found", {
+            ...(sessionResolution.matchedBy !== "passthrough"
+              ? { matchedBy: sessionResolution.matchedBy }
+              : {}),
+          });
           await controlStore.markProcessed(request.requestId);
           return false;
         }
@@ -2058,6 +2234,7 @@ async function handleControlRequest(
             operationalLogger,
             auditLogger,
           );
+          await recordExportFailed("invalid_snapshot_provider");
           await controlStore.markProcessed(request.requestId);
           return false;
         }
@@ -2075,6 +2252,7 @@ async function handleControlRequest(
             operationalLogger,
             auditLogger,
           );
+          await recordExportFailed("session_snapshot_empty");
           await controlStore.markProcessed(request.requestId);
           return false;
         }
@@ -2087,7 +2265,16 @@ async function handleControlRequest(
           title: sessionId,
           ...(format ? { format } : {}),
         });
+        await recordExportSucceeded(
+          snapshotProvider,
+          sessionResolution.matchedBy !== "passthrough"
+            ? sessionResolution.matchedBy
+            : undefined,
+        );
       } catch (error) {
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         await operationalLogger.error(
           "daemon.control.export.failed",
           "Export request failed in daemon runtime",
@@ -2095,9 +2282,12 @@ async function handleControlRequest(
             requestId: request.requestId,
             sessionId,
             outputPath,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           },
         );
+        await recordExportFailed("export_snapshot_failed", {
+          error: errorMessage,
+        });
       }
     }
   }

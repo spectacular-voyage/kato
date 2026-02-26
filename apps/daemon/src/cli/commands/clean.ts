@@ -5,6 +5,7 @@ import {
   resolveDefaultDaemonControlIndexPath,
   resolveDefaultSessionsDir,
 } from "../../orchestrator/mod.ts";
+import { resolveExportsLogPath } from "../../utils/exports_log.ts";
 import type { DaemonCliCommandContext } from "./context.ts";
 
 export interface CleanCommandOptions {
@@ -265,6 +266,7 @@ export async function runCleanCommand(
       const path of [
         join(ctx.runtime.runtimeDir, "logs", "operational.jsonl"),
         join(ctx.runtime.runtimeDir, "logs", "security-audit.jsonl"),
+        resolveExportsLogPath(ctx.runtime.runtimeDir),
       ]
     ) {
       applyMutationResult(

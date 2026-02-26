@@ -1,4 +1,8 @@
 import type { DaemonCliCommandContext } from "./context.ts";
+import {
+  appendExportsLogEntry,
+  resolveExportsLogPath,
+} from "../../utils/exports_log.ts";
 
 export async function runExportCommand(
   ctx: DaemonCliCommandContext,
@@ -71,6 +75,31 @@ export async function runExportCommand(
     resolvedOutputPath,
     format,
   });
+
+  const exportsLogPath = resolveExportsLogPath(ctx.runtime.runtimeDir);
+  try {
+    await appendExportsLogEntry(exportsLogPath, {
+      recordedAt: ctx.runtime.now().toISOString(),
+      requestId: request.requestId,
+      requestedAt: request.requestedAt,
+      status: "queued",
+      sessionId,
+      ...(resolvedOutputPath ? { outputPath: resolvedOutputPath } : {}),
+      ...(format ? { format } : {}),
+    });
+  } catch (error) {
+    await ctx.operationalLogger.warn(
+      "export.history.write_failed",
+      "Failed to append queued export event",
+      {
+        requestId: request.requestId,
+        sessionId,
+        outputPath: resolvedOutputPath,
+        exportsLogPath,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }
 
   ctx.runtime.writeStdout(
     `export request queued: session=${sessionId}${

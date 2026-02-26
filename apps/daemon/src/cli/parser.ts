@@ -190,7 +190,7 @@ function parseExport(rest: string[]): DaemonCliIntent {
 
 function parseClean(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
-    boolean: ["help", "all", "dry-run"],
+    boolean: ["help", "all", "logs", "dry-run"],
     string: ["recordings", "sessions"],
     alias: {
       h: "help",
@@ -205,12 +205,12 @@ function parseClean(rest: string[]): DaemonCliIntent {
 
   const recordingsDays = parseDays(parsed.recordings, "--recordings");
   const sessionsDays = parseDays(parsed.sessions, "--sessions");
-  const all = parsed.all === true;
+  const all = parsed.all === true || parsed.logs === true;
   const dryRun = parsed["dry-run"] === true;
 
   if (!all && recordingsDays === undefined && sessionsDays === undefined) {
     throw new CliUsageError(
-      "Command 'clean' requires one of --all, --recordings <days>, or --sessions <days>",
+      "Command 'clean' requires one of --all, --logs, --recordings <days>, or --sessions <days>",
     );
   }
 

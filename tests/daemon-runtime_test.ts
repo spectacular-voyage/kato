@@ -7,6 +7,7 @@ import {
   type DaemonStatusSnapshotStoreLike,
   InMemorySessionSnapshotStore,
   type LogRecord,
+  mapConversationEventsToTwin,
   PersistentSessionStateStore,
   type ProviderIngestionRunner,
   type RecordingPipelineLike,
@@ -258,22 +259,47 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
     ),
   ];
 
-  await runDaemonRuntimeLoop({
-    statusStore,
-    controlStore,
-    recordingPipeline,
-    loadSessionSnapshot(sessionId: string) {
-      loadedSessions.push(sessionId);
-      return Promise.resolve({
-        provider: "unknown",
-        events: sessionMessages,
-      });
-    },
-    now: () => new Date("2026-02-22T10:00:00.000Z"),
-    pid: 4242,
-    heartbeatIntervalMs: 50,
-    pollIntervalMs: 10,
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const tempDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-exports-",
   });
+
+  try {
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      loadSessionSnapshot(sessionId: string) {
+        loadedSessions.push(sessionId);
+        return Promise.resolve({
+          provider: "unknown",
+          events: sessionMessages,
+        });
+      },
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+      exportsLogPath: join(tempDir, "exports.jsonl"),
+    });
+
+    const exportsLines =
+      (await Deno.readTextFile(join(tempDir, "exports.jsonl")))
+        .trim()
+        .split("\n");
+    assertEquals(exportsLines.length, 1);
+    const entry = JSON.parse(exportsLines[0]!) as {
+      requestId: string;
+      status: string;
+      provider: string;
+    };
+    assertEquals(entry.requestId, "req-export");
+    assertEquals(entry.status, "succeeded");
+    assertEquals(entry.provider, "unknown");
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
 
   assertEquals(loadedSessions, ["session-42"]);
   assertEquals(exported.length, 1);
@@ -2977,6 +3003,223 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
     const session = lastStatus.sessions?.[0];
     assertExists(session);
     assertEquals(session?.providerSessionId, "session-persist");
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is truncated", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-capture-twin-start-",
+  });
+
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      retention: {
+        maxSessions: 200,
+        maxEventsPerSession: 2,
+      },
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-capture-twin-start-1234",
+    });
+
+    const provider = "codex";
+    const providerSessionId = "session-capture-twin-start";
+    const makeLocalEvent = (
+      id: string,
+      kind: "message.user" | "message.assistant",
+      content: string,
+      timestamp: string,
+    ): ConversationEvent => ({
+      eventId: id,
+      provider,
+      sessionId: providerSessionId,
+      timestamp,
+      kind,
+      role: kind === "message.user" ? "user" : "assistant",
+      content,
+      source: {
+        providerEventType: kind === "message.user" ? "user" : "assistant",
+        providerEventId: id,
+      },
+    } as ConversationEvent);
+
+    const firstUserMessage = makeLocalEvent(
+      "u-history-1",
+      "message.user",
+      "early context",
+      "2026-02-22T10:00:00.000Z",
+    );
+    const firstAssistantMessage = makeLocalEvent(
+      "a-history-1",
+      "message.assistant",
+      "early reply",
+      "2026-02-22T10:00:01.000Z",
+    );
+    const captureCommand = makeLocalEvent(
+      "u-capture-tail",
+      "message.user",
+      "::capture /tmp/capture-from-twin.md",
+      "2026-02-22T10:00:02.000Z",
+    );
+    const fullConversation = [
+      firstUserMessage,
+      firstAssistantMessage,
+      captureCommand,
+    ];
+
+    const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+      provider,
+      providerSessionId,
+      sourceFilePath: "/tmp/mock-source.jsonl",
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    const twinEvents = mapConversationEventsToTwin({
+      provider,
+      providerSessionId,
+      sessionId: metadata.sessionId,
+      events: fullConversation,
+      mode: "live",
+      capturedAt: "2026-02-22T10:00:03.000Z",
+    });
+    await sessionStateStore.appendTwinEvents(metadata, twinEvents);
+
+    sessionSnapshotStore.upsert({
+      provider,
+      sessionId: providerSessionId,
+      cursor: { kind: "byte-offset", value: 3 },
+      events: fullConversation,
+    });
+
+    const requests = [{
+      requestId: "req-stop-capture-from-twin-start",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let capturedSummary: Array<{ kind: string; content?: string }> = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot(input) {
+        capturedSummary = input.events.map((event) => {
+          if (
+            event.kind === "message.user" ||
+            event.kind === "message.assistant" ||
+            event.kind === "message.system" ||
+            event.kind === "thinking" ||
+            event.kind === "provider.info"
+          ) {
+            return { kind: event.kind, content: event.content };
+          }
+          return { kind: event.kind };
+        });
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination() {
+        return Promise.resolve({
+          mode: "append",
+          outputPath: "/tmp/capture-from-twin.md",
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(capturedSummary, [
+      { kind: "message.user", content: "early context" },
+      { kind: "message.assistant", content: "early reply" },
+      { kind: "message.user", content: "::capture /tmp/capture-from-twin.md" },
+    ]);
   } finally {
     await Deno.remove(stateDir, { recursive: true });
   }

@@ -30,6 +30,7 @@ import {
 } from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
 import { readOptionalEnv } from "./utils/env.ts";
+import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
@@ -204,6 +205,7 @@ export async function runDaemonSubprocess(
         });
       },
       exportEnabled: featureSettings.exportEnabled,
+      exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       operationalLogger,
       auditLogger,
