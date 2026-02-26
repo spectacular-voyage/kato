@@ -32,6 +32,19 @@ function makeToolCallEvent(): ConversationEvent {
   } as unknown as ConversationEvent;
 }
 
+function makeUserEvent(content: string): ConversationEvent {
+  return {
+    eventId: crypto.randomUUID(),
+    provider: "test",
+    sessionId: "sess-test",
+    timestamp: "2026-02-22T10:00:02.000Z",
+    kind: "message.user",
+    role: "user",
+    content,
+    source: { providerEventType: "user" },
+  } as unknown as ConversationEvent;
+}
+
 function makeSequencedPathPolicyGate(
   sequence: Array<"allow" | "deny">,
   callOrder: string[],
@@ -74,7 +87,10 @@ function makeWriterSpy(callOrder: string[]): {
       italicizeUserMessages?: boolean;
     }
   >;
-  renderOptionsByCall: Array<{ frontmatterConversationEventKinds?: string[] }>;
+  renderOptionsByCall: Array<{
+    frontmatterConversationEventKinds?: string[];
+    frontmatterParticipants?: string[];
+  }>;
   writer: ConversationWriterLike;
   appendOutcomes: Array<{ wrote: boolean; deduped: boolean }>;
   overwriteOutcomes: Array<{ wrote: boolean; deduped: boolean }>;
@@ -91,9 +107,10 @@ function makeWriterSpy(callOrder: string[]): {
       italicizeUserMessages?: boolean;
     }
   > = [];
-  const renderOptionsByCall: Array<
-    { frontmatterConversationEventKinds?: string[] }
-  > = [];
+  const renderOptionsByCall: Array<{
+    frontmatterConversationEventKinds?: string[];
+    frontmatterParticipants?: string[];
+  }> = [];
   const appendOutcomes: Array<{ wrote: boolean; deduped: boolean }> = [];
   const overwriteOutcomes: Array<{ wrote: boolean; deduped: boolean }> = [];
 
@@ -110,6 +127,9 @@ function makeWriterSpy(callOrder: string[]): {
             options?.frontmatterConversationEventKinds
               ? [...options.frontmatterConversationEventKinds]
               : undefined,
+          frontmatterParticipants: options?.frontmatterParticipants
+            ? [...options.frontmatterParticipants]
+            : undefined,
         });
         calls.push({
           mode: "append",
@@ -137,6 +157,9 @@ function makeWriterSpy(callOrder: string[]): {
             options?.frontmatterConversationEventKinds
               ? [...options.frontmatterConversationEventKinds]
               : undefined,
+          frontmatterParticipants: options?.frontmatterParticipants
+            ? [...options.frontmatterParticipants]
+            : undefined,
         });
         calls.push({
           mode: "overwrite",
@@ -458,7 +481,7 @@ Deno.test(
 );
 
 Deno.test(
-  "RecordingPipeline frontmatter conversationEventKinds include all event kinds",
+  "RecordingPipeline frontmatter conversationEventKinds accrete across active recording writes",
   async () => {
     const order: string[] = [];
     const writerSpy = makeWriterSpy(order);
@@ -479,6 +502,15 @@ Deno.test(
       writerSpy.renderOptionsByCall[0]?.frontmatterConversationEventKinds,
       ["message.assistant", "tool.call"],
     );
+    await pipeline.appendToActiveRecording({
+      provider: "codex",
+      sessionId: "session-kinds",
+      events: [makeUserEvent("follow-up")],
+    });
+    assertEquals(
+      writerSpy.renderOptionsByCall[1]?.frontmatterConversationEventKinds,
+      ["message.assistant", "message.user", "tool.call"],
+    );
 
     const pipelineWithoutKinds = new RecordingPipeline({
       pathPolicyGate: makeSequencedPathPolicyGate(["allow"], order),
@@ -493,8 +525,44 @@ Deno.test(
       seedEvents: [makeEvent("seed")],
     });
     assertEquals(
-      writerSpy.renderOptionsByCall[1]?.frontmatterConversationEventKinds,
+      writerSpy.renderOptionsByCall[2]?.frontmatterConversationEventKinds,
       undefined,
     );
+  },
+);
+
+Deno.test(
+  "RecordingPipeline frontmatter participants include configured user and provider model",
+  async () => {
+    const order: string[] = [];
+    const writerSpy = makeWriterSpy(order);
+    const pipeline = new RecordingPipeline({
+      pathPolicyGate: makeSequencedPathPolicyGate(["allow"], order),
+      writer: writerSpy.writer,
+      frontmatterParticipantUsername: "djradon",
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    await pipeline.startOrRotateRecording({
+      provider: "codex",
+      sessionId: "session-participants",
+      targetPath: "notes/participants.md",
+      seedEvents: [{
+        eventId: crypto.randomUUID(),
+        provider: "codex",
+        sessionId: "session-participants",
+        timestamp: "2026-02-22T10:00:00.000Z",
+        kind: "message.assistant",
+        role: "assistant",
+        content: "hello",
+        model: "gpt-5.3-codex",
+        source: { providerEventType: "assistant" },
+      } as ConversationEvent],
+    });
+
+    assertEquals(writerSpy.renderOptionsByCall[0]?.frontmatterParticipants, [
+      "user.djradon",
+      "codex.gpt-5.3-codex",
+    ]);
   },
 );

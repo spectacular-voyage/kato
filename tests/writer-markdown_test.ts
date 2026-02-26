@@ -253,7 +253,70 @@ Deno.test(
         content,
         "conversationEventKinds: [message.user, message.assistant]",
       );
+      assertEquals(content.includes("\nparticipants:"), false);
       assertStringIncludes(content, "assistant reply");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter keeps legacy tags untouched and only merges canonical fields",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "participants: [user.djradon]",
+          "tags: [provider.codex, kind.message.user, topic.keep]",
+          "conversationEventKinds: [message.assistant]",
+          "---",
+          "",
+          "# User_2026-02-22_1000_00",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant reply",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: true,
+        frontmatterParticipants: ["codex.gpt-5.3-codex"],
+        frontmatterConversationEventKinds: ["tool.call"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        content,
+        "participants: [user.djradon, codex.gpt-5.3-codex]",
+      );
+      assertStringIncludes(
+        content,
+        "tags: [provider.codex, kind.message.user, topic.keep]",
+      );
+      assertStringIncludes(
+        content,
+        "conversationEventKinds: [message.assistant, tool.call]",
+      );
     } finally {
       await Deno.remove(root, { recursive: true }).catch(() => {});
     }
@@ -312,6 +375,7 @@ Deno.test(
         content,
         "conversationEventKinds: [message.user, message.assistant]",
       );
+      assertEquals(content.includes("\nparticipants:"), false);
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await Deno.remove(root, { recursive: true }).catch(() => {});
@@ -320,7 +384,7 @@ Deno.test(
 );
 
 Deno.test(
-  "MarkdownConversationWriter migrates legacy messageEventKinds key",
+  "MarkdownConversationWriter does not migrate legacy messageEventKinds key",
   async () => {
     const root = makeSandboxRoot();
     const outputPath = join(root, "conversation.md");
@@ -361,9 +425,9 @@ Deno.test(
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(
         content,
-        "conversationEventKinds: [message.user, message.assistant]",
+        "conversationEventKinds: [message.assistant]",
       );
-      assertEquals(content.includes("\nmessageEventKinds:"), false);
+      assertStringIncludes(content, "messageEventKinds: [message.user]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await Deno.remove(root, { recursive: true }).catch(() => {});

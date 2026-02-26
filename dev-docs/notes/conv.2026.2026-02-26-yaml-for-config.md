@@ -7,6 +7,7 @@ participants: [codex.gpt-5.3-codex]
 sessionId: 019c9aa1-0c85-7e30-ab78-0f946e8902c2
 recordingIds: [e2c1bfea-57ff-4b5b-94bf-d00e5ad02e52]
 tags: [provider.codex]
+conversationEventKinds: [message.user, thinking, message.assistant, tool.call, tool.result]
 ---
 
 # User_unknown-time
@@ -1352,3 +1353,454 @@ Not 100% before; there was one stale line.
 I fixed it in [dev.feature-ideas.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.feature-ideas.md) by removing `- switch config to YAML`.
 
 I then re-scanned all `dev.*` notes for old config references (`config.json`, `.kato/config`, and that stale idea), and there are no remaining matches. So for the YAML/config-path changes, the `dev.*` docs are now aligned.
+
+# User_2026-02-26_1424_42
+
+I just created [conv.2026.2026-02-26-workspace-settings.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-26-workspace-settings.md) and it looks like the kinds are still going into `tags:` , `provider.code` is getting wrongly written into tags, and `message.assistant` is going into conversationEventKinds -- I don't even know where message.assistant came into the picture, but I don't think we want it. Please fix things so the kind gointo conversationEventKinds and <provider>.<model> goes into participants.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning frontmatter tag refactor**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1424_57
+
+I’ll inspect the current frontmatter rendering path (`recording_pipeline` → `markdown_writer` → `frontmatter`) and your new conversation file to reproduce exactly where `tags`, `provider.*`, and `message.assistant` are coming from, then patch it to match your intended schema.
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting recording pipeline components**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Analyzing legacy frontmatter tag retention**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning frontmatter merge and migration**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Analyzing conversationEventKinds handling**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adding main entry point**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning legacy tag migration**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Refining migration and test coverage**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning legacy tag migration**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1427_18
+
+I found the root cause: participants are not accretive across appends, and legacy `provider.*`/`kind.*` tags are being preserved instead of migrated. I’m patching frontmatter merge + markdown writer merge triggers to migrate those legacy tags into `participants` and `conversationEventKinds`.
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing existing participant tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning assistant event helper**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning event and pipeline test updates**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adding migration test for tags**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adjusting merge and tests for tag ordering**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1428_40
+
+I’ve patched the merge path so legacy `provider.*`/`kind.*` tags are migrated into `participants` / `conversationEventKinds`, and I added tests for both migration and participant accumulation. I’m running focused tests now.
+
+<details>
+<summary>Thinking</summary>
+
+**Preparing test expectation updates**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adding missing tags to tests**
+
+</details>
+
+# User_2026-02-26_1429_13
+
+Also, `kind.*` tags should only be included as they occur ideally. So we'll need some kind of ongoing check or "kind checklist" in state that gets updated as different kinds of messages occur.
+
+Let's rip out compatibility code wherever we find it. We don't need backwards compatibility yet.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning removal of compatibility and dynamic kind tracking**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1429_53
+
+Understood. I’ll pivot to a non-compat design: remove legacy/migration logic, add an in-memory kind checklist in recording state so `conversationEventKinds` accretes over time, and keep participants accretive on ongoing writes. Then I’ll update tests to match the no-compat policy.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning conversation kinds state management**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Starting inspection and parallel queries**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1430_56
+
+I’m going to align this with your new direction: remove compatibility paths and make `kind.*` tracking stateful so `conversationEventKinds` only reflects kinds actually seen over time. I’ll inspect the current writer/pipeline code and tests first, then patch and re-run the focused test files.
+
+<details>
+<summary>Thinking</summary>
+
+**Preparing function inspection**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1431_02
+
+I found your in-progress changes and confirmed the compatibility migration code is still present in `frontmatter.ts`. I’m now reading the exact merge/pipeline logic to remove legacy behavior cleanly and add persistent kind tracking in runtime state.
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting recording pipeline state structure**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting recording pipeline methods**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Analyzing frontmatter tags handling**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing relevant test files**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1431_19
+
+I confirmed the compatibility behavior is concentrated in `mergeAccretiveFrontmatterFields`, and pipeline currently only derives kinds from the current append batch. Next I’m updating pipeline state to accumulate kinds/participants per active recording and removing the legacy tag migration branch entirely.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning legacy merge tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Searching tests for frontmatter merge**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning focused test run**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Analyzing conversation file format issues**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting frontmatterTags assignment**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Investigating frontmatterTags usage**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Implementing stateful kind checklist and removing compatibility**
+**Extending tests for cumulative kind tracking**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning compatibility code removal**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Assessing frontmatter compatibility and event kinds**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1433_10
+
+I’ve got a clear implementation target now: remove the frontmatter migration shims and add per-recording event-kind state in `RecordingPipeline` so frontmatter kinds are accrued from observed events over time. I’m checking the config/docs definitions for `conversationEventKinds` quickly so the behavior matches your intended semantics before patching.
+
+<details>
+<summary>Thinking</summary>
+
+**Designing accretive frontmatter merge**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1433_19
+
+I’m patching `frontmatter.ts` now to remove all legacy migration logic (`provider.*`, `kind.*`, and `messageEventKinds` compatibility) so merges only operate on canonical fields. After that I’ll add the in-memory kind checklist in `RecordingPipeline`.
+
+<details>
+<summary>Thinking</summary>
+
+**Designing event kind tracking in recording pipeline**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Modifying writer-markdown tests**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1434_04
+
+I’ve removed the migration shim in `frontmatter.ts` and added per-recording kind checklist state in `RecordingPipeline`. I’m updating tests now to match your no-compat policy and to assert cumulative kind tracking across active recording writes.
+
+<details>
+<summary>Thinking</summary>
+
+**Extending test for event kind accumulation**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Running formatting on changed files**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Running targeted tests**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adjusting tests for tag preservation**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Rerunning tests after formatting**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Adjusting participant assertions**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Evaluating test scope and compatibility cleanup**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Checking compatibility and lint issues**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1435_11
+
+I finished the code changes and the focused tests are green. I’m doing a quick diff pass to verify there are no unintended edits before I summarize what changed and what this means for your PR.
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing final integration details**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Considering test line references**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing test additions and file changes**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing implemented changes and testing**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1436_22
+
+Implemented.
+
+1. Removed frontmatter compatibility/migration behavior in [`frontmatter.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/frontmatter.ts:256).
+- `mergeAccretiveFrontmatterFields` now only merges canonical fields (`recordingIds`, `participants`, `tags`, `conversationEventKinds`).
+- Removed legacy remapping from `tags` (`provider.*` / `kind.*`) and removed `messageEventKinds` migration/deletion logic.
+
+2. Added ongoing per-recording kind checklist state in [`recording_pipeline.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:192).
+- Active recording writes now accrete kinds in memory and pass cumulative `frontmatterConversationEventKinds`.
+- Checklist is initialized on start/rotate and cleared on stop.
+- This gives the “as-they-occur” behavior for kinds across an active recording session.
+
+3. Updated tests to match no-compat policy and new stateful accumulation.
+- [`recording-pipeline_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/recording-pipeline_test.ts:483)
+- [`writer-markdown_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:264)
+
+Validation run:
+- `deno test --allow-env --allow-read --allow-write --allow-run tests/writer-markdown_test.ts tests/recording-pipeline_test.ts`
+- Result: 31 passed, 0 failed.
+
+Note: existing legacy files are intentionally not auto-migrated now.
+
+# User_2026-02-26_1441_24
+
+OK, anything else?
+
+<details>
+<summary>Thinking</summary>
+
+**Confirming final task status**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1441_34
+
+I’ll do a quick repo check for remaining follow-ups tied to this frontmatter/kinds change so we can decide if your PR is merge-ready.
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing markdown_writer changes**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1441_39
+
+I found no obvious doc mismatch from a quick grep, but there is still a pending `markdown_writer.ts` change in your working tree. I’ll inspect that one quickly to confirm it’s intentional before I give a merge recommendation.
+
+<details>
+<summary>Thinking</summary>
+
+**Reviewing test coverage and docs mentions**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1441_47
+
+I confirmed `markdown_writer.ts` diff is intentional and required for participant accretion merges. I’ll do one last quick scan for stale “legacy migration” wording in docs/tests, then I’ll give a clean yes/no on merge readiness.

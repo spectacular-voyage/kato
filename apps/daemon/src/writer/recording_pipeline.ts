@@ -189,6 +189,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
   >;
   private readonly makeRecordingId: () => string;
   private readonly recordings = new Map<string, ActiveRecording>();
+  private readonly conversationEventKindChecklistByRecording = new Map<
+    string,
+    Set<string>
+  >();
   private readonly operationalLogger: StructuredLogger;
   private readonly auditLogger: AuditLogger;
   private readonly includeFrontmatterInMarkdownRecordings: boolean;
@@ -242,6 +246,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       lastWriteAt: nowIso,
     };
     this.recordings.set(sessionKey, nextRecording);
+    this.conversationEventKindChecklistByRecording.set(sessionKey, new Set());
 
     if ((input.seedEvents?.length ?? 0) > 0) {
       const result = await this.writer.appendEvents(
@@ -256,6 +261,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
             nextRecording.recordingId,
             ...(input.recordingIds ?? []),
           ],
+          trackActiveRecordingKinds: true,
         }),
       );
       if (result.wrote) {
@@ -379,6 +385,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
           activeRecording.recordingId,
           ...(input.recordingIds ?? []),
         ],
+        trackActiveRecordingKinds: true,
       }),
     );
     if (writeResult.wrote) {
@@ -431,7 +438,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
   }
 
   stopRecording(provider: string, sessionId: string): boolean {
-    return this.recordings.delete(makeSessionKey(provider, sessionId));
+    const sessionKey = makeSessionKey(provider, sessionId);
+    this.conversationEventKindChecklistByRecording.delete(sessionKey);
+    return this.recordings.delete(sessionKey);
   }
 
   getActiveRecording(
@@ -525,10 +534,14 @@ export class RecordingPipeline implements RecordingPipelineLike {
     events: ConversationEvent[];
     title: string | undefined;
     recordingIds?: string[];
+    trackActiveRecordingKinds?: boolean;
   }): MarkdownRenderOptions {
     const frontmatterConversationEventKinds = this
       .buildFrontmatterConversationEventKinds(
+        options.provider,
+        options.sessionId,
         options.events,
+        options.trackActiveRecordingKinds ?? false,
       );
     const frontmatterParticipants = this.buildFrontmatterParticipants(
       options.provider,
@@ -568,17 +581,41 @@ export class RecordingPipeline implements RecordingPipelineLike {
   }
 
   private buildFrontmatterConversationEventKinds(
+    provider: string,
+    sessionId: string,
     events: ConversationEvent[],
+    trackActiveRecordingKinds: boolean,
   ): string[] | undefined {
     if (!this.includeConversationEventKindsInFrontmatter) {
       return undefined;
     }
-    const eventKinds = new Set<string>();
+    const eventKinds = trackActiveRecordingKinds
+      ? this.getOrCreateConversationEventKindChecklist(
+        makeSessionKey(provider, sessionId),
+      )
+      : new Set<string>();
     for (const event of events) {
       eventKinds.add(event.kind);
     }
     const kinds = Array.from(eventKinds).sort((a, b) => a.localeCompare(b));
     return kinds.length > 0 ? kinds : undefined;
+  }
+
+  private getOrCreateConversationEventKindChecklist(sessionKey: string): Set<
+    string
+  > {
+    const checklist = this.conversationEventKindChecklistByRecording.get(
+      sessionKey,
+    );
+    if (checklist) {
+      return checklist;
+    }
+    const nextChecklist = new Set<string>();
+    this.conversationEventKindChecklistByRecording.set(
+      sessionKey,
+      nextChecklist,
+    );
+    return nextChecklist;
   }
 
   private buildFrontmatterParticipants(

@@ -256,16 +256,19 @@ function arraysEqual(a: string[], b: string[]): boolean {
 export function mergeAccretiveFrontmatterFields(options: {
   frontmatter: string;
   recordingIds?: ReadonlyArray<string>;
+  participants?: ReadonlyArray<string>;
   tags?: ReadonlyArray<string>;
   conversationEventKinds?: ReadonlyArray<string>;
 }): string {
   const incomingRecordingIds = dedupeStrings(options.recordingIds);
+  const incomingParticipants = dedupeStrings(options.participants);
   const incomingTags = dedupeStrings(options.tags);
   const incomingConversationEventKinds = dedupeStrings(
     options.conversationEventKinds,
   );
   if (
     incomingRecordingIds.length === 0 &&
+    incomingParticipants.length === 0 &&
     incomingTags.length === 0 &&
     incomingConversationEventKinds.length === 0
   ) {
@@ -290,20 +293,18 @@ export function mergeAccretiveFrontmatterFields(options: {
   }
 
   const existingRecordingIds = readStringList(parsed["recordingIds"]);
+  const existingParticipants = readStringList(parsed["participants"]);
   const existingTags = readStringList(parsed["tags"]);
-  const existingConversationEventKindsPrimary = readStringList(
+  const existingConversationEventKinds = readStringList(
     parsed["conversationEventKinds"],
-  );
-  const existingLegacyMessageEventKinds = readStringList(
-    parsed["messageEventKinds"],
-  );
-  const existingConversationEventKinds = mergeStringLists(
-    existingConversationEventKindsPrimary,
-    existingLegacyMessageEventKinds,
   );
   const mergedRecordingIds = mergeStringLists(
     existingRecordingIds,
     incomingRecordingIds,
+  );
+  const mergedParticipants = mergeStringLists(
+    existingParticipants,
+    incomingParticipants,
   );
   const mergedTags = mergeStringLists(existingTags, incomingTags);
   const mergedConversationEventKinds = mergeStringLists(
@@ -313,18 +314,21 @@ export function mergeAccretiveFrontmatterFields(options: {
 
   const recordingIdsChanged = incomingRecordingIds.length > 0 &&
     !arraysEqual(existingRecordingIds, mergedRecordingIds);
+  const participantsChanged = incomingParticipants.length > 0 &&
+    !arraysEqual(existingParticipants, mergedParticipants);
   const tagsChanged = incomingTags.length > 0 &&
     !arraysEqual(existingTags, mergedTags);
   const conversationEventKindsChanged =
     incomingConversationEventKinds.length > 0 &&
-    !arraysEqual(existingConversationEventKinds, mergedConversationEventKinds);
-  const legacyConversationEventKindsKeyPresent =
-    existingLegacyMessageEventKinds.length > 0;
+    !arraysEqual(
+      existingConversationEventKinds,
+      mergedConversationEventKinds,
+    );
   if (
     !recordingIdsChanged &&
+    !participantsChanged &&
     !tagsChanged &&
-    !conversationEventKindsChanged &&
-    !legacyConversationEventKindsKeyPresent
+    !conversationEventKindsChanged
   ) {
     return options.frontmatter;
   }
@@ -333,12 +337,18 @@ export function mergeAccretiveFrontmatterFields(options: {
   if (recordingIdsChanged) {
     nextRecord["recordingIds"] = mergedRecordingIds;
   }
-  if (tagsChanged) {
-    nextRecord["tags"] = mergedTags;
+  if (participantsChanged) {
+    nextRecord["participants"] = mergedParticipants;
   }
-  if (conversationEventKindsChanged || legacyConversationEventKindsKeyPresent) {
+  if (tagsChanged) {
+    if (mergedTags.length > 0) {
+      nextRecord["tags"] = mergedTags;
+    } else {
+      delete nextRecord["tags"];
+    }
+  }
+  if (conversationEventKindsChanged) {
     nextRecord["conversationEventKinds"] = mergedConversationEventKinds;
   }
-  delete nextRecord["messageEventKinds"];
   return renderFrontmatterRecord(nextRecord);
 }

@@ -488,12 +488,14 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     const existingFrontmatterView = splitExistingFrontmatter(existing.content);
     const shouldMergeFrontmatter = existingFrontmatterView &&
       ((options.frontmatterRecordingIds?.length ?? 0) > 0 ||
+        (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0);
     const nextFrontmatter = shouldMergeFrontmatter
       ? mergeAccretiveFrontmatterFields({
         frontmatter: existingFrontmatterView.frontmatter,
         recordingIds: options.frontmatterRecordingIds,
+        participants: options.frontmatterParticipants,
         tags: options.frontmatterTags,
         conversationEventKinds: options.frontmatterConversationEventKinds,
       })
@@ -582,12 +584,14 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       const hasAccretiveInputs =
         (options.frontmatterRecordingIds?.length ?? 0) >
           0 ||
+        (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0;
       const mergedFrontmatter = hasAccretiveInputs
         ? mergeAccretiveFrontmatterFields({
           frontmatter: existingFrontmatter,
           recordingIds: options.frontmatterRecordingIds,
+          participants: options.frontmatterParticipants,
           tags: options.frontmatterTags,
           conversationEventKinds: options.frontmatterConversationEventKinds,
         })

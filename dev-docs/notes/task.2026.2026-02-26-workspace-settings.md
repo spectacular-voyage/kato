@@ -127,13 +127,30 @@ Missing keys should merge downward; unknown keys remain fail-closed.
 - `kato workspace unregister [path-or-id]`
 - optional: `kato workspace discover --apply`
 
+### 7) Workspace Verification and Revalidation
+
+- Verify before persisting a new/updated workspace:
+  - canonicalize root path
+  - root exists and is a directory
+  - `<workspace>/.kato/kato-config.yaml` exists or is creatable
+  - parse + schema-validate workspace config
+  - reject duplicate canonical roots and id collisions
+- Re-verify existing workspaces on daemon startup and on config mtime/path
+  change; optional bounded periodic checks for long-running daemons.
+- Persist verification status rather than silently removing bad entries.
+- Fail closed for invalid workspaces:
+  - do not apply workspace defaults
+  - do not resolve relative targets against that workspace
+  - continue allowing absolute targets through normal path policy checks
+
 ## Proposed Schema Additions (Draft)
 
 Global config additions:
 
 - `workspaces`:
   - `registry`: array of workspace entries (`id`, `root`, `configPath`,
-    `enabled`, `source`)
+    `enabled`, `source`, `verificationStatus`, `lastVerifiedAt`,
+    `lastVerificationError`, `lastKnownConfigMtimeMs`)
   - `discoveryGlobs`: array of glob patterns to scan for workspace configs
   - `autoDiscoverOnStart`: boolean
 
@@ -184,14 +201,17 @@ Session metadata additions:
   - explicit registration beats discovery
   - discovery beats inference
   - nested workspace root tie-break rules
+  - verification status transitions (`unverified` -> `valid|invalid`)
 - Runtime tests:
   - in-chat relative path resolution uses workspace root
   - unknown workspace + relative target fails closed
   - absolute target behavior unchanged
+  - invalid workspace blocks workspace-default application
 - CLI tests:
   - register creates starter workspace config
   - list/unregister behavior
   - discover command behavior
+  - register rejects invalid/duplicate workspaces before persist
 
 ## Acceptance Criteria
 
@@ -199,6 +219,8 @@ Session metadata additions:
   with global config.
 - Relative in-chat paths are resolved by workspace context, not daemon cwd.
 - Workspace registration/discovery is available and deterministic.
+- Workspace entries are verified before persistence and re-verified over time.
+- Invalid workspace entries are retained with explicit failure reasons.
 - Workspace defaults can set capture/output behavior without weakening global
   write-root policy.
 - Audit logs include enough context to explain how workspace and target paths
