@@ -337,6 +337,7 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
       await Deno.writeTextFile(sessionFile, "placeholder\n");
       const stateRoot = join(dir, ".kato");
       const parseOffsets: number[] = [];
+      let phase: "initial" | "recovery" = "initial";
 
       function makeRunner(store: InMemorySessionSnapshotStore) {
         return new FileProviderIngestionRunner({
@@ -369,6 +370,12 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
                   cursor: { kind: "byte-offset" as const, value: 10 },
                 };
               }
+              if (phase === "recovery" && fromOffset === 10) {
+                yield {
+                  event: makeEvent("bootstrap-2", "2026-02-26T10:00:01.000Z"),
+                  cursor: { kind: "byte-offset" as const, value: 20 },
+                };
+              }
             })();
           },
         });
@@ -379,6 +386,7 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
       await firstRunner.start();
       await firstRunner.poll();
       await firstRunner.stop();
+      phase = "recovery";
 
       const stateStore = new PersistentSessionStateStore({
         katoDir: stateRoot,
@@ -401,12 +409,50 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
 
       const secondSnapshot = secondStore.get("session-bootstrap");
       assertExists(secondSnapshot);
-      assertEquals(secondSnapshot.events.length, 1);
-      assertEquals(secondSnapshot.events[0]?.kind, "message.assistant");
-      if (secondSnapshot.events[0]?.kind === "message.assistant") {
-        assertEquals(secondSnapshot.events[0].content, "bootstrap-1-content");
-      }
+      console.log("debug-second-snapshot", {
+        parseOffsets,
+        eventCount: secondSnapshot.events.length,
+      });
+      assertEquals(secondSnapshot.events.length, 2);
+      assertEquals(
+        secondSnapshot.events.map((event) =>
+          event.kind === "message.assistant" ? event.content : undefined
+        ),
+        ["bootstrap-1-content", "bootstrap-2-content"],
+      );
       assertEquals(parseOffsets, [0, 0, 10]);
+
+      const reloadedStateStore = new PersistentSessionStateStore({
+        katoDir: stateRoot,
+        now: () => new Date("2026-02-26T10:00:00.000Z"),
+        makeSessionId: () => "session-uuid-bootstrap-1",
+      });
+      const updatedMetadata = await reloadedStateStore.getOrCreateSessionMetadata({
+        provider: "test-provider",
+        providerSessionId: "session-bootstrap",
+        sourceFilePath: sessionFile,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      console.log("debug-metadata", {
+        ingestCursor: updatedMetadata.ingestCursor,
+        nextTwinSeq: updatedMetadata.nextTwinSeq,
+      });
+      assertEquals(updatedMetadata.ingestCursor, {
+        kind: "byte-offset",
+        value: 20,
+      });
+      assertEquals(updatedMetadata.nextTwinSeq, 3);
+
+      const twinEvents = await reloadedStateStore.readTwinEvents(updatedMetadata, 1);
+      console.log(
+        "debug-twin",
+        twinEvents.map((event) => ({ seq: event.seq, payload: event.payload })),
+      );
+      assertEquals(twinEvents.map((event) => event.seq), [1, 2]);
+      assertEquals(
+        new Set(twinEvents.map((event) => event.seq)).size,
+        twinEvents.length,
+      );
     },
   );
 });

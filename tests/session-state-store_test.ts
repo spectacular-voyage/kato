@@ -90,7 +90,11 @@ Deno.test("PersistentSessionStateStore persists metadata and rebuilds daemon ind
     const controlPath = join(katoDir, "daemon-control.json");
     await Deno.writeTextFile(controlPath, "{ not-json");
 
-    const rebuiltIndex = await store.loadDaemonControlIndex();
+    const coldStore = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-02-26T10:00:00.000Z"),
+    });
+    const rebuiltIndex = await coldStore.loadDaemonControlIndex();
     assertEquals(rebuiltIndex.sessions.length, 1);
     assertEquals(rebuiltIndex.sessions[0]?.sessionKey, "codex:session-1");
   });

@@ -584,7 +584,7 @@ async function readGeminiMessages(
   }
   const messages = parsed["messages"];
   if (!Array.isArray(messages)) {
-    return [];
+    return undefined;
   }
   return messages.filter((item): item is Record<string, unknown> =>
     isRecordValue(item)
@@ -1181,8 +1181,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             },
           );
 
+          // Twin rebuild should be a fresh replay from source.
+          // Persist reset state before append so dedupe does not suppress
+          // historical events based on stale fingerprint history.
           stateMetadata.nextTwinSeq = 1;
           stateMetadata.recentFingerprints = [];
+          await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+
           const bootstrapEvents: ConversationEvent[] = [];
           let bootstrapCursor: ProviderCursor = this.provider === "gemini"
             ? makeItemIndexCursor(0)
@@ -1242,6 +1247,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               );
             }
           }
+
+          // appendTwinEvents persists authoritative sequence/fingerprint state;
+          // reload metadata so cursor/mtime saves below do not clobber it.
+          stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+            {
+              provider: this.provider,
+              providerSessionId: sessionId,
+              sourceFilePath: session.filePath,
+              initialCursor: stateMetadata.ingestCursor,
+            },
+          );
 
           fromOffset = resolveCursorPosition(bootstrapCursor);
           existingCursor = bootstrapCursor;
@@ -1338,6 +1354,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             },
           );
         }
+      }
+
+      if (shouldAppendTwin && incomingEvents.length > 0) {
+        // appendTwinEvents updates metadata (nextTwinSeq/recentFingerprints);
+        // reload before saving ingestion cursor fields.
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata({
+          provider: this.provider,
+          providerSessionId: sessionId,
+          sourceFilePath: session.filePath,
+          initialCursor: latestCursor,
+        });
       }
 
       let anchorChanged = false;

@@ -97,10 +97,7 @@ export function resolveDefaultDaemonControlIndexPath(
 }
 
 function cloneCursor(cursor: ProviderCursor): ProviderCursor {
-  if (cursor.kind === "opaque") {
-    return { kind: "opaque", value: cursor.value };
-  }
-  return { kind: cursor.kind, value: cursor.value };
+  return { ...cursor };
 }
 
 function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
@@ -188,7 +185,16 @@ async function writeTextAtomically(
   } finally {
     file?.close();
   }
-  await Deno.rename(tmpPath, path);
+  try {
+    await Deno.rename(tmpPath, path);
+  } catch (error) {
+    try {
+      await Deno.remove(tmpPath);
+    } catch {
+      // Best-effort cleanup; preserve the original rename failure.
+    }
+    throw error;
+  }
 }
 
 async function writeJsonAtomically(
@@ -556,6 +562,10 @@ export class PersistentSessionStateStore {
         if (error instanceof Deno.errors.NotFound) {
           continue;
         }
+        console.error(
+          `failed to remove session twin file '${session.twinPath}':`,
+          error,
+        );
         failed += 1;
       }
     }

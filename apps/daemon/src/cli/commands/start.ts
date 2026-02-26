@@ -21,7 +21,24 @@ async function waitForDaemonStartupAck(
   const deadline = Date.now() + STARTUP_ACK_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const snapshot = await ctx.statusStore.load();
+    let snapshot: Awaited<ReturnType<typeof ctx.statusStore.load>>;
+    try {
+      snapshot = await ctx.statusStore.load();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        await ctx.operationalLogger.debug(
+          "daemon.start.ack_poll_retry",
+          "Transient status read failure while waiting for daemon startup acknowledgement",
+          {
+            launchedPid,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+      await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+      continue;
+    }
+
     if (snapshot.daemonRunning && snapshot.daemonPid === launchedPid) {
       const heartbeatMs = Date.parse(snapshot.heartbeatAt);
       if (Number.isFinite(heartbeatMs) && heartbeatMs >= launchedAtMs) {

@@ -33,7 +33,7 @@ function renderSessionRow(s: DaemonSessionStatus, now: Date): string {
     ? `${s.provider}/${
       s.sessionShortId ?? s.sessionId
     } (${s.providerSessionId})`
-    : `${s.provider}/${s.sessionId}`;
+    : `${s.provider}/${s.sessionShortId ?? s.sessionId}`;
   const header = `${marker} ${sessionIdentity}: ${label}`;
 
   const lines: string[] = [header];

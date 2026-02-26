@@ -20,6 +20,7 @@ export type {
   AppendToActiveRecordingResult,
   AppendToDestinationInput,
   ExportFormat,
+  ValidateDestinationPathInput,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,

@@ -20,6 +20,7 @@ interface CleanExecutionStats {
   logFilesFlushed: number;
   logFilesWouldFlush: number;
   missingFiles: number;
+  deletionFailures: number;
   sessionFilesDeleted: number;
   sessionFilesWouldDelete: number;
   sessionsDeleted: number;
@@ -85,7 +86,10 @@ async function listSessionCleanupCandidates(
       }
       throw error;
     }
-    const mtimeMs = stat.mtime?.getTime() ?? 0;
+    if (!stat.mtime) {
+      continue;
+    }
+    const mtimeMs = stat.mtime.getTime();
     const existing = byKey.get(parsed.key);
     if (!existing) {
       byKey.set(parsed.key, {
@@ -151,19 +155,24 @@ async function executeSessionCleanup(
 
     let sessionFailed = false;
     let deletedFiles = 0;
+    let missingFiles = 0;
+    let deletionFailures = 0;
     for (const file of candidate.files) {
       try {
         await Deno.remove(file.path);
         deletedFiles += 1;
       } catch (error) {
         if (error instanceof Deno.errors.NotFound) {
+          missingFiles += 1;
           continue;
         }
         sessionFailed = true;
+        deletionFailures += 1;
       }
     }
+    stats.missingFiles += missingFiles;
     if (sessionFailed) {
-      stats.missingFiles += Math.max(0, candidate.files.length - deletedFiles);
+      stats.deletionFailures += deletionFailures;
       continue;
     }
 
@@ -243,6 +252,7 @@ export async function runCleanCommand(
     logFilesFlushed: 0,
     logFilesWouldFlush: 0,
     missingFiles: 0,
+    deletionFailures: 0,
     sessionFilesDeleted: 0,
     sessionFilesWouldDelete: 0,
     sessionsDeleted: 0,
@@ -295,6 +305,7 @@ export async function runCleanCommand(
       sessionsDeleted: stats.sessionsDeleted,
       sessionsWouldDelete: stats.sessionsWouldDelete,
       missingFiles: stats.missingFiles,
+      deletionFailures: stats.deletionFailures,
       skippedScopes: [...stats.skippedScopes],
     },
   );
@@ -310,6 +321,7 @@ export async function runCleanCommand(
     sessionsDeleted: stats.sessionsDeleted,
     sessionsWouldDelete: stats.sessionsWouldDelete,
     missingFiles: stats.missingFiles,
+    deletionFailures: stats.deletionFailures,
     skippedScopes: [...stats.skippedScopes],
   });
 
@@ -339,6 +351,7 @@ export async function runCleanCommand(
     }
   }
   parts.push(`missingFiles=${stats.missingFiles}`);
+  parts.push(`deletionFailures=${stats.deletionFailures}`);
   if (stats.skippedScopes.length > 0) {
     parts.push(`scopesNotImplemented=${stats.skippedScopes.join(",")}`);
   }

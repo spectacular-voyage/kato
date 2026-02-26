@@ -73,6 +73,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 60 * 60_000;
 const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
+const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -520,14 +521,24 @@ async function applyPersistentControlCommandsForEvent(
       now(),
     );
     const destination = targetPath ?? defaultDestination;
+    let resolvedDestination = destination;
+    let commandApplied = true;
 
     try {
       if (canonicalCommand === "start") {
+        if (recordingPipeline.validateDestinationPath) {
+          resolvedDestination = await recordingPipeline.validateDestinationPath({
+            provider,
+            sessionId: providerSessionId,
+            targetPath: destination,
+            commandName: "record",
+          });
+        }
         const recordingId = crypto.randomUUID();
         const nowIso = now().toISOString();
         metadata.recordings.push({
           recordingId,
-          destination,
+          destination: resolvedDestination,
           desiredState: "on",
           writeCursor,
           createdAt: nowIso,
@@ -542,18 +553,19 @@ async function applyPersistentControlCommandsForEvent(
         );
         metadataChanged = true;
       } else if (canonicalCommand === "capture") {
-        await recordingPipeline.captureSnapshot({
+        const captureResult = await recordingPipeline.captureSnapshot({
           provider,
           sessionId: providerSessionId,
           targetPath: destination,
           events: snapshotSlice,
           title: providerSessionId,
         });
+        resolvedDestination = captureResult.outputPath;
         const recordingId = crypto.randomUUID();
         const nowIso = now().toISOString();
         metadata.recordings.push({
           recordingId,
-          destination,
+          destination: resolvedDestination,
           desiredState: "on",
           writeCursor,
           createdAt: nowIso,
@@ -601,8 +613,12 @@ async function applyPersistentControlCommandsForEvent(
           now,
         );
         metadataChanged = metadataChanged || stopped;
+        commandApplied = stopped;
       }
 
+      if (!commandApplied) {
+        continue;
+      }
       await operationalLogger.info(
         "recording.command.applied",
         "Applied in-chat control command",
@@ -612,7 +628,7 @@ async function applyPersistentControlCommandsForEvent(
           eventId: event.eventId,
           command: canonicalCommand,
           ...(targetPath ? { targetPath } : {}),
-          ...(targetPath ? {} : { targetPath: destination }),
+          ...(targetPath ? {} : { targetPath: resolvedDestination }),
         },
       );
     } catch (error) {
@@ -1764,6 +1780,7 @@ interface HandleControlRequestOptions {
   request: DaemonControlRequest;
   controlStore: DaemonControlRequestStoreLike;
   recordingPipeline: RecordingPipelineLike;
+  sessionStateStore?: PersistentSessionStateStore;
   loadSessionSnapshot?: (
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
@@ -1778,6 +1795,115 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+type ExportSessionResolutionMatch =
+  | "passthrough"
+  | "provider_session_id"
+  | "session_id"
+  | "session_id_prefix";
+
+interface ExportSessionResolution {
+  lookupSessionId: string;
+  matchedBy: ExportSessionResolutionMatch;
+  ambiguousMatches?: SessionMetadataV1[];
+}
+
+function parseExportSessionSelector(
+  requestedSessionId: string,
+): { provider?: string; selector: string } {
+  const trimmed = requestedSessionId.trim();
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) {
+    return { selector: trimmed };
+  }
+
+  const provider = trimmed.slice(0, slashIndex).trim().toLowerCase();
+  const selector = trimmed.slice(slashIndex + 1).trim();
+  if (
+    selector.length === 0 || !KNOWN_EXPORT_PROVIDER_PREFIXES.has(provider)
+  ) {
+    return { selector: trimmed };
+  }
+
+  return { provider, selector };
+}
+
+function passthroughExportSessionResolution(
+  requestedSessionId: string,
+): ExportSessionResolution {
+  const trimmed = requestedSessionId.trim();
+  return {
+    lookupSessionId: trimmed.length > 0 ? trimmed : requestedSessionId,
+    matchedBy: "passthrough",
+  };
+}
+
+async function resolveExportSessionLookup(
+  requestedSessionId: string,
+  sessionStateStore?: PersistentSessionStateStore,
+): Promise<ExportSessionResolution> {
+  const passthrough = passthroughExportSessionResolution(requestedSessionId);
+  if (!sessionStateStore) {
+    return passthrough;
+  }
+
+  const metadataList = await sessionStateStore.listSessionMetadata();
+  if (metadataList.length === 0) {
+    return passthrough;
+  }
+
+  const parsed = parseExportSessionSelector(passthrough.lookupSessionId);
+  const scopedEntries = parsed.provider
+    ? metadataList.filter((entry) =>
+      entry.provider.toLowerCase() === parsed.provider
+    )
+    : metadataList;
+  if (scopedEntries.length === 0 || parsed.selector.length === 0) {
+    return passthrough;
+  }
+
+  const matchers: Array<{
+    kind: ExportSessionResolutionMatch;
+    matches: SessionMetadataV1[];
+  }> = [{
+    kind: "provider_session_id",
+    matches: scopedEntries.filter((entry) =>
+      entry.providerSessionId === parsed.selector
+    ),
+  }, {
+    kind: "session_id",
+    matches: scopedEntries.filter((entry) => entry.sessionId === parsed.selector),
+  }, {
+    kind: "session_id_prefix",
+    matches: scopedEntries.filter((entry) =>
+      entry.sessionId.startsWith(parsed.selector)
+    ),
+  }];
+
+  for (const matcher of matchers) {
+    if (matcher.matches.length === 1) {
+      return {
+        lookupSessionId: matcher.matches[0]!.providerSessionId,
+        matchedBy: matcher.kind,
+      };
+    }
+    if (matcher.matches.length > 1) {
+      return {
+        ...passthrough,
+        matchedBy: matcher.kind,
+        ambiguousMatches: matcher.matches,
+      };
+    }
+  }
+
+  return passthrough;
+}
+
+function formatExportSessionAmbiguousLabel(metadata: SessionMetadataV1): string {
+  return `${metadata.provider}/${metadata.sessionId.slice(0, 8)} (${
+    metadata.providerSessionId
+  })`;
 }
 
 async function warnExportSkipped(
@@ -1803,6 +1929,7 @@ async function handleControlRequest(
     request,
     controlStore,
     recordingPipeline,
+    sessionStateStore,
     loadSessionSnapshot,
     exportEnabled,
     operationalLogger,
@@ -1866,12 +1993,45 @@ async function handleControlRequest(
       );
     } else {
       try {
-        const snapshotData = await loadSessionSnapshot(sessionId);
+        const sessionResolution = await resolveExportSessionLookup(
+          sessionId,
+          sessionStateStore,
+        );
+        if (sessionResolution.ambiguousMatches) {
+          await warnExportSkipped(
+            "daemon.control.export.session_ambiguous",
+            "Export request skipped because session selector matched multiple sessions",
+            {
+              requestId: request.requestId,
+              sessionId,
+              outputPath,
+              matchedBy: sessionResolution.matchedBy,
+              candidates: sessionResolution.ambiguousMatches.map((entry) =>
+                formatExportSessionAmbiguousLabel(entry)
+              ),
+            },
+            operationalLogger,
+            auditLogger,
+          );
+          await controlStore.markProcessed(request.requestId);
+          return false;
+        }
+
+        const lookupSessionId = sessionResolution.lookupSessionId;
+        const snapshotData = await loadSessionSnapshot(lookupSessionId);
         if (!snapshotData) {
           await warnExportSkipped(
             "daemon.control.export.session_missing",
             "Export request skipped because session snapshot was not found",
-            { requestId: request.requestId, sessionId, outputPath },
+            {
+              requestId: request.requestId,
+              sessionId,
+              outputPath,
+              ...(lookupSessionId !== sessionId ? { lookupSessionId } : {}),
+              ...(sessionResolution.matchedBy !== "passthrough"
+                ? { matchedBy: sessionResolution.matchedBy }
+                : {}),
+            },
             operationalLogger,
             auditLogger,
           );

@@ -3,24 +3,24 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
 }
 
 export function stableStringify(value: unknown): string {
+  if (value === undefined) {
+    return "null";
+  }
   if (value === null) {
     return "null";
   }
   if (typeof value === "string") {
     return JSON.stringify(value);
   }
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    value === undefined
-  ) {
+  if (typeof value === "number" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   }
   if (isRecordValue(value)) {
-    const keys = Object.keys(value).sort();
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined)
+      .sort();
     return `{${
       keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
         .join(",")

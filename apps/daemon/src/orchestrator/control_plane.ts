@@ -251,15 +251,21 @@ export function resolveDefaultRuntimeDir(): string {
 export function resolveDefaultStatusPath(
   runtimeDir = resolveDefaultRuntimeDir(),
 ): string {
-  return readOptionalEnv("KATO_DAEMON_STATUS_PATH") ??
-    join(runtimeDir, STATUS_FILENAME);
+  const override = readOptionalEnv("KATO_DAEMON_STATUS_PATH");
+  if (override) {
+    return expandHomePath(override);
+  }
+  return join(runtimeDir, STATUS_FILENAME);
 }
 
 export function resolveDefaultControlPath(
   runtimeDir = resolveDefaultRuntimeDir(),
 ): string {
-  return readOptionalEnv("KATO_DAEMON_CONTROL_PATH") ??
-    join(runtimeDir, CONTROL_FILENAME);
+  const override = readOptionalEnv("KATO_DAEMON_CONTROL_PATH");
+  if (override) {
+    return expandHomePath(override);
+  }
+  return join(runtimeDir, CONTROL_FILENAME);
 }
 
 export class DaemonStatusSnapshotFileStore

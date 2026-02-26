@@ -70,6 +70,13 @@ export interface AppendToDestinationInput {
   title?: string;
 }
 
+export interface ValidateDestinationPathInput {
+  provider: string;
+  sessionId: string;
+  targetPath: string;
+  commandName?: "record" | "capture" | "export";
+}
+
 export interface AppendToActiveRecordingResult {
   appended: boolean;
   deduped: boolean;
@@ -88,6 +95,9 @@ export interface RecordingPipelineLike {
   appendToDestination?(
     input: AppendToDestinationInput,
   ): Promise<MarkdownWriteResult>;
+  validateDestinationPath?(
+    input: ValidateDestinationPathInput,
+  ): Promise<string>;
   stopRecording(provider: string, sessionId: string): boolean;
   getActiveRecording(
     provider: string,
@@ -340,6 +350,18 @@ export class RecordingPipeline implements RecordingPipelineLike {
       input.events,
       this.makeWriterOptions(input.title),
     );
+  }
+
+  async validateDestinationPath(
+    input: ValidateDestinationPathInput,
+  ): Promise<string> {
+    const decision = await this.evaluatePathPolicy({
+      commandName: input.commandName ?? "record",
+      provider: input.provider,
+      sessionId: input.sessionId,
+      targetPath: input.targetPath,
+    });
+    return decision.canonicalTargetPath ?? input.targetPath;
   }
 
   stopRecording(provider: string, sessionId: string): boolean {
