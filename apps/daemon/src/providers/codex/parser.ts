@@ -6,6 +6,11 @@ interface CodexEntry {
   payload?: Record<string, unknown>;
 }
 
+interface PendingRequestUserInputCall {
+  callEventId: string;
+  questions: Array<Record<string, unknown>>;
+}
+
 function stripIdePreamble(text: string): string {
   const marker = "## My request for Codex:\n";
   const idx = text.indexOf(marker);
@@ -41,6 +46,122 @@ function extractMessageText(content: unknown): string {
     .trim();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asQuestionList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is Record<string, unknown> =>
+    isRecord(item)
+  );
+}
+
+function normalizeDecisionKey(raw: string, fallbackIndex: number): string {
+  const compact = raw.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return compact.length > 0 ? compact : `decision-${fallbackIndex + 1}`;
+}
+
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function asAnswerList(value: unknown): string[] {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text.length > 0 ? [text] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const fromAnswers = Array.isArray(value["answers"])
+    ? (value["answers"] as unknown[])
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0)
+    : [];
+
+  const fromOtherFields = Object.entries(value)
+    .filter(([key]) => key !== "answers")
+    .flatMap(([, entry]) => {
+      if (typeof entry === "string") {
+        const text = entry.trim();
+        return text.length > 0 ? [text] : [];
+      }
+      if (Array.isArray(entry)) {
+        return entry
+          .map((item) => String(item).trim())
+          .filter((item) => item.length > 0);
+      }
+      return [];
+    });
+
+  return [...fromAnswers, ...fromOtherFields];
+}
+
+function extractRequestUserInputAnswers(
+  output: unknown,
+): Record<string, string[]> | undefined {
+  const parsed = parseMaybeJson(output);
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+
+  const answers = parsed["answers"];
+  if (!isRecord(answers)) {
+    return undefined;
+  }
+
+  const normalized: Record<string, string[]> = {};
+  for (const [questionId, answerValue] of Object.entries(answers)) {
+    if (!isRecord(answerValue) || !("answers" in answerValue)) {
+      continue;
+    }
+    const selectedAnswers = asAnswerList(answerValue);
+    if (selectedAnswers.length > 0) {
+      normalized[questionId] = selectedAnswers;
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function findQuestionEntry(
+  questions: Array<Record<string, unknown>>,
+  key: string,
+): Record<string, unknown> | undefined {
+  return questions.find((question) =>
+    String(question["id"] ?? "") === key ||
+    String(question["question"] ?? "") === key
+  );
+}
+
+function asQuestionOptions(question: Record<string, unknown>): Array<{
+  label: string;
+  description: string;
+}> {
+  return asQuestionList(question["options"]).map((option) => ({
+    label: String(option["label"] ?? ""),
+    description: String(option["description"] ?? ""),
+  }));
+}
+
 function makeByteOffsetCursor(offset: number): ProviderCursor {
   return { kind: "byte-offset", value: Math.max(0, Math.floor(offset)) };
 }
@@ -71,12 +192,14 @@ export async function* parseCodexEvents(
   let model: string | undefined;
   let currentTurnId: string | undefined;
 
-  let userMsgEnd = -1;
-  let pendingAssistantText: string | undefined;
   let turnFinalized = false;
 
   let currentByteOffset = 0;
   const timestamp = new Date().toISOString();
+  const pendingRequestUserInputCalls = new Map<
+    string,
+    PendingRequestUserInputCall
+  >();
 
   function makeBase(
     kind: ConversationEvent["kind"],
@@ -105,32 +228,6 @@ export async function* parseCodexEvents(
     };
   }
 
-  function* flushPendingAssistant(
-    newUserLineStart: number,
-  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
-    if (!pendingAssistantText || turnFinalized || userMsgEnd < fromOffset) {
-      return;
-    }
-    const text = pendingAssistantText;
-    turnFinalized = true;
-    pendingAssistantText = undefined;
-    const base = makeBase(
-      "message.assistant",
-      "event_msg.agent_message",
-      newUserLineStart,
-    );
-    yield {
-      event: {
-        ...base,
-        kind: "message.assistant",
-        role: "assistant",
-        content: normalizeText(text),
-        ...(model ? { model } : {}),
-      } as unknown as ConversationEvent,
-      cursor: makeByteOffsetCursor(newUserLineStart),
-    };
-  }
-
   function* finalizeAssistant(
     text: string,
     lineEnd: number,
@@ -139,7 +236,6 @@ export async function* parseCodexEvents(
   ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
     if (turnFinalized || lineEnd <= fromOffset) return;
     turnFinalized = true;
-    pendingAssistantText = undefined;
     const base = makeBase("message.assistant", providerEventType, lineEnd);
     yield {
       event: {
@@ -154,12 +250,33 @@ export async function* parseCodexEvents(
     };
   }
 
+  function* emitAssistantCommentary(
+    text: string,
+    lineEnd: number,
+    providerEventType: string,
+  ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
+    if (lineEnd <= fromOffset || turnFinalized) return;
+    const normalized = normalizeText(text);
+    if (normalized.length === 0) return;
+    const base = makeBase("message.assistant", providerEventType, lineEnd);
+    yield {
+      event: {
+        ...base,
+        kind: "message.assistant",
+        role: "assistant",
+        content: normalized,
+        ...(model ? { model } : {}),
+        phase: "commentary",
+      } as unknown as ConversationEvent,
+      cursor: makeByteOffsetCursor(lineEnd),
+    };
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     const hasNewline = i < lines.length - 1;
     const lineBytes = utf8ByteLength(line) + (hasNewline ? 1 : 0);
-    const lineStart = currentByteOffset;
-    const lineEnd = lineStart + lineBytes;
+    const lineEnd = currentByteOffset + lineBytes;
     currentByteOffset = lineEnd;
 
     if (line.trim().length === 0) {
@@ -197,14 +314,10 @@ export async function* parseCodexEvents(
           const text = normalizeText(stripIdePreamble(rawText));
 
           if (lineEnd > fromOffset) {
-            yield* flushPendingAssistant(lineStart);
-
-            pendingAssistantText = undefined;
             turnFinalized = false;
 
             const savedTurnId = currentTurnId;
             currentTurnId = undefined;
-            userMsgEnd = lineEnd;
 
             if (text) {
               const base = makeBase(
@@ -225,15 +338,16 @@ export async function* parseCodexEvents(
               };
             }
           } else {
-            pendingAssistantText = undefined;
             turnFinalized = false;
             currentTurnId = undefined;
-            userMsgEnd = lineEnd;
           }
         } else if (msgType === "agent_message") {
-          if (!turnFinalized) {
-            pendingAssistantText = String(payload["message"] ?? "");
-          }
+          const text = String(payload["message"] ?? "");
+          yield* emitAssistantCommentary(
+            text,
+            lineEnd,
+            "event_msg.agent_message",
+          );
         } else if (msgType === "task_complete") {
           if (!turnFinalized) {
             const lastMessage = payload["last_agent_message"];
@@ -285,7 +399,7 @@ export async function* parseCodexEvents(
               };
             }
           }
-        } else if (itemType === "function_call" && lineEnd > fromOffset) {
+        } else if (itemType === "function_call") {
           const callId = String(payload["call_id"] ?? "");
           const name = String(payload["name"] ?? "unknown");
           let input: Record<string, unknown> | undefined;
@@ -297,6 +411,21 @@ export async function* parseCodexEvents(
           } catch {
             // Ignore malformed function_call arguments.
           }
+
+          const questions = name === "request_user_input"
+            ? asQuestionList(input?.["questions"])
+            : [];
+          if (name === "request_user_input" && callId.length > 0) {
+            pendingRequestUserInputCalls.set(callId, {
+              callEventId: makeEventId(sessionId, lineEnd, "tool.call"),
+              questions,
+            });
+          }
+
+          if (lineEnd <= fromOffset) {
+            break;
+          }
+
           const toolCallId = callId ||
             makeEventId(sessionId, lineEnd, "tool.call");
           const base = makeBase(
@@ -315,11 +444,74 @@ export async function* parseCodexEvents(
             } as unknown as ConversationEvent,
             cursor: makeByteOffsetCursor(lineEnd),
           };
-        } else if (
-          itemType === "function_call_output" && lineEnd > fromOffset
-        ) {
+
+          if (name === "request_user_input" && questions.length > 0) {
+            let decisionIndex = 1;
+            for (const question of questions) {
+              const questionText = String(question["question"] ?? "").trim();
+              if (questionText.length === 0) continue;
+              const questionHeader = String(question["header"] ?? "").trim();
+              const options = asQuestionOptions(question);
+              const questionId = String(question["id"] ?? "").trim();
+              const providerQuestionId = questionId.length > 0
+                ? questionId
+                : normalizeDecisionKey(questionText, decisionIndex);
+
+              const decisionBase = makeBase(
+                "decision",
+                "response_item.function_call.request_user_input",
+                lineEnd,
+                decisionIndex,
+              );
+              yield {
+                event: {
+                  ...decisionBase,
+                  kind: "decision",
+                  decisionId: makeEventId(
+                    sessionId,
+                    lineEnd,
+                    "decision",
+                    decisionIndex,
+                  ),
+                  decisionKey: normalizeDecisionKey(
+                    providerQuestionId,
+                    decisionIndex,
+                  ),
+                  summary: questionText,
+                  status: "proposed",
+                  decidedBy: "assistant",
+                  basisEventIds: [String(base["eventId"])],
+                  metadata: {
+                    providerQuestionId,
+                    ...(questionHeader.length > 0
+                      ? { header: questionHeader }
+                      : {}),
+                    ...(options.length > 0 ? { options } : {}),
+                    ...(typeof question["multiSelect"] === "boolean"
+                      ? { multiSelect: question["multiSelect"] }
+                      : {}),
+                  },
+                } as unknown as ConversationEvent,
+                cursor: makeByteOffsetCursor(lineEnd),
+              };
+              decisionIndex += 1;
+            }
+          }
+        } else if (itemType === "function_call_output") {
           const callId = String(payload["call_id"] ?? "");
           const output = payload["output"];
+          const pending = callId.length > 0
+            ? pendingRequestUserInputCalls.get(callId)
+            : undefined;
+          if (callId.length > 0) {
+            pendingRequestUserInputCalls.delete(callId);
+          }
+          const parsedAnswers = extractRequestUserInputAnswers(output);
+
+          if (lineEnd <= fromOffset) {
+            break;
+          }
+
           const result = typeof output === "string"
             ? output
             : JSON.stringify(output);
@@ -337,6 +529,109 @@ export async function* parseCodexEvents(
             } as unknown as ConversationEvent,
             cursor: makeByteOffsetCursor(lineEnd),
           };
+
+          // Synthesize request_user_input selections as first-class conversation events.
+          if (pending || parsedAnswers) {
+            const questions = pending?.questions ?? [];
+            const basisEventIds = [
+              ...(pending?.callEventId ? [pending.callEventId] : []),
+              String(base["eventId"]),
+            ];
+
+            if (parsedAnswers) {
+              const answerPairs = Object.entries(parsedAnswers);
+              if (answerPairs.length > 0) {
+                let decisionIndex = 1;
+                for (const [key, selected] of answerPairs) {
+                  const questionEntry = findQuestionEntry(questions, key);
+                  const questionText = questionEntry
+                    ? String(questionEntry["question"] ?? key)
+                    : key;
+                  const questionId = questionEntry
+                    ? String(questionEntry["id"] ?? "").trim()
+                    : "";
+                  const providerQuestionId = questionId.length > 0
+                    ? questionId
+                    : key;
+                  const summary = `${questionText} -> ${selected.join(", ")}`;
+                  const questionHeader = questionEntry
+                    ? String(questionEntry["header"] ?? "")
+                    : "";
+                  const options = questionEntry
+                    ? asQuestionOptions(questionEntry)
+                    : [];
+
+                  const decisionBase = makeBase(
+                    "decision",
+                    "response_item.function_call_output.request_user_input",
+                    lineEnd,
+                    decisionIndex,
+                  );
+                  yield {
+                    event: {
+                      ...decisionBase,
+                      kind: "decision",
+                      decisionId: makeEventId(
+                        sessionId,
+                        lineEnd,
+                        "decision",
+                        decisionIndex,
+                      ),
+                      decisionKey: normalizeDecisionKey(
+                        providerQuestionId,
+                        decisionIndex,
+                      ),
+                      summary,
+                      status: "accepted",
+                      decidedBy: "user",
+                      basisEventIds,
+                      metadata: {
+                        providerQuestionId,
+                        ...(questionHeader.length > 0
+                          ? { header: questionHeader }
+                          : {}),
+                        ...(options.length > 0 ? { options } : {}),
+                        ...(questionEntry &&
+                            typeof questionEntry["multiSelect"] === "boolean"
+                          ? { multiSelect: questionEntry["multiSelect"] }
+                          : {}),
+                      },
+                    } as unknown as ConversationEvent,
+                    cursor: makeByteOffsetCursor(lineEnd),
+                  };
+                  decisionIndex += 1;
+                }
+              }
+            } else if (pending) {
+              const rawOutput = String(
+                typeof output === "string" ? output : JSON.stringify(output),
+              ).trim();
+              if (rawOutput.length > 0) {
+                const fallbackQuestion = pending.questions.length === 1
+                  ? String(pending.questions[0]?.["question"] ?? "").trim()
+                  : "";
+                const fallbackContent = fallbackQuestion.length > 0
+                  ? `- ${fallbackQuestion}: ${rawOutput}`
+                  : rawOutput;
+                const userBase = makeBase(
+                  "message.user",
+                  "response_item.function_call_output.request_user_input",
+                  lineEnd,
+                  1,
+                );
+                yield {
+                  event: {
+                    ...userBase,
+                    kind: "message.user",
+                    role: "user",
+                    content: fallbackContent,
+                    phase: "other",
+                  } as unknown as ConversationEvent,
+                  cursor: makeByteOffsetCursor(lineEnd),
+                };
+              }
+            }
+          }
         } else if (itemType === "reasoning" && lineEnd > fromOffset) {
           const summary = payload["summary"];
           if (Array.isArray(summary) && summary.length > 0) {
@@ -374,6 +669,9 @@ export async function* parseCodexEvents(
         );
         const questions = payload["questions"];
         const answers = payload["answers"];
+        const questionsList = Array.isArray(questions)
+          ? questions as Array<Record<string, unknown>>
+          : [];
 
         // tool.call: the questionnaire prompt
         const toolCallBase = makeBase(
@@ -392,6 +690,57 @@ export async function* parseCodexEvents(
           } as unknown as ConversationEvent,
           cursor: makeByteOffsetCursor(lineEnd),
         };
+
+        let decisionIndex = 1;
+        for (const question of questionsList) {
+          const questionText = String(question["question"] ?? "").trim();
+          if (questionText.length === 0) continue;
+          const questionHeader = String(question["header"] ?? "").trim();
+          const options = asQuestionOptions(question);
+          const questionId = String(question["id"] ?? "").trim();
+          const providerQuestionId = questionId.length > 0
+            ? questionId
+            : normalizeDecisionKey(questionText, decisionIndex);
+          const proposedDecisionBase = makeBase(
+            "decision",
+            "request_user_input",
+            lineEnd,
+            decisionIndex,
+          );
+          const proposedDecisionId = makeEventId(
+            sessionId,
+            lineEnd,
+            "decision",
+            decisionIndex,
+          );
+          yield {
+            event: {
+              ...proposedDecisionBase,
+              kind: "decision",
+              decisionId: proposedDecisionId,
+              decisionKey: normalizeDecisionKey(
+                providerQuestionId,
+                decisionIndex,
+              ),
+              summary: questionText,
+              status: "proposed",
+              decidedBy: "assistant",
+              basisEventIds: [String(toolCallBase["eventId"])],
+              metadata: {
+                providerQuestionId,
+                ...(questionHeader.length > 0
+                  ? { header: questionHeader }
+                  : {}),
+                ...(options.length > 0 ? { options } : {}),
+                ...(typeof question["multiSelect"] === "boolean"
+                  ? { multiSelect: question["multiSelect"] }
+                  : {}),
+              },
+            } as unknown as ConversationEvent,
+            cursor: makeByteOffsetCursor(lineEnd),
+          };
+          decisionIndex += 1;
+        }
 
         // tool.result: raw answer output
         const toolResultBase = makeBase(
@@ -416,37 +765,22 @@ export async function* parseCodexEvents(
           : undefined;
 
         if (answersRecord) {
-          const answeredLines = Object.entries(answersRecord)
-            .map(([key, val]) => `- ${key}: ${String(val)}`)
-            .join("\n");
-
-          const userBase = makeBase(
-            "message.user",
-            "request_user_input",
-            lineEnd,
-            2,
-          );
-          userMsgEnd = lineEnd;
-          yield {
-            event: {
-              ...userBase,
-              kind: "message.user",
-              role: "user",
-              content: answeredLines,
-            } as unknown as ConversationEvent,
-            cursor: makeByteOffsetCursor(lineEnd),
-          };
-
           // decision events: one per answered question
-          const questionsList = Array.isArray(questions)
-            ? questions as Array<Record<string, unknown>>
-            : [];
-          let decisionIndex = 3;
           for (const [key, val] of Object.entries(answersRecord)) {
             const questionEntry = questionsList.find((q) => q["id"] === key);
             const questionText = questionEntry
               ? String(questionEntry["question"] ?? key)
               : key;
+            const questionId = questionEntry
+              ? String(questionEntry["id"] ?? "").trim()
+              : "";
+            const providerQuestionId = questionId.length > 0 ? questionId : key;
+            const questionHeader = questionEntry
+              ? String(questionEntry["header"] ?? "")
+              : "";
+            const options = questionEntry
+              ? asQuestionOptions(questionEntry)
+              : [];
             const decisionBase = makeBase(
               "decision",
               "request_user_input",
@@ -464,7 +798,10 @@ export async function* parseCodexEvents(
                 ...decisionBase,
                 kind: "decision",
                 decisionId,
-                decisionKey: key,
+                decisionKey: normalizeDecisionKey(
+                  providerQuestionId,
+                  decisionIndex,
+                ),
                 summary: `${questionText} → ${String(val)}`,
                 status: "accepted",
                 decidedBy: "user",
@@ -472,6 +809,17 @@ export async function* parseCodexEvents(
                   String(toolCallBase["eventId"]),
                   String(toolResultBase["eventId"]),
                 ],
+                metadata: {
+                  providerQuestionId,
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
+                  ...(options.length > 0 ? { options } : {}),
+                  ...(questionEntry &&
+                      typeof questionEntry["multiSelect"] === "boolean"
+                    ? { multiSelect: questionEntry["multiSelect"] }
+                    : {}),
+                },
               } as unknown as ConversationEvent,
               cursor: makeByteOffsetCursor(lineEnd),
             };
@@ -481,24 +829,5 @@ export async function* parseCodexEvents(
         break;
       }
     }
-  }
-
-  // Flush any remaining pending assistant text at end of file
-  if (pendingAssistantText && !turnFinalized && userMsgEnd >= fromOffset) {
-    const base = makeBase(
-      "message.assistant",
-      "event_msg.agent_message",
-      currentByteOffset,
-    );
-    yield {
-      event: {
-        ...base,
-        kind: "message.assistant",
-        role: "assistant",
-        content: normalizeText(pendingAssistantText),
-        ...(model ? { model } : {}),
-      } as unknown as ConversationEvent,
-      cursor: makeByteOffsetCursor(currentByteOffset),
-    };
   }
 }

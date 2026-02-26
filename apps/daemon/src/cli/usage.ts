@@ -21,11 +21,12 @@ const GLOBAL_USAGE_BODY = [
   "  start                 Start daemon in detached background mode",
   "  restart               Stop then start daemon (start only if not running)",
   "  stop                  Queue daemon stop request (or reset stale status)",
-  "  status [--json]       Show daemon status",
+  "  status [--json] [--all] [--live]",
+  "                        Show daemon status",
   "  export <session-id> [--output <path>]",
   "                        Queue one-off export request",
-  "  clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
-  "                        Queue cleanup request",
+  "  clean [--all|--logs|--recordings <days>|--sessions <days>] [--dry-run]",
+  "                        Run cleanup immediately in CLI",
   "",
   "Run `kato help <command>` for command-specific usage.",
 ].join("\n");
@@ -40,6 +41,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Usage: kato start",
     "",
     "Starts daemon runtime in detached background mode.",
+    "Returns success after daemon heartbeat acknowledges startup.",
   ].join("\n"),
   restart: [
     "Usage: kato restart",
@@ -52,9 +54,13 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Queues daemon stop request or resets stale running status.",
   ].join("\n"),
   status: [
-    "Usage: kato status [--json]",
+    "Usage: kato status [--json] [--all] [--live]",
     "",
     "Shows daemon state in text (default) or JSON form.",
+    "",
+    "  --json    Output as JSON (includes full memory and session fields)",
+    "  --all     Include stale sessions",
+    "  --live    Refresh-loop display; press q or Ctrl+C to exit (implies --all)",
   ].join("\n"),
   export: [
     "Usage: kato export <session-id> [--output <path>]",
@@ -62,9 +68,14 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Queues a one-off export request.",
   ].join("\n"),
   clean: [
-    "Usage: kato clean [--all|--recordings <days>|--sessions <days>] [--dry-run]",
+    "Usage: kato clean [--all|--logs|--recordings <days>|--sessions <days>] [--dry-run]",
     "",
-    "Queues a cleanup request for recordings/session metadata.",
+    "Runs cleanup in CLI.",
+    "--logs flushes runtime logs plus ~/.kato/exports.jsonl.",
+    "--all is an alias for --logs.",
+    "--sessions deletes persisted session twins/metadata older than <days>.",
+    "--sessions refuses to run while daemon status is actively running.",
+    "--recordings is accepted but currently a no-op placeholder.",
   ].join("\n"),
 };
 

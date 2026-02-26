@@ -355,3 +355,284 @@ Deno.test(
     assertEquals(rendered.includes("second-thought"), false);
   },
 );
+
+Deno.test(
+  "renderEventsToMarkdown can exclude assistant commentary independently of thinking",
+  () => {
+    const commentary: ConversationEvent = {
+      eventId: "assistant-commentary-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "I am checking the parser implementation now.",
+      phase: "commentary",
+      source: {
+        providerEventType: "response_item.message.commentary",
+        providerEventId: "assistant-commentary-1",
+      },
+    } as unknown as ConversationEvent;
+    const thinking: ConversationEvent = {
+      eventId: "thinking-visible-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "thinking",
+      content: "internal reasoning trace",
+      source: { providerEventType: "thinking", providerEventId: "think-1" },
+    } as unknown as ConversationEvent;
+    const finalAnswer = makeEvent(
+      "assistant-final-1",
+      "message.assistant",
+      "Final answer.",
+      "2026-02-22T10:00:02.000Z",
+    );
+
+    const withoutCommentary = renderEventsToMarkdown(
+      [commentary, thinking, finalAnswer],
+      {
+        includeFrontmatter: false,
+        includeCommentary: false,
+        includeThinking: true,
+      },
+    );
+    assertEquals(
+      withoutCommentary.includes(
+        "I am checking the parser implementation now.",
+      ),
+      false,
+    );
+    assertStringIncludes(withoutCommentary, "internal reasoning trace");
+    assertStringIncludes(withoutCommentary, "Final answer.");
+
+    const withCommentary = renderEventsToMarkdown(
+      [commentary, thinking, finalAnswer],
+      {
+        includeFrontmatter: false,
+        includeCommentary: true,
+        includeThinking: true,
+      },
+    );
+    assertStringIncludes(
+      withCommentary,
+      "I am checking the parser implementation now.",
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown renders questionnaire proposed decisions with options list",
+  () => {
+    const questionnairePrompt: ConversationEvent = {
+      eventId: "decision-questionnaire-proposed-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-proposed-1",
+      decisionKey: "plan-mode-capture-round",
+      summary: "Which capture behavior should we validate?",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-1"],
+      metadata: {
+        providerQuestionId: "plan_mode_capture_round",
+        options: [
+          {
+            label: "Prompt + options + answer (Recommended)",
+            description: "Capture question text, options, and selected answer.",
+          },
+          {
+            label: "Prompt + options only",
+            description: "Capture only question text and options.",
+          },
+        ],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-proposed-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnairePrompt], {
+      includeFrontmatter: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [plan-mode-capture-round]:** Which capture behavior should we validate?",
+    );
+    assertStringIncludes(
+      rendered,
+      "- Prompt + options + answer (Recommended): Capture question text, options, and selected answer.",
+    );
+    assertStringIncludes(
+      rendered,
+      "- Prompt + options only: Capture only question text and options.",
+    );
+    assertEquals(rendered.includes("*Status: proposed"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown renders questionnaire accepted decisions as a single line",
+  () => {
+    const questionnaireDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-1",
+      decisionKey: "decision-line-policy",
+      summary: "decision_line_policy -> Show both (Recommended)",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_line_policy",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnaireDecision], {
+      includeFrontmatter: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [decision-line-policy]:** decision_line_policy -> Show both (Recommended)",
+    );
+    assertEquals(rendered.includes("*Status: accepted"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown suppresses identical commentary when same-turn final repeats it",
+  () => {
+    const commentary: ConversationEvent = {
+      eventId: "assistant-commentary-dup-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      turnId: "turn-dup-1",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Done. Your selected answer was: `Alpha`.",
+      phase: "commentary",
+      source: {
+        providerEventType: "event_msg.agent_message",
+        providerEventId: "assistant-commentary-dup-1",
+      },
+    } as unknown as ConversationEvent;
+    const finalAnswer: ConversationEvent = {
+      eventId: "assistant-final-dup-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      turnId: "turn-dup-1",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Done. Your selected answer was: `Alpha`.",
+      phase: "final",
+      source: {
+        providerEventType: "response_item.message.final_answer",
+        providerEventId: "assistant-final-dup-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([commentary, finalAnswer], {
+      includeFrontmatter: false,
+      includeCommentary: true,
+    });
+
+    assertEquals(
+      rendered.split("Done. Your selected answer was: `Alpha`.").length - 1,
+      1,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown suppresses immediate duplicate assistant messages with same turn and content",
+  () => {
+    const first: ConversationEvent = {
+      eventId: "assistant-dup-a",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      turnId: "turn-dup-2",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Repeated assistant text.",
+      phase: "final",
+      source: {
+        providerEventType: "response_item.message.final_answer",
+        providerEventId: "assistant-dup-a",
+      },
+    } as unknown as ConversationEvent;
+    const second: ConversationEvent = {
+      eventId: "assistant-dup-b",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      turnId: "turn-dup-2",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Repeated assistant text.",
+      phase: "final",
+      source: {
+        providerEventType: "event_msg.task_complete",
+        providerEventId: "assistant-dup-b",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([first, second], {
+      includeFrontmatter: false,
+      includeCommentary: true,
+    });
+
+    assertEquals(rendered.split("Repeated assistant text.").length - 1, 1);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown keeps status line for non-questionnaire decisions",
+  () => {
+    const genericDecision: ConversationEvent = {
+      eventId: "decision-generic-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-generic-1",
+      decisionKey: "export-format",
+      summary: "Use markdown export",
+      status: "accepted",
+      decidedBy: "assistant",
+      basisEventIds: ["event-1"],
+      source: {
+        providerEventType: "system",
+        providerEventId: "decision-generic-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([genericDecision], {
+      includeFrontmatter: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [export-format]:** Use markdown export",
+    );
+    assertStringIncludes(
+      rendered,
+      "*Status: accepted — decided by: assistant*",
+    );
+  },
+);

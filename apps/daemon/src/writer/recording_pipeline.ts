@@ -62,6 +62,21 @@ export interface AppendToActiveRecordingInput {
   title?: string;
 }
 
+export interface AppendToDestinationInput {
+  provider: string;
+  sessionId: string;
+  targetPath: string;
+  events: ConversationEvent[];
+  title?: string;
+}
+
+export interface ValidateDestinationPathInput {
+  provider: string;
+  sessionId: string;
+  targetPath: string;
+  commandName?: "record" | "capture" | "export";
+}
+
 export interface AppendToActiveRecordingResult {
   appended: boolean;
   deduped: boolean;
@@ -77,6 +92,12 @@ export interface RecordingPipelineLike {
   appendToActiveRecording(
     input: AppendToActiveRecordingInput,
   ): Promise<AppendToActiveRecordingResult>;
+  appendToDestination?(
+    input: AppendToDestinationInput,
+  ): Promise<MarkdownWriteResult>;
+  validateDestinationPath?(
+    input: ValidateDestinationPathInput,
+  ): Promise<string>;
   stopRecording(provider: string, sessionId: string): boolean;
   getActiveRecording(
     provider: string,
@@ -92,6 +113,7 @@ export interface RecordingPipelineOptions {
   jsonlWriter?: JsonlConversationWriter;
   defaultRenderOptions?: Pick<
     MarkdownRenderOptions,
+    | "includeCommentary"
     | "includeThinking"
     | "includeToolCalls"
     | "italicizeUserMessages"
@@ -149,6 +171,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private readonly jsonlWriter: JsonlConversationWriter | undefined;
   private readonly defaultRenderOptions: Pick<
     MarkdownRenderOptions,
+    | "includeCommentary"
     | "includeThinking"
     | "includeToolCalls"
     | "italicizeUserMessages"
@@ -310,6 +333,35 @@ export class RecordingPipeline implements RecordingPipelineLike {
       deduped: writeResult.deduped,
       recording: cloneRecording(activeRecording),
     };
+  }
+
+  async appendToDestination(
+    input: AppendToDestinationInput,
+  ): Promise<MarkdownWriteResult> {
+    const decision = await this.evaluatePathPolicy({
+      commandName: "record",
+      provider: input.provider,
+      sessionId: input.sessionId,
+      targetPath: input.targetPath,
+    });
+    const outputPath = decision.canonicalTargetPath ?? input.targetPath;
+    return await this.writer.appendEvents(
+      outputPath,
+      input.events,
+      this.makeWriterOptions(input.title),
+    );
+  }
+
+  async validateDestinationPath(
+    input: ValidateDestinationPathInput,
+  ): Promise<string> {
+    const decision = await this.evaluatePathPolicy({
+      commandName: input.commandName ?? "record",
+      provider: input.provider,
+      sessionId: input.sessionId,
+      targetPath: input.targetPath,
+    });
+    return decision.canonicalTargetPath ?? input.targetPath;
   }
 
   stopRecording(provider: string, sessionId: string): boolean {

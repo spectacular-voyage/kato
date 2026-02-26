@@ -1,4 +1,10 @@
-import type { ConversationEvent, ProviderCursor } from "@kato/shared";
+import type {
+  ConversationEvent,
+  ProviderAutoGenerateSnapshots,
+  ProviderCursor,
+  SessionIngestAnchorV1,
+  SessionMetadataV1,
+} from "@kato/shared";
 import { basename, join } from "@std/path";
 import {
   type DebouncedWatchBatch,
@@ -18,6 +24,21 @@ import type {
   ProviderIngestionRunner,
   SessionSnapshotStore,
 } from "./ingestion_runtime.ts";
+import {
+  makeDefaultSessionCursor,
+  type PersistentSessionStateStore,
+  SessionStateLoadError,
+} from "./session_state_store.ts";
+import {
+  mapConversationEventsToTwin,
+  mapTwinEventsToConversation,
+} from "./session_twin_mapper.ts";
+import {
+  expandHomePath,
+  readOptionalEnv,
+  resolveHomeDir,
+} from "../utils/env.ts";
+import { hashStringFNV1a, stableStringify } from "../utils/hash.ts";
 
 export interface ProviderSessionFile {
   sessionId: string;
@@ -35,6 +56,8 @@ export interface FileProviderIngestionRunnerOptions {
     ctx: { provider: string; sessionId: string },
   ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
   sessionSnapshotStore: SessionSnapshotStore;
+  sessionStateStore?: PersistentSessionStateStore;
+  autoGenerateSnapshots?: boolean;
   discoveryIntervalMs?: number;
   watchDebounceMs?: number;
   now?: () => Date;
@@ -49,6 +72,9 @@ export interface FileProviderIngestionRunnerOptions {
 
 export interface ProviderIngestionFactoryOptions {
   sessionSnapshotStore: SessionSnapshotStore;
+  sessionStateStore?: PersistentSessionStateStore;
+  globalAutoGenerateSnapshots?: boolean;
+  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   now?: () => Date;
   watchDebounceMs?: number;
   discoveryIntervalMs?: number;
@@ -66,6 +92,8 @@ export interface ProviderIngestionFactoryOptions {
 
 export interface CreateProviderIngestionRunnerOptions {
   sessionSnapshotStore: SessionSnapshotStore;
+  sessionStateStore?: PersistentSessionStateStore;
+  autoGenerateSnapshots?: boolean;
   sessionRoots?: string[];
   now?: () => Date;
   watchDebounceMs?: number;
@@ -91,6 +119,27 @@ interface CodexSessionMeta {
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
+type ProviderReadOperation = "stat" | "readDir" | "open";
+
+class ProviderIngestionReadDeniedError extends Error {
+  readonly operation: ProviderReadOperation;
+  readonly targetPath: string;
+  readonly causeError: Error;
+
+  constructor(
+    operation: ProviderReadOperation,
+    targetPath: string,
+    causeError: Error,
+  ) {
+    super(
+      `permission denied for ${operation} on '${targetPath}': ${causeError.message}`,
+    );
+    this.name = "ProviderIngestionReadDeniedError";
+    this.operation = operation;
+    this.targetPath = targetPath;
+    this.causeError = causeError;
+  }
+}
 
 function makeNoopOperationalLogger(now: () => Date): StructuredLogger {
   return new StructuredLogger([new NoopSink()], {
@@ -138,6 +187,14 @@ function resolveCursorPosition(cursor: ProviderCursor | undefined): number {
   return 0;
 }
 
+function cursorsEqual(
+  a: ProviderCursor | undefined,
+  b: ProviderCursor | undefined,
+): boolean {
+  if (!a || !b) return a === b;
+  return a.kind === b.kind && a.value === b.value;
+}
+
 function makeByteOffsetCursor(offset: number): ProviderCursor {
   return {
     kind: "byte-offset",
@@ -152,47 +209,17 @@ function makeItemIndexCursor(index: number): ProviderCursor {
   };
 }
 
-function readEnvOptional(name: string): string | undefined {
-  try {
-    const value = Deno.env.get(name);
-    if (!value || value.length === 0) {
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotCapable) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-function resolveHomeDir(): string | undefined {
-  return readEnvOptional("HOME") ?? readEnvOptional("USERPROFILE");
-}
-
-function expandHome(path: string): string {
-  if (!path.startsWith("~")) {
-    return path;
-  }
-  const home = resolveHomeDir();
-  if (!home) return path;
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return join(home, path.slice(2));
-  return path;
-}
-
 function normalizeRoots(paths: string[]): string[] {
   const deduped = new Set<string>();
   for (const path of paths) {
     if (!isNonEmptyString(path)) continue;
-    deduped.add(expandHome(path.trim()));
+    deduped.add(expandHomePath(path.trim()));
   }
   return Array.from(deduped);
 }
 
 function parseRootsFromEnv(name: string): string[] | undefined {
-  const raw = readEnvOptional(name);
+  const raw = readOptionalEnv(name);
   if (!raw) return undefined;
   let parsed: unknown;
   try {
@@ -237,11 +264,11 @@ async function pathExists(path: string): Promise<boolean> {
     await Deno.stat(path);
     return true;
   } catch (error) {
-    if (
-      error instanceof Deno.errors.NotFound ||
-      error instanceof Deno.errors.PermissionDenied
-    ) {
+    if (error instanceof Deno.errors.NotFound) {
       return false;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("stat", path, error);
     }
     throw error;
   }
@@ -256,11 +283,11 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
     try {
       entries = Deno.readDir(current);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
         continue;
+      }
+      if (error instanceof Deno.errors.PermissionDenied) {
+        throw new ProviderIngestionReadDeniedError("readDir", current, error);
       }
       throw error;
     }
@@ -286,11 +313,11 @@ async function* walkJsonFiles(root: string): AsyncGenerator<string> {
     try {
       entries = Deno.readDir(current);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
         continue;
+      }
+      if (error instanceof Deno.errors.PermissionDenied) {
+        throw new ProviderIngestionReadDeniedError("readDir", current, error);
       }
       throw error;
     }
@@ -308,8 +335,18 @@ async function* walkJsonFiles(root: string): AsyncGenerator<string> {
 }
 
 async function statModifiedAtMs(path: string): Promise<number> {
-  const stat = await Deno.stat(path);
-  return stat.mtime?.getTime() ?? 0;
+  try {
+    const stat = await Deno.stat(path);
+    return stat.mtime?.getTime() ?? 0;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return 0;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("stat", path, error);
+    }
+    throw error;
+  }
 }
 
 async function discoverClaudeSessions(
@@ -334,7 +371,15 @@ async function discoverClaudeSessions(
 async function readFirstLineChunk(
   filePath: string,
 ): Promise<string | undefined> {
-  const file = await Deno.open(filePath, { read: true });
+  let file: Deno.FsFile;
+  try {
+    file = await Deno.open(filePath, { read: true });
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
+    throw error;
+  }
   try {
     const buffer = new Uint8Array(32 * 1024);
     const read = await file.read(buffer);
@@ -400,7 +445,10 @@ async function readGeminiSessionId(
   let parsed: unknown;
   try {
     parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
-  } catch {
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -437,6 +485,113 @@ async function discoverGeminiSessions(
     }
   }
   return sessions;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readAnchorStringField(value: unknown): string | undefined {
+  if (!isNonEmptyString(value)) {
+    return undefined;
+  }
+  return value.trim();
+}
+
+function normalizeGeminiMessageForAnchor(
+  message: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    type: readAnchorStringField(message["type"]) ?? "",
+    content: message["content"],
+    displayContent: message["displayContent"],
+    thoughts: message["thoughts"],
+    toolCalls: message["toolCalls"],
+    model: readAnchorStringField(message["model"]) ?? "",
+  };
+}
+
+function buildGeminiMessageAnchor(
+  message: Record<string, unknown>,
+): SessionIngestAnchorV1 {
+  const messageId = readAnchorStringField(message["id"]);
+  const payloadHash = hashStringFNV1a(
+    stableStringify(normalizeGeminiMessageForAnchor(message)),
+  );
+  return {
+    ...(messageId ? { messageId } : {}),
+    payloadHash,
+  };
+}
+
+function findGeminiAnchorIndex(
+  messages: Record<string, unknown>[],
+  anchor: SessionIngestAnchorV1,
+): number | undefined {
+  if (isNonEmptyString(anchor.messageId)) {
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index];
+      if (!message) continue;
+      const messageId = readAnchorStringField(message["id"]);
+      if (messageId === anchor.messageId) {
+        return index;
+      }
+    }
+  }
+
+  if (!isNonEmptyString(anchor.payloadHash)) {
+    return undefined;
+  }
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message) continue;
+    const candidate = buildGeminiMessageAnchor(message);
+    if (candidate.payloadHash === anchor.payloadHash) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
+function anchorsEqual(
+  a: SessionIngestAnchorV1 | undefined,
+  b: SessionIngestAnchorV1 | undefined,
+): boolean {
+  if (!a || !b) {
+    return a === b;
+  }
+  if (isNonEmptyString(a.messageId) || isNonEmptyString(b.messageId)) {
+    return (a.messageId ?? "") === (b.messageId ?? "");
+  }
+  return (a.payloadHash ?? "") === (b.payloadHash ?? "");
+}
+
+async function readGeminiMessages(
+  filePath: string,
+): Promise<Record<string, unknown>[] | undefined> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  if (!isRecordValue(parsed)) {
+    return undefined;
+  }
+  const messages = parsed["messages"];
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  return messages.filter((item): item is Record<string, unknown> =>
+    isRecordValue(item)
+  );
 }
 
 function eventSignature(event: ConversationEvent): string {
@@ -499,6 +654,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly operationalLogger: StructuredLogger;
   private readonly auditLogger: AuditLogger;
   private readonly sessionSnapshotStore: SessionSnapshotStore;
+  private readonly sessionStateStore: PersistentSessionStateStore | undefined;
+  private readonly autoGenerateSnapshots: boolean;
   private readonly discoverSessions: () => Promise<ProviderSessionFile[]>;
   private readonly parseEvents: (
     filePath: string,
@@ -510,12 +667,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly sessionByFilePath = new Map<string, string>();
   private readonly dirtySessions = new Set<string>();
   private readonly cursors = new Map<string, ProviderCursor>();
+  private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
+  private lastDuplicateDiscoveryWarningKey: string | undefined;
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
+  private readonly failedClosedSessions = new Set<string>();
 
   constructor(options: FileProviderIngestionRunnerOptions) {
     this.provider = options.provider;
@@ -523,6 +683,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.discoverSessions = options.discoverSessions;
     this.parseEvents = options.parseEvents;
     this.sessionSnapshotStore = options.sessionSnapshotStore;
+    this.sessionStateStore = options.sessionStateStore;
+    this.autoGenerateSnapshots = options.autoGenerateSnapshots ?? false;
     this.now = options.now ?? (() => new Date());
     this.discoveryIntervalMs = options.discoveryIntervalMs ??
       DEFAULT_DISCOVERY_INTERVAL_MS;
@@ -543,15 +705,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       "Provider ingestion runner started",
       { provider: this.provider, watchRoots: this.watchRoots },
     );
-    await this.auditLogger.record(
-      "provider.ingestion.started",
-      "Provider ingestion runner started",
-      { provider: this.provider, watchRoots: this.watchRoots },
-    );
 
     const existingWatchRoots: string[] = [];
     for (const root of this.watchRoots) {
-      if (await pathExists(root)) existingWatchRoots.push(root);
+      try {
+        if (await pathExists(root)) {
+          existingWatchRoots.push(root);
+        }
+      } catch (error) {
+        if (!(await this.handleReadDenied(error, "stat", root))) {
+          throw error;
+        }
+      }
     }
 
     if (existingWatchRoots.length > 0) {
@@ -641,11 +806,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       "Provider ingestion runner stopped",
       { provider: this.provider },
     );
-    await this.auditLogger.record(
-      "provider.ingestion.stopped",
-      "Provider ingestion runner stopped",
-      { provider: this.provider },
-    );
   }
 
   private async onWatchBatch(batch: DebouncedWatchBatch): Promise<void> {
@@ -662,8 +822,69 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     );
   }
 
+  private async logReadDenied(
+    operation: ProviderReadOperation,
+    targetPath: string,
+    error: Error,
+  ): Promise<void> {
+    const attributes = {
+      provider: this.provider,
+      operation,
+      targetPath,
+      reason: error.message,
+    };
+
+    await this.operationalLogger.warn(
+      "provider.ingestion.read_denied",
+      "Provider ingestion read access denied",
+      attributes,
+    );
+    await this.auditLogger.record(
+      "provider.ingestion.read_denied",
+      "Provider ingestion read access denied",
+      attributes,
+    );
+  }
+
+  private async handleReadDenied(
+    error: unknown,
+    fallbackOperation: ProviderReadOperation,
+    fallbackTargetPath: string,
+  ): Promise<boolean> {
+    if (error instanceof ProviderIngestionReadDeniedError) {
+      await this.logReadDenied(
+        error.operation,
+        error.targetPath,
+        error.causeError,
+      );
+      return true;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      await this.logReadDenied(fallbackOperation, fallbackTargetPath, error);
+      return true;
+    }
+    return false;
+  }
+
   private async discoverAndTrackSessions(): Promise<void> {
-    const discovered = await this.discoverSessions();
+    let discovered: ProviderSessionFile[];
+    try {
+      discovered = await this.discoverSessions();
+    } catch (error) {
+      if (
+        await this.handleReadDenied(
+          error,
+          "readDir",
+          this.watchRoots[0] ?? "unknown",
+        )
+      ) {
+        this.needsDiscovery = false;
+        this.nextDiscoveryAtMs = this.now().getTime() +
+          this.discoveryIntervalMs;
+        return;
+      }
+      throw error;
+    }
     const deduped = await this.dedupeDiscoveredSessions(discovered);
     const activeSessionIds = new Set<string>();
 
@@ -675,6 +896,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.sessionByFilePath.set(session.filePath, session.sessionId);
         if (current && current.filePath !== session.filePath) {
           this.sessionByFilePath.delete(current.filePath);
+          this.cursors.delete(session.sessionId);
+          this.cursorSourcePaths.delete(session.sessionId);
         }
         this.dirtySessions.add(session.sessionId);
       }
@@ -684,6 +907,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       if (!activeSessionIds.has(sessionId)) {
         this.sessions.delete(sessionId);
         this.sessionByFilePath.delete(existing.filePath);
+        this.cursors.delete(sessionId);
+        this.cursorSourcePaths.delete(sessionId);
       }
     }
 
@@ -695,6 +920,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     sessions: ProviderSessionFile[],
   ): Promise<ProviderSessionFile[]> {
     const bySessionId = new Map<string, ProviderSessionFile>();
+    const duplicateSessionIds = new Set<string>();
     let droppedEvents = 0;
 
     const sorted = [...sessions].sort((a, b) => {
@@ -707,47 +933,132 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         bySessionId.set(session.sessionId, session);
       } else {
         droppedEvents += 1;
+        duplicateSessionIds.add(session.sessionId);
       }
     }
 
     if (droppedEvents > 0) {
-      await this.operationalLogger.warn(
+      const warningKey = `${droppedEvents}:${
+        Array.from(duplicateSessionIds)
+          .sort()
+          .join(",")
+      }`;
+      if (this.lastDuplicateDiscoveryWarningKey === warningKey) {
+        return Array.from(bySessionId.values());
+      }
+      this.lastDuplicateDiscoveryWarningKey = warningKey;
+      await this.operationalLogger.debug(
         "provider.ingestion.events_dropped",
         "Dropped duplicate session discovery events",
         {
           provider: this.provider,
           droppedEvents,
           reason: "duplicate-session-id",
+          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
         },
       );
-      await this.auditLogger.record(
-        "provider.ingestion.events_dropped",
-        "Dropped duplicate session discovery events",
-        {
-          provider: this.provider,
-          droppedEvents,
-          reason: "duplicate-session-id",
-        },
-      );
+    } else {
+      this.lastDuplicateDiscoveryWarningKey = undefined;
     }
 
     return Array.from(bySessionId.values());
+  }
+
+  private setCursor(
+    sessionId: string,
+    cursor: ProviderCursor,
+    sourceFilePath: string,
+  ): void {
+    this.cursors.set(sessionId, cursor);
+    this.cursorSourcePaths.set(sessionId, sourceFilePath);
   }
 
   private async ingestSession(sessionId: string): Promise<IngestSessionResult> {
     const session = this.sessions.get(sessionId);
     if (!session) return { updated: false, eventsObserved: 0 };
 
-    const existingCursor = this.cursors.get(sessionId);
+    const currentSnapshot = this.sessionSnapshotStore.get(sessionId);
+    let stateMetadata: SessionMetadataV1 | undefined;
+    if (this.sessionStateStore) {
+      try {
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+          {
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sourceFilePath: session.filePath,
+            // Always initialize new metadata from the start of the source.
+            // This keeps snippet/history anchored to the first user message in
+            // the provider session instead of a late in-memory cursor.
+            initialCursor: makeDefaultSessionCursor(this.provider),
+          },
+        );
+        this.failedClosedSessions.delete(`${this.provider}:${sessionId}`);
+      } catch (error) {
+        if (error instanceof SessionStateLoadError) {
+          const sessionKey = `${this.provider}:${sessionId}`;
+          if (!this.failedClosedSessions.has(sessionKey)) {
+            const attributes = {
+              provider: this.provider,
+              sessionId,
+              metadataPath: error.metadataPath,
+              reason: error.reason,
+              action: "delete metadata file to rebuild from source",
+              error: error.message,
+            };
+            await this.operationalLogger.error(
+              "session.state.fail_closed",
+              "Failing closed for session state due to invalid or unsupported metadata",
+              attributes,
+            );
+            await this.auditLogger.record(
+              "session.state.fail_closed",
+              "Failing closed for session state due to invalid or unsupported metadata",
+              attributes,
+            );
+            this.failedClosedSessions.add(sessionKey);
+          }
+          return { updated: false, eventsObserved: 0 };
+        }
+        throw error;
+      }
+    }
+
+    const memoryCursor = this.cursors.get(sessionId);
+    let existingCursor = stateMetadata?.ingestCursor ??
+      memoryCursor;
+    let resumeSource: "persisted" | "memory" | "default" = stateMetadata
+      ? "persisted"
+      : memoryCursor
+      ? "memory"
+      : "default";
+    if (
+      stateMetadata?.sourceFilePath &&
+      stateMetadata.sourceFilePath !== session.filePath
+    ) {
+      existingCursor = undefined;
+      resumeSource = "persisted";
+      this.cursors.delete(sessionId);
+      this.cursorSourcePaths.delete(sessionId);
+    } else if (
+      !stateMetadata &&
+      memoryCursor &&
+      this.cursorSourcePaths.has(sessionId) &&
+      this.cursorSourcePaths.get(sessionId) !== session.filePath
+    ) {
+      existingCursor = undefined;
+      resumeSource = "default";
+      this.cursors.delete(sessionId);
+      this.cursorSourcePaths.delete(sessionId);
+    }
     let fromOffset = resolveCursorPosition(existingCursor);
     let fileStat: Deno.FileInfo;
     try {
       fileStat = await Deno.stat(session.filePath);
     } catch (error) {
-      if (
-        error instanceof Deno.errors.NotFound ||
-        error instanceof Deno.errors.PermissionDenied
-      ) {
+      if (error instanceof Deno.errors.NotFound) {
+        return { updated: false, eventsObserved: 0 };
+      }
+      if (await this.handleReadDenied(error, "stat", session.filePath)) {
         return { updated: false, eventsObserved: 0 };
       }
       throw error;
@@ -757,12 +1068,245 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const fileSize = fileStat.size ?? 0;
       if (fromOffset > fileSize) {
         fromOffset = 0;
-        this.cursors.set(sessionId, makeByteOffsetCursor(0));
+        existingCursor = makeByteOffsetCursor(0);
+        this.setCursor(sessionId, existingCursor, session.filePath);
+        if (stateMetadata) {
+          stateMetadata.ingestCursor = existingCursor;
+        }
         await this.operationalLogger.warn(
           "provider.ingestion.cursor.reset",
           "Provider ingestion cursor reset after file truncation",
           { provider: this.provider, sessionId, filePath: session.filePath },
         );
+      }
+    }
+
+    await this.operationalLogger.debug(
+      "provider.ingestion.cursor.resume",
+      "Resuming provider ingestion cursor",
+      {
+        provider: this.provider,
+        sessionId,
+        filePath: session.filePath,
+        source: resumeSource,
+        cursorKind: existingCursor?.kind ?? "unknown",
+        fromOffset,
+      },
+    );
+
+    let geminiMessagesCache: Record<string, unknown>[] | undefined;
+    const loadGeminiMessagesForAnchor = async (
+      forceRefresh: boolean = false,
+    ): Promise<Record<string, unknown>[] | undefined> => {
+      if (this.provider !== "gemini") {
+        return undefined;
+      }
+      if (!forceRefresh && geminiMessagesCache !== undefined) {
+        return geminiMessagesCache;
+      }
+      geminiMessagesCache = await readGeminiMessages(session.filePath);
+      return geminiMessagesCache;
+    };
+
+    let replayedFromStart = false;
+    if (
+      this.provider === "gemini" &&
+      stateMetadata &&
+      existingCursor?.kind === "item-index" &&
+      fromOffset > 0 &&
+      stateMetadata.ingestAnchor
+    ) {
+      let messages: Record<string, unknown>[] | undefined;
+      try {
+        messages = await loadGeminiMessagesForAnchor();
+      } catch (error) {
+        if (await this.handleReadDenied(error, "open", session.filePath)) {
+          return { updated: false, eventsObserved: 0 };
+        }
+        throw error;
+      }
+
+      if (messages) {
+        const expectedAnchor = stateMetadata.ingestAnchor;
+        const currentAnchor = messages[fromOffset - 1]
+          ? buildGeminiMessageAnchor(messages[fromOffset - 1]!)
+          : undefined;
+
+        if (!anchorsEqual(expectedAnchor, currentAnchor)) {
+          const previousOffset = fromOffset;
+          const realignedIndex = findGeminiAnchorIndex(
+            messages,
+            expectedAnchor,
+          );
+          if (realignedIndex === undefined) {
+            fromOffset = 0;
+            existingCursor = makeItemIndexCursor(0);
+            stateMetadata.ingestCursor = existingCursor;
+            this.setCursor(sessionId, existingCursor, session.filePath);
+            replayedFromStart = true;
+            await this.operationalLogger.warn(
+              "provider.ingestion.anchor.not_found",
+              "Gemini anchor missing; replaying session from start with dedupe",
+              {
+                provider: this.provider,
+                sessionId,
+                filePath: session.filePath,
+                previousCursor: previousOffset,
+                anchor: expectedAnchor,
+              },
+            );
+          } else {
+            const realignedOffset = realignedIndex + 1;
+            if (realignedOffset !== fromOffset) {
+              fromOffset = realignedOffset;
+              existingCursor = makeItemIndexCursor(realignedOffset);
+              stateMetadata.ingestCursor = existingCursor;
+              this.setCursor(sessionId, existingCursor, session.filePath);
+              await this.operationalLogger.warn(
+                "provider.ingestion.anchor.realigned",
+                "Gemini anchor mismatch resolved by re-aligning cursor",
+                {
+                  provider: this.provider,
+                  sessionId,
+                  filePath: session.filePath,
+                  previousCursor: previousOffset,
+                  realignedCursor: realignedOffset,
+                  anchor: expectedAnchor,
+                },
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (stateMetadata && this.sessionStateStore) {
+      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
+        recording.desiredState === "on"
+      );
+      const shouldAppendTwin = this.autoGenerateSnapshots ||
+        hasActiveRecordings;
+      if (shouldAppendTwin) {
+        let twinExists = true;
+        try {
+          await Deno.stat(stateMetadata.twinPath);
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) {
+            twinExists = false;
+          } else if (
+            await this.handleReadDenied(error, "stat", stateMetadata.twinPath)
+          ) {
+            return { updated: false, eventsObserved: 0 };
+          } else {
+            throw error;
+          }
+        }
+
+        const needsBootstrap = !twinExists &&
+          (
+            fromOffset > 0 ||
+            stateMetadata.nextTwinSeq > 1 ||
+            stateMetadata.recentFingerprints.length > 0
+          );
+        if (needsBootstrap) {
+          await this.operationalLogger.info(
+            "provider.ingestion.twin.bootstrap",
+            "Session twin missing; rebuilding twin from source",
+            {
+              provider: this.provider,
+              sessionId,
+              filePath: session.filePath,
+              twinPath: stateMetadata.twinPath,
+            },
+          );
+
+          // Twin rebuild should be a fresh replay from source.
+          // Persist reset state before append so dedupe does not suppress
+          // historical events based on stale fingerprint history.
+          stateMetadata.nextTwinSeq = 1;
+          stateMetadata.recentFingerprints = [];
+          await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+
+          const bootstrapEvents: ConversationEvent[] = [];
+          let bootstrapCursor: ProviderCursor = this.provider === "gemini"
+            ? makeItemIndexCursor(0)
+            : makeByteOffsetCursor(0);
+          try {
+            for await (
+              const { event, cursor } of this.parseEvents(
+                session.filePath,
+                0,
+                { provider: this.provider, sessionId },
+              )
+            ) {
+              bootstrapEvents.push(event);
+              if (
+                cursor.kind === "byte-offset" || cursor.kind === "item-index"
+              ) {
+                const current = resolveCursorPosition(bootstrapCursor);
+                const incoming = resolveCursorPosition(cursor);
+                if (
+                  cursor.kind !== bootstrapCursor.kind || incoming > current
+                ) {
+                  bootstrapCursor = cursor;
+                }
+              } else {
+                bootstrapCursor = cursor;
+              }
+            }
+          } catch (error) {
+            if (await this.handleReadDenied(error, "open", session.filePath)) {
+              return { updated: false, eventsObserved: 0 };
+            }
+            throw error;
+          }
+
+          if (bootstrapEvents.length > 0) {
+            const twinDrafts = mapConversationEventsToTwin({
+              provider: this.provider,
+              providerSessionId: sessionId,
+              sessionId: stateMetadata.sessionId,
+              events: bootstrapEvents,
+              mode: "backfill",
+            });
+            const appendResult = await this.sessionStateStore.appendTwinEvents(
+              stateMetadata,
+              twinDrafts,
+            );
+            if (appendResult.droppedAsDuplicate > 0) {
+              await this.operationalLogger.debug(
+                "provider.ingestion.events_dropped",
+                "Provider ingestion dropped duplicate events during twin bootstrap",
+                {
+                  provider: this.provider,
+                  sessionId,
+                  droppedEvents: appendResult.droppedAsDuplicate,
+                  reason: "duplicate-session-twin-bootstrap",
+                },
+              );
+            }
+          }
+
+          // appendTwinEvents persists authoritative sequence/fingerprint state;
+          // reload metadata so cursor/mtime saves below do not clobber it.
+          stateMetadata = await this.sessionStateStore
+            .getOrCreateSessionMetadata(
+              {
+                provider: this.provider,
+                providerSessionId: sessionId,
+                sourceFilePath: session.filePath,
+                initialCursor: stateMetadata.ingestCursor,
+              },
+            );
+
+          fromOffset = resolveCursorPosition(bootstrapCursor);
+          existingCursor = bootstrapCursor;
+          stateMetadata.ingestCursor = bootstrapCursor;
+          stateMetadata.lastObservedMtimeMs = fileStat.mtime?.getTime();
+          stateMetadata.sourceFilePath = session.filePath;
+          await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+          this.setCursor(sessionId, bootstrapCursor, session.filePath);
+        }
       }
     }
 
@@ -791,17 +1335,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         }
       }
     } catch (error) {
+      if (await this.handleReadDenied(error, "open", session.filePath)) {
+        return { updated: false, eventsObserved: 0 };
+      }
       await this.operationalLogger.error(
-        "provider.ingestion.parse_error",
-        "Provider ingestion parse failed",
-        {
-          provider: this.provider,
-          sessionId,
-          filePath: session.filePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-      await this.auditLogger.record(
         "provider.ingestion.parse_error",
         "Provider ingestion parse failed",
         {
@@ -815,29 +1352,215 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     const latestOffset = resolveCursorPosition(latestCursor);
+    const fileModifiedAtMs = fileStat.mtime?.getTime();
+
+    if (stateMetadata && this.sessionStateStore) {
+      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
+        recording.desiredState === "on"
+      );
+      const shouldAppendTwin = this.autoGenerateSnapshots ||
+        hasActiveRecordings;
+      let appendedTwinCount = 0;
+      let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
+        [];
+
+      if (shouldAppendTwin && incomingEvents.length > 0) {
+        const twinDrafts = mapConversationEventsToTwin({
+          provider: this.provider,
+          providerSessionId: sessionId,
+          sessionId: stateMetadata.sessionId,
+          events: incomingEvents,
+          mode: "live",
+          capturedAt: this.now().toISOString(),
+        });
+        const appendResult = await this.sessionStateStore.appendTwinEvents(
+          stateMetadata,
+          twinDrafts,
+        );
+        appendedTwinCount = appendResult.appended.length;
+        appendedTwinEvents = appendResult.appended;
+        if (appendResult.droppedAsDuplicate > 0) {
+          await this.operationalLogger.debug(
+            "provider.ingestion.events_dropped",
+            "Provider ingestion dropped duplicate events during twin append",
+            {
+              provider: this.provider,
+              sessionId,
+              droppedEvents: appendResult.droppedAsDuplicate,
+              reason: replayedFromStart
+                ? "duplicate-session-twin-anchor-replay"
+                : "duplicate-session-twin",
+              replayedFromStart,
+            },
+          );
+        }
+      }
+
+      if (shouldAppendTwin && incomingEvents.length > 0) {
+        // appendTwinEvents updates metadata (nextTwinSeq/recentFingerprints);
+        // reload before saving ingestion cursor fields.
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+          {
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sourceFilePath: session.filePath,
+            initialCursor: latestCursor,
+          },
+        );
+      }
+
+      let anchorChanged = false;
+      if (this.provider === "gemini" && latestCursor.kind === "item-index") {
+        let nextAnchor: SessionIngestAnchorV1 | undefined;
+        const latestIndex = resolveItemIndex(latestCursor);
+        if (latestIndex > 0) {
+          try {
+            const messages = await loadGeminiMessagesForAnchor(true);
+            const message = messages?.[latestIndex - 1];
+            if (message) {
+              nextAnchor = buildGeminiMessageAnchor(message);
+            }
+          } catch (error) {
+            if (
+              !(await this.handleReadDenied(error, "open", session.filePath))
+            ) {
+              throw error;
+            }
+          }
+        }
+        if (!anchorsEqual(stateMetadata.ingestAnchor, nextAnchor)) {
+          stateMetadata.ingestAnchor = nextAnchor;
+          anchorChanged = true;
+        }
+      }
+
+      const cursorChanged = !cursorsEqual(
+        stateMetadata.ingestCursor,
+        latestCursor,
+      );
+      const fileMtimeChanged =
+        stateMetadata.lastObservedMtimeMs !== fileModifiedAtMs;
+      const sourceFileChanged =
+        stateMetadata.sourceFilePath !== session.filePath;
+      if (
+        cursorChanged || fileMtimeChanged || sourceFileChanged || anchorChanged
+      ) {
+        stateMetadata.ingestCursor = latestCursor;
+        stateMetadata.lastObservedMtimeMs = fileModifiedAtMs;
+        stateMetadata.sourceFilePath = session.filePath;
+        await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+      }
+
+      const shouldHydrateSnapshot = appendedTwinCount > 0 ||
+        !currentSnapshot ||
+        cursorChanged ||
+        fileMtimeChanged ||
+        sourceFileChanged ||
+        anchorChanged;
+
+      if (shouldHydrateSnapshot) {
+        if (shouldAppendTwin) {
+          const existingSnapshotEvents =
+            currentSnapshot?.provider === this.provider
+              ? currentSnapshot.events
+              : undefined;
+
+          if (!existingSnapshotEvents) {
+            const twinEvents = await this.sessionStateStore.readTwinEvents(
+              stateMetadata,
+              1,
+            );
+            const rebuiltSnapshotEvents = mapTwinEventsToConversation(
+              twinEvents,
+            );
+            this.sessionSnapshotStore.upsert({
+              provider: this.provider,
+              sessionId,
+              cursor: latestCursor,
+              events: rebuiltSnapshotEvents,
+              fileModifiedAtMs,
+            });
+          } else if (appendedTwinEvents.length > 0) {
+            const appendedSnapshotEvents = mapTwinEventsToConversation(
+              appendedTwinEvents,
+            );
+            const merged = mergeEvents(
+              existingSnapshotEvents,
+              appendedSnapshotEvents,
+            );
+            if (merged.droppedEvents > 0) {
+              await this.operationalLogger.debug(
+                "provider.ingestion.events_dropped",
+                "Provider ingestion dropped duplicate events while merging appended twin events",
+                {
+                  provider: this.provider,
+                  sessionId,
+                  droppedEvents: merged.droppedEvents,
+                  reason: "duplicate-session-twin-snapshot",
+                },
+              );
+            }
+            this.sessionSnapshotStore.upsert({
+              provider: this.provider,
+              sessionId,
+              cursor: latestCursor,
+              events: merged.mergedEvents,
+              fileModifiedAtMs,
+            });
+          } else {
+            this.sessionSnapshotStore.upsert({
+              provider: this.provider,
+              sessionId,
+              cursor: latestCursor,
+              events: existingSnapshotEvents,
+              fileModifiedAtMs,
+            });
+          }
+        } else if (incomingEvents.length > 0 || currentSnapshot) {
+          const existingEvents = currentSnapshot?.provider === this.provider
+            ? currentSnapshot.events
+            : [];
+          const merged = mergeEvents(existingEvents, incomingEvents);
+          if (merged.droppedEvents > 0) {
+            await this.operationalLogger.debug(
+              "provider.ingestion.events_dropped",
+              "Provider ingestion dropped duplicate events",
+              {
+                provider: this.provider,
+                sessionId,
+                droppedEvents: merged.droppedEvents,
+                reason: "duplicate-event",
+              },
+            );
+          }
+          this.sessionSnapshotStore.upsert({
+            provider: this.provider,
+            sessionId,
+            cursor: latestCursor,
+            events: merged.mergedEvents,
+            fileModifiedAtMs,
+          });
+        }
+      }
+
+      this.setCursor(sessionId, latestCursor, session.filePath);
+      return {
+        updated: shouldHydrateSnapshot || latestOffset !== fromOffset,
+        eventsObserved: incomingEvents.length,
+      };
+    }
 
     if (incomingEvents.length === 0 && latestOffset === fromOffset) {
       return { updated: false, eventsObserved: 0 };
     }
 
-    const currentSnapshot = this.sessionSnapshotStore.get(sessionId);
     const existingEvents = currentSnapshot?.provider === this.provider
       ? currentSnapshot.events
       : [];
     const merged = mergeEvents(existingEvents, incomingEvents);
 
     if (merged.droppedEvents > 0) {
-      await this.operationalLogger.warn(
-        "provider.ingestion.events_dropped",
-        "Provider ingestion dropped duplicate events",
-        {
-          provider: this.provider,
-          sessionId,
-          droppedEvents: merged.droppedEvents,
-          reason: "duplicate-event",
-        },
-      );
-      await this.auditLogger.record(
+      await this.operationalLogger.debug(
         "provider.ingestion.events_dropped",
         "Provider ingestion dropped duplicate events",
         {
@@ -854,8 +1577,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       sessionId,
       cursor: latestCursor,
       events: merged.mergedEvents,
+      fileModifiedAtMs,
     });
-    this.cursors.set(sessionId, latestCursor);
+    this.setCursor(sessionId, latestCursor, session.filePath);
 
     return { updated: true, eventsObserved: incomingEvents.length };
   }
@@ -872,6 +1596,8 @@ export function createClaudeIngestionRunner(
     parseEvents: (filePath, fromOffset, ctx) =>
       parseClaudeEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
+    sessionStateStore: options.sessionStateStore,
+    autoGenerateSnapshots: options.autoGenerateSnapshots,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -892,6 +1618,8 @@ export function createCodexIngestionRunner(
     parseEvents: (filePath, fromOffset, ctx) =>
       parseCodexEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
+    sessionStateStore: options.sessionStateStore,
+    autoGenerateSnapshots: options.autoGenerateSnapshots,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -912,6 +1640,8 @@ export function createGeminiIngestionRunner(
     parseEvents: (filePath, fromOffset, ctx) =>
       parseGeminiEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
+    sessionStateStore: options.sessionStateStore,
+    autoGenerateSnapshots: options.autoGenerateSnapshots,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -924,9 +1654,16 @@ export function createGeminiIngestionRunner(
 export function createDefaultProviderIngestionRunners(
   options: ProviderIngestionFactoryOptions,
 ): ProviderIngestionRunner[] {
+  const resolveAutoGenerate = (provider: "claude" | "codex" | "gemini") =>
+    options.providerAutoGenerateSnapshots?.[provider] ??
+      options.globalAutoGenerateSnapshots ??
+      false;
+
   return [
     createClaudeIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
+      sessionStateStore: options.sessionStateStore,
+      autoGenerateSnapshots: resolveAutoGenerate("claude"),
       sessionRoots: options.claudeSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
@@ -937,6 +1674,8 @@ export function createDefaultProviderIngestionRunners(
     }),
     createCodexIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
+      sessionStateStore: options.sessionStateStore,
+      autoGenerateSnapshots: resolveAutoGenerate("codex"),
       sessionRoots: options.codexSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
@@ -947,6 +1686,8 @@ export function createDefaultProviderIngestionRunners(
     }),
     createGeminiIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
+      sessionStateStore: options.sessionStateStore,
+      autoGenerateSnapshots: resolveAutoGenerate("gemini"),
       sessionRoots: options.geminiSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,

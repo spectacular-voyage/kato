@@ -1,0 +1,21 @@
+{
+  "sessionId": "gemini-fixture-assistant-mismatch",
+  "startTime": "2026-02-24T12:00:00.000Z",
+  "lastUpdated": "2026-02-24T12:00:10.000Z",
+  "messages": [
+    {
+      "id": "u1",
+      "timestamp": "2026-02-24T12:00:01.000Z",
+      "type": "user",
+      "content": [{ "text": "fix the audit noise" }]
+    },
+    {
+      "id": "a1",
+      "timestamp": "2026-02-24T12:00:08.000Z",
+      "type": "gemini",
+      "model": "gemini-2.0-pro",
+      "content": "I'll take the taxonomy-cleanup slice now. Here is the updated code.",
+      "displayContent": [{ "text": "Here is the updated code." }]
+    }
+  ]
+}

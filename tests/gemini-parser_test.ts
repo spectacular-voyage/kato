@@ -5,6 +5,16 @@ import { parseGeminiEvents } from "../apps/daemon/src/providers/gemini/mod.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const FIXTURE = join(THIS_DIR, "fixtures", "gemini-session.json");
+const COMMAND_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "gemini-session-command-display-mismatch.json",
+);
+const ASSISTANT_CONTENT_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "gemini-session-assistant-content-mismatch.json",
+);
 const TEST_CTX = { provider: "gemini", sessionId: "sess-gemini-001" };
 
 type ParseItem = {
@@ -52,6 +62,39 @@ Deno.test("gemini parser prefers displayContent over content for user messages",
         "raw user text that should be ignored",
       ),
     );
+  }
+});
+
+Deno.test("gemini parser preserves control-command lines from raw user content", async () => {
+  const results = await collectEvents(COMMAND_FIXTURE);
+  const firstUser = results.find((result) =>
+    result.event.kind === "message.user"
+  );
+  assert(firstUser !== undefined);
+  if (firstUser.event.kind === "message.user") {
+    assertStringIncludes(firstUser.event.content, "::capture notes/gemini.md");
+    assertStringIncludes(
+      firstUser.event.content,
+      "Please help with this project.",
+    );
+    assert(
+      !firstUser.event.content.includes("raw-only body text"),
+    );
+  }
+});
+
+Deno.test("gemini parser prefers content over displayContent for assistant messages", async () => {
+  const results = await collectEvents(ASSISTANT_CONTENT_FIXTURE);
+  const assistant = results.find((result) =>
+    result.event.kind === "message.assistant"
+  );
+  assert(assistant !== undefined);
+  if (assistant.event.kind === "message.assistant") {
+    assertStringIncludes(
+      assistant.event.content,
+      "I'll take the taxonomy-cleanup slice now.",
+    );
+    assertStringIncludes(assistant.event.content, "Here is the updated code.");
   }
 });
 

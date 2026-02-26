@@ -26,7 +26,10 @@ export type {
   DaemonProcessLauncherLike,
   DaemonStatusSnapshotStoreLike,
   FileProviderIngestionRunnerOptions,
+  GetOrCreateSessionMetadataInput,
   InMemorySessionSnapshotStoreOptions,
+  MapConversationEventsToTwinInput,
+  PersistentSessionStateStoreOptions,
   ProviderIngestionFactoryOptions,
   ProviderIngestionPollResult,
   ProviderIngestionRunner,
@@ -36,6 +39,10 @@ export type {
   SessionSnapshotStore,
   SessionSnapshotStoreRetentionPolicy,
   SessionSnapshotUpsert,
+  SessionStateIdentity,
+  SessionStateLocation,
+  SnapshotMemoryStats,
+  TwinToConversationOptions,
 } from "./orchestrator/mod.ts";
 export {
   createClaudeIngestionRunner,
@@ -50,10 +57,18 @@ export {
   FileProviderIngestionRunner,
   InMemorySessionSnapshotStore,
   isStatusSnapshotStale,
+  makeDefaultSessionCursor,
+  mapConversationEventsToTwin,
+  mapTwinEventsToConversation,
+  PersistentSessionStateStore,
   resolveDefaultControlPath,
+  resolveDefaultDaemonControlIndexPath,
+  resolveDefaultKatoDir,
   resolveDefaultRuntimeDir,
+  resolveDefaultSessionsDir,
   resolveDefaultStatusPath,
   runDaemonRuntimeLoop,
+  SessionSnapshotMemoryBudgetExceededError,
 } from "./orchestrator/mod.ts";
 export type {
   EnsureRuntimeConfigResult,
@@ -61,6 +76,7 @@ export type {
 } from "./config/mod.ts";
 export {
   createDefaultRuntimeConfig,
+  createDefaultRuntimeLoggingConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
@@ -112,6 +128,7 @@ export type {
   ActiveRecording,
   AppendToActiveRecordingInput,
   AppendToActiveRecordingResult,
+  AppendToDestinationInput,
   ConversationWriteMode,
   ConversationWriterLike,
   MarkdownRenderOptions,

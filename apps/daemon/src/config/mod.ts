@@ -4,6 +4,7 @@ export type {
 } from "./runtime_config.ts";
 export {
   createDefaultRuntimeConfig,
+  createDefaultRuntimeLoggingConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,

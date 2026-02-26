@@ -1,5 +1,5 @@
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
   resolveDefaultConfigPath,
@@ -16,15 +16,21 @@ import {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
   InMemorySessionSnapshotStore,
+  PersistentSessionStateStore,
+  resolveDefaultDaemonControlIndexPath,
   resolveDefaultRuntimeDir,
+  resolveDefaultSessionsDir,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
 import {
   AuditLogger,
   JsonLineFileSink,
+  type LogLevel,
   StructuredLogger,
 } from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
+import { readOptionalEnv } from "./utils/env.ts";
+import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
@@ -38,6 +44,37 @@ export interface RunDaemonSubprocessOptions {
 function writeToStderr(text: string): void {
   const encoder = new TextEncoder();
   Deno.stderr.writeSync(encoder.encode(text));
+}
+
+function parseLogLevelOverride(name: string): LogLevel | undefined {
+  const raw = readOptionalEnv(name);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (
+    normalized !== "debug" &&
+    normalized !== "info" &&
+    normalized !== "warn" &&
+    normalized !== "error"
+  ) {
+    throw new Error(`${name} must be one of: debug, info, warn, error`);
+  }
+
+  return normalized;
+}
+
+function resolveLogLevels(runtimeConfig: RuntimeConfig): {
+  operationalLevel: LogLevel;
+  auditLevel: LogLevel;
+} {
+  return {
+    operationalLevel: parseLogLevelOverride("KATO_LOGGING_OPERATIONAL_LEVEL") ??
+      runtimeConfig.logging.operationalLevel,
+    auditLevel: parseLogLevelOverride("KATO_LOGGING_AUDIT_LEVEL") ??
+      runtimeConfig.logging.auditLevel,
+  };
 }
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
@@ -73,6 +110,17 @@ export async function runDaemonSubprocess(
 
   const featureClient = bootstrapOpenFeature(runtimeConfig.featureFlags);
   const featureSettings = evaluateDaemonFeatureSettings(featureClient);
+  let logLevels: { operationalLevel: LogLevel; auditLevel: LogLevel };
+  try {
+    logLevels = resolveLogLevels(runtimeConfig);
+  } catch (error) {
+    writeStderr(
+      `Daemon startup failed: invalid logging level override: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+    return 1;
+  }
   const operationalLogPath = join(
     runtimeConfig.runtimeDir,
     "logs",
@@ -88,19 +136,39 @@ export async function runDaemonSubprocess(
     new JsonLineFileSink(operationalLogPath),
   ], {
     channel: "operational",
-    minLevel: "info",
+    minLevel: logLevels.operationalLevel,
     now,
   });
   const auditLogger = new AuditLogger(
     new StructuredLogger([new JsonLineFileSink(auditLogPath)], {
       channel: "security-audit",
-      minLevel: "info",
+      minLevel: logLevels.auditLevel,
       now,
     }),
   );
-  const sessionSnapshotStore = new InMemorySessionSnapshotStore({ now });
+  const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+    now,
+    daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
+  });
+  const katoDir = typeof runtimeConfig.katoDir === "string" &&
+      runtimeConfig.katoDir.trim().length > 0
+    ? runtimeConfig.katoDir
+    : dirname(runtimeConfig.runtimeDir);
+  if (katoDir.trim().length === 0) {
+    throw new Error(
+      "Runtime config must provide a valid katoDir or runtimeDir",
+    );
+  }
+  const sessionStateStore = new PersistentSessionStateStore({
+    daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(katoDir),
+    sessionsDir: resolveDefaultSessionsDir(katoDir),
+    now,
+  });
   const ingestionRunners = createDefaultProviderIngestionRunners({
     sessionSnapshotStore,
+    sessionStateStore,
+    globalAutoGenerateSnapshots: runtimeConfig.globalAutoGenerateSnapshots,
+    providerAutoGenerateSnapshots: runtimeConfig.providerAutoGenerateSnapshots,
     claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
     codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
     geminiSessionRoots: runtimeConfig.providerSessionRoots.gemini,
@@ -132,6 +200,7 @@ export async function runDaemonSubprocess(
       recordingPipeline,
       ingestionRunners,
       sessionSnapshotStore,
+      sessionStateStore,
       loadSessionSnapshot(sessionId: string) {
         const snapshot = sessionSnapshotStore.get(sessionId);
         if (!snapshot) {
@@ -144,8 +213,11 @@ export async function runDaemonSubprocess(
         });
       },
       exportEnabled: featureSettings.exportEnabled,
+      exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
+      cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       operationalLogger,
       auditLogger,
+      daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
       now,
     });
     return 0;

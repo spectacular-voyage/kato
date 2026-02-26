@@ -55,6 +55,7 @@ function makeWriterSpy(callOrder: string[]): {
       path: string;
       events: number;
       hasNow: boolean;
+      includeCommentary?: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
       italicizeUserMessages?: boolean;
@@ -70,6 +71,7 @@ function makeWriterSpy(callOrder: string[]): {
       path: string;
       events: number;
       hasNow: boolean;
+      includeCommentary?: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
       italicizeUserMessages?: boolean;
@@ -90,6 +92,7 @@ function makeWriterSpy(callOrder: string[]): {
           path,
           events: events.length,
           hasNow: typeof options?.now === "function",
+          includeCommentary: options?.includeCommentary,
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
           italicizeUserMessages: options?.italicizeUserMessages,
@@ -110,6 +113,7 @@ function makeWriterSpy(callOrder: string[]): {
           path,
           events: events.length,
           hasNow: typeof options?.now === "function",
+          includeCommentary: options?.includeCommentary,
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
           italicizeUserMessages: options?.italicizeUserMessages,
@@ -220,6 +224,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     path: "/safe/notes/capture.md",
     events: 1,
     hasNow: true,
+    includeCommentary: undefined,
     includeThinking: undefined,
     includeToolCalls: undefined,
     italicizeUserMessages: undefined,
@@ -248,6 +253,7 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
     path: "/safe/notes/export.md",
     events: 1,
     hasNow: true,
+    includeCommentary: undefined,
     includeThinking: undefined,
     includeToolCalls: undefined,
     italicizeUserMessages: undefined,
@@ -349,6 +355,7 @@ Deno.test(
       pathPolicyGate: makeSequencedPathPolicyGate(["allow", "allow"], order),
       writer: writerSpy.writer,
       defaultRenderOptions: {
+        includeCommentary: true,
         includeThinking: false,
         includeToolCalls: false,
         italicizeUserMessages: true,
@@ -375,6 +382,7 @@ Deno.test(
       path: "/safe/notes/with-flags.md",
       events: 1,
       hasNow: true,
+      includeCommentary: true,
       includeThinking: false,
       includeToolCalls: false,
       italicizeUserMessages: true,
@@ -384,6 +392,7 @@ Deno.test(
       path: "/safe/notes/with-flags.md",
       events: 1,
       hasNow: true,
+      includeCommentary: true,
       includeThinking: false,
       includeToolCalls: false,
       italicizeUserMessages: true,

@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u-string-1","parentUuid":"progress-1","isSidechain":false,"sessionId":"sess-string-1","timestamp":"2026-02-25T06:00:00.000Z","message":{"role":"user","content":"Please do a quick capture.\n::capture notes/out-of-turn.md"}}
+{"type":"assistant","uuid":"a-string-1","parentUuid":"u-string-1","isSidechain":false,"sessionId":"sess-string-1","timestamp":"2026-02-25T06:00:01.000Z","message":{"role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"Acknowledged."}]}}

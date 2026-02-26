@@ -16,6 +16,12 @@ const FIXTURE_ABORTED = join(
   "codex-session-aborted.jsonl",
 );
 
+const FIXTURE_REQUEST_USER_INPUT = join(
+  THIS_DIR,
+  "fixtures",
+  "codex-session-request-user-input.jsonl",
+);
+
 const TEST_CTX = { provider: "codex", sessionId: "sess-vscode-001" };
 
 type ParseItem = {
@@ -37,6 +43,18 @@ async function collectEvents(
   return items;
 }
 
+function getProviderQuestionId(event: ConversationEvent): string | undefined {
+  if (event.kind !== "decision") {
+    return undefined;
+  }
+  const metadata = event.metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return undefined;
+  }
+  const value = (metadata as Record<string, unknown>)["providerQuestionId"];
+  return typeof value === "string" ? value : undefined;
+}
+
 Deno.test("codex parser strips IDE preamble from user message", async () => {
   const results = await collectEvents(FIXTURE_VSCODE);
   const userEvent = results.find((r) => r.event.kind === "message.user");
@@ -55,18 +73,34 @@ Deno.test("codex parser strips IDE preamble from user message", async () => {
   }
 });
 
-Deno.test("codex parser prefers final_answer over intermediate agent messages", async () => {
+Deno.test("codex parser preserves agent progress commentary and final answers", async () => {
   const results = await collectEvents(FIXTURE_VSCODE);
   const assistantEvents = results.filter(
     (r) => r.event.kind === "message.assistant",
   );
-  // At least 2 assistant messages for 2 turns.
+  // Two progress updates + one final answer in turn 1 + one final in turn 2.
   assert(assistantEvents.length >= 2);
-  const firstAssistant = assistantEvents[0]!.event;
-  if (firstAssistant.kind === "message.assistant") {
-    assertStringIncludes(firstAssistant.content, "JWT tokens");
-    assert(!firstAssistant.content.includes("I'm analyzing your project"));
-    assert(!firstAssistant.content.includes("Let me check the existing code"));
+  const commentaryEvents = assistantEvents.filter((item) =>
+    item.event.kind === "message.assistant" &&
+    item.event.phase === "commentary"
+  );
+  assert(commentaryEvents.length >= 2);
+  const commentaryTexts = commentaryEvents
+    .map((item) =>
+      item.event.kind === "message.assistant" ? item.event.content : ""
+    )
+    .join("\n");
+  assertStringIncludes(commentaryTexts, "I'm analyzing your project");
+  assertStringIncludes(commentaryTexts, "Let me check the existing code");
+
+  const finalEvents = assistantEvents.filter((item) =>
+    item.event.kind === "message.assistant" &&
+    item.event.phase === "final"
+  );
+  assert(finalEvents.length >= 2);
+  const firstFinal = finalEvents[0]!.event;
+  if (firstFinal.kind === "message.assistant") {
+    assertStringIncludes(firstFinal.content, "JWT tokens");
   }
 });
 
@@ -150,4 +184,215 @@ Deno.test("codex parser populates source fields", async () => {
   const first = results[0]!.event;
   assert(first.source.providerEventType.length > 0);
   assert(first.source.rawCursor !== undefined);
+});
+
+Deno.test("codex parser synthesizes selected request_user_input answers", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const proposedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "proposed" &&
+    getProviderQuestionId(result.event) === "deploy_mode"
+  );
+  assert(proposedDecision !== undefined);
+  if (proposedDecision.event.kind === "decision") {
+    assertStringIncludes(proposedDecision.event.summary, "Choose deploy mode.");
+    const metadata = proposedDecision.event.metadata as Record<string, unknown>;
+    const options = metadata["options"];
+    assert(Array.isArray(options));
+    const hasBlueOption = (options as Array<Record<string, unknown>>).some((
+      option,
+    ) =>
+      String(option["label"] ?? "") === "Blue (Recommended)" &&
+      String(option["description"] ?? "") === "Primary rollout lane."
+    );
+    assertEquals(hasBlueOption, true);
+  }
+
+  const synthesizedUser = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("Choose deploy mode.") &&
+    result.event.content.includes("Blue (Recommended)")
+  );
+  assertEquals(synthesizedUser, undefined);
+
+  const acceptedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    getProviderQuestionId(result.event) === "deploy_mode"
+  );
+  assert(acceptedDecision !== undefined);
+  if (acceptedDecision.event.kind === "decision") {
+    assertStringIncludes(acceptedDecision.event.summary, "Choose deploy mode.");
+    assertStringIncludes(acceptedDecision.event.summary, "Blue (Recommended)");
+    assertEquals(acceptedDecision.event.status, "accepted");
+    assertEquals(acceptedDecision.event.decidedBy, "user");
+  }
+});
+
+Deno.test("codex parser supports free-form request_user_input answers", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const synthesizedUser = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("How should migration run?") &&
+    result.event.content.includes("Run it only on staging first.")
+  );
+  assertEquals(synthesizedUser, undefined);
+
+  const acceptedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    getProviderQuestionId(result.event) === "migration_scope"
+  );
+  assert(acceptedDecision !== undefined);
+  if (acceptedDecision.event.kind === "decision") {
+    assertStringIncludes(
+      acceptedDecision.event.summary,
+      "How should migration run?",
+    );
+    assertStringIncludes(
+      acceptedDecision.event.summary,
+      "Run it only on staging first.",
+    );
+  }
+});
+
+Deno.test("codex parser maps multiple question answers by question id", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const apiDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    getProviderQuestionId(result.event) === "api_mode"
+  );
+  assert(apiDecision !== undefined);
+  if (apiDecision.event.kind === "decision") {
+    assertStringIncludes(apiDecision.event.summary, "API mode?");
+    assertStringIncludes(apiDecision.event.summary, "Public");
+  }
+
+  const logDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    getProviderQuestionId(result.event) === "log_mode"
+  );
+  assert(logDecision !== undefined);
+  if (logDecision.event.kind === "decision") {
+    assertStringIncludes(logDecision.event.summary, "Log mode?");
+    assertStringIncludes(logDecision.event.summary, "Verbose (Recommended)");
+  }
+
+  const combinedUserMessage = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("API mode?") &&
+    result.event.content.includes("Log mode?")
+  );
+  assertEquals(combinedUserMessage, undefined);
+});
+
+Deno.test("codex parser falls back to readable message.user on malformed request_user_input output", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const fallbackMessage = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("Malformed output question?") &&
+    result.event.content.includes("not-json-response-payload")
+  );
+  assert(fallbackMessage !== undefined);
+
+  const malformedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    result.event.summary.includes("Malformed output question?")
+  );
+  assertEquals(malformedDecision, undefined);
+});
+
+Deno.test("codex parser preserves request_user_input question metadata across resume offsets", async () => {
+  const allResults = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+  const deployCall = allResults.find((result) =>
+    result.event.kind === "tool.call" &&
+    result.event.name === "request_user_input" &&
+    result.event.toolCallId === "call-rui-001"
+  );
+  assert(deployCall !== undefined);
+
+  const resumed = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    deployCall.cursor.value,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const resumedDeployDecision = resumed.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted" &&
+    getProviderQuestionId(result.event) === "deploy_mode"
+  );
+  assert(resumedDeployDecision !== undefined);
+  if (resumedDeployDecision.event.kind === "decision") {
+    assertStringIncludes(
+      resumedDeployDecision.event.summary,
+      "Choose deploy mode.",
+    );
+    const metadata = resumedDeployDecision.event.metadata as Record<
+      string,
+      unknown
+    >;
+    const options = metadata["options"];
+    assert(Array.isArray(options));
+    const hasGreenOption = (options as Array<Record<string, unknown>>).some((
+      option,
+    ) =>
+      String(option["label"] ?? "") === "Green" &&
+      String(option["description"] ?? "") === "Secondary rollout lane."
+    );
+    assertEquals(hasGreenOption, true);
+  }
+});
+
+Deno.test("codex parser keeps non request_user_input tool events unchanged", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const execToolCall = results.find((result) =>
+    result.event.kind === "tool.call" &&
+    result.event.name === "exec_command"
+  );
+  assert(execToolCall !== undefined);
+  if (execToolCall.event.kind === "tool.call") {
+    assertStringIncludes(execToolCall.event.description ?? "", "echo ok");
+  }
+
+  const execToolResult = results.find((result) =>
+    result.event.kind === "tool.result" &&
+    result.event.toolCallId === "call-rui-005"
+  );
+  assert(execToolResult !== undefined);
+  if (execToolResult.event.kind === "tool.result") {
+    assertStringIncludes(execToolResult.event.result, "ok");
+  }
 });

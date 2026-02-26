@@ -28,14 +28,19 @@ For implementation constraints and security invariants, also see:
 - **Provider**: external conversation source (currently `claude`, `codex`,
   `gemini`) represented as session log files under configured roots.
 - **Session**: one provider conversation identified by a provider-specific
-  `sessionId`.
+  `providerSessionId`, plus a kato-generated `sessionId` UUID for daemon/status
+  targeting.
+- **SessionTwin**: kato-native canonical JSONL event stream per session
+  (`*.twin.jsonl`) used for durable replay/export/write-cursor tracking.
+- **Session metadata**: per-session durable state (`*.meta.json`) with ingest
+  cursor, dedupe fingerprints, command cursor, and recording state.
 - **ConversationEvent**: typed canonical event record (kind: `message.user`,
   `message.assistant`, `tool.call`, `tool.result`, `thinking`, `decision`,
   `provider.info`, etc.) with base fields `eventId`, `provider`, `sessionId`,
   `timestamp`, `turnId?`, and `source` (provider-native identity).
-- **Runtime session snapshot**: normalized in-memory state for a session
-  (provider, cursor, `conversationSchemaVersion: 2`, bounded events list, status
-  metadata). This is the canonical runtime state for export and provider status.
+- **Runtime session snapshot**: normalized in-memory projection of SessionTwin
+  state (provider, cursor, `conversationSchemaVersion: 2`, bounded events list,
+  status metadata) used by status/export paths while daemon is running.
 - **Control plane**: filesystem IPC boundary between CLI and daemon:
   `control.json` (requests) and `status.json` (daemon snapshot).
 - **Recording/writer pipeline**: module chain that converts event snapshots into
@@ -64,6 +69,9 @@ graph TD
     CONFIG[~/.kato/config.json]
     CONTROL[~/.kato/runtime/control.json]
     STATUS[~/.kato/runtime/status.json]
+    SESSIONMETA[~/.kato/sessions/*.meta.json]
+    SESSIONTWIN[~/.kato/sessions/*.twin.jsonl]
+    DCTRL[~/.kato/daemon-control.json]
     LOGS[provider session logs .jsonl/.json]
     OUTPUT[exports .md]
     OPLOG[operational.jsonl]
@@ -75,6 +83,7 @@ graph TD
     LAUNCHER[Detached Launcher]
     RUNTIME[runDaemonRuntimeLoop]
     INGEST[Provider Ingestion Runners]
+    PERSIST[PersistentSessionStateStore]
     SNAPSHOT[InMemorySessionSnapshotStore]
     WRITER[RecordingPipeline + MarkdownWriter/JsonlWriter]
     POLICY[WritePathPolicyGate]
@@ -91,12 +100,17 @@ graph TD
 
   RUNTIME --> INGEST
   INGEST --> LOGS
+  INGEST --> PERSIST
   INGEST --> SNAPSHOT
 
   RUNTIME --> SNAPSHOT
+  RUNTIME --> PERSIST
   RUNTIME --> CONTROL
   RUNTIME --> STATUS
   RUNTIME --> WRITER
+  PERSIST --> SESSIONMETA
+  PERSIST --> SESSIONTWIN
+  PERSIST --> DCTRL
   WRITER --> POLICY
   WRITER --> OUTPUT
 
@@ -112,8 +126,9 @@ graph TD
 | Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
 | Config          | Validate and default runtime config              | config schema rules           | `~/.kato/config.json`, env           | `~/.kato/config.json`        | `apps/daemon/src/config/runtime_config.ts`           |
 | Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
-| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | session snapshot store, logs | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Snapshot store  | Canonical session state for runtime              | per-session snapshots         | ingestion upserts                    | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
+| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | SessionTwin + snapshots      | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
+| Session state   | Persistent session metadata/twin/index           | per-session durable artifacts | ingestion/runtime updates            | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
+| Snapshot store  | Runtime projection for status/command processing | per-session snapshots         | ingestion/session-state projections  | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
 | Writer pipeline | Render/export markdown or JSONL with path gates  | active recordings map         | export requests + event snapshots    | .md/.jsonl files, logs       | `apps/daemon/src/writer/*`                           |
 | Policy          | Deny/allow write destinations, command detection | none                          | config + command text                | decisions/events             | `apps/daemon/src/policy/*`                           |
 | Observability   | structured operational + audit records           | none                          | events from runtime/ingestion/writer | JSONL sinks                  | `apps/daemon/src/observability/*`                    |
@@ -132,6 +147,10 @@ graph TD
 Command handlers do not run daemon business logic directly; they manipulate the
 control plane and rely on the daemon runtime to execute queued work.
 
+Exception: `clean` is intentionally CLI-owned for immediate local hygiene. In
+current behavior, `clean --all` flushes runtime log files directly from the CLI
+path (no daemon queue dependency).
+
 ### 2) Detached Launcher and Permission Envelope
 
 `DenoDetachedDaemonLauncher` computes scoped read/write roots before spawning:
@@ -147,16 +166,23 @@ This makes the long-lived daemon process narrower than a broad `-A` profile.
 
 1. initialize status snapshot (`daemonRunning: true`)
 2. start ingestion runners
-3. each poll cycle:
+3. each poll cycle (every ~1s):
    - poll ingestion runners
+   - process in-chat recording commands via `processInChatRecordingUpdates`
    - consume control requests from queue
    - update recording summary
-   - on heartbeat boundary, recompute provider status and persist `status.json`
+   - on heartbeat boundary (~5s), recompute provider/session status and persist `status.json`
 4. stop ingestion runners on shutdown
 5. write terminal status (`daemonRunning: false`)
 
-Important: provider status aggregation is heartbeat-scoped (not every poll) to
-avoid unnecessary full snapshot cloning on hot loops.
+**Performance constraint:** hot-path functions (`processInChatRecordingUpdates`
+and heartbeat projection) must not call `list()` on the snapshot store because
+`list()` deep-clones all events via `structuredClone`. Instead:
+
+- `processInChatRecordingUpdates` uses `listMetadataOnly()` (no event cloning)
+  and skips sessions whose file mtime has not changed since last poll.
+- Heartbeat projection (`toProviderStatuses`, `toSessionStatuses`) also uses
+  `listMetadataOnly()` — events are not needed after snippet caching (see §5).
 
 ### 4) Ingestion Pipeline
 
@@ -167,11 +193,13 @@ Per runner responsibilities:
 
 - discover session files from provider roots
 - watch filesystem changes with debounce
-- maintain in-memory cursor map per session
+- resume ingest cursor from persisted session metadata
 - parse new log content from last cursor
-- merge/dedupe events against existing snapshot (signature includes kind, source
-  fields, and content)
-- upsert into shared snapshot store
+- map parser `ConversationEvent` output into canonical SessionTwin event kinds
+  (see `dev.event-kinds.md`)
+- append to SessionTwin with bounded recent-fingerprint dedupe
+- update persisted ingest cursor/metadata, then project SessionTwin back into
+  runtime snapshot store
 - emit operational and audit events for starts/errors/cursor updates/drops
 
 ### 5) Snapshot Store and State Semantics
@@ -182,12 +210,42 @@ Per runner responsibilities:
 - stores `ConversationEvent[]` with `conversationSchemaVersion: 2`
 - upsert is copy-safe (clones inputs/outputs)
 - metadata carries:
-  - `updatedAt` (ingestion-time)
-  - `eventCount`
-  - `truncatedEvents`
-  - optional `lastEventAt`
+  - `updatedAt` (ingestion-time, resets on every upsert — do not use for staleness)
+  - `eventCount`, `truncatedEvents`
+  - `lastEventAt` (timestamp of last parsed event — provider-accuracy varies)
+  - `fileModifiedAtMs` (OS-level file mtime — most reliable staleness signal)
+  - `snippet` (first non-blank user message, truncated to 60 chars, computed at
+    upsert to avoid re-scanning events on every poll)
 
-`status.providers` is derived from this store, not from parser internals.
+`list()` returns full deep-cloned snapshots (events included). **Avoid in hot
+paths.** Use `listMetadataOnly()` when only metadata fields are needed — it
+returns `SessionSnapshotMetadataEntry[]` with no event cloning.
+
+`status.providers` and `status.sessions` are both derived from this store on
+heartbeat, not from parser internals.
+
+### 5a) Status Projection
+
+Status fields visible in `kato status` / `status.json` are computed by
+`shared/src/status_projection.ts`:
+
+- `extractSnippet(events)` — first non-blank user message, newlines stripped,
+  truncated at 60 chars.
+- `isSessionStale(ts, now, staleAfterMs)` — compares a timestamp against the
+  stale threshold (default 5 min, `DEFAULT_STATUS_STALE_AFTER_MS`).
+- `projectSessionStatus(opts)` — builds a `DaemonSessionStatus` from metadata
+  + optional recording join. Staleness precedence: `fileModifiedAtMs` (primary)
+  → `lastEventAt` (fallback) → absent = stale.
+- `filterSessionsForDisplay(sessions, opts)` — filter active/stale + sort by
+  recency.
+
+`DaemonSessionStatus` and `DaemonRecordingStatus` are defined in
+`shared/src/contracts/status.ts` and exported from `shared/src/mod.ts`.
+
+**Known issue (codex provider):** the Codex parser sets all event timestamps to
+ingestion time (`new Date().toISOString()`), so `lastEventAt` is unreliable for
+Codex sessions. File mtime (`fileModifiedAtMs`) is the correct staleness signal
+for Codex.
 
 ### 6) Export/Writer Path
 
@@ -225,24 +283,32 @@ The daemon emits two channels with independent sinks:
 - `security-audit` for control, policy, and security-relevant events
 
 Runtime startup wires JSONL file sinks under `<runtimeDir>/logs`.
+`StructuredLogger` routes through a LogLayer adapter that preserves JSONL parity
+and falls back to parity emission when npm LogLayer transport loading is
+unavailable.
 
 ## Source-of-Truth Boundaries
 
 - `config.json`: canonical runtime settings and policy-relevant roots/flags.
 - `control.json`: canonical queued daemon commands from CLI.
 - `status.json`: canonical externally readable daemon status snapshot.
-- in-memory snapshot store: canonical live session state while daemon runs.
+- session metadata + SessionTwin files: canonical durable session state.
+- in-memory snapshot store: runtime projection/cache while daemon runs.
 - exported markdown: derived artifact, never the runtime source of truth.
 
 ## Key Interaction Flows
 
 ### Ingestion to Status Flow
 
-1. provider file changes
-2. runner parses incremental messages
-3. snapshot store upsert
-4. heartbeat recompute of provider aggregates
-5. write `status.json`
+1. provider file changes (detected by file watcher or discovery poll)
+2. runner parses incremental events, calls `upsert()` with:
+   - merged events, updated cursor, `fileModifiedAtMs` from `Deno.stat()`
+   - `upsert()` caches `snippet` and `lastEventAt` in metadata
+3. `processInChatRecordingUpdates` (every poll, 1s): calls `listMetadataOnly()`,
+   skips sessions whose `fileModifiedAtMs` is unchanged, fetches full snapshot
+   via `get()` only for changed sessions, appends new events to active recordings
+4. heartbeat (~5s): calls `listMetadataOnly()`, projects `providers` and
+   `sessions` from metadata (no event access needed), writes `status.json`
 
 ### Ingestion to Export Flow
 

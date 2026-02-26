@@ -138,11 +138,18 @@ Keep two lock artifacts:
 
 State model should track:
 
-- Session offsets per provider/session.
-- Active recording destination per session.
+- Session ingest cursors per provider/session (persisted in `*.meta.json`).
+- SessionTwin canonical events per session (`*.twin.jsonl`).
+- Recording state per session (recording id, desired state, write cursor).
 - Writer worker identity/version metadata (optional but useful for debugging).
 
 Writes must be atomic (temp + rename pattern).
+
+Current implementation note:
+
+- `~/.kato/daemon-control.json` is a rebuildable cache index.
+- `~/.kato/sessions/*.meta.json` is authoritative session metadata.
+- `~/.kato/sessions/*.twin.jsonl` is the durable canonical event log.
 
 ## Failure and Recovery Model
 

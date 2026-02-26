@@ -1,6 +1,61 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
 
+const STARTUP_ACK_TIMEOUT_MS = 10_000;
+const STARTUP_ACK_POLL_INTERVAL_MS = 100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForDaemonStartupAck(
+  ctx: DaemonCliCommandContext,
+  launchedPid: number,
+  launchedAtMs: number,
+): Promise<{
+  heartbeatAt: string;
+  ackLatencyMs: number;
+}> {
+  const deadline = Date.now() + STARTUP_ACK_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    let snapshot: Awaited<ReturnType<typeof ctx.statusStore.load>>;
+    try {
+      snapshot = await ctx.statusStore.load();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        await ctx.operationalLogger.debug(
+          "daemon.start.ack_poll_retry",
+          "Transient status read failure while waiting for daemon startup acknowledgement",
+          {
+            launchedPid,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+      await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (snapshot.daemonRunning && snapshot.daemonPid === launchedPid) {
+      const heartbeatMs = Date.parse(snapshot.heartbeatAt);
+      if (Number.isFinite(heartbeatMs) && heartbeatMs >= launchedAtMs) {
+        return {
+          heartbeatAt: snapshot.heartbeatAt,
+          ackLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
+        };
+      }
+    }
+    await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `Timed out waiting for daemon startup acknowledgement (pid: ${launchedPid})`,
+  );
+}
+
 export async function runStartCommand(
   ctx: DaemonCliCommandContext,
 ): Promise<void> {
@@ -15,29 +70,27 @@ export async function runStartCommand(
     return;
   }
 
+  const launchedAtMs = ctx.runtime.now().getTime();
   const launchedPid = await ctx.daemonLauncher.launchDetached();
-  const nowIso = ctx.runtime.now().toISOString();
-  await ctx.statusStore.save({
-    ...existingSnapshot,
-    daemonRunning: true,
-    daemonPid: launchedPid,
-    generatedAt: nowIso,
-    heartbeatAt: nowIso,
-  });
+  const ack = await waitForDaemonStartupAck(ctx, launchedPid, launchedAtMs);
 
   await ctx.operationalLogger.info(
     "daemon.start",
-    "Daemon start launched from CLI",
+    "Daemon start acknowledged by runtime heartbeat",
     {
       launchedPid,
       requestedByPid: ctx.runtime.pid,
       staleBeforeLaunch: stale,
+      startupAckHeartbeatAt: ack.heartbeatAt,
+      startupAckLatencyMs: ack.ackLatencyMs,
       statusPath: ctx.runtime.statusPath,
     },
   );
   await ctx.auditLogger.command("start", {
     launchedPid,
     staleBeforeLaunch: stale,
+    startupAckHeartbeatAt: ack.heartbeatAt,
+    startupAckLatencyMs: ack.ackLatencyMs,
   });
 
   ctx.runtime.writeStdout(

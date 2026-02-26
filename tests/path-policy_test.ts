@@ -61,7 +61,8 @@ Deno.test("WritePathPolicyGate denies symlink escape targets", async () => {
     await Deno.mkdir(outsideRoot, { recursive: true });
 
     try {
-      await Deno.symlink(outsideRoot, symlinkPath, { type: "dir" });
+      const outsideCanonical = await Deno.realPath(outsideRoot);
+      await Deno.symlink(outsideCanonical, symlinkPath, { type: "dir" });
     } catch (error) {
       if (
         error instanceof Deno.errors.NotCapable ||

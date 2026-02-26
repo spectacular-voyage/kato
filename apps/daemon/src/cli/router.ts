@@ -283,7 +283,12 @@ export async function runDaemonCli(
         await runStopCommand(commandContext);
         return 0;
       case "status":
-        await runStatusCommand(commandContext, intent.command.asJson);
+        await runStatusCommand(
+          commandContext,
+          intent.command.asJson,
+          intent.command.all,
+          intent.command.live,
+        );
         return 0;
       case "export":
         await runExportCommand(

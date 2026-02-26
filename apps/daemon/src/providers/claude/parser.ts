@@ -11,10 +11,11 @@ interface RawEntry {
   uuid: string;
   timestamp: string;
   isSidechain?: boolean;
+  toolUseResult?: unknown;
   message?: {
     role: string;
     model?: string;
-    content: RawContentBlock[];
+    content?: unknown;
   };
 }
 
@@ -68,16 +69,13 @@ function* parseLines(
   }
 }
 
-function isUserTextEntry(entry: RawEntry): boolean {
-  return (
-    Array.isArray(entry.message?.content) &&
-    entry.message!.content.some((block) => block.type === "text")
-  );
-}
-
 function stripAnsi(text: string): string {
   // deno-lint-ignore no-control-regex
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cleanText(text: string): string {
@@ -89,8 +87,24 @@ function cleanText(text: string): string {
     .trim();
 }
 
-function extractText(content: RawContentBlock[]): string {
-  return content
+function asContentBlocks(content: unknown): RawContentBlock[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content.filter((block): block is RawContentBlock =>
+    typeof block === "object" &&
+    block !== null &&
+    typeof (block as { type?: unknown }).type === "string"
+  );
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") {
+    return cleanText(content);
+  }
+
+  const blocks = asContentBlocks(content);
+  return blocks
     .filter((block) => block.type === "text")
     .map((block) => cleanText(String(block["text"] ?? "")))
     .filter((text) => text.length > 0)
@@ -110,6 +124,42 @@ function extractToolResultText(content: unknown): string {
       .join("\n");
   }
   return "";
+}
+
+function asQuestionList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> =>
+    isRecord(item)
+  );
+}
+
+function asAnswersRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeDecisionKey(raw: string, fallbackIndex: number): string {
+  const compact = raw.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return compact.length > 0 ? compact : `decision-${fallbackIndex + 1}`;
+}
+
+function extractQuestionnairePayload(entry: RawEntry): {
+  questions: Array<Record<string, unknown>>;
+  answers: Record<string, unknown>;
+} | undefined {
+  if (!isRecord(entry.toolUseResult)) {
+    return undefined;
+  }
+  const questions = asQuestionList(entry.toolUseResult["questions"]);
+  const answers = asAnswersRecord(entry.toolUseResult["answers"]);
+  if (!answers) {
+    return undefined;
+  }
+  return { questions, answers };
 }
 
 function deriveToolDescription(
@@ -189,8 +239,7 @@ export async function* parseClaudeEvents(
 
     if (entry.type === "system") {
       // system entries → provider.info events
-      const blocks = entry.message?.content ?? [];
-      const text = extractText(blocks);
+      const text = extractText(entry.message?.content);
       if (text) {
         yield {
           event: {
@@ -205,31 +254,35 @@ export async function* parseClaudeEvents(
       continue;
     }
 
-    const blocks = entry.message?.content ?? [];
+    const blocks = asContentBlocks(entry.message?.content);
 
     if (entry.type === "user") {
       // Extract text content → message.user
-      if (isUserTextEntry(entry)) {
-        const text = extractText(blocks);
-        if (text) {
-          yield {
-            event: {
-              ...makeBase("message.user"),
-              kind: "message.user",
-              role: "user",
-              content: text,
-            } as unknown as ConversationEvent,
-            cursor,
-          };
-        }
+      const text = extractText(entry.message?.content);
+      if (text) {
+        yield {
+          event: {
+            ...makeBase("message.user"),
+            kind: "message.user",
+            role: "user",
+            content: text,
+          } as unknown as ConversationEvent,
+          cursor,
+        };
       }
 
       // Extract tool_result blocks → tool.result events
       let toolResultIndex = 0;
+      const toolResultEventIds: string[] = [];
       for (const block of blocks) {
         if (block.type !== "tool_result") continue;
         const toolUseId = String(block["tool_use_id"] ?? "");
         const resultText = extractToolResultText(block["content"]);
+        const toolResultEventId = makeEventId(
+          turnId,
+          "tool.result",
+          toolResultIndex,
+        );
         yield {
           event: {
             ...makeBase("tool.result", toolResultIndex),
@@ -239,13 +292,64 @@ export async function* parseClaudeEvents(
           } as unknown as ConversationEvent,
           cursor,
         };
+        toolResultEventIds.push(toolResultEventId);
         toolResultIndex += 1;
+      }
+
+      // Claude AskUserQuestion answers live in top-level toolUseResult payload.
+      const questionnaire = extractQuestionnairePayload(entry);
+      if (questionnaire) {
+        const { questions, answers } = questionnaire;
+        const answerPairs = Object.entries(answers);
+        if (answerPairs.length > 0) {
+          let decisionIndex = 0;
+          for (const [key, value] of answerPairs) {
+            const questionEntry = questions.find((question) =>
+              String(question["id"] ?? "") === key ||
+              String(question["question"] ?? "") === key
+            );
+            const questionText = questionEntry
+              ? String(questionEntry["question"] ?? key)
+              : key;
+            const questionHeader = questionEntry
+              ? String(questionEntry["header"] ?? "")
+              : "";
+            const options = questionEntry
+              ? asQuestionList(questionEntry["options"]).map((option) => ({
+                label: String(option["label"] ?? ""),
+                description: String(option["description"] ?? ""),
+              }))
+              : [];
+
+            yield {
+              event: {
+                ...makeBase("decision", decisionIndex),
+                kind: "decision",
+                decisionId: makeEventId(turnId, "decision", decisionIndex),
+                decisionKey: normalizeDecisionKey(key, decisionIndex),
+                summary: `${questionText} -> ${String(value)}`,
+                status: "accepted",
+                decidedBy: "user",
+                basisEventIds: [...toolResultEventIds],
+                metadata: {
+                  providerQuestionId: key,
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
+                  ...(options.length > 0 ? { options } : {}),
+                },
+              } as unknown as ConversationEvent,
+              cursor,
+            };
+            decisionIndex += 1;
+          }
+        }
       }
     } else if (entry.type === "assistant") {
       const model = entry.message?.model;
 
       // Extract text → message.assistant
-      const text = extractText(blocks);
+      const text = extractText(entry.message?.content);
       if (text) {
         yield {
           event: {
@@ -279,6 +383,7 @@ export async function* parseClaudeEvents(
 
       // Extract tool_use blocks → tool.call events
       let toolCallIndex = 0;
+      let decisionIndex = 0;
       for (const block of blocks) {
         if (block.type !== "tool_use") continue;
         const name = String(block["name"] ?? "unknown");
@@ -286,6 +391,7 @@ export async function* parseClaudeEvents(
         const toolCallId = String(
           block["id"] ?? makeEventId(turnId, "tool.call", toolCallIndex),
         );
+        const toolCallEventId = makeEventId(turnId, "tool.call", toolCallIndex);
         yield {
           event: {
             ...makeBase("tool.call", toolCallIndex),
@@ -297,6 +403,46 @@ export async function* parseClaudeEvents(
           } as unknown as ConversationEvent,
           cursor,
         };
+
+        if (name === "AskUserQuestion" && input) {
+          const questions = asQuestionList(input["questions"]);
+          for (const question of questions) {
+            const questionText = String(question["question"] ?? "").trim();
+            if (questionText.length === 0) continue;
+            const questionHeader = String(question["header"] ?? "").trim();
+            const options = asQuestionList(question["options"]).map((
+              option,
+            ) => ({
+              label: String(option["label"] ?? ""),
+              description: String(option["description"] ?? ""),
+            }));
+
+            yield {
+              event: {
+                ...makeBase("decision", decisionIndex),
+                kind: "decision",
+                decisionId: makeEventId(turnId, "decision", decisionIndex),
+                decisionKey: normalizeDecisionKey(questionText, decisionIndex),
+                summary: questionText,
+                status: "proposed",
+                decidedBy: "assistant",
+                basisEventIds: [toolCallEventId],
+                metadata: {
+                  ...(questionHeader.length > 0
+                    ? { header: questionHeader }
+                    : {}),
+                  ...(options.length > 0 ? { options } : {}),
+                  ...(typeof question["multiSelect"] === "boolean"
+                    ? { multiSelect: question["multiSelect"] }
+                    : {}),
+                },
+              } as unknown as ConversationEvent,
+              cursor,
+            };
+            decisionIndex += 1;
+          }
+        }
+
         toolCallIndex += 1;
       }
     }

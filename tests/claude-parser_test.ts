@@ -5,6 +5,16 @@ import { parseClaudeEvents } from "../apps/daemon/src/providers/claude/mod.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const FIXTURE = join(THIS_DIR, "fixtures", "claude-session.jsonl");
+const STRING_CONTENT_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "claude-session-user-string-content.jsonl",
+);
+const ASK_USER_QUESTION_FIXTURE = join(
+  THIS_DIR,
+  "fixtures",
+  "claude-session-ask-user-question.jsonl",
+);
 
 const TEST_CTX = { provider: "claude", sessionId: "sess-001" };
 
@@ -162,4 +172,71 @@ Deno.test("claude parser populates source fields", async () => {
   assertEquals(first.source.providerEventType, "user");
   assertEquals(first.source.providerEventId, "msg-u1");
   assert(first.source.rawCursor !== undefined);
+});
+
+Deno.test("claude parser accepts string user content and preserves command lines", async () => {
+  const results = await collectEvents(STRING_CONTENT_FIXTURE);
+  assertEquals(results.length, 2);
+
+  const userEvent = results[0]!.event;
+  assertEquals(userEvent.kind, "message.user");
+  if (userEvent.kind === "message.user") {
+    assertEquals(userEvent.turnId, "u-string-1");
+    assertStringIncludes(userEvent.content, "::capture notes/out-of-turn.md");
+  }
+
+  const assistantEvent = results[1]!.event;
+  assertEquals(assistantEvent.kind, "message.assistant");
+  if (assistantEvent.kind === "message.assistant") {
+    assertEquals(assistantEvent.content, "Acknowledged.");
+  }
+});
+
+Deno.test("claude parser synthesizes decision events for AskUserQuestion prompts and answers", async () => {
+  const results = await collectEvents(ASK_USER_QUESTION_FIXTURE);
+
+  const toolCall = results.find((result) =>
+    result.event.kind === "tool.call" && result.event.name === "AskUserQuestion"
+  );
+  assert(toolCall !== undefined);
+
+  const proposedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "proposed"
+  );
+  assert(proposedDecision !== undefined);
+  if (proposedDecision.event.kind === "decision") {
+    assertStringIncludes(
+      proposedDecision.event.summary,
+      "Which file should we start implementation with?",
+    );
+    const metadata = proposedDecision.event.metadata as Record<string, unknown>;
+    const options = metadata["options"];
+    assert(Array.isArray(options));
+    const hasSharedContracts = (options as Array<Record<string, unknown>>).some(
+      (option) =>
+        String(option["label"] ?? "") === "shared contracts" &&
+        String(option["description"] ?? "") ===
+          "shared/src/contracts/status.ts",
+    );
+    assertEquals(hasSharedContracts, true);
+  }
+
+  const synthesizedUser = results.find((result) =>
+    result.event.kind === "message.user" &&
+    result.event.content.includes("shared contracts")
+  );
+  assertEquals(synthesizedUser, undefined);
+
+  const acceptedDecision = results.find((result) =>
+    result.event.kind === "decision" &&
+    result.event.status === "accepted"
+  );
+  assert(acceptedDecision !== undefined);
+  if (acceptedDecision.event.kind === "decision") {
+    assertStringIncludes(
+      acceptedDecision.event.summary,
+      "shared contracts",
+    );
+  }
 });

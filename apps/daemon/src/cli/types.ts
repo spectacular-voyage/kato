@@ -14,7 +14,7 @@ export type DaemonCliCommand =
   | { name: "start" }
   | { name: "restart" }
   | { name: "stop" }
-  | { name: "status"; asJson: boolean }
+  | { name: "status"; asJson: boolean; all: boolean; live: boolean }
   | {
     name: "export";
     sessionId: string;
