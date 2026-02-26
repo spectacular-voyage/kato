@@ -20,12 +20,12 @@ export type {
   AppendToActiveRecordingResult,
   AppendToDestinationInput,
   ExportFormat,
-  ValidateDestinationPathInput,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,
   SnapshotExportInput,
   SnapshotExportResult,
   StartOrRotateRecordingInput,
+  ValidateDestinationPathInput,
 } from "./recording_pipeline.ts";
 export { RecordingPipeline } from "./recording_pipeline.ts";

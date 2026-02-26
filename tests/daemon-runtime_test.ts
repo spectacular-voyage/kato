@@ -418,6 +418,159 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
   }]);
 });
 
+Deno.test("runDaemonRuntimeLoop resolves export short session selectors via session state metadata", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-export-resolve-",
+  });
+
+  try {
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          schemaVersion: 1,
+          generatedAt: "2026-02-22T10:00:00.000Z",
+          heartbeatAt: "2026-02-22T10:00:00.000Z",
+          daemonRunning: false,
+          providers: [],
+          recordings: {
+            activeRecordings: 0,
+            destinations: 0,
+          },
+        });
+      },
+      save(_snapshot) {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [
+      {
+        requestId: "req-export-short",
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: "2ee6e8b4",
+          resolvedOutputPath: ".kato/test-runtime/session-short.md",
+        },
+      },
+      {
+        requestId: "req-export-prefixed-short",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: "codex/2ee6e8b4",
+          resolvedOutputPath: ".kato/test-runtime/session-prefixed-short.md",
+        },
+      },
+      {
+        requestId: "req-stop",
+        requestedAt: "2026-02-22T10:00:02.000Z",
+        command: "stop" as const,
+      },
+    ];
+
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const exportedSessionIds: string[] = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot(input) {
+        exportedSessionIds.push(input.sessionId);
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "2ee6e8b4-1111-2222-3333-444444444444",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "provider-session-42",
+      sourceFilePath: "/tmp/provider-session-42.jsonl",
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const loadedSnapshots: string[] = [];
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionStateStore,
+      loadSessionSnapshot(sessionId: string) {
+        loadedSnapshots.push(sessionId);
+        return Promise.resolve({
+          provider: "codex",
+          events: [makeEvent("m1", "message.assistant", "export me")],
+        });
+      },
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertEquals(loadedSnapshots, [
+      "provider-session-42",
+      "provider-session-42",
+    ]);
+    assertEquals(exportedSessionIds, ["2ee6e8b4", "codex/2ee6e8b4"]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
 Deno.test("runDaemonRuntimeLoop skips export when session snapshot is missing", async () => {
   const statusStore: DaemonStatusSnapshotStoreLike = {
     load() {
@@ -3530,6 +3683,157 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
         recording!.destination
       }`,
     );
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop initializes missing session metadata from default cursor", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-default-cursor-",
+  });
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    let pollCount = 0;
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-default-cursor-1234",
+    });
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-default-cursor",
+            cursor: { kind: "byte-offset", value: 42 },
+            events: [makeEvent("a1", "message.assistant", "assistant-1")],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:01.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-default-cursor",
+      requestedAt: "2026-02-22T10:00:02.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const recordingPipeline: RecordingPipelineLike = {
+      startOrRotateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    const metadata = await sessionStateStore.listSessionMetadata();
+    const session = metadata.find((entry) =>
+      entry.providerSessionId === "session-default-cursor"
+    );
+    assertExists(session);
+    assertEquals(session!.ingestCursor, { kind: "byte-offset", value: 0 });
   } finally {
     await Deno.remove(stateDir, { recursive: true });
   }

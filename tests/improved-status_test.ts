@@ -1,4 +1,9 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import { renderStatusText } from "../apps/daemon/src/cli/commands/status.ts";
@@ -91,6 +96,7 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
+  assertStringIncludes(out, "kato  ·  daemon:");
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -113,7 +119,7 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "● claude/abc123");
+  assertStringIncludes(out, "● claude:");
   assertStringIncludes(out, "how do I configure X");
   assertStringIncludes(out, "/home/user/notes.md");
   assertStringIncludes(out, "recording");
@@ -139,7 +145,7 @@ Deno.test("renderStatusText: stale session hidden by default", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "claude/active");
+  assertStringIncludes(out, "(active)  ·  last message");
   assertEquals(out.includes("codex/stale"), false);
 });
 
@@ -157,8 +163,8 @@ Deno.test("renderStatusText: --all includes stale session with circle marker", (
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "○ codex/stale");
-  assertStringIncludes(out, "(stale)");
+  assertStringIncludes(out, "○ codex:");
+  assertStringIncludes(out, "no active recordings");
 });
 
 Deno.test("renderStatusText: memory summary line present", () => {
@@ -167,8 +173,8 @@ Deno.test("renderStatusText: memory summary line present", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "Memory:");
-  assertStringIncludes(out, "MB budget");
+  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "MB /");
   assertStringIncludes(out, "snapshots");
 });
 
@@ -198,10 +204,54 @@ Deno.test("renderStatusText: sessionCap limits displayed sessions", () => {
     stale: false,
   });
   // Should only mention the 3 most recent (s0, s1, s2)
-  assertStringIncludes(out, "claude/s0");
-  assertStringIncludes(out, "claude/s1");
-  assertStringIncludes(out, "claude/s2");
-  assertEquals(out.includes("claude/s3"), false);
+  assertStringIncludes(out, "(s0)  ·  last message");
+  assertStringIncludes(out, "(s1)  ·  last message");
+  assertStringIncludes(out, "(s2)  ·  last message");
+  assertEquals(out.includes("(s3)  ·  last message"), false);
+});
+
+Deno.test("renderStatusText: narrow width keeps lines within width", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "abc123",
+    snippet:
+      "this is a long snippet that should be truncated when terminal width is very narrow",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: false,
+    recording: {
+      outputPath:
+        "/home/user/really/long/path/to/a/file/that/should/be/truncated/in/narrow/view.md",
+      startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+      lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    },
+  }];
+  const width = 60;
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    terminalWidth: width,
+  });
+  const tooWideLine = out.split("\n").find((line) => line.length > width);
+  assertEquals(tooWideLine, undefined);
+  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "recordings:");
+});
+
+Deno.test("renderStatusText: wide width keeps two-column summary", () => {
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    terminalWidth: 120,
+  });
+  assertStringIncludes(out, "daemon: running");
+  assertStringIncludes(out, "memory:");
+  assert(
+    out.split("\n").some((line) =>
+      line.includes("daemon: running") && line.includes("memory:")
+    ),
+  );
 });
 
 // ─── Web view model ───────────────────────────────────────────────────────────

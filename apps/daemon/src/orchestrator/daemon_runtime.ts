@@ -40,7 +40,10 @@ import type {
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
 import { SessionSnapshotMemoryBudgetExceededError } from "./ingestion_runtime.ts";
-import type { PersistentSessionStateStore } from "./session_state_store.ts";
+import {
+  makeDefaultSessionCursor,
+  type PersistentSessionStateStore,
+} from "./session_state_store.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -527,12 +530,14 @@ async function applyPersistentControlCommandsForEvent(
     try {
       if (canonicalCommand === "start") {
         if (recordingPipeline.validateDestinationPath) {
-          resolvedDestination = await recordingPipeline.validateDestinationPath({
-            provider,
-            sessionId: providerSessionId,
-            targetPath: destination,
-            commandName: "record",
-          });
+          resolvedDestination = await recordingPipeline.validateDestinationPath(
+            {
+              provider,
+              sessionId: providerSessionId,
+              targetPath: destination,
+              commandName: "record",
+            },
+          );
         }
         const recordingId = crypto.randomUUID();
         const nowIso = now().toISOString();
@@ -1023,7 +1028,7 @@ async function processPersistentRecordingUpdates(
         provider,
         providerSessionId,
         sourceFilePath: `[unknown:${provider}:${providerSessionId}]`,
-        initialCursor: snapshot.cursor,
+        initialCursor: makeDefaultSessionCursor(provider),
       }) as SessionMetadataV1;
       metadataBySessionKey.set(sessionKey, metadata);
     }
@@ -1874,7 +1879,9 @@ async function resolveExportSessionLookup(
     ),
   }, {
     kind: "session_id",
-    matches: scopedEntries.filter((entry) => entry.sessionId === parsed.selector),
+    matches: scopedEntries.filter((entry) =>
+      entry.sessionId === parsed.selector
+    ),
   }, {
     kind: "session_id_prefix",
     matches: scopedEntries.filter((entry) =>
@@ -1901,10 +1908,12 @@ async function resolveExportSessionLookup(
   return passthrough;
 }
 
-function formatExportSessionAmbiguousLabel(metadata: SessionMetadataV1): string {
-  return `${metadata.provider}/${metadata.sessionId.slice(0, 8)} (${
-    metadata.providerSessionId
-  })`;
+function formatExportSessionAmbiguousLabel(
+  metadata: SessionMetadataV1,
+): string {
+  return `${metadata.provider}/${
+    metadata.sessionId.slice(0, 8)
+  } (${metadata.providerSessionId})`;
 }
 
 async function warnExportSkipped(

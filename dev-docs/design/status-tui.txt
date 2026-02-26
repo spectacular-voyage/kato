@@ -1,0 +1,27 @@
+kato  ·  daemon: running (pid: 58380)  
+─────────────────────────────────────────────────
+memory: 318 MB / 500 MB  ·  snapshots:  4 MB  ·  ~/.kato disk usage: 57MB 
+recordings: 2 active, 25 stale                 
+─────────────────────────────────────────────────
+Sessions (8 active, 25 stale)
+
+● codex: "From kato status I see not much" (2ee6e8b4)  ·  last message 18m ago
+  no active recordings · 
+
+● claude: "OK, Codex has completed most of the work. Can you review pl…" (4a04b971)  ·  last message 3h 2m ago
+   ● recording (2ee6e8b4) -> /home/djradon/hub/spectac...s/notes/conv.2026.2026-02-25_2106-persistence-sidekick-claude.md
+      started 2h ago · last write 17m ago
+   ○ recording (4a04b971) -> /home/djradon/hub/conv.2026.2026-02-25_2102-test.md
+      started 3h ago · last write 2m ago
+
+─────────────────────────────────────────────────
+
+Exports (2 succeeded, 1 pending, 1 failed)
+● (2ee6e8b4) -> /home/djradon/hub/spectac...s/notes/conv.2026.2026-02-25_2106-persistence-sidekick-claude.md
+○ (2ee6e8b4) -> /home/djradon/hub/spectac...s/notes/conv.2026.2026-02-25_2106-persistence-sidekick-claude.md
+
+─────────────────────────────────────────────────
+
+Errors/Warnings
+⚠ 5 min ago: "Export request skipped because session snapshot was not found", "sessionId":"2ee6e8b4"
+☢ 8 min ago: "Daemon crashed"

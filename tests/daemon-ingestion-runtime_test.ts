@@ -18,6 +18,23 @@ function makeEvent(
   } as unknown as ConversationEvent;
 }
 
+function makeUserEvent(
+  id: string,
+  timestamp: string,
+  content: string,
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "test",
+    sessionId: "session-a",
+    timestamp,
+    kind: "message.user",
+    role: "user",
+    content,
+    source: { providerEventType: "user", providerEventId: id },
+  } as unknown as ConversationEvent;
+}
+
 Deno.test("InMemorySessionSnapshotStore upserts and returns isolated snapshots", () => {
   const store = new InMemorySessionSnapshotStore({
     now: () => new Date("2026-02-22T19:22:00.000Z"),
@@ -96,6 +113,41 @@ Deno.test("InMemorySessionSnapshotStore enforces bounded event windows", () => {
     truncatedEvents: 1,
     lastEventAt: "2026-02-22T19:29:00.000Z",
   });
+});
+
+Deno.test("InMemorySessionSnapshotStore keeps first user snippet when early events are truncated", () => {
+  const store = new InMemorySessionSnapshotStore({
+    retention: {
+      maxSessions: 10,
+      maxEventsPerSession: 2,
+    },
+    now: () => new Date("2026-02-22T19:30:00.000Z"),
+  });
+
+  const first = store.upsert({
+    provider: "claude",
+    sessionId: "session-window-snippet",
+    cursor: { kind: "item-index", value: 3 },
+    events: [
+      makeUserEvent("u1", "2026-02-22T19:27:00.000Z", "first user message"),
+      makeEvent("a1", "2026-02-22T19:28:00.000Z"),
+      makeEvent("a2", "2026-02-22T19:29:00.000Z"),
+    ],
+  });
+  assertEquals(first.metadata.snippet, "first user message");
+  assertEquals(first.events.map((event) => event.eventId), ["a1", "a2"]);
+
+  const second = store.upsert({
+    provider: "claude",
+    sessionId: "session-window-snippet",
+    cursor: { kind: "item-index", value: 4 },
+    events: [
+      makeEvent("a2", "2026-02-22T19:29:00.000Z"),
+      makeEvent("a3", "2026-02-22T19:30:00.000Z"),
+    ],
+  });
+
+  assertEquals(second.metadata.snippet, "first user message");
 });
 
 Deno.test("InMemorySessionSnapshotStore omits lastEventAt for empty event lists", () => {

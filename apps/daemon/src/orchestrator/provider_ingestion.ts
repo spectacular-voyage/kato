@@ -969,8 +969,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             provider: this.provider,
             providerSessionId: sessionId,
             sourceFilePath: session.filePath,
-            initialCursor: this.cursors.get(sessionId) ??
-              makeDefaultSessionCursor(this.provider),
+            // Always initialize new metadata from the start of the source.
+            // This keeps snippet/history anchored to the first user message in
+            // the provider session instead of a late in-memory cursor.
+            initialCursor: makeDefaultSessionCursor(this.provider),
           },
         );
         this.failedClosedSessions.delete(`${this.provider}:${sessionId}`);
@@ -1250,14 +1252,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
           // appendTwinEvents persists authoritative sequence/fingerprint state;
           // reload metadata so cursor/mtime saves below do not clobber it.
-          stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
-            {
-              provider: this.provider,
-              providerSessionId: sessionId,
-              sourceFilePath: session.filePath,
-              initialCursor: stateMetadata.ingestCursor,
-            },
-          );
+          stateMetadata = await this.sessionStateStore
+            .getOrCreateSessionMetadata(
+              {
+                provider: this.provider,
+                providerSessionId: sessionId,
+                sourceFilePath: session.filePath,
+                initialCursor: stateMetadata.ingestCursor,
+              },
+            );
 
           fromOffset = resolveCursorPosition(bootstrapCursor);
           existingCursor = bootstrapCursor;
@@ -1359,12 +1362,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       if (shouldAppendTwin && incomingEvents.length > 0) {
         // appendTwinEvents updates metadata (nextTwinSeq/recentFingerprints);
         // reload before saving ingestion cursor fields.
-        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata({
-          provider: this.provider,
-          providerSessionId: sessionId,
-          sourceFilePath: session.filePath,
-          initialCursor: latestCursor,
-        });
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+          {
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sourceFilePath: session.filePath,
+            initialCursor: latestCursor,
+          },
+        );
       }
 
       let anchorChanged = false;

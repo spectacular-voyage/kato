@@ -409,10 +409,6 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
 
       const secondSnapshot = secondStore.get("session-bootstrap");
       assertExists(secondSnapshot);
-      console.log("debug-second-snapshot", {
-        parseOffsets,
-        eventCount: secondSnapshot.events.length,
-      });
       assertEquals(secondSnapshot.events.length, 2);
       assertEquals(
         secondSnapshot.events.map((event) =>
@@ -427,26 +423,22 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
         now: () => new Date("2026-02-26T10:00:00.000Z"),
         makeSessionId: () => "session-uuid-bootstrap-1",
       });
-      const updatedMetadata = await reloadedStateStore.getOrCreateSessionMetadata({
-        provider: "test-provider",
-        providerSessionId: "session-bootstrap",
-        sourceFilePath: sessionFile,
-        initialCursor: { kind: "byte-offset", value: 0 },
-      });
-      console.log("debug-metadata", {
-        ingestCursor: updatedMetadata.ingestCursor,
-        nextTwinSeq: updatedMetadata.nextTwinSeq,
-      });
+      const updatedMetadata = await reloadedStateStore
+        .getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-bootstrap",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
       assertEquals(updatedMetadata.ingestCursor, {
         kind: "byte-offset",
         value: 20,
       });
       assertEquals(updatedMetadata.nextTwinSeq, 3);
 
-      const twinEvents = await reloadedStateStore.readTwinEvents(updatedMetadata, 1);
-      console.log(
-        "debug-twin",
-        twinEvents.map((event) => ({ seq: event.seq, payload: event.payload })),
+      const twinEvents = await reloadedStateStore.readTwinEvents(
+        updatedMetadata,
+        1,
       );
       assertEquals(twinEvents.map((event) => event.seq), [1, 2]);
       assertEquals(

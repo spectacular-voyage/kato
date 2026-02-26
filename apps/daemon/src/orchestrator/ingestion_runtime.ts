@@ -205,6 +205,7 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
   upsert(input: SessionSnapshotUpsert): RuntimeSessionSnapshot {
     const provider = requireNonEmpty(input.provider, "provider");
     const sessionId = requireNonEmpty(input.sessionId, "sessionId");
+    const previousSnippet = this.snapshots.get(sessionId)?.metadata.snippet;
     const retainedEvents = input.events.slice(
       -this.retention.maxEventsPerSession,
     );
@@ -214,7 +215,10 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     );
     const updatedAt = this.now().toISOString();
     const lastEventAt = readLastEventAt(retainedEvents);
-    const snippet = extractSnippet(retainedEvents);
+    // Keep snippet stable for the life of the session.
+    // Prefer previously discovered first-user snippet, otherwise derive from
+    // the full event stream (not just retained tail events).
+    const snippet = previousSnippet ?? extractSnippet(input.events);
 
     const snapshot: RuntimeSessionSnapshot = {
       provider,
