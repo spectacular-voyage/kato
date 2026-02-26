@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { ConversationEvent } from "@kato/shared";
+import type { ConversationEvent, DaemonSessionStatus } from "@kato/shared";
 import {
   DEFAULT_STATUS_STALE_AFTER_MS,
   extractSnippet,
@@ -180,7 +180,7 @@ Deno.test("projectSessionStatus marks old session as stale", () => {
 // ─── filterSessionsForDisplay ─────────────────────────────────────────────────
 
 Deno.test("filterSessionsForDisplay excludes stale when includeStale=false", () => {
-  const sessions = [
+  const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
       sessionId: "a",
@@ -194,7 +194,7 @@ Deno.test("filterSessionsForDisplay excludes stale when includeStale=false", () 
       updatedAt: "2026-02-24T09:00:00.000Z",
     },
   ];
-  const result = filterSessionsForDisplay(sessions as never, {
+  const result = filterSessionsForDisplay(sessions, {
     includeStale: false,
   });
   assertEquals(result.length, 1);
@@ -202,7 +202,7 @@ Deno.test("filterSessionsForDisplay excludes stale when includeStale=false", () 
 });
 
 Deno.test("filterSessionsForDisplay includes stale when includeStale=true", () => {
-  const sessions = [
+  const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
       sessionId: "a",
@@ -216,14 +216,14 @@ Deno.test("filterSessionsForDisplay includes stale when includeStale=true", () =
       updatedAt: "2026-02-24T09:00:00.000Z",
     },
   ];
-  const result = filterSessionsForDisplay(sessions as never, {
+  const result = filterSessionsForDisplay(sessions, {
     includeStale: true,
   });
   assertEquals(result.length, 2);
 });
 
 Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
-  const sessions = [
+  const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
       sessionId: "older",
@@ -237,7 +237,7 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
       updatedAt: "2026-02-24T10:00:00.000Z",
     },
   ];
-  const result = filterSessionsForDisplay(sessions as never, {
+  const result = filterSessionsForDisplay(sessions, {
     includeStale: true,
   });
   assertEquals(result[0].sessionId, "newer");
@@ -247,7 +247,7 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
 // ─── sortSessionsByRecency ────────────────────────────────────────────────────
 
 Deno.test("sortSessionsByRecency uses lastWriteAt over updatedAt", () => {
-  const sessions = [
+  const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
       sessionId: "no-rec",
@@ -266,6 +266,6 @@ Deno.test("sortSessionsByRecency uses lastWriteAt over updatedAt", () => {
       },
     },
   ];
-  const result = sortSessionsByRecency(sessions as never);
+  const result = sortSessionsByRecency(sessions);
   assertEquals(result[0].sessionId, "with-rec");
 });

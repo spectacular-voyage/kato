@@ -329,6 +329,73 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
   });
 });
 
+Deno.test("FileProviderIngestionRunner resets persisted cursor when source file path changes", async () => {
+  await withTempDir("provider-ingestion-source-change-", async (dir) => {
+    const sessionFileA = join(dir, "session-source-a.jsonl");
+    const sessionFileB = join(dir, "session-source-b.jsonl");
+    await Deno.writeTextFile(sessionFileA, "placeholder-a\n");
+    await Deno.writeTextFile(sessionFileB, "placeholder-b\n");
+    const stateRoot = join(dir, ".kato");
+    const parseOffsets: number[] = [];
+
+    function makeRunner(
+      filePath: string,
+      store: InMemorySessionSnapshotStore,
+    ): FileProviderIngestionRunner {
+      return new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        sessionStateStore: new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-source-change-uuid",
+        }),
+        autoGenerateSnapshots: true,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-source-change",
+            filePath,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          currentFilePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          parseOffsets.push(fromOffset);
+          return (async function* () {
+            if (fromOffset === 0) {
+              yield {
+                event: makeEvent(
+                  `source:${currentFilePath}:offset:0`,
+                  "2026-02-26T10:00:00.000Z",
+                ),
+                cursor: { kind: "byte-offset" as const, value: 10 },
+              };
+            }
+          })();
+        },
+      });
+    }
+
+    const firstStore = new InMemorySessionSnapshotStore();
+    const firstRunner = makeRunner(sessionFileA, firstStore);
+    await firstRunner.start();
+    await firstRunner.poll();
+    await firstRunner.stop();
+
+    const secondStore = new InMemorySessionSnapshotStore();
+    const secondRunner = makeRunner(sessionFileB, secondStore);
+    await secondRunner.start();
+    await secondRunner.poll();
+    await secondRunner.stop();
+
+    assertEquals(parseOffsets, [0, 0]);
+  });
+});
+
 Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file is missing", async () => {
   await withTempDir(
     "provider-ingestion-bootstrap-missing-twin-",

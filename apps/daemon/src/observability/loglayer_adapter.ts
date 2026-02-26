@@ -103,7 +103,7 @@ class NpmLogLayerChannel implements LogLayerChannelLike {
   private readonly parity: JsonlParityLogLayerChannel;
   private readonly pendingRecords: LogRecord[] = [];
   private shipCount = 0;
-  private readonly logger:
+  private logger:
     | {
       debug?: (message: string) => Promise<void> | void;
       info?: (message: string) => Promise<void> | void;
@@ -165,7 +165,8 @@ class NpmLogLayerChannel implements LogLayerChannelLike {
       }
     }
 
-    return new NpmLogLayerChannel(options, logger);
+    channel.logger = logger;
+    return channel;
   }
 
   async log(entry: LogLayerEntry): Promise<void> {

@@ -2,7 +2,7 @@
 id: 6pmb02qfq64qkypl9wbw1wz
 title: 2026 02 25 Coderabbit Persistence Review
 desc: ''
-updated: 1772091896178
+updated: 1772098289448
 created: 1772090825327
 ---
 
@@ -186,3 +186,164 @@ provider_ingestion.ts large hydrate extraction: refactor-only, no correctness/se
 session_state_store.ts warning/strict fallback for missing home dir: changes function contract/noise without clear runtime gain.
 recording_pipeline.ts making appendToDestination required: optionality is currently used intentionally for compatibility/fallback handling.
 Color commentary: I added a focused validateDestinationPath hook in the recording pipeline so persistent ::start can validate/canonicalize destination before mutating metadata, which addresses the real bug without forcing broader interface churn.
+
+---
+
+CodeRabbit follow-up (2026-02-26):
+
+Inline comments:
+
+In `@apps/daemon/src/observability/loglayer_adapter.ts`:
+- [x] Around line 130-169: transport closure captured one channel instance while create() returned another; reused the same channel instance and attached the logger to it before returning.
+
+In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
+- [x] Around line 1563-1568: replaced per-tick `listSessionMetadata()` status reads with cached summary metadata plus configurable refresh interval (`sessionMetadataRefreshIntervalMs`) and dirty invalidation.
+
+In `@apps/daemon/src/orchestrator/provider_ingestion.ts`:
+- [x] Around line 1007-1014 and analogous replacement-file path flow: reset resume cursor when persisted/source-tracked path differs from current file path, and clear stale in-memory cursor source bindings on file replacement.
+- [x] Around line 338-346: `statModifiedAtMs` now treats `Deno.errors.NotFound` as benign and returns `0`.
+
+In `@apps/daemon/src/orchestrator/session_state_store.ts`:
+- [x] Around line 503-544: `rebuildDaemonControlIndex` now updates `this.daemonIndexCache` with rebuilt data.
+
+In `@tests/improved-status_test.ts`:
+- [x] Around line 9-48: replaced early-return intent guards with explicit assertions that fail on wrong intent shape.
+
+In `@tests/session-state-store_test.ts`:
+- [x] Line 1: removed unused `assert` import.
+
+Duplicate comments:
+
+In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
+- [c] Around line 525-543: already fixed in current code; destination validation occurs before metadata mutation/open period in start branch.
+- [c] Around line 591-617: already fixed in current code; applied-log emission is gated by `commandApplied`, and stop sets it from `stopped`.
+
+In `@apps/daemon/src/orchestrator/session_twin_mapper.ts`:
+- [x] Around line 340-344: corrected reconstructed `ConversationEvent.sessionId` to use twin `event.session.sessionId`.
+
+In `@tests/session-state-store_test.ts`:
+- [c] Around line 93-95: already fixed in current code; test already uses a fresh `PersistentSessionStateStore` for cold index rebuild load.
+
+Nitpick comments:
+
+In `@apps/daemon/src/config/runtime_config.ts`:
+- [x] Around line 172-174: removed redundant `expandHome` wrapper and switched call sites to `expandHomePath`.
+
+In `@apps/daemon/src/main.ts`:
+- [x] Around line 148-157: added explicit `runtimeConfig.katoDir` support and use it for daemon control/sessions paths, with fallback to `dirname(runtimeConfig.runtimeDir)` when omitted.
+
+In `@tests/status-projection_test.ts`:
+- [x] Around line 197-270: replaced `as never` casts with explicit `DaemonSessionStatus[]` fixtures.
+
+
+## more coderabbitting
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/daemon/src/cli/commands/status.ts`:
+- [x] Around line 306-308: The SIGINT listener added with Deno.addSignalListener in
+runLiveMode is never removed, causing listeners to accumulate across calls;
+update runLiveMode to store the listener callback (the function that sets
+shouldExit = true) so you can call Deno.removeSignalListener with that same
+callback in the finally block (or unregister the listener there) to ensure the
+listener is removed when runLiveMode exits and prevent multiple listeners from
+stacking; reference Deno.addSignalListener, shouldExit, runLiveMode, and
+Deno.removeSignalListener when making the change.
+
+In `@dev-docs/notes/completed.2026.2026-02-25-persistent-state.md`:
+- [x] Line 118: The committed note contains an absolute local path in the capture
+directive ("::capture
+/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-25-persistent-state.md");
+replace that absolute path with a repo-relative path or a placeholder (e.g.
+"::capture dev-docs/notes/task.2026.2026-02-25-persistent-state.md" or
+"::capture {{REPO_ROOT}}/dev-docs/...") so no user-local filesystem paths are
+committed, and update the string in the file where the "::capture
+/home/djradon/..." token appears.
+
+
+In `@tests/daemon-cli_test.ts`:
+- [x] Around line 320-329: The test for parseDaemonCliArgs should not silently
+return on unexpected types; replace the early "if (parsed.kind !== 'command') {
+return; }" and "if (parsed.command.name !== 'clean') { return; }" with explicit
+assertions/failures so test fails on mismatch—e.g., assertEquals(parsed.kind,
+"command") already present, so remove the first guard and similarly remove the
+second guard and replace with an assertion that parsed.command.name === "clean"
+(or call a test-failure helper) to ensure parseDaemonCliArgs and
+parsed.command.name are validated explicitly.
+- [x] Around line 954-962: The launch callback passed into makeDaemonLauncher is
+unnecessarily marked async (it contains no await), causing the linter warning;
+remove the async keyword from the anonymous function so it becomes a synchronous
+callback (i.e., change the argument to makeDaemonLauncher(...) to a plain () =>
+{ ... }), leaving the body that updates
+currentStatus/daemonRunning/daemonPid/heartbeatAt/generateAt untouched; this
+matches the onLaunch type (() => Promise<void> | void) and resolves the linter
+complaint.
+
+---
+
+Duplicate comments:
+In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
+- [c] Around line 1680-1685: The code currently calls
+sessionStateStore.listSessionMetadata() every poll tick which causes expensive
+disk-backed scans; change the logic in the daemon runtime so the expensive
+listSessionMetadata() is not called on every loop: introduce a
+cachedSummaryMetadata that is refreshed on a timer or via a store change/watch
+hook and use that cached value inside the loop, falling back to
+recordingPipeline.listActiveRecordings() only when no cached metadata is
+available; update the logic around sessionStateStore.listSessionMetadata(),
+toActiveRecordingsFromMetadata, and recordingPipeline.listActiveRecordings() to
+read from the cache instead of calling listSessionMetadata() directly each
+iteration.
+
+In `@apps/daemon/src/orchestrator/provider_ingestion.ts`:
+- [c] Around line 337-346: The statModifiedAtMs function currently rethrows when
+Deno.stat fails if the file was removed between walk and stat; update
+statModifiedAtMs to catch Deno.errors.NotFound (in addition to PermissionDenied)
+and treat it as a transient missing file by returning 0 (so discovery skips it)
+while preserving the existing behavior of throwing
+ProviderIngestionReadDeniedError for PermissionDenied and rethrowing other
+errors; reference the statModifiedAtMs function, Deno.stat call,
+Deno.errors.NotFound, and ProviderIngestionReadDeniedError when making the
+change.
+- [c] Around line 1009-1016: The resume logic currently prefers the persisted cursor
+(existingCursor from stateMetadata) even when the persisted metadata refers to a
+different source file; update the logic so that if stateMetadata exists but its
+sourceFilePath differs from the current session's source file path, you treat it
+as not usable: ignore stateMetadata (reset existingCursor), set resumeSource to
+"memory" or "default" accordingly, and then compute fromOffset via
+resolveCursorPosition(existingCursor). Concretely, add a check comparing
+stateMetadata.sourceFilePath to the current source file path (e.g.,
+session.sourceFilePath or equivalent), and if they differ clear existingCursor
+and adjust resumeSource before calling resolveCursorPosition.
+
+In `@apps/daemon/src/orchestrator/session_state_store.ts`:
+- [c] Around line 543-550: The rebuilt DaemonControlIndexV1 is written and returned
+by rebuildDaemonControlIndex but the in-memory cache this.daemonIndexCache is
+not updated, allowing callers to read stale data; after creating the rebuilt
+object and successfully calling writeJsonAtomically, assign
+this.daemonIndexCache = rebuilt (using the same rebuilt object so updatedAt
+remains consistent) before returning from rebuildDaemonControlIndex to ensure
+the in-memory cache matches the persisted index.
+
+In `@dev-docs/notes/completed.2026.2026-02-25-persistent-state.md`:
+- [x] Line 67: Fix the typos in the note text by replacing the misspelled tokens
+"alll" with "all" and "recordsings" with "recordings" wherever they appear (the
+context mentions autoGenerateSnapshots and session-state generation), and run a
+quick spellcheck across the same document to catch any other similar typos so
+wording remains consistent.
+
+In `@tests/improved-status_test.ts`:
+- [c] Around line 14-53: The tests currently early-return when the parsed intent
+shape doesn't match (using `if (intent.kind !== "command" || intent.command.name
+!== "status") return;`), which can hide parser regressions; update each affected
+test to assert the shape explicitly instead of returning early—use assertions
+like `assertEquals(intent.kind, "command")` and
+`assertEquals(intent.command.name, "status")` (or `fail()` after a missing
+shape) before checking `intent.command.*` fields so failures surface
+immediately; update the tests that call `parseDaemonCliArgs` (the Deno.test
+blocks for "status" variants) to replace the conditional-return with explicit
+assertions for `intent.kind` and `intent.command.name` and then proceed to
+assert `all`, `live`, and `asJson` or use `assertThrows` where appropriate.
+
+---

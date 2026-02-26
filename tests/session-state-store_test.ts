@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { join } from "@std/path";
 import type { SessionTwinEventV1 } from "@kato/shared";
 import {

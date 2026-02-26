@@ -169,10 +169,6 @@ function parseRuntimeLoggingConfig(
   return resolved;
 }
 
-function expandHome(path: string): string {
-  return expandHomePath(path);
-}
-
 function collapseHome(path: string): string {
   const home = resolveHomeDir();
   if (!home) {
@@ -197,7 +193,7 @@ function normalizeRoots(paths: string[]): string[] {
     if (!isNonEmptyString(path)) {
       continue;
     }
-    deduped.add(expandHome(path.trim()));
+    deduped.add(expandHomePath(path.trim()));
   }
   return Array.from(deduped);
 }
@@ -360,9 +356,19 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   ) {
     return undefined;
   }
-  const runtimeDir = expandHome(value["runtimeDir"]);
-  const statusPath = expandHome(value["statusPath"]);
-  const controlPath = expandHome(value["controlPath"]);
+  const runtimeDir = expandHomePath(value["runtimeDir"]);
+  let katoDir = dirname(runtimeDir);
+  if ("katoDir" in value && value["katoDir"] !== undefined) {
+    if (
+      typeof value["katoDir"] !== "string" ||
+      value["katoDir"].length === 0
+    ) {
+      return undefined;
+    }
+    katoDir = expandHomePath(value["katoDir"]);
+  }
+  const statusPath = expandHomePath(value["statusPath"]);
+  const controlPath = expandHomePath(value["controlPath"]);
   const allowedWriteRoots = value["allowedWriteRoots"];
   if (
     !Array.isArray(allowedWriteRoots) ||
@@ -420,9 +426,10 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
     runtimeDir,
+    katoDir,
     statusPath,
     controlPath,
-    allowedWriteRoots: allowedWriteRoots.map((root) => expandHome(root)),
+    allowedWriteRoots: allowedWriteRoots.map((root) => expandHomePath(root)),
     providerSessionRoots,
     globalAutoGenerateSnapshots,
     providerAutoGenerateSnapshots,
@@ -447,6 +454,7 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
   return {
     schemaVersion: config.schemaVersion,
     runtimeDir: config.runtimeDir,
+    ...(config.katoDir ? { katoDir: config.katoDir } : {}),
     statusPath: config.statusPath,
     controlPath: config.controlPath,
     allowedWriteRoots: [...config.allowedWriteRoots],
@@ -471,6 +479,7 @@ export function resolveDefaultConfigPath(runtimeDir: string): string {
 
 export function createDefaultRuntimeConfig(options: {
   runtimeDir: string;
+  katoDir?: string;
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
@@ -545,6 +554,7 @@ export function createDefaultRuntimeConfig(options: {
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
     runtimeDir: serializePath(options.runtimeDir),
+    katoDir: serializePath(options.katoDir ?? dirname(options.runtimeDir)),
     statusPath: serializePath(options.statusPath),
     controlPath: serializePath(options.controlPath),
     allowedWriteRoots: options.allowedWriteRoots.map((root) =>

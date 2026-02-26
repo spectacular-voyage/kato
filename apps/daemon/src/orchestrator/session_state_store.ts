@@ -546,6 +546,7 @@ export class PersistentSessionStateStore {
       sessions,
     };
     await writeJsonAtomically(this.daemonControlIndexPath, rebuilt);
+    this.daemonIndexCache = rebuilt;
     return rebuilt;
   }
 

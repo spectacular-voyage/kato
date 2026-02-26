@@ -340,7 +340,7 @@ export function mapTwinEventsToConversation(
     const common = {
       eventId: makeEventId(event),
       provider: event.session.provider,
-      sessionId: event.session.providerSessionId,
+      sessionId: event.session.sessionId,
       timestamp: readTimestamp(event),
       ...(event.turnId ? { turnId: event.turnId } : {}),
       source: {

@@ -321,11 +321,11 @@ Deno.test("cli parser accepts clean --logs", () => {
   const parsed = parseDaemonCliArgs(["clean", "--logs"]);
   assertEquals(parsed.kind, "command");
   if (parsed.kind !== "command") {
-    return;
+    throw new Error("expected command intent");
   }
   assertEquals(parsed.command.name, "clean");
   if (parsed.command.name !== "clean") {
-    return;
+    throw new Error("expected clean command");
   }
   assertEquals(parsed.command.all, true);
   assertEquals(parsed.command.dryRun, false);
@@ -951,7 +951,7 @@ Deno.test("runDaemonCli restart queues stop and then starts daemon when running"
   const runtimeDir = ".kato/test-runtime";
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
-  const daemonLauncher = makeDaemonLauncher(31337, async () => {
+  const daemonLauncher = makeDaemonLauncher(31337, () => {
     currentStatus = {
       ...currentStatus,
       daemonRunning: true,

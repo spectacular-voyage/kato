@@ -1,14 +1,13 @@
 {
-	"folders": [
-		{
-			"path": "."
-		},
-		{
-			"path": "stenobot"
-		}
-	],
-	"settings": {
-		"deno.enable": true,
-		"deno.unstable": true
-	}
+  "folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": "stenobot"
+    }
+  ],
+  "settings": {
+    "deno.enable": true
+  }
 }

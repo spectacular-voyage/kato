@@ -311,3 +311,52 @@ Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", 
     }
   }
 });
+
+Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state paths", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const rootDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-main-katodir-",
+  });
+
+  try {
+    const runtimeDir = join(rootDir, "runtime");
+    const explicitKatoDir = join(rootDir, "state-root");
+    const config = makeRuntimeConfig(runtimeDir);
+    config.katoDir = explicitKatoDir;
+    const configStore: RuntimeConfigStoreLike = {
+      load() {
+        return Promise.resolve(config);
+      },
+      ensureInitialized() {
+        throw new Error("not used");
+      },
+    };
+
+    const observedMetadataPaths: string[] = [];
+    const exitCode = await runDaemonSubprocess({
+      configStore,
+      runtimeLoop(options = {}) {
+        const store = options.sessionStateStore;
+        if (!store) {
+          throw new Error("sessionStateStore should be defined");
+        }
+        const location = store.resolveLocation({
+          provider: "codex",
+          providerSessionId: "session-1",
+        });
+        observedMetadataPaths.push(location.metadataPath);
+        return Promise.resolve();
+      },
+    });
+
+    assertEquals(exitCode, 0);
+    assertEquals(observedMetadataPaths.length, 1);
+    assertEquals(
+      observedMetadataPaths[0]?.startsWith(join(explicitKatoDir, "sessions")),
+      true,
+    );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});

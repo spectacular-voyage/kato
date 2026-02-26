@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
   createDefaultRuntimeFeatureFlags,
@@ -105,6 +105,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
       resolveDefaultProviderSessionRoots(),
     );
     assertEquals(loaded.logging, createDefaultRuntimeLoggingConfig());
+    assertEquals(loaded.katoDir, dirname(runtimeDir));
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
@@ -437,6 +438,29 @@ Deno.test("createDefaultRuntimeConfig accepts logging overrides", () => {
     operationalLevel: "debug",
     auditLevel: "warn",
   });
+});
+
+Deno.test("createDefaultRuntimeConfig derives katoDir from runtimeDir", () => {
+  const config = createDefaultRuntimeConfig({
+    runtimeDir: ".kato/runtime",
+    statusPath: ".kato/runtime/status.json",
+    controlPath: ".kato/runtime/control.json",
+    allowedWriteRoots: [".kato"],
+  });
+
+  assertEquals(config.katoDir, ".kato");
+});
+
+Deno.test("createDefaultRuntimeConfig accepts explicit katoDir override", () => {
+  const config = createDefaultRuntimeConfig({
+    runtimeDir: ".kato/runtime",
+    katoDir: ".kato-explicit",
+    statusPath: ".kato/runtime/status.json",
+    controlPath: ".kato/runtime/control.json",
+    allowedWriteRoots: [".kato"],
+  });
+
+  assertEquals(config.katoDir, ".kato-explicit");
 });
 
 Deno.test("createDefaultRuntimeConfig reads logging env overrides", () => {

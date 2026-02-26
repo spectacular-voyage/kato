@@ -339,6 +339,9 @@ async function statModifiedAtMs(path: string): Promise<number> {
     const stat = await Deno.stat(path);
     return stat.mtime?.getTime() ?? 0;
   } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return 0;
+    }
     if (error instanceof Deno.errors.PermissionDenied) {
       throw new ProviderIngestionReadDeniedError("stat", path, error);
     }
@@ -664,6 +667,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly sessionByFilePath = new Map<string, string>();
   private readonly dirtySessions = new Set<string>();
   private readonly cursors = new Map<string, ProviderCursor>();
+  private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
@@ -892,6 +896,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.sessionByFilePath.set(session.filePath, session.sessionId);
         if (current && current.filePath !== session.filePath) {
           this.sessionByFilePath.delete(current.filePath);
+          this.cursors.delete(session.sessionId);
+          this.cursorSourcePaths.delete(session.sessionId);
         }
         this.dirtySessions.add(session.sessionId);
       }
@@ -901,6 +907,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       if (!activeSessionIds.has(sessionId)) {
         this.sessions.delete(sessionId);
         this.sessionByFilePath.delete(existing.filePath);
+        this.cursors.delete(sessionId);
+        this.cursorSourcePaths.delete(sessionId);
       }
     }
 
@@ -956,6 +964,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     return Array.from(bySessionId.values());
   }
 
+  private setCursor(
+    sessionId: string,
+    cursor: ProviderCursor,
+    sourceFilePath: string,
+  ): void {
+    this.cursors.set(sessionId, cursor);
+    this.cursorSourcePaths.set(sessionId, sourceFilePath);
+  }
+
   private async ingestSession(sessionId: string): Promise<IngestSessionResult> {
     const session = this.sessions.get(sessionId);
     if (!session) return { updated: false, eventsObserved: 0 };
@@ -1006,13 +1023,33 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
     }
 
+    const memoryCursor = this.cursors.get(sessionId);
     let existingCursor = stateMetadata?.ingestCursor ??
-      this.cursors.get(sessionId);
-    const resumeSource = stateMetadata
+      memoryCursor;
+    let resumeSource: "persisted" | "memory" | "default" = stateMetadata
       ? "persisted"
-      : this.cursors.has(sessionId)
+      : memoryCursor
       ? "memory"
       : "default";
+    if (
+      stateMetadata?.sourceFilePath &&
+      stateMetadata.sourceFilePath !== session.filePath
+    ) {
+      existingCursor = undefined;
+      resumeSource = "persisted";
+      this.cursors.delete(sessionId);
+      this.cursorSourcePaths.delete(sessionId);
+    } else if (
+      !stateMetadata &&
+      memoryCursor &&
+      this.cursorSourcePaths.has(sessionId) &&
+      this.cursorSourcePaths.get(sessionId) !== session.filePath
+    ) {
+      existingCursor = undefined;
+      resumeSource = "default";
+      this.cursors.delete(sessionId);
+      this.cursorSourcePaths.delete(sessionId);
+    }
     let fromOffset = resolveCursorPosition(existingCursor);
     let fileStat: Deno.FileInfo;
     try {
@@ -1032,7 +1069,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       if (fromOffset > fileSize) {
         fromOffset = 0;
         existingCursor = makeByteOffsetCursor(0);
-        this.cursors.set(sessionId, existingCursor);
+        this.setCursor(sessionId, existingCursor, session.filePath);
         if (stateMetadata) {
           stateMetadata.ingestCursor = existingCursor;
         }
@@ -1105,7 +1142,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             fromOffset = 0;
             existingCursor = makeItemIndexCursor(0);
             stateMetadata.ingestCursor = existingCursor;
-            this.cursors.set(sessionId, existingCursor);
+            this.setCursor(sessionId, existingCursor, session.filePath);
             replayedFromStart = true;
             await this.operationalLogger.warn(
               "provider.ingestion.anchor.not_found",
@@ -1124,7 +1161,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               fromOffset = realignedOffset;
               existingCursor = makeItemIndexCursor(realignedOffset);
               stateMetadata.ingestCursor = existingCursor;
-              this.cursors.set(sessionId, existingCursor);
+              this.setCursor(sessionId, existingCursor, session.filePath);
               await this.operationalLogger.warn(
                 "provider.ingestion.anchor.realigned",
                 "Gemini anchor mismatch resolved by re-aligning cursor",
@@ -1268,7 +1305,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           stateMetadata.lastObservedMtimeMs = fileStat.mtime?.getTime();
           stateMetadata.sourceFilePath = session.filePath;
           await this.sessionStateStore.saveSessionMetadata(stateMetadata);
-          this.cursors.set(sessionId, bootstrapCursor);
+          this.setCursor(sessionId, bootstrapCursor, session.filePath);
         }
       }
     }
@@ -1506,7 +1543,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         }
       }
 
-      this.cursors.set(sessionId, latestCursor);
+      this.setCursor(sessionId, latestCursor, session.filePath);
       return {
         updated: shouldHydrateSnapshot || latestOffset !== fromOffset,
         eventsObserved: incomingEvents.length,
@@ -1542,7 +1579,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       events: merged.mergedEvents,
       fileModifiedAtMs,
     });
-    this.cursors.set(sessionId, latestCursor);
+    this.setCursor(sessionId, latestCursor, session.filePath);
 
     return { updated: true, eventsObserved: incomingEvents.length };
   }

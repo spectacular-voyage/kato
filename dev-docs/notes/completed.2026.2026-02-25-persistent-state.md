@@ -64,7 +64,7 @@ We should process session state generation in order of reverse mtime? and only c
 
 Any other questions?
 
-reprocessing of session states should be manual. There's a question of which sessions should be processed. Probably not all, but if we don't process all codex states as they happen, we won't have any basis for accurate timestamping if we decide to record later. I guess we can set a preference per-provider-session-root (autoGenerateSnapshots) of whether to generate session state for alll conversations. So we'll need an updated config schema. 
+reprocessing of session states should be manual. There's a question of which sessions should be processed. Probably not all, but if we don't process all codex states as they happen, we won't have any basis for accurate timestamping if we decide to record later. I guess we can set a preference per-provider-session-root (autoGenerateSnapshots) of whether to generate session state for all conversations. So we'll need an updated config schema. 
 
 We don't need to worry about backwards compatibility. 
 
@@ -115,9 +115,9 @@ Which of these would you like to lock down first?
 
 Let's discuss. 
 
-::capture /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-25-persistent-state.md
+::capture dev-docs/notes/task.2026.2026-02-25-persistent-state.md
 
-1. Maybe we want both a daemon-level control state and per-session? Session control states could keep track of multiple recordings. I'd like to support multiple recordsings per session, but it's session->recordings... a recording couldn't have multiple sessions; it's just that a session could have multiple recordings. And then the daemon control state could link to multiple session control states? Separation would be good in the case that we go multi-threaded, to avoid contention over a single file.
+1. Maybe we want both a daemon-level control state and per-session? Session control states could keep track of multiple recordings. I'd like to support multiple recordings per session, but it's session->recordings... a recording couldn't have multiple sessions; it's just that a session could have multiple recordings. And then the daemon control state could link to multiple session control states? Separation would be good in the case that we go multi-threaded, to avoid contention over a single file.
 
 2. I think the kato-specific representation could be jsonl list of events (with timestamps). Session state is created either"
 - when autoGenerateSnapshots is true: daemon detects a file modification

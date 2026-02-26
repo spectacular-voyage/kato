@@ -3303,6 +3303,65 @@ Deno.test("runDaemonRuntimeLoop performs session twin cleanup at shutdown", asyn
   assert(callOrder.includes("cleanup"));
 });
 
+Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh intervals", async () => {
+  let metadataReads = 0;
+  let controlPolls = 0;
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: { activeRecordings: 0, destinations: 0 },
+      });
+    },
+    save(_snapshot) {
+      return Promise.resolve();
+    },
+  };
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      controlPolls += 1;
+      if (controlPolls >= 5) {
+        return Promise.resolve([{
+          requestId: "req-stop-cache-test",
+          requestedAt: "2026-02-22T10:00:00.000Z",
+          command: "stop" as const,
+        }]);
+      }
+      return Promise.resolve([]);
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called");
+    },
+    markProcessed(_requestId: string) {
+      return Promise.resolve();
+    },
+  };
+  const sessionStateStore = {
+    listSessionMetadata() {
+      metadataReads += 1;
+      return Promise.resolve([]);
+    },
+  } as unknown as PersistentSessionStateStore;
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    sessionStateStore,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+    pid: 4242,
+    heartbeatIntervalMs: 1_000,
+    pollIntervalMs: 1,
+    sessionMetadataRefreshIntervalMs: 10_000,
+  });
+
+  assert(controlPolls >= 5);
+  assertEquals(metadataReads, 3);
+});
+
 Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple recordings", async () => {
   await Deno.mkdir(".kato/test-tmp", { recursive: true });
   const stateDir = await Deno.makeTempDir({

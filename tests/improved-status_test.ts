@@ -14,7 +14,11 @@ import { toStatusViewModel } from "../apps/web/src/main.ts";
 Deno.test("cli parser: status --all parses all=true live=false", () => {
   const intent = parseDaemonCliArgs(["status", "--all"]);
   assertEquals(intent.kind, "command");
-  if (intent.kind !== "command" || intent.command.name !== "status") return;
+  if (intent.kind !== "command") throw new Error("expected command intent");
+  assertEquals(intent.command.name, "status");
+  if (intent.command.name !== "status") {
+    throw new Error("expected status command");
+  }
   assertEquals(intent.command.all, true);
   assertEquals(intent.command.live, false);
 });
@@ -22,7 +26,11 @@ Deno.test("cli parser: status --all parses all=true live=false", () => {
 Deno.test("cli parser: status --live parses live=true all=true (implied)", () => {
   const intent = parseDaemonCliArgs(["status", "--live"]);
   assertEquals(intent.kind, "command");
-  if (intent.kind !== "command" || intent.command.name !== "status") return;
+  if (intent.kind !== "command") throw new Error("expected command intent");
+  assertEquals(intent.command.name, "status");
+  if (intent.command.name !== "status") {
+    throw new Error("expected status command");
+  }
   assertEquals(intent.command.live, true);
   assertEquals(intent.command.all, true);
 });
@@ -30,7 +38,11 @@ Deno.test("cli parser: status --live parses live=true all=true (implied)", () =>
 Deno.test("cli parser: status --json --all parses both", () => {
   const intent = parseDaemonCliArgs(["status", "--json", "--all"]);
   assertEquals(intent.kind, "command");
-  if (intent.kind !== "command" || intent.command.name !== "status") return;
+  if (intent.kind !== "command") throw new Error("expected command intent");
+  assertEquals(intent.command.name, "status");
+  if (intent.command.name !== "status") {
+    throw new Error("expected status command");
+  }
   assertEquals(intent.command.asJson, true);
   assertEquals(intent.command.all, true);
   assertEquals(intent.command.live, false);
@@ -46,7 +58,11 @@ Deno.test("cli parser: status --unknown-flag throws CliUsageError", () => {
 Deno.test("cli parser: plain status parses all=false live=false", () => {
   const intent = parseDaemonCliArgs(["status"]);
   assertEquals(intent.kind, "command");
-  if (intent.kind !== "command" || intent.command.name !== "status") return;
+  if (intent.kind !== "command") throw new Error("expected command intent");
+  assertEquals(intent.command.name, "status");
+  if (intent.command.name !== "status") {
+    throw new Error("expected status command");
+  }
   assertEquals(intent.command.all, false);
   assertEquals(intent.command.live, false);
   assertEquals(intent.command.asJson, false);

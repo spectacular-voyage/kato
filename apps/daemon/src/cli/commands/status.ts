@@ -303,9 +303,10 @@ async function runLiveMode(
 
   let shouldExit = false;
 
-  Deno.addSignalListener("SIGINT", () => {
+  const onSigint = () => {
     shouldExit = true;
-  });
+  };
+  Deno.addSignalListener("SIGINT", onSigint);
 
   Deno.stdin.setRaw(true);
 
@@ -352,6 +353,7 @@ async function runLiveMode(
       }
     }
   } finally {
+    Deno.removeSignalListener("SIGINT", onSigint);
     Deno.stdin.setRaw(false);
   }
 

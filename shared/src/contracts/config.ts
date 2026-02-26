@@ -31,6 +31,7 @@ export interface ProviderAutoGenerateSnapshots {
 export interface RuntimeConfig {
   schemaVersion: 1;
   runtimeDir: string;
+  katoDir?: string;
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];

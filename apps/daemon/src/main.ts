@@ -150,7 +150,15 @@ export async function runDaemonSubprocess(
     now,
     daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
   });
-  const katoDir = dirname(runtimeConfig.runtimeDir);
+  const katoDir = typeof runtimeConfig.katoDir === "string" &&
+      runtimeConfig.katoDir.trim().length > 0
+    ? runtimeConfig.katoDir
+    : dirname(runtimeConfig.runtimeDir);
+  if (katoDir.trim().length === 0) {
+    throw new Error(
+      "Runtime config must provide a valid katoDir or runtimeDir",
+    );
+  }
   const sessionStateStore = new PersistentSessionStateStore({
     daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(katoDir),
     sessionsDir: resolveDefaultSessionsDir(katoDir),
