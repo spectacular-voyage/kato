@@ -21,7 +21,7 @@ export interface RuntimeMarkdownFrontmatterConfig {
   includeUpdatedInFrontmatter: boolean;
   addParticipantUsernameToFrontmatter: boolean;
   defaultParticipantUsername: string;
-  includeConversationKinds: boolean;
+  includeConversationEventKinds: boolean;
 }
 
 export interface ProviderSessionRoots {

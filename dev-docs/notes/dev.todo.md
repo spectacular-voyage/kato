@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1772132342147
+updated: 1772141794466
 created: 1771812869620
 ---
 
@@ -68,3 +68,4 @@ created: 1771812869620
 
 - [ ] defaultParticipantUsername still uses string with "" default in config.ts.
 - [ ] resolveConversationTitle call dedup/memoization in daemon runtime is still an optimization opportunity.
+- [ ] remove all compatibility-layer cruft

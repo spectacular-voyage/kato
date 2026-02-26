@@ -208,7 +208,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", asy
           includeUpdatedInFrontmatter: false,
           addParticipantUsernameToFrontmatter: false,
           defaultParticipantUsername: "",
-          includeConversationKinds: false,
+          includeConversationEventKinds: false,
           extra: true,
         },
       }),
@@ -245,7 +245,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value type
           includeUpdatedInFrontmatter: "false",
           addParticipantUsernameToFrontmatter: false,
           defaultParticipantUsername: "",
-          includeConversationKinds: false,
+          includeConversationEventKinds: false,
         },
       }),
     );
@@ -281,7 +281,7 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
           includeUpdatedInFrontmatter: true,
           addParticipantUsernameToFrontmatter: true,
           defaultParticipantUsername: "alice",
-          includeConversationKinds: true,
+          includeConversationEventKinds: true,
         },
       }),
     );
@@ -292,7 +292,7 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
       includeUpdatedInFrontmatter: true,
       addParticipantUsernameToFrontmatter: true,
       defaultParticipantUsername: "alice",
-      includeConversationKinds: true,
+      includeConversationEventKinds: true,
     });
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});

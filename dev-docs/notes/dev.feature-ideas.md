@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772124093583
+updated: 1772140846496
 created: 1771724652182
 ---
 
@@ -17,7 +17,7 @@ created: 1771724652182
   - tricky, because we can't write the hash into the file?
 - web-based UI for status; surfacing history and logs; surfacing in-chat commands; tracking performance
 - run-as-service on Windows; systemd/init.d on Linux; launchd on macOS
-- switch config to YAML
 - Multi-destination recording
 - support flag in in-chat comments, e.g. to start including thinking or tool use
 - folder-based session-state and twin files (maybe just by year? or probably year-month)
+- instead of "User_unknown-time" headings, we could number sequentially, or use the event IDs

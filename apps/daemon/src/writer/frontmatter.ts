@@ -107,6 +107,7 @@ export function renderFrontmatter(options: {
   recordingIds?: string[];
   participants?: string[];
   tags?: string[];
+  conversationEventKinds?: string[];
   includeUpdated?: boolean;
 }): string {
   const now = options.now ?? new Date();
@@ -121,6 +122,7 @@ export function renderFrontmatter(options: {
   const participants = dedupeStrings(options.participants);
   const recordingIds = dedupeStrings(options.recordingIds);
   const tags = dedupeStrings(options.tags);
+  const conversationEventKinds = dedupeStrings(options.conversationEventKinds);
 
   const lines = [
     "---",
@@ -137,6 +139,13 @@ export function renderFrontmatter(options: {
       ? [`recordingIds: ${renderInlineYamlArray(recordingIds)}`]
       : []),
     ...(tags.length > 0 ? [`tags: ${renderInlineYamlArray(tags)}`] : []),
+    ...(conversationEventKinds.length > 0
+      ? [
+        `conversationEventKinds: ${
+          renderInlineYamlArray(conversationEventKinds)
+        }`,
+      ]
+      : []),
     "---",
   ];
 
@@ -246,10 +255,18 @@ export function mergeAccretiveFrontmatterFields(options: {
   frontmatter: string;
   recordingIds?: ReadonlyArray<string>;
   tags?: ReadonlyArray<string>;
+  conversationEventKinds?: ReadonlyArray<string>;
 }): string {
   const incomingRecordingIds = dedupeStrings(options.recordingIds);
   const incomingTags = dedupeStrings(options.tags);
-  if (incomingRecordingIds.length === 0 && incomingTags.length === 0) {
+  const incomingConversationEventKinds = dedupeStrings(
+    options.conversationEventKinds,
+  );
+  if (
+    incomingRecordingIds.length === 0 &&
+    incomingTags.length === 0 &&
+    incomingConversationEventKinds.length === 0
+  ) {
     return options.frontmatter;
   }
   if (!options.frontmatter.startsWith("---\n")) {
@@ -272,17 +289,41 @@ export function mergeAccretiveFrontmatterFields(options: {
 
   const existingRecordingIds = readStringList(parsed["recordingIds"]);
   const existingTags = readStringList(parsed["tags"]);
+  const existingConversationEventKindsPrimary = readStringList(
+    parsed["conversationEventKinds"],
+  );
+  const existingLegacyMessageEventKinds = readStringList(
+    parsed["messageEventKinds"],
+  );
+  const existingConversationEventKinds = mergeStringLists(
+    existingConversationEventKindsPrimary,
+    existingLegacyMessageEventKinds,
+  );
   const mergedRecordingIds = mergeStringLists(
     existingRecordingIds,
     incomingRecordingIds,
   );
   const mergedTags = mergeStringLists(existingTags, incomingTags);
+  const mergedConversationEventKinds = mergeStringLists(
+    existingConversationEventKinds,
+    incomingConversationEventKinds,
+  );
 
   const recordingIdsChanged = incomingRecordingIds.length > 0 &&
     !arraysEqual(existingRecordingIds, mergedRecordingIds);
   const tagsChanged = incomingTags.length > 0 &&
     !arraysEqual(existingTags, mergedTags);
-  if (!recordingIdsChanged && !tagsChanged) {
+  const conversationEventKindsChanged =
+    incomingConversationEventKinds.length > 0 &&
+    !arraysEqual(existingConversationEventKinds, mergedConversationEventKinds);
+  const legacyConversationEventKindsKeyPresent =
+    existingLegacyMessageEventKinds.length > 0;
+  if (
+    !recordingIdsChanged &&
+    !tagsChanged &&
+    !conversationEventKindsChanged &&
+    !legacyConversationEventKindsKeyPresent
+  ) {
     return options.frontmatter;
   }
 
@@ -293,5 +334,9 @@ export function mergeAccretiveFrontmatterFields(options: {
   if (tagsChanged) {
     nextRecord["tags"] = mergedTags;
   }
+  if (conversationEventKindsChanged || legacyConversationEventKindsKeyPresent) {
+    nextRecord["conversationEventKinds"] = mergedConversationEventKinds;
+  }
+  delete nextRecord["messageEventKinds"];
   return renderFrontmatterRecord(nextRecord);
 }

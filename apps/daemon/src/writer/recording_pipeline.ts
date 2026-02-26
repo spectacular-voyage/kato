@@ -119,7 +119,7 @@ export interface RecordingPipelineOptions {
   jsonlWriter?: JsonlConversationWriter;
   includeFrontmatterInMarkdownRecordings?: boolean;
   includeUpdatedInFrontmatter?: boolean;
-  includeConversationKindsInFrontmatter?: boolean;
+  includeConversationEventKindsInFrontmatter?: boolean;
   frontmatterParticipantUsername?: string;
   defaultRenderOptions?: Pick<
     MarkdownRenderOptions,
@@ -193,7 +193,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private readonly auditLogger: AuditLogger;
   private readonly includeFrontmatterInMarkdownRecordings: boolean;
   private readonly includeUpdatedInFrontmatter: boolean;
-  private readonly includeConversationKindsInFrontmatter: boolean;
+  private readonly includeConversationEventKindsInFrontmatter: boolean;
   private readonly frontmatterParticipantUsername: string | undefined;
 
   constructor(private readonly options: RecordingPipelineOptions) {
@@ -210,8 +210,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
       options.includeFrontmatterInMarkdownRecordings ?? true;
     this.includeUpdatedInFrontmatter = options.includeUpdatedInFrontmatter ??
       false;
-    this.includeConversationKindsInFrontmatter =
-      options.includeConversationKindsInFrontmatter ?? false;
+    this.includeConversationEventKindsInFrontmatter =
+      options.includeConversationEventKindsInFrontmatter ?? false;
     this.frontmatterParticipantUsername = options.frontmatterParticipantUsername
       ?.trim() || undefined;
   }
@@ -526,10 +526,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
     title: string | undefined;
     recordingIds?: string[];
   }): MarkdownRenderOptions {
-    const frontmatterTags = this.buildFrontmatterTags(
-      options.provider,
-      options.events,
-    );
+    const frontmatterConversationEventKinds = this
+      .buildFrontmatterConversationEventKinds(
+        options.events,
+      );
     const frontmatterParticipants = this.buildFrontmatterParticipants(
       options.provider,
       options.events,
@@ -545,7 +545,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
       includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
       frontmatterSessionId: options.sessionId,
       ...(frontmatterRecordingIds ? { frontmatterRecordingIds } : {}),
-      ...(frontmatterTags ? { frontmatterTags } : {}),
+      ...(frontmatterConversationEventKinds
+        ? { frontmatterConversationEventKinds }
+        : {}),
       ...(frontmatterParticipants ? { frontmatterParticipants } : {}),
     };
   }
@@ -565,20 +567,18 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return resolved.length > 0 ? resolved : undefined;
   }
 
-  private buildFrontmatterTags(
-    provider: string,
+  private buildFrontmatterConversationEventKinds(
     events: ConversationEvent[],
-  ): string[] {
-    const tags: string[] = [`provider.${provider}`];
-    if (!this.includeConversationKindsInFrontmatter) {
-      return tags;
+  ): string[] | undefined {
+    if (!this.includeConversationEventKindsInFrontmatter) {
+      return undefined;
     }
-    const kindTags = new Set<string>();
+    const eventKinds = new Set<string>();
     for (const event of events) {
-      kindTags.add(`kind.${event.kind}`);
+      eventKinds.add(event.kind);
     }
-    tags.push(...Array.from(kindTags).sort((a, b) => a.localeCompare(b)));
-    return tags;
+    const kinds = Array.from(eventKinds).sort((a, b) => a.localeCompare(b));
+    return kinds.length > 0 ? kinds : undefined;
   }
 
   private buildFrontmatterParticipants(

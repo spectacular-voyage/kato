@@ -1,7 +1,7 @@
 ---
 id: ru04o3780vg0ell7chui1e5
 title: 2026 02 26 Decent Frontmatter
-desc: ''
+desc: ""
 updated: 1772124160537
 created: 1772122600275
 ---
@@ -63,7 +63,8 @@ updated: <epoch-ms> # optional; controlled by config
 participants: [user.djradon, codex.gpt-5.3-codex]
 sessionId: <session-id>
 recordingIds: [<recording-id-1>, <recording-id-2>]
-tags: [provider.codex, kind.message.user, kind.message.assistant]
+tags: [topic.session]
+conversationEventKinds: [message.user, message.assistant, tool.call, tool.result]
 ---
 ```
 
@@ -104,16 +105,19 @@ Rules:
     2. env username (`USER`/`USERNAME`) when available
     3. home-directory basename (best effort)
 - Output format:
-  - strings like `user.djradon`, `codex.gpt-5.3-codex`, `claude.claude-3.7-sonnet`.
+  - strings like `user.djradon`, `codex.gpt-5.3-codex`,
+    `claude.claude-3.7-sonnet`.
 
-### 4) Tags / Conversation Kinds
+### 4) Tags / Conversation EventKinds
 
-- Always include `provider.<provider>`.
-- If `includeConversationKinds` is true, include observed
-  `ConversationEvent.kind` values as `kind.<value>`.
+- Do not include `provider.<provider>` in tags; provider identity is already
+  represented via `participants`.
+- If `includeConversationEventKinds` is true, include observed
+  `ConversationEvent.kind` values in `conversationEventKinds` (for example
+  `message.user`, `message.assistant`, `tool.call`, `tool.result`).
 - Maintain deterministic order and de-duplicate.
-- On writes to existing files, tags are accretive only: add missing tags but do
-  not remove any existing tags.
+- On writes to existing files, both `tags` and `conversationEventKinds` are
+  accretive only: add missing values but do not remove existing values.
 
 ### 5) Recording + Session Identity Fields
 
@@ -133,7 +137,7 @@ markdownFrontmatter:
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
-  includeConversationKinds: false
+  includeConversationEventKinds: false
 ```
 
 Defaults:
@@ -142,7 +146,7 @@ Defaults:
 - `includeUpdatedInFrontmatter`: `false`
 - `addParticipantUsernameToFrontmatter`: `false`
 - `defaultParticipantUsername`: `""`
-- `includeConversationKinds`: `false`
+- `includeConversationEventKinds`: `false`
 
 Validation:
 
@@ -248,7 +252,7 @@ Validation:
 - Risk: username inference can be wrong.
   - Mitigation: username emission is opt-in and overrideable in config.
 - Risk: frontmatter grows noisy with event-kind tags.
-  - Mitigation: `includeConversationKinds` default is `false`.
+  - Mitigation: `includeConversationEventKinds` default is `false`.
 - Risk: in-place frontmatter updates could clobber user formatting.
   - Mitigation: limit mutations to targeted keys (`recordingIds`, `tags`) and
     preserve other keys/values untouched.

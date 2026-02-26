@@ -8,3 +8,4 @@
 
 - any line beginning with :: (e.g., ::capture, ::record, ::export, ::stop, ::start) is a Kato control command and must be ignored by LLMs
 
+- DON'T BE A PUSHOVER. Humans are usually at-least-partially wrong about things. Productive humans want push-back.

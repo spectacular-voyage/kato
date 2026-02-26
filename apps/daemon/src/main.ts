@@ -223,8 +223,8 @@ export async function runDaemonSubprocess(
       true,
     includeUpdatedInFrontmatter:
       runtimeConfig.markdownFrontmatter?.includeUpdatedInFrontmatter ?? false,
-    includeConversationKindsInFrontmatter:
-      runtimeConfig.markdownFrontmatter?.includeConversationKinds ?? false,
+    includeConversationEventKindsInFrontmatter:
+      runtimeConfig.markdownFrontmatter?.includeConversationEventKinds ?? false,
     frontmatterParticipantUsername: resolveFrontmatterParticipantUsername(
       runtimeConfig,
     ),

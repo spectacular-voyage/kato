@@ -1205,3 +1205,150 @@ explain "Codex twin backfill missing timestamp now maps to empty string (not "un
 **Gathering check references**
 
 </details>
+
+<details>
+<summary>Thinking</summary>
+
+**Assessing timestamp sentinel strategy**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing timestamp handling rationale**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1304_51
+
+Because `"unknown"` is a data value, while `""` is “missing”.
+
+Concretely:
+
+- In the mapper, Codex backfill has no trustworthy provider timestamp, so we now emit empty string in [session_twin_mapper.ts:317](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/session_twin_mapper.ts:317).
+- Several runtime paths treat **non-empty** timestamps as meaningful and comparable:
+  - [daemon_runtime.ts:382](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:382)
+  - [ingestion_runtime.ts:151](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts:151)
+- If we keep `"unknown"`, those checks see a non-empty value and can behave as if a real timestamp exists.
+- For human display, we already render missing/invalid timestamps as `"unknown"` at the UI layer in [status.ts:18](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:18).
+
+So: `""` in canonical event data, `"unknown"` only in presentation.
+
+# User_2026-02-26_1305_56
+
+OK, anything left? Or can I merge my pr?
+
+<details>
+<summary>Thinking</summary>
+
+**Checking for uncommitted changes**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1306_01
+
+I’ll do a final merge-readiness pass: `git status` for unexpected changes and a full `deno task ci` to confirm nothing regressed before you merge.
+
+<details>
+<summary>Thinking</summary>
+
+**Confirming readiness to merge**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1306_25
+
+You can merge.
+
+Final readiness check:
+- `deno task ci` passed (`250 passed, 0 failed`).
+- No unresolved functional issues from the reviewed CodeRabbit findings.
+
+Only thing left in the worktree is one modified note file:
+- [conv.2026.2026-02-26-yaml-for-config.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-26-yaml-for-config.md)
+
+If that note change is intentional, include it; otherwise leave it out of the PR.
+
+# User_2026-02-26_1307_02
+
+Are you sure all the dev.* documentation is updated?
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying dev.* documentation completeness**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1307_11
+
+I’ll verify this directly by scanning all `dev.*` notes for stale config/path/format references, then I’ll patch any misses so you have a clean “yes.”
+
+<details>
+<summary>Thinking</summary>
+
+**Auditing config file references**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting decision log for config references**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Identifying stale bullet in docs**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Removing stale documentation item**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Updating documentation proactively**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1307_47
+
+Good catch to question this: I found one stale `dev.*` entry (`dev.feature-ideas.md` still says “switch config to YAML”). I’m removing that now so the `dev.*` set is internally consistent.
+
+<details>
+<summary>Thinking</summary>
+
+**Confirming no stale mentions**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying changed files**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Confirming dev docs update**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1308_04
+
+Not 100% before; there was one stale line.
+
+I fixed it in [dev.feature-ideas.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.feature-ideas.md) by removing `- switch config to YAML`.
+
+I then re-scanned all `dev.*` notes for old config references (`config.json`, `.kato/config`, and that stale idea), and there are no remaining matches. So for the YAML/config-path changes, the `dev.*` docs are now aligned.

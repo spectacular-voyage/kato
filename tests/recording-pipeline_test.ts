@@ -19,6 +19,19 @@ function makeEvent(content: string): ConversationEvent {
   } as unknown as ConversationEvent;
 }
 
+function makeToolCallEvent(): ConversationEvent {
+  return {
+    eventId: crypto.randomUUID(),
+    provider: "test",
+    sessionId: "sess-test",
+    timestamp: "2026-02-22T10:00:01.000Z",
+    kind: "tool.call",
+    toolCallId: "tool-1",
+    name: "search",
+    source: { providerEventType: "tool_call", providerEventId: "tool-1" },
+  } as unknown as ConversationEvent;
+}
+
 function makeSequencedPathPolicyGate(
   sequence: Array<"allow" | "deny">,
   callOrder: string[],
@@ -61,6 +74,7 @@ function makeWriterSpy(callOrder: string[]): {
       italicizeUserMessages?: boolean;
     }
   >;
+  renderOptionsByCall: Array<{ frontmatterConversationEventKinds?: string[] }>;
   writer: ConversationWriterLike;
   appendOutcomes: Array<{ wrote: boolean; deduped: boolean }>;
   overwriteOutcomes: Array<{ wrote: boolean; deduped: boolean }>;
@@ -77,16 +91,26 @@ function makeWriterSpy(callOrder: string[]): {
       italicizeUserMessages?: boolean;
     }
   > = [];
+  const renderOptionsByCall: Array<
+    { frontmatterConversationEventKinds?: string[] }
+  > = [];
   const appendOutcomes: Array<{ wrote: boolean; deduped: boolean }> = [];
   const overwriteOutcomes: Array<{ wrote: boolean; deduped: boolean }> = [];
 
   return {
     calls,
+    renderOptionsByCall,
     appendOutcomes,
     overwriteOutcomes,
     writer: {
       appendEvents(path, events, options) {
         callOrder.push("writer.append");
+        renderOptionsByCall.push({
+          frontmatterConversationEventKinds:
+            options?.frontmatterConversationEventKinds
+              ? [...options.frontmatterConversationEventKinds]
+              : undefined,
+        });
         calls.push({
           mode: "append",
           path,
@@ -108,6 +132,12 @@ function makeWriterSpy(callOrder: string[]): {
       },
       overwriteEvents(path, events, options) {
         callOrder.push("writer.overwrite");
+        renderOptionsByCall.push({
+          frontmatterConversationEventKinds:
+            options?.frontmatterConversationEventKinds
+              ? [...options.frontmatterConversationEventKinds]
+              : undefined,
+        });
         calls.push({
           mode: "overwrite",
           path,
@@ -424,5 +454,47 @@ Deno.test(
       includeToolCalls: false,
       italicizeUserMessages: true,
     });
+  },
+);
+
+Deno.test(
+  "RecordingPipeline frontmatter conversationEventKinds include all event kinds",
+  async () => {
+    const order: string[] = [];
+    const writerSpy = makeWriterSpy(order);
+    const pipeline = new RecordingPipeline({
+      pathPolicyGate: makeSequencedPathPolicyGate(["allow", "allow"], order),
+      writer: writerSpy.writer,
+      includeConversationEventKindsInFrontmatter: true,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    await pipeline.startOrRotateRecording({
+      provider: "codex",
+      sessionId: "session-kinds",
+      targetPath: "notes/kinds.md",
+      seedEvents: [makeEvent("seed"), makeToolCallEvent()],
+    });
+    assertEquals(
+      writerSpy.renderOptionsByCall[0]?.frontmatterConversationEventKinds,
+      ["message.assistant", "tool.call"],
+    );
+
+    const pipelineWithoutKinds = new RecordingPipeline({
+      pathPolicyGate: makeSequencedPathPolicyGate(["allow"], order),
+      writer: writerSpy.writer,
+      includeConversationEventKindsInFrontmatter: false,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    await pipelineWithoutKinds.startOrRotateRecording({
+      provider: "claude",
+      sessionId: "session-no-kinds",
+      targetPath: "notes/no-kinds.md",
+      seedEvents: [makeEvent("seed")],
+    });
+    assertEquals(
+      writerSpy.renderOptionsByCall[1]?.frontmatterConversationEventKinds,
+      undefined,
+    );
   },
 );

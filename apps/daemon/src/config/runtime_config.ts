@@ -39,7 +39,7 @@ const RUNTIME_MARKDOWN_FRONTMATTER_KEYS: Array<
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
   "defaultParticipantUsername",
-  "includeConversationKinds",
+  "includeConversationEventKinds",
 ];
 
 export interface EnsureRuntimeConfigResult {
@@ -155,7 +155,7 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     includeUpdatedInFrontmatter: false,
     addParticipantUsernameToFrontmatter: false,
     defaultParticipantUsername: "",
-    includeConversationKinds: false,
+    includeConversationEventKinds: false,
   };
   if (!overrides) {
     return defaults;
@@ -172,8 +172,8 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
         defaults.addParticipantUsernameToFrontmatter,
     defaultParticipantUsername: overrides.defaultParticipantUsername ??
       defaults.defaultParticipantUsername,
-    includeConversationKinds: overrides.includeConversationKinds ??
-      defaults.includeConversationKinds,
+    includeConversationEventKinds: overrides.includeConversationEventKinds ??
+      defaults.includeConversationEventKinds,
   };
 }
 
@@ -260,11 +260,11 @@ function parseRuntimeMarkdownFrontmatterConfig(
         return undefined;
       }
       resolved.addParticipantUsernameToFrontmatter = candidate;
-    } else if (key === "includeConversationKinds") {
+    } else if (key === "includeConversationEventKinds") {
       if (typeof candidate !== "boolean") {
         return undefined;
       }
-      resolved.includeConversationKinds = candidate;
+      resolved.includeConversationEventKinds = candidate;
     }
   }
 

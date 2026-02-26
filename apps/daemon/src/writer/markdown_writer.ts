@@ -30,6 +30,7 @@ export interface MarkdownRenderOptions {
   frontmatterRecordingIds?: string[];
   frontmatterParticipants?: string[];
   frontmatterTags?: string[];
+  frontmatterConversationEventKinds?: string[];
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
   includeThinking?: boolean;
@@ -200,6 +201,7 @@ export function renderEventsToMarkdown(
         recordingIds: options.frontmatterRecordingIds,
         participants: options.frontmatterParticipants,
         tags: options.frontmatterTags,
+        conversationEventKinds: options.frontmatterConversationEventKinds,
         includeUpdated: options.includeUpdatedInFrontmatter,
       }),
       "",
@@ -486,12 +488,14 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     const existingFrontmatterView = splitExistingFrontmatter(existing.content);
     const shouldMergeFrontmatter = existingFrontmatterView &&
       ((options.frontmatterRecordingIds?.length ?? 0) > 0 ||
-        (options.frontmatterTags?.length ?? 0) > 0);
+        (options.frontmatterTags?.length ?? 0) > 0 ||
+        (options.frontmatterConversationEventKinds?.length ?? 0) > 0);
     const nextFrontmatter = shouldMergeFrontmatter
       ? mergeAccretiveFrontmatterFields({
         frontmatter: existingFrontmatterView.frontmatter,
         recordingIds: options.frontmatterRecordingIds,
         tags: options.frontmatterTags,
+        conversationEventKinds: options.frontmatterConversationEventKinds,
       })
       : existingFrontmatterView?.frontmatter;
     const frontmatterChanged = existingFrontmatterView !== null &&
@@ -578,12 +582,14 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       const hasAccretiveInputs =
         (options.frontmatterRecordingIds?.length ?? 0) >
           0 ||
-        (options.frontmatterTags?.length ?? 0) > 0;
+        (options.frontmatterTags?.length ?? 0) > 0 ||
+        (options.frontmatterConversationEventKinds?.length ?? 0) > 0;
       const mergedFrontmatter = hasAccretiveInputs
         ? mergeAccretiveFrontmatterFields({
           frontmatter: existingFrontmatter,
           recordingIds: options.frontmatterRecordingIds,
           tags: options.frontmatterTags,
+          conversationEventKinds: options.frontmatterConversationEventKinds,
         })
         : existingFrontmatter;
       const body = renderEventsToMarkdown(events, {

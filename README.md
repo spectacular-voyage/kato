@@ -135,7 +135,7 @@ markdownFrontmatter:
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
-  includeConversationKinds: false
+  includeConversationEventKinds: false
 featureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: false
@@ -165,10 +165,11 @@ Notes:
   - `includeFrontmatterInMarkdownRecordings` (default `true`)
   - `includeUpdatedInFrontmatter` (default `false`)
   - `addParticipantUsernameToFrontmatter` (default `false`)
-  - `defaultParticipantUsername` preferred username when username inclusion is enabled.
-    Fallback order is: `defaultParticipantUsername` -> `USER`/`USERNAME` env
-    vars -> home-directory basename.
-  - `includeConversationKinds` to add `kind.*` tags (default `false`)
+  - `defaultParticipantUsername` preferred username when username inclusion is
+    enabled. Fallback order is: `defaultParticipantUsername` ->
+    `USER`/`USERNAME` env vars -> home-directory basename.
+  - `includeConversationEventKinds` to add `conversationEventKinds` from all
+    observed `ConversationEvent.kind` values (default `false`)
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:
