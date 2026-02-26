@@ -399,7 +399,7 @@ export async function* parseCodexEvents(
               };
             }
           }
-        } else if (itemType === "function_call" && lineEnd > fromOffset) {
+        } else if (itemType === "function_call") {
           const callId = String(payload["call_id"] ?? "");
           const name = String(payload["name"] ?? "unknown");
           let input: Record<string, unknown> | undefined;
@@ -411,6 +411,21 @@ export async function* parseCodexEvents(
           } catch {
             // Ignore malformed function_call arguments.
           }
+
+          const questions = name === "request_user_input"
+            ? asQuestionList(input?.["questions"])
+            : [];
+          if (name === "request_user_input" && callId.length > 0) {
+            pendingRequestUserInputCalls.set(callId, {
+              callEventId: makeEventId(sessionId, lineEnd, "tool.call"),
+              questions,
+            });
+          }
+
+          if (lineEnd <= fromOffset) {
+            break;
+          }
+
           const toolCallId = callId ||
             makeEventId(sessionId, lineEnd, "tool.call");
           const base = makeBase(
@@ -430,17 +445,73 @@ export async function* parseCodexEvents(
             cursor: makeByteOffsetCursor(lineEnd),
           };
 
-          if (name === "request_user_input" && callId.length > 0) {
-            pendingRequestUserInputCalls.set(callId, {
-              callEventId: String(base["eventId"]),
-              questions: asQuestionList(input?.["questions"]),
-            });
+          if (name === "request_user_input" && questions.length > 0) {
+            let decisionIndex = 1;
+            for (const question of questions) {
+              const questionText = String(question["question"] ?? "").trim();
+              if (questionText.length === 0) continue;
+              const questionHeader = String(question["header"] ?? "").trim();
+              const options = asQuestionOptions(question);
+              const questionId = String(question["id"] ?? "").trim();
+              const providerQuestionId = questionId.length > 0
+                ? questionId
+                : normalizeDecisionKey(questionText, decisionIndex);
+
+              const decisionBase = makeBase(
+                "decision",
+                "response_item.function_call.request_user_input",
+                lineEnd,
+                decisionIndex,
+              );
+              yield {
+                event: {
+                  ...decisionBase,
+                  kind: "decision",
+                  decisionId: makeEventId(
+                    sessionId,
+                    lineEnd,
+                    "decision",
+                    decisionIndex,
+                  ),
+                  decisionKey: normalizeDecisionKey(
+                    providerQuestionId,
+                    decisionIndex,
+                  ),
+                  summary: questionText,
+                  status: "proposed",
+                  decidedBy: "assistant",
+                  basisEventIds: [String(base["eventId"])],
+                  metadata: {
+                    providerQuestionId,
+                    ...(questionHeader.length > 0
+                      ? { header: questionHeader }
+                      : {}),
+                    ...(options.length > 0 ? { options } : {}),
+                    ...(typeof question["multiSelect"] === "boolean"
+                      ? { multiSelect: question["multiSelect"] }
+                      : {}),
+                  },
+                } as unknown as ConversationEvent,
+                cursor: makeByteOffsetCursor(lineEnd),
+              };
+              decisionIndex += 1;
+            }
           }
-        } else if (
-          itemType === "function_call_output" && lineEnd > fromOffset
-        ) {
+        } else if (itemType === "function_call_output") {
           const callId = String(payload["call_id"] ?? "");
           const output = payload["output"];
+          const pending = callId.length > 0
+            ? pendingRequestUserInputCalls.get(callId)
+            : undefined;
+          if (callId.length > 0) {
+            pendingRequestUserInputCalls.delete(callId);
+          }
+          const parsedAnswers = extractRequestUserInputAnswers(output);
+
+          if (lineEnd <= fromOffset) {
+            break;
+          }
+
           const result = typeof output === "string"
             ? output
             : JSON.stringify(output);
@@ -459,14 +530,6 @@ export async function* parseCodexEvents(
             cursor: makeByteOffsetCursor(lineEnd),
           };
 
-          const pending = callId.length > 0
-            ? pendingRequestUserInputCalls.get(callId)
-            : undefined;
-          if (callId.length > 0) {
-            pendingRequestUserInputCalls.delete(callId);
-          }
-          const parsedAnswers = extractRequestUserInputAnswers(output);
-
           // Synthesize request_user_input selections as first-class conversation events.
           if (pending || parsedAnswers) {
             const questions = pending?.questions ?? [];
@@ -483,6 +546,12 @@ export async function* parseCodexEvents(
                   const questionEntry = findQuestionEntry(questions, key);
                   const questionText = questionEntry
                     ? String(questionEntry["question"] ?? key)
+                    : key;
+                  const questionId = questionEntry
+                    ? String(questionEntry["id"] ?? "").trim()
+                    : "";
+                  const providerQuestionId = questionId.length > 0
+                    ? questionId
                     : key;
                   const summary = `${questionText} -> ${selected.join(", ")}`;
                   const questionHeader = questionEntry
@@ -508,17 +577,24 @@ export async function* parseCodexEvents(
                         "decision",
                         decisionIndex,
                       ),
-                      decisionKey: normalizeDecisionKey(key, decisionIndex),
+                      decisionKey: normalizeDecisionKey(
+                        providerQuestionId,
+                        decisionIndex,
+                      ),
                       summary,
                       status: "accepted",
                       decidedBy: "user",
                       basisEventIds,
                       metadata: {
-                        providerQuestionId: key,
+                        providerQuestionId,
                         ...(questionHeader.length > 0
                           ? { header: questionHeader }
                           : {}),
                         ...(options.length > 0 ? { options } : {}),
+                        ...(questionEntry &&
+                            typeof questionEntry["multiSelect"] === "boolean"
+                          ? { multiSelect: questionEntry["multiSelect"] }
+                          : {}),
                       },
                     } as unknown as ConversationEvent,
                     cursor: makeByteOffsetCursor(lineEnd),
@@ -593,6 +669,9 @@ export async function* parseCodexEvents(
         );
         const questions = payload["questions"];
         const answers = payload["answers"];
+        const questionsList = Array.isArray(questions)
+          ? questions as Array<Record<string, unknown>>
+          : [];
 
         // tool.call: the questionnaire prompt
         const toolCallBase = makeBase(
@@ -611,6 +690,52 @@ export async function* parseCodexEvents(
           } as unknown as ConversationEvent,
           cursor: makeByteOffsetCursor(lineEnd),
         };
+
+        let decisionIndex = 1;
+        for (const question of questionsList) {
+          const questionText = String(question["question"] ?? "").trim();
+          if (questionText.length === 0) continue;
+          const questionHeader = String(question["header"] ?? "").trim();
+          const options = asQuestionOptions(question);
+          const questionId = String(question["id"] ?? "").trim();
+          const providerQuestionId = questionId.length > 0
+            ? questionId
+            : normalizeDecisionKey(questionText, decisionIndex);
+          const proposedDecisionBase = makeBase(
+            "decision",
+            "request_user_input",
+            lineEnd,
+            decisionIndex,
+          );
+          const proposedDecisionId = makeEventId(
+            sessionId,
+            lineEnd,
+            "decision",
+            decisionIndex,
+          );
+          yield {
+            event: {
+              ...proposedDecisionBase,
+              kind: "decision",
+              decisionId: proposedDecisionId,
+              decisionKey: normalizeDecisionKey(providerQuestionId, decisionIndex),
+              summary: questionText,
+              status: "proposed",
+              decidedBy: "assistant",
+              basisEventIds: [String(toolCallBase["eventId"])],
+              metadata: {
+                providerQuestionId,
+                ...(questionHeader.length > 0 ? { header: questionHeader } : {}),
+                ...(options.length > 0 ? { options } : {}),
+                ...(typeof question["multiSelect"] === "boolean"
+                  ? { multiSelect: question["multiSelect"] }
+                  : {}),
+              },
+            } as unknown as ConversationEvent,
+            cursor: makeByteOffsetCursor(lineEnd),
+          };
+          decisionIndex += 1;
+        }
 
         // tool.result: raw answer output
         const toolResultBase = makeBase(
@@ -636,15 +761,15 @@ export async function* parseCodexEvents(
 
         if (answersRecord) {
           // decision events: one per answered question
-          const questionsList = Array.isArray(questions)
-            ? questions as Array<Record<string, unknown>>
-            : [];
-          let decisionIndex = 2;
           for (const [key, val] of Object.entries(answersRecord)) {
             const questionEntry = questionsList.find((q) => q["id"] === key);
             const questionText = questionEntry
               ? String(questionEntry["question"] ?? key)
               : key;
+            const questionId = questionEntry
+              ? String(questionEntry["id"] ?? "").trim()
+              : "";
+            const providerQuestionId = questionId.length > 0 ? questionId : key;
             const questionHeader = questionEntry
               ? String(questionEntry["header"] ?? "")
               : "";
@@ -668,7 +793,10 @@ export async function* parseCodexEvents(
                 ...decisionBase,
                 kind: "decision",
                 decisionId,
-                decisionKey: key,
+                decisionKey: normalizeDecisionKey(
+                  providerQuestionId,
+                  decisionIndex,
+                ),
                 summary: `${questionText} → ${String(val)}`,
                 status: "accepted",
                 decidedBy: "user",
@@ -677,11 +805,15 @@ export async function* parseCodexEvents(
                   String(toolResultBase["eventId"]),
                 ],
                 metadata: {
-                  providerQuestionId: key,
+                  providerQuestionId,
                   ...(questionHeader.length > 0
                     ? { header: questionHeader }
                     : {}),
                   ...(options.length > 0 ? { options } : {}),
+                  ...(questionEntry &&
+                      typeof questionEntry["multiSelect"] === "boolean"
+                    ? { multiSelect: questionEntry["multiSelect"] }
+                    : {}),
                 },
               } as unknown as ConversationEvent,
               cursor: makeByteOffsetCursor(lineEnd),

@@ -197,7 +197,8 @@ export function renderEventsToMarkdown(
   let lastSignature: string | undefined;
 
   // Pass 2: Render events in sequence.
-  for (const event of events) {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]!;
     if (isMessageEvent(event)) {
       if (event.kind === "message.system" && !includeSystemEvents) {
         continue;
@@ -216,6 +217,33 @@ export function renderEventsToMarkdown(
 
       if (content.trim().length === 0) {
         continue;
+      }
+
+      if (event.kind === "message.assistant") {
+        const normalizedContent = content.trim();
+        const nextEvent = events[i + 1];
+        if (
+          event.phase === "commentary" &&
+          nextEvent?.kind === "message.assistant" &&
+          nextEvent.phase === "final" &&
+          nextEvent.turnId === event.turnId &&
+          nextEvent.content.trim() === normalizedContent
+        ) {
+          continue;
+        }
+
+        const previousEvent = i > 0 ? events[i - 1] : undefined;
+        if (
+          previousEvent?.kind === "message.assistant" &&
+          previousEvent.turnId === event.turnId &&
+          previousEvent.content.trim() === normalizedContent
+        ) {
+          const keepFinalOverCommentary = previousEvent.phase === "commentary" &&
+            event.phase === "final";
+          if (!keepFinalOverCommentary) {
+            continue;
+          }
+        }
       }
 
       const signature = makeEventSignature(event);
@@ -284,20 +312,53 @@ export function renderEventsToMarkdown(
       lastSignature = undefined;
     } else if (event.kind === "decision") {
       const metadata = event.metadata;
-      const questionnaireDecision = event.status === "accepted" &&
-        typeof metadata === "object" &&
+      const questionnaireDecision = typeof metadata === "object" &&
         metadata !== null &&
         "providerQuestionId" in metadata;
-      const decisionParts = questionnaireDecision
-        ? [
+      const questionnaireMetadata = questionnaireDecision
+        ? metadata
+        : undefined;
+
+      const questionnaireAcceptedDecision = questionnaireDecision &&
+        event.status === "accepted";
+      const questionnaireProposedDecision = questionnaireDecision &&
+        event.status === "proposed";
+
+      let decisionParts: string[];
+      if (questionnaireAcceptedDecision) {
+        decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,
-        ]
-        : [
+        ];
+      } else if (questionnaireProposedDecision) {
+        const optionsValue = questionnaireMetadata?.["options"];
+        const optionLines = Array.isArray(optionsValue)
+          ? optionsValue
+            .filter((option): option is Record<string, unknown> =>
+              typeof option === "object" && option !== null
+            )
+            .map((option) => {
+              const label = String(option["label"] ?? "").trim();
+              if (label.length === 0) return "";
+              const description = String(option["description"] ?? "").trim();
+              return description.length > 0
+                ? `- ${label}: ${description}`
+                : `- ${label}`;
+            })
+            .filter((line) => line.length > 0)
+          : [];
+        decisionParts = [
+          "",
+          `**Decision [${event.decisionKey}]:** ${event.summary}`,
+          ...optionLines,
+        ];
+      } else {
+        decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,
           `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
         ];
+      }
       parts.push(decisionParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "provider.info") {

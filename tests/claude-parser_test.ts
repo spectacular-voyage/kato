@@ -210,6 +210,16 @@ Deno.test("claude parser synthesizes decision events for AskUserQuestion prompts
       proposedDecision.event.summary,
       "Which file should we start implementation with?",
     );
+    const metadata = proposedDecision.event.metadata as Record<string, unknown>;
+    const options = metadata["options"];
+    assert(Array.isArray(options));
+    const hasSharedContracts = (options as Array<Record<string, unknown>>).some(
+      (option) =>
+        String(option["label"] ?? "") === "shared contracts" &&
+        String(option["description"] ?? "") ===
+          "shared/src/contracts/status.ts",
+    );
+    assertEquals(hasSharedContracts, true);
   }
 
   const synthesizedUser = results.find((result) =>
