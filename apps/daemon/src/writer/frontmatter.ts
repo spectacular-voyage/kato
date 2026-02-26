@@ -1,4 +1,4 @@
-import { parse as parseYaml } from "@std/yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 
 const DEFAULT_MAX_SLUG_LENGTH = 24;
 const DEFAULT_RANDOM_SUFFIX_LENGTH = 6;
@@ -60,7 +60,7 @@ function formatInlineYamlScalar(value: string): string {
   if (trimmed.length === 0) {
     return quoteYaml(trimmed);
   }
-  if (/^[A-Za-z0-9._/-]+$/.test(trimmed)) {
+  if (/^[A-Za-z0-9._/@:-]+$/.test(trimmed)) {
     return trimmed;
   }
   return quoteYaml(trimmed);
@@ -133,6 +133,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function renderYamlValue(key: string, value: unknown): string[] {
+  if (typeof value === "string") {
+    return [`${key}: ${formatInlineYamlScalar(value)}`];
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return [`${key}: ${String(value)}`];
+  }
+  if (value === null) {
+    return [`${key}: null`];
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return [`${key}: []`];
+    }
+    const allStrings = value.every((item) => typeof item === "string");
+    if (allStrings) {
+      const values = value as string[];
+      return [`${key}: ${renderInlineYamlArray(values)}`];
+    }
+    const serialized = stringifyYaml(value).trimEnd();
+    if (!serialized.includes("\n")) {
+      return [`${key}: ${serialized}`];
+    }
+    return [
+      `${key}:`,
+      ...serialized.split("\n").map((line) => `  ${line}`),
+    ];
+  }
+  if (isRecord(value)) {
+    const serialized = stringifyYaml(value).trimEnd();
+    if (serialized.length === 0) {
+      return [`${key}: {}`];
+    }
+    if (!serialized.includes("\n")) {
+      return [`${key}: ${serialized}`];
+    }
+    return [
+      `${key}:`,
+      ...serialized.split("\n").map((line) => `  ${line}`),
+    ];
+  }
+  return [`${key}: ${formatInlineYamlScalar(String(value))}`];
+}
+
+function renderFrontmatterRecord(record: Record<string, unknown>): string {
+  const lines: string[] = ["---"];
+  for (const [key, value] of Object.entries(record)) {
+    lines.push(...renderYamlValue(key, value));
+  }
+  lines.push("---");
+  return lines.join("\n");
+}
+
 function readStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -175,50 +228,6 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return true;
 }
 
-function removeTopLevelKeyBlock(lines: string[], key: string): string[] {
-  const result: string[] = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!;
-    const keyMatch = line.match(/^([A-Za-z0-9_-]+):/);
-    if (!keyMatch || keyMatch[1] !== key) {
-      result.push(line);
-      continue;
-    }
-
-    i += 1;
-    while (i < lines.length) {
-      const nextLine = lines[i]!;
-      const nextTopLevel = nextLine.match(/^([A-Za-z0-9_-]+):/);
-      if (nextTopLevel) {
-        i -= 1;
-        break;
-      }
-      if (
-        nextLine.startsWith(" ") || nextLine.startsWith("\t") ||
-        nextLine.trim().length === 0
-      ) {
-        i += 1;
-        continue;
-      }
-      i -= 1;
-      break;
-    }
-  }
-  return result;
-}
-
-function upsertInlineArray(
-  lines: string[],
-  key: string,
-  values: string[],
-): string[] {
-  const withoutKey = removeTopLevelKeyBlock(lines, key);
-  return [
-    ...withoutKey,
-    `${key}: ${renderInlineYamlArray(values)}`,
-  ];
-}
-
 export function mergeAccretiveFrontmatterFields(options: {
   frontmatter: string;
   recordingIds?: ReadonlyArray<string>;
@@ -232,14 +241,11 @@ export function mergeAccretiveFrontmatterFields(options: {
   if (!options.frontmatter.startsWith("---\n")) {
     return options.frontmatter;
   }
-  const lines = options.frontmatter.split("\n");
-  if (
-    lines.length < 3 || lines[0] !== "---" || lines[lines.length - 1] !== "---"
-  ) {
+  const closingIndex = options.frontmatter.indexOf("\n---", 4);
+  if (closingIndex < 0) {
     return options.frontmatter;
   }
-
-  const payload = lines.slice(1, -1).join("\n");
+  const payload = options.frontmatter.slice(4, closingIndex);
   let parsed: unknown;
   try {
     parsed = parseYaml(payload);
@@ -266,12 +272,12 @@ export function mergeAccretiveFrontmatterFields(options: {
     return options.frontmatter;
   }
 
-  let middle = lines.slice(1, -1);
+  const nextRecord: Record<string, unknown> = { ...parsed };
   if (recordingIdsChanged) {
-    middle = upsertInlineArray(middle, "recordingIds", mergedRecordingIds);
+    nextRecord["recordingIds"] = mergedRecordingIds;
   }
   if (tagsChanged) {
-    middle = upsertInlineArray(middle, "tags", mergedTags);
+    nextRecord["tags"] = mergedTags;
   }
-  return ["---", ...middle, "---"].join("\n");
+  return renderFrontmatterRecord(nextRecord);
 }

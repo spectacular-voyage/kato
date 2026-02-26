@@ -1520,6 +1520,42 @@ Deno.test("runDaemonRuntimeLoop excludes stale recordings from status.recordings
     const sessionSnapshotStore = new InMemorySessionSnapshotStore({
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: "session-stale",
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [{
+        eventId: "stale-message",
+        provider: "codex",
+        sessionId: "session-stale",
+        timestamp: "2026-02-22T08:00:00.000Z",
+        kind: "message.user",
+        role: "user",
+        content: "old message",
+        source: {
+          providerEventType: "user",
+          providerEventId: "stale-message",
+        },
+      } as ConversationEvent],
+    });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: "session-active",
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [{
+        eventId: "active-message",
+        provider: "codex",
+        sessionId: "session-active",
+        timestamp: "2026-02-22T10:00:00.000Z",
+        kind: "message.user",
+        role: "user",
+        content: "fresh message",
+        source: {
+          providerEventType: "user",
+          providerEventId: "active-message",
+        },
+      } as ConversationEvent],
+    });
     let sessionStateNow = new Date("2026-02-22T08:00:00.000Z");
     const sessionStateStore = new PersistentSessionStateStore({
       katoDir: join(stateDir, ".kato"),

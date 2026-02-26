@@ -120,6 +120,7 @@ interface CodexSessionMeta {
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
+const MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES = 16 * 1024 * 1024;
 type ProviderReadOperation = "stat" | "readDir" | "open";
 
 class ProviderIngestionReadDeniedError extends Error {
@@ -670,7 +671,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly cursors = new Map<string, ProviderCursor>();
   private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
-  private readonly sourceSnippetBySessionId = new Map<string, string>();
+  private readonly sourceSnippetBySessionId = new Map<string, string | null>();
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
@@ -1400,19 +1401,33 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     const incomingHasUserMessage = incomingEvents.some((event) =>
       event.kind === "message.user"
     );
-    let snippetOverride = this.sourceSnippetBySessionId.get(sessionId);
+    const cachedSnippet = this.sourceSnippetBySessionId.get(sessionId);
+    let snippetOverride = cachedSnippet ?? undefined;
     if (
-      snippetOverride === undefined &&
+      cachedSnippet === undefined &&
       this.provider === "codex" &&
       fromOffset > 0 &&
       incomingHasUserMessage
     ) {
-      snippetOverride = await this.recoverFirstUserSnippetFromSource(
-        sessionId,
-        session.filePath,
-      );
-      if (snippetOverride !== undefined) {
-        this.sourceSnippetBySessionId.set(sessionId, snippetOverride);
+      if ((fileStat.size ?? 0) > MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES) {
+        this.sourceSnippetBySessionId.set(sessionId, null);
+        await this.operationalLogger.debug(
+          "provider.ingestion.snippet.recover_skipped",
+          "Skipped first-user snippet recovery due to source file size",
+          {
+            provider: this.provider,
+            sessionId,
+            filePath: session.filePath,
+            fileSizeBytes: fileStat.size ?? 0,
+            maxFileSizeBytes: MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES,
+          },
+        );
+      } else {
+        snippetOverride = await this.recoverFirstUserSnippetFromSource(
+          sessionId,
+          session.filePath,
+        );
+        this.sourceSnippetBySessionId.set(sessionId, snippetOverride ?? null);
       }
     }
 

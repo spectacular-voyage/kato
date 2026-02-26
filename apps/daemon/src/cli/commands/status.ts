@@ -1,5 +1,5 @@
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
-import { filterSessionsForDisplay } from "@kato/shared";
+import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
 
@@ -107,6 +107,43 @@ function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   return [line1, line2];
 }
 
+function summarizeRecordingsFromSessions(
+  sessions: DaemonSessionStatus[] | undefined,
+  fallback: DaemonStatusSnapshot["recordings"],
+): DaemonStatusSnapshot["recordings"] {
+  if (!sessions) return fallback;
+  const activeSessionsWithRecording = sessions.filter((session) =>
+    !session.stale && session.recording !== undefined
+  );
+  return {
+    activeRecordings: activeSessionsWithRecording.length,
+    destinations: new Set(
+      activeSessionsWithRecording.map((session) => session.recording!.outputPath),
+    ).size,
+  };
+}
+
+function normalizeSnapshotForStatusDisplay(
+  snapshot: DaemonStatusSnapshot,
+  now: Date,
+): DaemonStatusSnapshot {
+  if (!snapshot.sessions) return snapshot;
+  const normalizedSessions = snapshot.sessions.map((session) => ({
+    ...session,
+    stale: session.lastMessageAt
+      ? isSessionStale(session.lastMessageAt, now)
+      : true,
+  }));
+  return {
+    ...snapshot,
+    sessions: normalizedSessions,
+    recordings: summarizeRecordingsFromSessions(
+      normalizedSessions,
+      snapshot.recordings,
+    ),
+  };
+}
+
 function renderTopSummarySection(
   snapshot: DaemonStatusSnapshot,
   opts: {
@@ -114,12 +151,13 @@ function renderTopSummarySection(
     activeCount: number;
     staleCount: number;
     width: number;
+    recordingSummary: DaemonStatusSnapshot["recordings"];
   },
 ): string[] {
-  const { daemonText, activeCount, staleCount, width } = opts;
+  const { daemonText, activeCount, staleCount, width, recordingSummary } = opts;
   const memoryLines = buildMemoryLines(snapshot);
   const recordingLine =
-    `recordings: ${snapshot.recordings.activeRecordings} active, ${staleCount} stale`;
+    `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale`;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
     return [
@@ -131,7 +169,7 @@ function renderTopSummarySection(
 
   const leftLines = [
     `daemon: ${daemonText}`,
-    `recordings: ${snapshot.recordings.activeRecordings} active`,
+    `recordings: ${recordingSummary.activeRecordings} active`,
     `sessions: ${activeCount} active, ${staleCount} stale`,
   ];
   const rightLines = memoryLines;
@@ -240,6 +278,10 @@ export function renderStatusText(
   const allSessions = snapshot.sessions ?? [];
   const activeCount = allSessions.filter((s) => !s.stale).length;
   const staleCount = allSessions.length - activeCount;
+  const recordingSummary = summarizeRecordingsFromSessions(
+    allSessions,
+    snapshot.recordings,
+  );
   const displaySessions = filterSessionsForDisplay(allSessions, {
     includeStale: showAll,
   }).slice(0, sessionCap);
@@ -262,6 +304,7 @@ export function renderStatusText(
       activeCount,
       staleCount,
       width,
+      recordingSummary,
     }),
   );
   lines.push(divider);
@@ -337,7 +380,10 @@ async function runLiveMode(
   try {
     while (!shouldExit) {
       const now = ctx.runtime.now();
-      const snapshot: DaemonStatusSnapshot = await ctx.statusStore.load();
+      const snapshot = normalizeSnapshotForStatusDisplay(
+        await ctx.statusStore.load(),
+        now,
+      );
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
 
@@ -384,7 +430,10 @@ export async function runStatusCommand(
   }
 
   const now = ctx.runtime.now();
-  const snapshot: DaemonStatusSnapshot = await ctx.statusStore.load();
+  const snapshot = normalizeSnapshotForStatusDisplay(
+    await ctx.statusStore.load(),
+    now,
+  );
   const stale = isStatusSnapshotStale(snapshot, now);
 
   await ctx.operationalLogger.info(

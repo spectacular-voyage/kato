@@ -82,7 +82,7 @@ export interface DaemonRuntimeLoopOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 60 * 60_000;
+const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
 const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
 
@@ -1275,17 +1275,21 @@ function toActiveRecordingsFromMetadata(
   return recordings;
 }
 
-function filterCurrentRecordings(
-  recordings: ActiveRecording[],
-  now: Date,
-  staleAfterMs: number,
-): ActiveRecording[] {
-  const nowMs = now.getTime();
-  return recordings.filter((recording) => {
-    const lastWriteAtMs = readTimeMs(recording.lastWriteAt);
-    if (lastWriteAtMs === undefined) return false;
-    return nowMs - lastWriteAtMs <= staleAfterMs;
-  });
+function summarizeRecordingStatusFromSessions(
+  sessions: DaemonSessionStatus[] | undefined,
+): { activeRecordings: number; destinations: number } {
+  if (!sessions) {
+    return { activeRecordings: 0, destinations: 0 };
+  }
+  const activeRecordings = sessions.filter((session) =>
+    !session.stale && session.recording !== undefined
+  );
+  return {
+    activeRecordings: activeRecordings.length,
+    destinations: new Set(
+      activeRecordings.map((session) => session.recording!.outputPath),
+    ).size,
+  };
 }
 
 function toProviderStatuses(
@@ -1773,27 +1777,6 @@ export async function runDaemonRuntimeLoop(
       summaryMetadataDirty = true;
     }
     const summaryMetadata = await loadSummaryMetadata();
-    const rawActiveRecordingsForStatus = summaryMetadata
-      ? toActiveRecordingsFromMetadata(summaryMetadata)
-      : recordingPipeline.listActiveRecordings();
-    const activeRecordingsForStatus = filterCurrentRecordings(
-      rawActiveRecordingsForStatus,
-      now(),
-      providerStatusStaleAfterMs,
-    );
-    const recordingSummary = {
-      activeRecordings: activeRecordingsForStatus.length,
-      destinations: new Set(
-        activeRecordingsForStatus.map((recording) => recording.outputPath),
-      ).size,
-    };
-    snapshot = {
-      ...snapshot,
-      recordings: {
-        activeRecordings: recordingSummary.activeRecordings,
-        destinations: recordingSummary.destinations,
-      },
-    };
 
     const currentTimeMs = now().getTime();
     if (currentTimeMs >= nextHeartbeatAt) {
@@ -1826,6 +1809,7 @@ export async function runDaemonRuntimeLoop(
           heartbeatMetadataByKey,
         )
         : snapshot.sessions;
+      const recordingSummary = summarizeRecordingStatusFromSessions(sessions);
 
       const processMemory = Deno.memoryUsage();
       const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
@@ -1843,6 +1827,10 @@ export async function runDaemonRuntimeLoop(
         ...snapshot,
         providers,
         sessions,
+        recordings: {
+          activeRecordings: recordingSummary.activeRecordings,
+          destinations: recordingSummary.destinations,
+        },
         generatedAt: currentIso,
         heartbeatAt: currentIso,
         memory: {
@@ -1924,6 +1912,7 @@ export async function runDaemonRuntimeLoop(
       exitMetadataByKey,
     )
     : snapshot.sessions;
+  const recordingSummary = summarizeRecordingStatusFromSessions(sessions);
 
   const processMemory = Deno.memoryUsage();
   const snapshotMemory = sessionSnapshotStore?.getMemoryStats?.() ??
@@ -1942,6 +1931,10 @@ export async function runDaemonRuntimeLoop(
     ...snapshot,
     providers,
     sessions,
+    recordings: {
+      activeRecordings: recordingSummary.activeRecordings,
+      destinations: recordingSummary.destinations,
+    },
     generatedAt: exitIso,
     heartbeatAt: exitIso,
     daemonRunning: false,
