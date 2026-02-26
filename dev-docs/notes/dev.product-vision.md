@@ -2,7 +2,7 @@
 id: 4tvkvybigqrxc5yehscco6o
 title: Product Vision
 desc: ''
-updated: 1771785147279
+updated: 1772119694437
 created: 1771728320207
 ---
 
@@ -26,17 +26,16 @@ Kato more than a chat logger. It is the control plane for personal AI data.
 
 AI conversations today are:
 
-* Locked inside proprietary tools
-* Ephemeral and difficult to retrieve
-* Store in illegible (to humans) formats
-* Mixed with unrelated filesystem/network access
+* Ephemeral
+* Encoded in illegible (to humans), and provider-specific formats
+* Filed in arcane folder hierarchies, making them difficult to retrieve
 
 Users who care about their conversation data, privacy, portability, and long-term value lack:
 
 * Control over what gets recorded, and where
 * Strong containment guarantees
 * Tool-agnostic capture
-* A principled foundation for future AI-native workflows
+* A principled foundation AI-native workflows
 
 Conversation data allows both humans and AIs to reference context, history, and decisions. This data is essential for refining workflows and automation.
  

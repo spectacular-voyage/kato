@@ -2,14 +2,12 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772037843883
+updated: 1772119718625
 created: 1771724652182
 ---
 
-- each project/workspace folder can have its own .kato file/folder that specified where conversations go by default and filename patterns
-  - extremely useful if all conversations go to the same place and should follow the same pattern
-  - thinking and tools use should use, as default, the settings in config but allow per-session overrids, maybe by adding flags to the "::" commands
-
+- good frontmatter generation
+- thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overrids, maybe by adding flags to the "::" commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
 - support for kimi, etc
