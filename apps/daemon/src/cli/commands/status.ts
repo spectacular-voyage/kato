@@ -9,6 +9,9 @@ const DEFAULT_TERMINAL_WIDTH = 100;
 const MIN_TERMINAL_WIDTH = 48;
 const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
+const KEY_CTRL_C = 3;
+const KEY_LOWER_Q = 113;
+const KEY_UPPER_Q = 81;
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -78,6 +81,12 @@ function resolveTerminalWidth(): number {
   } catch {
     return DEFAULT_TERMINAL_WIDTH;
   }
+}
+
+export function isLiveExitKey(keyByte: number): boolean {
+  return keyByte === KEY_CTRL_C ||
+    keyByte === KEY_LOWER_Q ||
+    keyByte === KEY_UPPER_Q;
 }
 
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
@@ -164,7 +173,7 @@ function renderSessionRow(
     ? `"${sanitizeInlineText(s.snippet)}"`
     : "(no user message)";
   const identity = s.sessionShortId ?? s.sessionId;
-  const lastMessage = formatRelativeTime(s.lastMessageAt ?? s.updatedAt, now);
+  const lastMessage = formatRelativeTime(s.lastMessageAt, now);
   const header =
     `${marker} ${s.provider}: ${label} (${identity})  ·  last message ${lastMessage}`;
 
@@ -315,8 +324,8 @@ async function runLiveMode(
     while (!shouldExit) {
       const n = await Deno.stdin.read(stdinBuf);
       if (n === null) break;
-      // q or Q
-      if (stdinBuf[0] === 113 || stdinBuf[0] === 81) {
+      // In raw mode Ctrl+C arrives as ETX (0x03), not SIGINT.
+      if (isLiveExitKey(stdinBuf[0])) {
         shouldExit = true;
         break;
       }

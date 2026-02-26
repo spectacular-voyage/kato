@@ -21,7 +21,7 @@ export interface SessionProjectionInput {
   providerSessionId?: string;
   updatedAt: string;
   lastEventAt?: string;
-  /** File mtime in ms — most reliable staleness signal, provider-agnostic. */
+  /** File mtime in ms, available for diagnostics. */
   fileModifiedAtMs?: number;
   /** Pre-computed snippet from metadata. Preferred over scanning events. */
   snippet?: string;
@@ -83,24 +83,16 @@ export function projectSessionStatus(opts: {
   staleAfterMs?: number;
 }): DaemonSessionStatus {
   const { session, recording, now, staleAfterMs } = opts;
-  // Staleness precedence:
-  //   1. fileModifiedAtMs — OS-level mtime, reliable across all providers
-  //   2. lastEventAt     — fallback for providers without mtime support
-  //   3. absent          — no evidence of activity → stale
-  // We avoid updatedAt because it resets to now() on every daemon restart.
-  let stale: boolean;
-  if (session.fileModifiedAtMs !== undefined) {
-    stale = now.getTime() - session.fileModifiedAtMs >
-      (staleAfterMs ?? DEFAULT_STATUS_STALE_AFTER_MS);
-  } else if (session.lastEventAt !== undefined) {
-    stale = isSessionStale(
+  // Staleness is derived strictly from event time.
+  // We intentionally do not fallback to mtime/updatedAt so missing lastEventAt
+  // remains visible as a data issue.
+  const stale = session.lastEventAt !== undefined
+    ? isSessionStale(
       session.lastEventAt,
       now,
       staleAfterMs ?? DEFAULT_STATUS_STALE_AFTER_MS,
-    );
-  } else {
-    stale = true;
-  }
+    )
+    : true;
 
   const result: DaemonSessionStatus = {
     provider: session.provider,
@@ -113,7 +105,7 @@ export function projectSessionStatus(opts: {
       : {}),
     snippet: session.snippet ?? extractSnippet(session.events ?? []),
     updatedAt: session.updatedAt,
-    lastMessageAt: session.lastEventAt,
+    ...(session.lastEventAt ? { lastMessageAt: session.lastEventAt } : {}),
     stale,
   };
 
@@ -134,10 +126,18 @@ export function projectSessionStatus(opts: {
 }
 
 /**
- * Key used for recency sorting: prefer lastWriteAt > lastMessageAt > updatedAt.
+ * Key used for recency sorting.
+ *
+ * For active sessions, recording write recency is a useful "currently active"
+ * signal, so prefer lastWriteAt > lastMessageAt > updatedAt.
+ *
+ * For stale sessions, sort by conversational recency (lastMessageAt) so old
+ * sessions with recently touched recording files don't bubble to the top.
  */
 function recencyKey(s: DaemonSessionStatus): number {
-  const ts = s.recording?.lastWriteAt ?? s.lastMessageAt ?? s.updatedAt;
+  const ts = s.stale
+    ? (s.lastMessageAt ?? s.updatedAt)
+    : (s.recording?.lastWriteAt ?? s.lastMessageAt ?? s.updatedAt);
   const parsed = Date.parse(ts);
   return Number.isNaN(parsed) ? 0 : parsed;
 }

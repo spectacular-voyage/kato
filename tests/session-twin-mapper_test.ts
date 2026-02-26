@@ -109,3 +109,32 @@ Deno.test("mapTwinEventsToConversation round-trips message events", () => {
   assertEquals(roundTrip[0]?.kind, "message.user");
   assertEquals(roundTrip[1]?.kind, "message.assistant");
 });
+
+Deno.test("mapConversationEventsToTwin backfill keeps capturedAt when provided", () => {
+  const twin = mapConversationEventsToTwin({
+    provider: "codex",
+    providerSessionId: "provider-session-3",
+    sessionId: "kato-session-3",
+    events: [makeUserEvent("hello backfill")],
+    mode: "backfill",
+    capturedAt: "2026-02-26T11:00:00.000Z",
+  });
+
+  assertEquals(twin[0]?.time?.capturedAt, "2026-02-26T11:00:00.000Z");
+
+  const roundTrip = mapTwinEventsToConversation(twin);
+  assertEquals(roundTrip[0]?.timestamp, "2026-02-26T11:00:00.000Z");
+});
+
+Deno.test("mapTwinEventsToConversation uses unknown for codex backfill without timestamps", () => {
+  const twin = mapConversationEventsToTwin({
+    provider: "codex",
+    providerSessionId: "provider-session-4",
+    sessionId: "kato-session-4",
+    events: [makeUserEvent("hello unknown")],
+    mode: "backfill",
+  });
+
+  const roundTrip = mapTwinEventsToConversation(twin);
+  assertEquals(roundTrip[0]?.timestamp, "unknown");
+});

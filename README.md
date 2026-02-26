@@ -4,7 +4,8 @@ Own your AI conversations.
 
 ## Advantages
 
-- IDE extensions don't let you copy what you want, and don't always let you copy-as-markdown
+- IDE extensions don't let you copy what you want, and don't always let you
+  copy-as-markdown
 - let you centralize conversation from multiple provider in a single location
 - let you decentralize conversations into multiple locations
 
@@ -129,6 +130,12 @@ providerSessionRoots:
 globalAutoGenerateSnapshots: false
 providerAutoGenerateSnapshots: {}
 cleanSessionStatesOnShutdown: false
+markdownFrontmatter:
+  includeFrontmatterInMarkdownRecordings: true
+  includeUpdatedInFrontmatter: false
+  addParticipantUsernameToFrontmatter: false
+  defaultParticipantUsername: ""
+  includeConversationKinds: false
 featureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: false
@@ -147,12 +154,19 @@ Notes:
 - Runtime config is validated fail-closed at startup.
 - `providerSessionRoots` controls provider ingestion discovery roots and daemon
   read-scope narrowing.
-- `globalAutoGenerateSnapshots` controls default SessionTwin generation behavior.
-  `false` means twins are generated while recordings are active (or on-demand).
+- `globalAutoGenerateSnapshots` controls default SessionTwin generation
+  behavior. `false` means twins are generated while recordings are active (or
+  on-demand).
 - `providerAutoGenerateSnapshots` can override `globalAutoGenerateSnapshots` per
   provider (`claude`, `codex`, `gemini`).
 - `cleanSessionStatesOnShutdown=true` deletes persisted `*.twin.jsonl` files at
   daemon shutdown while retaining session metadata/index.
+- `markdownFrontmatter` controls markdown frontmatter behavior:
+  - `includeFrontmatterInMarkdownRecordings` (default `true`)
+  - `includeUpdatedInFrontmatter` (default `false`)
+  - `addParticipantUsernameToFrontmatter` (default `false`)
+  - `defaultParticipantUsername` fallback when username inclusion is enabled
+  - `includeConversationKinds` to add `kind.*` tags (default `false`)
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:

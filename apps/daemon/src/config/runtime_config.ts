@@ -5,6 +5,7 @@ import type {
   RuntimeFeatureFlags,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
+  RuntimeMarkdownFrontmatterConfig,
 } from "@kato/shared";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
@@ -30,6 +31,15 @@ const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
 const RUNTIME_LOGGING_CONFIG_KEYS: Array<keyof RuntimeLoggingConfig> = [
   "operationalLevel",
   "auditLevel",
+];
+const RUNTIME_MARKDOWN_FRONTMATTER_KEYS: Array<
+  keyof RuntimeMarkdownFrontmatterConfig
+> = [
+  "includeFrontmatterInMarkdownRecordings",
+  "includeUpdatedInFrontmatter",
+  "addParticipantUsernameToFrontmatter",
+  "defaultParticipantUsername",
+  "includeConversationKinds",
 ];
 
 export interface EnsureRuntimeConfigResult {
@@ -137,6 +147,36 @@ export function createDefaultRuntimeLoggingConfig(
   };
 }
 
+export function createDefaultRuntimeMarkdownFrontmatterConfig(
+  overrides?: Partial<RuntimeMarkdownFrontmatterConfig>,
+): RuntimeMarkdownFrontmatterConfig {
+  const defaults: RuntimeMarkdownFrontmatterConfig = {
+    includeFrontmatterInMarkdownRecordings: true,
+    includeUpdatedInFrontmatter: false,
+    addParticipantUsernameToFrontmatter: false,
+    defaultParticipantUsername: "",
+    includeConversationKinds: false,
+  };
+  if (!overrides) {
+    return defaults;
+  }
+
+  return {
+    includeFrontmatterInMarkdownRecordings:
+      overrides.includeFrontmatterInMarkdownRecordings ??
+        defaults.includeFrontmatterInMarkdownRecordings,
+    includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ??
+      defaults.includeUpdatedInFrontmatter,
+    addParticipantUsernameToFrontmatter:
+      overrides.addParticipantUsernameToFrontmatter ??
+        defaults.addParticipantUsernameToFrontmatter,
+    defaultParticipantUsername: overrides.defaultParticipantUsername ??
+      defaults.defaultParticipantUsername,
+    includeConversationKinds: overrides.includeConversationKinds ??
+      defaults.includeConversationKinds,
+  };
+}
+
 function parseRuntimeLoggingConfig(
   value: unknown,
 ): RuntimeLoggingConfig | undefined {
@@ -169,6 +209,63 @@ function parseRuntimeLoggingConfig(
       return undefined;
     }
     resolved[key] = level;
+  }
+
+  return resolved;
+}
+
+function parseRuntimeMarkdownFrontmatterConfig(
+  value: unknown,
+): RuntimeMarkdownFrontmatterConfig | undefined {
+  if (value === undefined) {
+    return createDefaultRuntimeMarkdownFrontmatterConfig();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (
+      !RUNTIME_MARKDOWN_FRONTMATTER_KEYS.includes(
+        key as keyof RuntimeMarkdownFrontmatterConfig,
+      )
+    ) {
+      return undefined;
+    }
+  }
+
+  const resolved = createDefaultRuntimeMarkdownFrontmatterConfig();
+  for (const key of RUNTIME_MARKDOWN_FRONTMATTER_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (key === "defaultParticipantUsername") {
+      if (typeof candidate !== "string") {
+        return undefined;
+      }
+      resolved.defaultParticipantUsername = candidate;
+    } else if (key === "includeFrontmatterInMarkdownRecordings") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeFrontmatterInMarkdownRecordings = candidate;
+    } else if (key === "includeUpdatedInFrontmatter") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeUpdatedInFrontmatter = candidate;
+    } else if (key === "addParticipantUsernameToFrontmatter") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.addParticipantUsernameToFrontmatter = candidate;
+    } else if (key === "includeConversationKinds") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeConversationKinds = candidate;
+    }
   }
 
   return resolved;
@@ -392,6 +489,12 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!logging) {
     return undefined;
   }
+  const markdownFrontmatter = parseRuntimeMarkdownFrontmatterConfig(
+    value["markdownFrontmatter"],
+  );
+  if (!markdownFrontmatter) {
+    return undefined;
+  }
   const providerSessionRoots = parseProviderSessionRoots(
     value["providerSessionRoots"],
   );
@@ -439,6 +542,7 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     globalAutoGenerateSnapshots,
     providerAutoGenerateSnapshots,
     cleanSessionStatesOnShutdown,
+    markdownFrontmatter,
     featureFlags,
     logging,
     daemonMaxMemoryMb,
@@ -471,6 +575,9 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
       ...(config.providerAutoGenerateSnapshots ?? {}),
     },
     cleanSessionStatesOnShutdown: config.cleanSessionStatesOnShutdown ?? false,
+    markdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
+      config.markdownFrontmatter,
+    ),
     featureFlags: { ...config.featureFlags },
     logging: { ...config.logging },
     daemonMaxMemoryMb: config.daemonMaxMemoryMb,
@@ -492,6 +599,7 @@ export function createDefaultRuntimeConfig(options: {
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
+  markdownFrontmatter?: Partial<RuntimeMarkdownFrontmatterConfig>;
   featureFlags?: Partial<RuntimeFeatureFlags>;
   logging?: Partial<RuntimeLoggingConfig>;
   daemonMaxMemoryMb?: number;
@@ -575,6 +683,9 @@ export function createDefaultRuntimeConfig(options: {
       ...(options.providerAutoGenerateSnapshots ?? {}),
     },
     cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,
+    markdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
+      options.markdownFrontmatter,
+    ),
     featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
     logging: resolvedLogging,
     daemonMaxMemoryMb: resolvedDaemonMaxMemoryMb,

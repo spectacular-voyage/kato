@@ -329,6 +329,102 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
   });
 });
 
+Deno.test("FileProviderIngestionRunner recovers first-user snippet when resuming from persisted cursor", async () => {
+  await withTempDir("provider-ingestion-snippet-recover-", async (dir) => {
+    const sessionFile = join(dir, "session-snippet-recover.jsonl");
+    await Deno.writeTextFile(sessionFile, `${"x".repeat(256)}\n`);
+    const stateRoot = join(dir, ".kato");
+    const parseOffsets: number[] = [];
+
+    const stateStore = new PersistentSessionStateStore({
+      katoDir: stateRoot,
+      now: () => new Date("2026-02-26T10:00:00.000Z"),
+      makeSessionId: () => "session-snippet-recover-uuid",
+    });
+    const metadata = await stateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-snippet-recover",
+      sourceFilePath: sessionFile,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    metadata.ingestCursor = { kind: "byte-offset", value: 100 };
+    await stateStore.saveSessionMetadata(metadata);
+
+    const store = new InMemorySessionSnapshotStore();
+    const runner = new FileProviderIngestionRunner({
+      provider: "codex",
+      watchRoots: [dir],
+      sessionSnapshotStore: store,
+      sessionStateStore: new PersistentSessionStateStore({
+        katoDir: stateRoot,
+        now: () => new Date("2026-02-26T10:00:00.000Z"),
+        makeSessionId: () => "session-snippet-recover-uuid",
+      }),
+      autoGenerateSnapshots: false,
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-snippet-recover",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        parseOffsets.push(fromOffset);
+        return (async function* () {
+          if (fromOffset === 100) {
+            yield {
+              event: {
+                ...makeEvent("resume-late", "2026-02-26T10:00:10.000Z"),
+                kind: "message.user",
+                role: "user",
+                content: "late user message",
+                source: {
+                  providerEventType: "user",
+                  providerEventId: "resume-late",
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 110 },
+            };
+            return;
+          }
+          if (fromOffset === 0) {
+            yield {
+              event: {
+                ...makeEvent("first-user", "2026-02-26T09:00:00.000Z"),
+                kind: "message.user",
+                role: "user",
+                content: "first user message",
+                source: {
+                  providerEventType: "user",
+                  providerEventId: "first-user",
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 50 },
+            };
+            yield {
+              event: makeEvent("first-assistant", "2026-02-26T09:00:01.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 100 },
+            };
+          }
+        })();
+      },
+    });
+
+    await runner.start();
+    await runner.poll();
+    await runner.stop();
+
+    const snapshot = store.get("session-snippet-recover");
+    assertExists(snapshot);
+    assertEquals(snapshot.metadata.snippet, "first user message");
+    assertEquals(parseOffsets, [100, 0]);
+  });
+});
+
 Deno.test("FileProviderIngestionRunner resets persisted cursor when source file path changes", async () => {
   await withTempDir("provider-ingestion-source-change-", async (dir) => {
     const sessionFileA = join(dir, "session-source-a.jsonl");

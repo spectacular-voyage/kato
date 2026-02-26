@@ -162,6 +162,24 @@ Deno.test("projectSessionStatus marks session stale when lastEventAt absent", ()
   assertEquals(result.stale, true);
 });
 
+Deno.test("projectSessionStatus does not fall back lastMessageAt to fileModifiedAtMs", () => {
+  const now = new Date("2026-02-24T10:00:00.000Z");
+  const updatedAt = new Date(now.getTime() - 60_000).toISOString();
+  const fileModifiedAtMs = Date.parse("2026-02-24T08:30:00.000Z");
+  const result = projectSessionStatus({
+    session: {
+      provider: "claude",
+      sessionId: "mtime-fallback",
+      updatedAt,
+      fileModifiedAtMs,
+      events: [],
+    },
+    now,
+  });
+  assertEquals(result.lastMessageAt, undefined);
+  assertEquals(result.stale, true);
+});
+
 Deno.test("projectSessionStatus marks old session as stale", () => {
   const now = new Date("2026-02-24T10:00:00.000Z");
   const updatedAt = new Date(now.getTime() - 10 * 60_000).toISOString();
@@ -269,3 +287,40 @@ Deno.test("sortSessionsByRecency uses lastWriteAt over updatedAt", () => {
   const result = sortSessionsByRecency(sessions);
   assertEquals(result[0].sessionId, "with-rec");
 });
+
+Deno.test(
+  "sortSessionsByRecency for stale sessions uses lastMessageAt over recording lastWriteAt",
+  () => {
+    const sessions: DaemonSessionStatus[] = [
+      {
+        provider: "claude",
+        sessionId: "stale-older-message",
+        stale: true,
+        updatedAt: "2026-02-24T09:00:00.000Z",
+        lastMessageAt: "2026-02-24T09:00:00.000Z",
+        recording: {
+          outputPath: "/out-old.md",
+          startedAt: "2026-02-24T09:00:00.000Z",
+          // Intentionally newer than the other stale session. Should be ignored.
+          lastWriteAt: "2026-02-24T12:00:00.000Z",
+        },
+      },
+      {
+        provider: "claude",
+        sessionId: "stale-newer-message",
+        stale: true,
+        updatedAt: "2026-02-24T10:00:00.000Z",
+        lastMessageAt: "2026-02-24T10:00:00.000Z",
+        recording: {
+          outputPath: "/out-new.md",
+          startedAt: "2026-02-24T10:00:00.000Z",
+          lastWriteAt: "2026-02-24T11:00:00.000Z",
+        },
+      },
+    ];
+
+    const result = sortSessionsByRecency(sessions);
+    assertEquals(result[0].sessionId, "stale-newer-message");
+    assertEquals(result[1].sessionId, "stale-older-message");
+  },
+);

@@ -38,10 +38,8 @@ function eventTimestampForTwin(
 }
 
 function readCapturedAt(
-  mode: "live" | "backfill",
   capturedAt: string | undefined,
 ): string | undefined {
-  if (mode !== "live") return undefined;
   const normalized = normalizeText(capturedAt);
   return normalized.length > 0 ? normalized : undefined;
 }
@@ -57,7 +55,7 @@ function makeBaseDraft(
     input.provider,
     input.mode,
   );
-  const capturedAt = readCapturedAt(input.mode, input.capturedAt);
+  const capturedAt = readCapturedAt(input.capturedAt);
 
   return {
     schemaVersion: 1,
@@ -321,6 +319,9 @@ function readTimestamp(event: SessionTwinEventV1): string {
   if (fromProvider.length > 0) return fromProvider;
   const fromCapturedAt = normalizeText(event.time?.capturedAt);
   if (fromCapturedAt.length > 0) return fromCapturedAt;
+  if (event.session.provider === "codex") {
+    return "unknown";
+  }
   return "";
 }
 

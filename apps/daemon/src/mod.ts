@@ -77,6 +77,7 @@ export type {
 export {
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
+  createDefaultRuntimeMarkdownFrontmatterConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,

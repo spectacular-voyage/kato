@@ -5,6 +5,7 @@ import type {
   SessionIngestAnchorV1,
   SessionMetadataV1,
 } from "@kato/shared";
+import { extractSnippet } from "@kato/shared";
 import { basename, join } from "@std/path";
 import {
   type DebouncedWatchBatch,
@@ -669,6 +670,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly cursors = new Map<string, ProviderCursor>();
   private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
+  private readonly sourceSnippetBySessionId = new Map<string, string>();
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
@@ -866,6 +868,41 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     return false;
   }
 
+  private async recoverFirstUserSnippetFromSource(
+    sessionId: string,
+    filePath: string,
+  ): Promise<string | undefined> {
+    try {
+      for await (
+        const { event } of this.parseEvents(
+          filePath,
+          0,
+          { provider: this.provider, sessionId },
+        )
+      ) {
+        if (event.kind !== "message.user") continue;
+        const snippet = extractSnippet([event]);
+        if (snippet) return snippet;
+      }
+      return undefined;
+    } catch (error) {
+      if (await this.handleReadDenied(error, "open", filePath)) {
+        return undefined;
+      }
+      await this.operationalLogger.warn(
+        "provider.ingestion.snippet.recover_failed",
+        "Failed to recover first-user snippet from source",
+        {
+          provider: this.provider,
+          sessionId,
+          filePath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return undefined;
+    }
+  }
+
   private async discoverAndTrackSessions(): Promise<void> {
     let discovered: ProviderSessionFile[];
     try {
@@ -898,6 +935,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.sessionByFilePath.delete(current.filePath);
           this.cursors.delete(session.sessionId);
           this.cursorSourcePaths.delete(session.sessionId);
+          this.sourceSnippetBySessionId.delete(session.sessionId);
         }
         this.dirtySessions.add(session.sessionId);
       }
@@ -909,6 +947,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.sessionByFilePath.delete(existing.filePath);
         this.cursors.delete(sessionId);
         this.cursorSourcePaths.delete(sessionId);
+        this.sourceSnippetBySessionId.delete(sessionId);
       }
     }
 
@@ -1268,6 +1307,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               sessionId: stateMetadata.sessionId,
               events: bootstrapEvents,
               mode: "backfill",
+              // Codex backfill cannot infer reliable event time from source.
+              // Leave capturedAt unset so it surfaces as unknown downstream.
+              ...(this.provider === "codex"
+                ? {}
+                : { capturedAt: this.now().toISOString() }),
             });
             const appendResult = await this.sessionStateStore.appendTwinEvents(
               stateMetadata,
@@ -1353,6 +1397,24 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
+    const incomingHasUserMessage = incomingEvents.some((event) =>
+      event.kind === "message.user"
+    );
+    let snippetOverride = this.sourceSnippetBySessionId.get(sessionId);
+    if (
+      snippetOverride === undefined &&
+      this.provider === "codex" &&
+      fromOffset > 0 &&
+      incomingHasUserMessage
+    ) {
+      snippetOverride = await this.recoverFirstUserSnippetFromSource(
+        sessionId,
+        session.filePath,
+      );
+      if (snippetOverride !== undefined) {
+        this.sourceSnippetBySessionId.set(sessionId, snippetOverride);
+      }
+    }
 
     if (stateMetadata && this.sessionStateStore) {
       const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
@@ -1479,6 +1541,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               cursor: latestCursor,
               events: rebuiltSnapshotEvents,
               fileModifiedAtMs,
+              ...(snippetOverride ? { snippetOverride } : {}),
             });
           } else if (appendedTwinEvents.length > 0) {
             const appendedSnapshotEvents = mapTwinEventsToConversation(
@@ -1506,6 +1569,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               cursor: latestCursor,
               events: merged.mergedEvents,
               fileModifiedAtMs,
+              ...(snippetOverride ? { snippetOverride } : {}),
             });
           } else {
             this.sessionSnapshotStore.upsert({
@@ -1514,6 +1578,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               cursor: latestCursor,
               events: existingSnapshotEvents,
               fileModifiedAtMs,
+              ...(snippetOverride ? { snippetOverride } : {}),
             });
           }
         } else if (incomingEvents.length > 0 || currentSnapshot) {
@@ -1539,6 +1604,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             cursor: latestCursor,
             events: merged.mergedEvents,
             fileModifiedAtMs,
+            ...(snippetOverride ? { snippetOverride } : {}),
           });
         }
       }
@@ -1578,6 +1644,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       cursor: latestCursor,
       events: merged.mergedEvents,
       fileModifiedAtMs,
+      ...(snippetOverride ? { snippetOverride } : {}),
     });
     this.setCursor(sessionId, latestCursor, session.filePath);
 

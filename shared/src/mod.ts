@@ -25,6 +25,7 @@ export type {
   RuntimeFeatureFlags,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
+  RuntimeMarkdownFrontmatterConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {
