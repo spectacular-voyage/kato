@@ -150,6 +150,34 @@ Deno.test("InMemorySessionSnapshotStore keeps first user snippet when early even
   assertEquals(second.metadata.snippet, "first user message");
 });
 
+Deno.test("InMemorySessionSnapshotStore snippetOverride can repair resumed snippet", () => {
+  const store = new InMemorySessionSnapshotStore({
+    now: () => new Date("2026-02-22T19:30:00.000Z"),
+  });
+
+  const first = store.upsert({
+    provider: "codex",
+    sessionId: "session-snippet-override",
+    cursor: { kind: "byte-offset", value: 100 },
+    events: [
+      makeUserEvent("u-late", "2026-02-22T19:29:00.000Z", "late user message"),
+    ],
+  });
+  assertEquals(first.metadata.snippet, "late user message");
+
+  const second = store.upsert({
+    provider: "codex",
+    sessionId: "session-snippet-override",
+    cursor: { kind: "byte-offset", value: 110 },
+    events: [
+      makeEvent("a-next", "2026-02-22T19:30:00.000Z"),
+    ],
+    snippetOverride: "original first user message",
+  });
+
+  assertEquals(second.metadata.snippet, "original first user message");
+});
+
 Deno.test("InMemorySessionSnapshotStore omits lastEventAt for empty event lists", () => {
   const store = new InMemorySessionSnapshotStore({
     now: () => new Date("2026-02-22T19:31:00.000Z"),

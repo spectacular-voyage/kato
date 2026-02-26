@@ -1,6 +1,9 @@
 import type { ConversationEvent } from "@kato/shared";
 import { basename, dirname } from "@std/path";
-import { renderFrontmatter } from "./frontmatter.ts";
+import {
+  mergeAccretiveFrontmatterFields,
+  renderFrontmatter,
+} from "./frontmatter.ts";
 
 export type ConversationWriteMode = "create" | "append" | "overwrite";
 
@@ -19,9 +22,15 @@ export interface MarkdownSpeakerNames {
 
 export interface MarkdownRenderOptions {
   includeFrontmatter?: boolean;
+  includeUpdatedInFrontmatter?: boolean;
   title?: string;
   now?: () => Date;
   makeFrontmatterId?: (title: string) => string;
+  frontmatterSessionId?: string;
+  frontmatterRecordingIds?: string[];
+  frontmatterParticipants?: string[];
+  frontmatterTags?: string[];
+  frontmatterConversationEventKinds?: string[];
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
   includeThinking?: boolean;
@@ -188,6 +197,12 @@ export function renderEventsToMarkdown(
         title,
         now: options.now?.() ?? new Date(),
         makeFrontmatterId: options.makeFrontmatterId,
+        sessionId: options.frontmatterSessionId,
+        recordingIds: options.frontmatterRecordingIds,
+        participants: options.frontmatterParticipants,
+        tags: options.frontmatterTags,
+        conversationEventKinds: options.frontmatterConversationEventKinds,
+        includeUpdated: options.includeUpdatedInFrontmatter,
       }),
       "",
     );
@@ -378,6 +393,37 @@ export function renderEventsToMarkdown(
   return parts.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
+interface ExistingFrontmatterView {
+  frontmatter: string;
+  body: string;
+}
+
+function splitExistingFrontmatter(
+  content: string,
+): ExistingFrontmatterView | null {
+  if (!content.startsWith("---\n")) {
+    return null;
+  }
+
+  const closingIndex = content.indexOf("\n---", 4);
+  if (closingIndex < 0) {
+    return null;
+  }
+
+  const frontmatterEnd = closingIndex + 4;
+  let body = content.slice(frontmatterEnd);
+  if (body.startsWith("\n\n")) {
+    body = body.slice(2);
+  } else if (body.startsWith("\n")) {
+    body = body.slice(1);
+  }
+
+  return {
+    frontmatter: content.slice(0, frontmatterEnd),
+    body,
+  };
+}
+
 async function extractExistingFrontmatter(
   filePath: string,
 ): Promise<string | null> {
@@ -391,16 +437,11 @@ async function extractExistingFrontmatter(
     throw error;
   }
 
-  if (!content.startsWith("---\n")) {
+  const split = splitExistingFrontmatter(content);
+  if (!split) {
     return null;
   }
-
-  const closingIndex = content.indexOf("\n---", 4);
-  if (closingIndex < 0) {
-    return null;
-  }
-
-  return content.slice(0, closingIndex + 4);
+  return split.frontmatter;
 }
 
 async function readExistingFile(
@@ -426,11 +467,12 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
 
     const existing = await readExistingFile(outputPath);
+    const includeFrontmatter = options.includeFrontmatter !== false;
     if (!existing.exists) {
       const title = options.title ?? basename(outputPath, ".md");
       const rendered = renderEventsToMarkdown(events, {
         ...options,
-        includeFrontmatter: true,
+        includeFrontmatter,
         title,
       });
       const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
@@ -443,12 +485,30 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       };
     }
 
+    const existingFrontmatterView = splitExistingFrontmatter(existing.content);
+    const shouldMergeFrontmatter = existingFrontmatterView &&
+      ((options.frontmatterRecordingIds?.length ?? 0) > 0 ||
+        (options.frontmatterTags?.length ?? 0) > 0 ||
+        (options.frontmatterConversationEventKinds?.length ?? 0) > 0);
+    const nextFrontmatter = shouldMergeFrontmatter
+      ? mergeAccretiveFrontmatterFields({
+        frontmatter: existingFrontmatterView.frontmatter,
+        recordingIds: options.frontmatterRecordingIds,
+        tags: options.frontmatterTags,
+        conversationEventKinds: options.frontmatterConversationEventKinds,
+      })
+      : existingFrontmatterView?.frontmatter;
+    const frontmatterChanged = existingFrontmatterView !== null &&
+      nextFrontmatter !== undefined &&
+      nextFrontmatter !== existingFrontmatterView.frontmatter;
+
     const rendered = renderEventsToMarkdown(events, {
       ...options,
       includeFrontmatter: false,
     });
     const content = rendered.trim();
-    if (content.length === 0) {
+    const hasBodyToAppend = content.length > 0;
+    if (!hasBodyToAppend && !frontmatterChanged) {
       return {
         mode: "append",
         outputPath,
@@ -457,8 +517,10 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       };
     }
 
+    const existingBody = existingFrontmatterView?.body ?? existing.content;
     const existingTrimmed = existing.content.trimEnd();
-    if (existingTrimmed.endsWith(content)) {
+    const deduped = hasBodyToAppend && existingTrimmed.endsWith(content);
+    if (deduped && !frontmatterChanged) {
       return {
         mode: "append",
         outputPath,
@@ -467,23 +529,44 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       };
     }
 
-    const separator = existing.content.length === 0
-      ? ""
-      : existing.content.endsWith("\n\n")
-      ? ""
-      : existing.content.endsWith("\n")
-      ? "\n"
-      : "\n\n";
-    await Deno.writeTextFile(outputPath, `${separator}${content}`, {
-      append: true,
-      create: true,
-    });
+    if (frontmatterChanged && existingFrontmatterView && nextFrontmatter) {
+      let nextBody = existingBody;
+      if (hasBodyToAppend && !deduped) {
+        const separator = nextBody.length === 0
+          ? ""
+          : nextBody.endsWith("\n\n")
+          ? ""
+          : nextBody.endsWith("\n")
+          ? "\n"
+          : "\n\n";
+        nextBody = `${nextBody}${separator}${content}`;
+      }
+      const normalizedBody = nextBody.replace(/^\n+/, "");
+      const nextContent = normalizedBody.length > 0
+        ? `${nextFrontmatter}\n\n${
+          normalizedBody.endsWith("\n") ? normalizedBody : `${normalizedBody}\n`
+        }`
+        : `${nextFrontmatter}\n`;
+      await Deno.writeTextFile(outputPath, nextContent);
+    } else if (hasBodyToAppend && !deduped) {
+      const separator = existing.content.length === 0
+        ? ""
+        : existing.content.endsWith("\n\n")
+        ? ""
+        : existing.content.endsWith("\n")
+        ? "\n"
+        : "\n\n";
+      await Deno.writeTextFile(outputPath, `${separator}${content}`, {
+        append: true,
+        create: true,
+      });
+    }
 
     return {
       mode: "append",
       outputPath,
-      wrote: true,
-      deduped: false,
+      wrote: frontmatterChanged || (hasBodyToAppend && !deduped),
+      deduped,
     };
   }
 
@@ -496,13 +579,26 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
 
     const existingFrontmatter = await extractExistingFrontmatter(outputPath);
     if (existingFrontmatter) {
+      const hasAccretiveInputs =
+        (options.frontmatterRecordingIds?.length ?? 0) >
+          0 ||
+        (options.frontmatterTags?.length ?? 0) > 0 ||
+        (options.frontmatterConversationEventKinds?.length ?? 0) > 0;
+      const mergedFrontmatter = hasAccretiveInputs
+        ? mergeAccretiveFrontmatterFields({
+          frontmatter: existingFrontmatter,
+          recordingIds: options.frontmatterRecordingIds,
+          tags: options.frontmatterTags,
+          conversationEventKinds: options.frontmatterConversationEventKinds,
+        })
+        : existingFrontmatter;
       const body = renderEventsToMarkdown(events, {
         ...options,
         includeFrontmatter: false,
       }).trim();
       const content = body.length > 0
-        ? `${existingFrontmatter}\n\n${body}\n`
-        : `${existingFrontmatter}\n`;
+        ? `${mergedFrontmatter}\n\n${body}\n`
+        : `${mergedFrontmatter}\n`;
       await Deno.writeTextFile(outputPath, content);
       return {
         mode: "overwrite",
@@ -513,9 +609,10 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     }
 
     const title = options.title ?? basename(outputPath, ".md");
+    const includeFrontmatter = options.includeFrontmatter !== false;
     const rendered = renderEventsToMarkdown(events, {
       ...options,
-      includeFrontmatter: true,
+      includeFrontmatter,
       title,
     });
     const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;

@@ -1452,6 +1452,169 @@ Deno.test("runDaemonRuntimeLoop omits stale provider snapshots from status.provi
   assertEquals(last.providers, []);
 });
 
+Deno.test("runDaemonRuntimeLoop excludes stale recordings from status.recordings.activeRecordings", async () => {
+  await Deno.mkdir(".kato/test-tmp", { recursive: true });
+  const stateDir = await Deno.makeTempDir({
+    dir: ".kato/test-tmp",
+    prefix: "daemon-runtime-recording-status-",
+  });
+  try {
+    const statusHistory: DaemonStatusSnapshot[] = [];
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        statusHistory.push({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-stale-recording-count",
+      requestedAt: "2026-02-22T10:00:01.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: "session-stale",
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [{
+        eventId: "stale-message",
+        provider: "codex",
+        sessionId: "session-stale",
+        timestamp: "2026-02-22T08:00:00.000Z",
+        kind: "message.user",
+        role: "user",
+        content: "old message",
+        source: {
+          providerEventType: "user",
+          providerEventId: "stale-message",
+        },
+      } as ConversationEvent],
+    });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: "session-active",
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [{
+        eventId: "active-message",
+        provider: "codex",
+        sessionId: "session-active",
+        timestamp: "2026-02-22T10:00:00.000Z",
+        kind: "message.user",
+        role: "user",
+        content: "fresh message",
+        source: {
+          providerEventType: "user",
+          providerEventId: "active-message",
+        },
+      } as ConversationEvent],
+    });
+    let sessionStateNow = new Date("2026-02-22T08:00:00.000Z");
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => sessionStateNow,
+      makeSessionId: () => "kato-session-recording-status-1234",
+    });
+
+    const staleMetadata = await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-stale",
+      sourceFilePath: "/tmp/session-stale.jsonl",
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    staleMetadata.recordings = [{
+      recordingId: "recording-stale-1",
+      destination: "/tmp/stale.md",
+      desiredState: "on",
+      writeCursor: 0,
+      periods: [{ startedCursor: 0 }],
+    }];
+    await sessionStateStore.saveSessionMetadata(staleMetadata);
+
+    sessionStateNow = new Date("2026-02-22T10:00:00.000Z");
+    const activeMetadata = await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-active",
+      sourceFilePath: "/tmp/session-active.jsonl",
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    activeMetadata.recordings = [{
+      recordingId: "recording-active-1",
+      destination: "/tmp/active.md",
+      desiredState: "on",
+      writeCursor: 0,
+      periods: [{ startedCursor: 0 }],
+    }];
+    await sessionStateStore.saveSessionMetadata(activeMetadata);
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      sessionSnapshotStore,
+      sessionStateStore,
+      providerStatusStaleAfterMs: 60_000,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    const last = statusHistory[statusHistory.length - 1];
+    assertExists(last);
+    assertEquals(last.recordings.activeRecordings, 1);
+    assertEquals(last.recordings.destinations, 1);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
 Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ingested messages", async () => {
   let currentStatus: DaemonStatusSnapshot = {
     schemaVersion: 1,
@@ -3578,6 +3741,8 @@ Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple
       ["a-1", "u-start-b", "a-2"],
     );
     assertEquals(appendByDestination.get("/tmp/multi-b.md"), ["a-2"]);
+    assertEquals(currentStatus.recordings.activeRecordings, 2);
+    assertEquals(currentStatus.recordings.destinations, 2);
   } finally {
     await Deno.remove(stateDir, { recursive: true });
   }

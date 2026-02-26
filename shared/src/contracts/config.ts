@@ -16,6 +16,14 @@ export interface RuntimeLoggingConfig {
   auditLevel: RuntimeLogLevel;
 }
 
+export interface RuntimeMarkdownFrontmatterConfig {
+  includeFrontmatterInMarkdownRecordings: boolean;
+  includeUpdatedInFrontmatter: boolean;
+  addParticipantUsernameToFrontmatter: boolean;
+  defaultParticipantUsername: string;
+  includeConversationEventKinds: boolean;
+}
+
 export interface ProviderSessionRoots {
   claude: string[];
   codex: string[];
@@ -39,6 +47,7 @@ export interface RuntimeConfig {
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
+  markdownFrontmatter?: RuntimeMarkdownFrontmatterConfig;
   featureFlags: RuntimeFeatureFlags;
   logging: RuntimeLoggingConfig;
   daemonMaxMemoryMb: number;

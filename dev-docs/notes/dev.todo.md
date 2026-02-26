@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1772088881867
+updated: 1772141794466
 created: 1771812869620
 ---
 
@@ -63,3 +63,9 @@ created: 1771812869620
 - [ ] Service-manager integration evaluation (`systemd`, launchd, Windows Service).
 - [ ] Re-evaluate additional CLI framework features (Cliffy) only if command UX outgrows current router.
 - [ ] Re-evaluate `zod` adoption only if boundary validation complexity materially increases.
+
+## Other
+
+- [ ] defaultParticipantUsername still uses string with "" default in config.ts.
+- [ ] resolveConversationTitle call dedup/memoization in daemon runtime is still an optimization opportunity.
+- [ ] remove all compatibility-layer cruft

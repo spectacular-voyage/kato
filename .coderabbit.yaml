@@ -1,5 +1,6 @@
 reviews:
   path_filters:
     - "!dev-docs/notes/conv.*"
+    - "!dev-docs/notes/task.*"
   auto_review:
     enabled: true

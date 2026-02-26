@@ -1,5 +1,5 @@
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { basename, dirname, join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
   resolveDefaultConfigPath,
@@ -29,7 +29,7 @@ import {
   StructuredLogger,
 } from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
-import { readOptionalEnv } from "./utils/env.ts";
+import { readOptionalEnv, resolveHomeDir } from "./utils/env.ts";
 import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
@@ -75,6 +75,43 @@ function resolveLogLevels(runtimeConfig: RuntimeConfig): {
     auditLevel: parseLogLevelOverride("KATO_LOGGING_AUDIT_LEVEL") ??
       runtimeConfig.logging.auditLevel,
   };
+}
+
+function normalizeFrontmatterParticipantUsername(
+  value: string | undefined,
+): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "");
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function resolveFrontmatterParticipantUsername(
+  runtimeConfig: RuntimeConfig,
+): string | undefined {
+  const markdownFrontmatter = runtimeConfig.markdownFrontmatter;
+  if (!markdownFrontmatter?.addParticipantUsernameToFrontmatter) {
+    return undefined;
+  }
+  const configured = normalizeFrontmatterParticipantUsername(
+    markdownFrontmatter.defaultParticipantUsername,
+  );
+  if (configured) {
+    return configured;
+  }
+  const envUser = normalizeFrontmatterParticipantUsername(
+    readOptionalEnv("USER") ?? readOptionalEnv("USERNAME"),
+  );
+  if (envUser) {
+    return envUser;
+  }
+  const home = resolveHomeDir();
+  return normalizeFrontmatterParticipantUsername(
+    home ? basename(home) : undefined,
+  );
 }
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
@@ -181,6 +218,16 @@ export async function runDaemonSubprocess(
       allowedRoots: runtimeConfig.allowedWriteRoots,
     }),
     now,
+    includeFrontmatterInMarkdownRecordings: runtimeConfig.markdownFrontmatter
+      ?.includeFrontmatterInMarkdownRecordings ??
+      true,
+    includeUpdatedInFrontmatter:
+      runtimeConfig.markdownFrontmatter?.includeUpdatedInFrontmatter ?? false,
+    includeConversationEventKindsInFrontmatter:
+      runtimeConfig.markdownFrontmatter?.includeConversationEventKinds ?? false,
+    frontmatterParticipantUsername: resolveFrontmatterParticipantUsername(
+      runtimeConfig,
+    ),
     defaultRenderOptions: featureSettings.writerRenderOptions,
     operationalLogger,
     auditLogger,

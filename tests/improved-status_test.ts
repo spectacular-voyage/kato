@@ -6,7 +6,10 @@ import {
 } from "@std/assert";
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
-import { renderStatusText } from "../apps/daemon/src/cli/commands/status.ts";
+import {
+  isLiveExitKey,
+  renderStatusText,
+} from "../apps/daemon/src/cli/commands/status.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
 // ─── Parser tests ─────────────────────────────────────────────────────────────
@@ -66,6 +69,17 @@ Deno.test("cli parser: plain status parses all=false live=false", () => {
   assertEquals(intent.command.all, false);
   assertEquals(intent.command.live, false);
   assertEquals(intent.command.asJson, false);
+});
+
+Deno.test("isLiveExitKey: q, Q, and Ctrl+C exit live mode", () => {
+  assertEquals(isLiveExitKey(113), true);
+  assertEquals(isLiveExitKey(81), true);
+  assertEquals(isLiveExitKey(3), true);
+});
+
+Deno.test("isLiveExitKey: non-exit keys do not exit live mode", () => {
+  assertEquals(isLiveExitKey(10), false);
+  assertEquals(isLiveExitKey(32), false);
 });
 
 // ─── renderStatusText ─────────────────────────────────────────────────────────
@@ -139,6 +153,21 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
   assertStringIncludes(out, "how do I configure X");
   assertStringIncludes(out, "/home/user/notes.md");
   assertStringIncludes(out, "recording");
+});
+
+Deno.test("renderStatusText: missing lastMessageAt renders as unknown", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "no-msg-time",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: true,
+  }];
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+  });
+  assertStringIncludes(out, "(no-msg-time)  ·  last message unknown");
 });
 
 Deno.test("renderStatusText: stale session hidden by default", () => {
@@ -252,6 +281,7 @@ Deno.test("renderStatusText: narrow width keeps lines within width", () => {
   assertEquals(tooWideLine, undefined);
   assertStringIncludes(out, "memory:");
   assertStringIncludes(out, "recordings:");
+  assertStringIncludes(out, "stale sessions");
 });
 
 Deno.test("renderStatusText: wide width keeps two-column summary", () => {

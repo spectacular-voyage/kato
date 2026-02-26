@@ -28,6 +28,8 @@ export interface SessionSnapshotUpsert {
   cursor: ProviderCursor;
   events: ConversationEvent[];
   fileModifiedAtMs?: number;
+  /** Optional authoritative snippet (first user message) supplied by caller. */
+  snippetOverride?: string;
 }
 
 export interface SessionSnapshotMetadataEntry {
@@ -215,10 +217,11 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     );
     const updatedAt = this.now().toISOString();
     const lastEventAt = readLastEventAt(retainedEvents);
-    // Keep snippet stable for the life of the session.
-    // Prefer previously discovered first-user snippet, otherwise derive from
-    // the full event stream (not just retained tail events).
-    const snippet = previousSnippet ?? extractSnippet(input.events);
+    // Keep snippet stable for the life of the session unless caller provides
+    // a source-derived correction (e.g., after resume from a persisted cursor).
+    // Otherwise derive from the full event stream (not just retained tail events).
+    const snippet = input.snippetOverride ?? previousSnippet ??
+      extractSnippet(input.events);
 
     const snapshot: RuntimeSessionSnapshot = {
       provider,

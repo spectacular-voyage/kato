@@ -121,6 +121,332 @@ Deno.test("MarkdownConversationWriter overwrite preserves existing frontmatter",
 });
 
 Deno.test(
+  "MarkdownConversationWriter create can render rich frontmatter and omit updated",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e1",
+          "message.user",
+          "hello",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ], {
+        title: "Conversation Session",
+        includeUpdatedInFrontmatter: false,
+        frontmatterSessionId: "12345678-abcdef",
+        frontmatterRecordingIds: ["rec-seed"],
+        frontmatterParticipants: ["user.djradon", "codex.gpt-5.3-codex"],
+        frontmatterTags: ["provider.codex"],
+        frontmatterConversationEventKinds: ["message.user"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "id: conversation-session-12345678");
+      assertStringIncludes(content, "sessionId: 12345678-abcdef");
+      assertStringIncludes(content, "recordingIds: [rec-seed]");
+      assertStringIncludes(
+        content,
+        "participants: [user.djradon, codex.gpt-5.3-codex]",
+      );
+      assertStringIncludes(
+        content,
+        "tags: [provider.codex]",
+      );
+      assertStringIncludes(
+        content,
+        "conversationEventKinds: [message.user]",
+      );
+      assertEquals(content.includes("\nupdated:"), false);
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter quotes ambiguous scalar-like frontmatter strings",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e1",
+          "message.user",
+          "hello",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ], {
+        includeFrontmatter: true,
+        frontmatterRecordingIds: ["123", "true", "null", "~", "rec-safe"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        content,
+        "recordingIds: ['123', 'true', 'null', '~', rec-safe]",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter append accretively updates recordingIds, tags, and conversationEventKinds in existing frontmatter",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "recordingIds: [rec-old]",
+          "tags: [provider.codex]",
+          "conversationEventKinds: [message.user]",
+          "---",
+          "",
+          "# User_2026-02-22_1000_00",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant reply",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: true,
+        frontmatterRecordingIds: ["rec-new"],
+        frontmatterTags: ["topic.frontmatter"],
+        frontmatterConversationEventKinds: ["message.assistant"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "recordingIds: [rec-old, rec-new]");
+      assertStringIncludes(
+        content,
+        "tags: [provider.codex, topic.frontmatter]",
+      );
+      assertStringIncludes(
+        content,
+        "conversationEventKinds: [message.user, message.assistant]",
+      );
+      assertStringIncludes(content, "assistant reply");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter still updates accretive frontmatter fields when includeFrontmatter is false",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "recordingIds: [rec-old]",
+          "tags: [provider.codex]",
+          "conversationEventKinds: [message.user]",
+          "---",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant follow-up",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        frontmatterRecordingIds: ["rec-new"],
+        frontmatterTags: ["topic.extra"],
+        frontmatterConversationEventKinds: ["message.assistant"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "recordingIds: [rec-old, rec-new]");
+      assertStringIncludes(
+        content,
+        "tags: [provider.codex, topic.extra]",
+      );
+      assertStringIncludes(
+        content,
+        "conversationEventKinds: [message.user, message.assistant]",
+      );
+      assertStringIncludes(content, "assistant follow-up");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter migrates legacy messageEventKinds key",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "recordingIds: [rec-old]",
+          "messageEventKinds: [message.user]",
+          "---",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant follow-up",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        frontmatterConversationEventKinds: ["message.assistant"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        content,
+        "conversationEventKinds: [message.user, message.assistant]",
+      );
+      assertEquals(content.includes("\nmessageEventKinds:"), false);
+      assertStringIncludes(content, "assistant follow-up");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter preserves whitespace in unchanged frontmatter scalar fields",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        outputPath,
+        [
+          "---",
+          "id: seed-frontmatter",
+          "title: 'Seed Conversation'",
+          "desc: ''",
+          "created: 1",
+          "updated: 1",
+          "customPadded: '  keep me padded  '",
+          "tags: [topic.seed]",
+          "---",
+          "",
+          "seed body",
+          "",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e2",
+          "message.assistant",
+          "assistant follow-up",
+          "2026-02-22T10:00:01.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        frontmatterRecordingIds: ["rec-new"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "customPadded: '  keep me padded  '");
+      assertStringIncludes(content, "recordingIds: [rec-new]");
+      assertStringIncludes(content, "assistant follow-up");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+Deno.test("MarkdownConversationWriter create respects includeFrontmatter false", async () => {
+  const root = makeSandboxRoot();
+  const outputPath = join(root, "conversation.md");
+  const writer = new MarkdownConversationWriter();
+
+  try {
+    await writer.appendEvents(outputPath, [
+      makeEvent(
+        "e1",
+        "message.user",
+        "no frontmatter",
+        "2026-02-22T10:00:00.000Z",
+      ),
+    ], {
+      includeFrontmatter: false,
+      title: "No Frontmatter",
+    });
+
+    const content = await Deno.readTextFile(outputPath);
+    assertEquals(content.startsWith("---\n"), false);
+    assertStringIncludes(content, "no frontmatter");
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test(
   "renderEventsToMarkdown keeps tool call revisions when includeToolCalls is enabled",
   () => {
     const baseAssistant = makeEvent(

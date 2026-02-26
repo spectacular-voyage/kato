@@ -5,6 +5,7 @@ import {
   createDefaultRuntimeConfig,
   createDefaultRuntimeFeatureFlags,
   createDefaultRuntimeLoggingConfig,
+  createDefaultRuntimeMarkdownFrontmatterConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
@@ -176,7 +177,123 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
       resolveDefaultProviderSessionRoots(),
     );
     assertEquals(loaded.logging, createDefaultRuntimeLoggingConfig());
+    assertEquals(
+      loaded.markdownFrontmatter,
+      createDefaultRuntimeMarkdownFrontmatterConfig(),
+    );
     assertEquals(loaded.katoDir, dirname(runtimeDir));
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        markdownFrontmatter: {
+          includeFrontmatterInMarkdownRecordings: true,
+          includeUpdatedInFrontmatter: false,
+          addParticipantUsernameToFrontmatter: false,
+          defaultParticipantUsername: "",
+          includeConversationEventKinds: false,
+          extra: true,
+        },
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "unsupported schema",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value types", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        markdownFrontmatter: {
+          includeFrontmatterInMarkdownRecordings: true,
+          includeUpdatedInFrontmatter: "false",
+          addParticipantUsernameToFrontmatter: false,
+          defaultParticipantUsername: "",
+          includeConversationEventKinds: false,
+        },
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "unsupported schema",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        markdownFrontmatter: {
+          includeFrontmatterInMarkdownRecordings: false,
+          includeUpdatedInFrontmatter: true,
+          addParticipantUsernameToFrontmatter: true,
+          defaultParticipantUsername: "alice",
+          includeConversationEventKinds: true,
+        },
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.markdownFrontmatter, {
+      includeFrontmatterInMarkdownRecordings: false,
+      includeUpdatedInFrontmatter: true,
+      addParticipantUsernameToFrontmatter: true,
+      defaultParticipantUsername: "alice",
+      includeConversationEventKinds: true,
+    });
   } finally {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }

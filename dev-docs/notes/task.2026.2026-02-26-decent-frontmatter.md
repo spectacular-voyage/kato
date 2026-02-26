@@ -1,7 +1,7 @@
 ---
 id: ru04o3780vg0ell7chui1e5
 title: 2026 02 26 Decent Frontmatter
-desc: ''
+desc: ""
 updated: 1772124160537
 created: 1772122600275
 ---
@@ -58,18 +58,23 @@ For newly created markdown files, emit:
 id: <computed-id>
 title: '<computed-title>'
 desc: ''
-updated: <epoch-ms>
 created: <epoch-ms>
+updated: <epoch-ms> # optional; controlled by config
 participants: [user.djradon, codex.gpt-5.3-codex]
 sessionId: <session-id>
 recordingIds: [<recording-id-1>, <recording-id-2>]
-tags: [provider.codex, kind.message.user, kind.message.assistant]
+tags: [topic.session]
+conversationEventKinds: [message.user, message.assistant, tool.call, tool.result]
 ---
 ```
 
 Rules:
 
-- `created` and `updated` are equal at creation time.
+- `created` is always emitted at creation time.
+- `updated` is emitted only when `includeUpdatedInFrontmatter=true`; when
+  emitted on creation, set `updated=created`.
+- After creation, kato does not mutate `updated` on append/overwrite writes
+  (Dendron or other tools may update it externally).
 - `desc` remains blank by default.
 - New fields are omitted if no value is available.
 - Arrays are serialized inline (single-line YAML arrays).
@@ -100,20 +105,27 @@ Rules:
     2. env username (`USER`/`USERNAME`) when available
     3. home-directory basename (best effort)
 - Output format:
-  - strings like `user.djradon`, `codex.gpt-5.3-codex`, `claude.claude-3.7-sonnet`.
+  - strings like `user.djradon`, `codex.gpt-5.3-codex`,
+    `claude.claude-3.7-sonnet`.
 
-### 4) Tags / Conversation Kinds
+### 4) Tags / Conversation EventKinds
 
-- Always include `provider.<provider>`.
-- If `includeConversationKinds` is true, include observed
-  `ConversationEvent.kind` values as `kind.<value>`.
+- Do not include `provider.<provider>` in tags; provider identity is already
+  represented via `participants`.
+- If `includeConversationEventKinds` is true, include observed
+  `ConversationEvent.kind` values in `conversationEventKinds` (for example
+  `message.user`, `message.assistant`, `tool.call`, `tool.result`).
 - Maintain deterministic order and de-duplicate.
+- On writes to existing files, both `tags` and `conversationEventKinds` are
+  accretive only: add missing values but do not remove existing values.
 
 ### 5) Recording + Session Identity Fields
 
 - Always include `sessionId` when known.
 - `recordingIds` should include all known recording IDs mapped to this
-  destination at creation time (at minimum, current recording ID).
+  destination and be refreshed when writing to existing files.
+- `recordingIds` updates are additive: preserve existing values and add newly
+  observed IDs.
 
 ### 6) Config Contract
 
@@ -122,17 +134,19 @@ Add a new optional runtime config section:
 ```yaml
 markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
+  includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
-  includeConversationKinds: false
+  includeConversationEventKinds: false
 ```
 
 Defaults:
 
 - `includeFrontmatterInMarkdownRecordings`: `true` (preserve current behavior)
+- `includeUpdatedInFrontmatter`: `false`
 - `addParticipantUsernameToFrontmatter`: `false`
 - `defaultParticipantUsername`: `""`
-- `includeConversationKinds`: `false`
+- `includeConversationEventKinds`: `false`
 
 Validation:
 
@@ -141,9 +155,12 @@ Validation:
 
 ### 7) Existing File Behavior
 
-- If file already has frontmatter, keep existing preserve-on-overwrite behavior
-  (no broad frontmatter migration in this task).
-- This task primarily upgrades creation-time frontmatter quality.
+- If file already has frontmatter:
+  - preserve existing `id`, `title`, `desc`, `created`, and `updated`.
+  - update `recordingIds` and `tags` in-place using additive merge rules.
+  - never remove existing tags.
+- This task upgrades creation-time quality and selectively refreshes mutable
+  metadata fields (`recordingIds`, `tags`) on subsequent writes.
 
 ## Implementation Plan
 
@@ -166,12 +183,16 @@ Validation:
     - `tags`
     - deterministic ID generation with optional session short ID.
 - keep YAML-safe quoting and inline array rendering.
+- add merge/update helpers for existing frontmatter so `recordingIds`/`tags` can
+  be accretively refreshed.
 
 3. Thread frontmatter metadata through write pipeline.
 
 - `apps/daemon/src/writer/markdown_writer.ts`
   - accept richer frontmatter options.
   - respect `includeFrontmatterInMarkdownRecordings`.
+  - preserve baseline fields on existing files while accretively updating
+    `recordingIds` and `tags`.
 - `apps/daemon/src/writer/recording_pipeline.ts`
   - carry frontmatter context from orchestrator to writer options.
 - `apps/daemon/src/orchestrator/daemon_runtime.ts`
@@ -191,6 +212,9 @@ Validation:
   - arrays are single-line.
   - ID format uses snippet + session short ID.
   - `includeFrontmatterInMarkdownRecordings=false` omits frontmatter.
+  - `includeUpdatedInFrontmatter=false` omits `updated`.
+  - append/overwrite to existing files accretively updates `recordingIds` and
+    tags without removing existing tags.
 - `tests/runtime-config_test.ts`
   - parse defaults for missing `markdownFrontmatter`.
   - reject unknown/invalid `markdownFrontmatter` keys/types.
@@ -200,9 +224,11 @@ Validation:
 - Unit:
   - frontmatter rendering contract (field presence/omission/order/quoting).
   - participant/tag derivation and dedupe.
+  - existing-frontmatter merge behavior for accretive `recordingIds`/`tags`.
 - Integration:
   - `record`, `capture`, and `export` create markdown with snippet-based title.
-  - current overwrite-preserve behavior remains unchanged.
+  - existing file writes refresh `recordingIds`/`tags` without touching baseline
+    Dendron fields.
 - Regression:
   - existing markdown writer tests continue to pass.
   - runtime config loading still fail-closed and backward-compatible.
@@ -214,6 +240,10 @@ Validation:
 - `title` uses conversation snippet instead of opaque session ID.
 - `participants`, `sessionId`, `recordingIds`, and `tags` are emitted when data
   is available.
+- `updated` is omitted by default and only emitted when
+  `includeUpdatedInFrontmatter=true`.
+- existing-file writes accretively update `recordingIds` and `tags` and never
+  remove tags.
 - Config flags control behavior exactly as specified.
 - Docs/tests updated and passing.
 
@@ -222,13 +252,10 @@ Validation:
 - Risk: username inference can be wrong.
   - Mitigation: username emission is opt-in and overrideable in config.
 - Risk: frontmatter grows noisy with event-kind tags.
-  - Mitigation: `includeConversationKinds` default is `false`.
+  - Mitigation: `includeConversationEventKinds` default is `false`.
+- Risk: in-place frontmatter updates could clobber user formatting.
+  - Mitigation: limit mutations to targeted keys (`recordingIds`, `tags`) and
+    preserve other keys/values untouched.
 - Risk: ID collisions across files from same session/snippet.
   - Mitigation: keep fallback random ID path when needed and retain current
     preserve behavior for existing files.
-
-## Open Questions
-
-- Should we update `updated` on append-only writes, or keep current behavior
-  (frontmatter untouched unless file is newly created)?
-
