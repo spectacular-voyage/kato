@@ -1568,6 +1568,7 @@ export async function runDaemonRuntimeLoop(
         request,
         controlStore,
         recordingPipeline,
+        sessionStateStore,
         loadSessionSnapshot,
         exportEnabled,
         operationalLogger,
