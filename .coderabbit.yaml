@@ -1,2 +1,5 @@
-path_filters:
-  - "!dev-docs/notes/conv.*"
+reviews:
+  path_filters:
+    - "!dev-docs/notes/conv.*"
+  auto_review:
+    enabled: true
