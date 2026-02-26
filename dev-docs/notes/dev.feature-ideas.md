@@ -2,16 +2,15 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772119718625
+updated: 1772124093583
 created: 1771724652182
 ---
 
-- good frontmatter generation
 - thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overrids, maybe by adding flags to the "::" commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
 - support for kimi, etc
-- add an "interlocutors" YAML field, and maybe sessionId field as well. 
+- multiple recordings to one file 
 - create a summary file (and/or decision log, maybe update a to-do file) on command
   - dangerous because AI/network
 - "::seal" command : sign, hash, and close a file
@@ -21,3 +20,4 @@ created: 1771724652182
 - switch config to YAML
 - Multi-destination recording
 - support flag in in-chat comments, e.g. to start including thinking or tool use
+- folder-based session-state and twin files (maybe just by year? or probably year-month)

@@ -5,7 +5,7 @@ import { DenoDetachedDaemonLauncher } from "../apps/daemon/src/mod.ts";
 Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subprocess", async () => {
   const runtime = {
     runtimeDir: ".kato/custom-runtime",
-    configPath: ".kato/custom/config.json",
+    configPath: ".kato/custom/kato-config.yaml",
     statusPath: ".kato/custom/status/status.json",
     controlPath: ".kato/custom/control/control.json",
     allowedWriteRoots: ["./notes", "./exports"],

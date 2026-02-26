@@ -30,7 +30,7 @@ function makeRuntimeHarness(runtimeDir: string) {
     stderr,
     runtime: {
       runtimeDir,
-      configPath: `${runtimeDir}/config.json`,
+      configPath: `${runtimeDir}/kato-config.yaml`,
       statusPath: `${runtimeDir}/status.json`,
       controlPath: `${runtimeDir}/control.json`,
       now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -131,7 +131,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               featureFlags: { ...state.featureFlags },
               logging: { ...state.logging },
             },
-            path: `${state.runtimeDir}/config.json`,
+            path: `${state.runtimeDir}/kato-config.yaml`,
           });
         }
 
@@ -148,7 +148,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             featureFlags: { ...state.featureFlags },
             logging: { ...state.logging },
           },
-          path: `${state.runtimeDir}/config.json`,
+          path: `${state.runtimeDir}/kato-config.yaml`,
         });
       },
     },
@@ -435,7 +435,7 @@ Deno.test("runDaemonCli init creates runtime config when missing", async () => {
   assertEquals(firstCode, 0);
   assertStringIncludes(
     harness.stdout.join(""),
-    `created runtime config at ${runtimeDir}/config.json`,
+    `created runtime config at ${runtimeDir}/kato-config.yaml`,
   );
   assertEquals(ensureCalls.value, 1);
 
@@ -479,7 +479,7 @@ Deno.test(
     assertEquals(code, 0);
     assertStringIncludes(
       harness.stdout.join(""),
-      `initialized runtime config at ${runtimeDir}/config.json`,
+      `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
     );
     assertStringIncludes(harness.stdout.join(""), "started in background");
     assertEquals(ensureCalls.value, 1);
@@ -513,7 +513,7 @@ Deno.test(
     assertEquals(code, 0);
     assertStringIncludes(
       harness.stdout.join(""),
-      `initialized runtime config at ${runtimeDir}/config.json`,
+      `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
     );
     assertStringIncludes(harness.stdout.join(""), "started in background");
     assertEquals(ensureCalls.value, 1);

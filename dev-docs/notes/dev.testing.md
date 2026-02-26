@@ -60,19 +60,19 @@ Expected:
 - Output contains either:
   - `created runtime config at ...`, or
   - `runtime config already exists at ...`
-- `~/.kato/config.json` exists.
+- `~/.kato/kato-config.yaml` exists.
 
 ### 2) Configure provider roots and seed fixture
 
 ```bash
-deno eval -A 'const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/config.json`; const cfg=JSON.parse(await Deno.readTextFile(path)); cfg.providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, JSON.stringify(cfg, null, 2));'
+deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/kato-config.yaml`; const raw=await Deno.readTextFile(path); const cfg=parse(raw); if(typeof cfg!=="object" || cfg===null || Array.isArray(cfg)) throw new Error("invalid yaml config"); (cfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, `${stringify(cfg).trimEnd()}\n`);'
 mkdir -p ~/.kato/test-provider/codex
 cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```
 
 Expected:
 
-- `~/.kato/config.json` includes `providerSessionRoots`.
+- `~/.kato/kato-config.yaml` includes `providerSessionRoots`.
 - `~/.kato/test-provider/codex/smoke-codex.jsonl` exists.
 
 ### 3) Start daemon
@@ -159,8 +159,8 @@ Expected:
 
 ### 8) Fail-closed config check (unknown feature flag)
 
-1. Edit `~/.kato/config.json` and add an unknown key under `featureFlags`, e.g.:
-   - `"futureFlagThatDoesNotExist": true`
+1. Edit `~/.kato/kato-config.yaml` and add an unknown key under `featureFlags`, e.g.:
+   - `futureFlagThatDoesNotExist: true`
 2. Run:
 
 ```bash
@@ -189,7 +189,7 @@ Expected:
 1. `Runtime config not found ... Run kato init first`:
    - Run `deno run -A apps/daemon/src/main.ts init`.
 2. `Runtime config file has unsupported schema`:
-   - Inspect `~/.kato/config.json` for invalid shape/unknown `featureFlags`
+   - Inspect `~/.kato/kato-config.yaml` for invalid shape/unknown `featureFlags`
      keys.
 3. `Export path denied by policy`:
    - Use an output path within configured `allowedWriteRoots`.

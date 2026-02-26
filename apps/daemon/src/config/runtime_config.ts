@@ -7,6 +7,7 @@ import type {
   RuntimeLogLevel,
 } from "@kato/shared";
 import { dirname, isAbsolute, join, relative } from "@std/path";
+import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import {
   createDefaultRuntimeFeatureFlags,
   mergeRuntimeFeatureFlags,
@@ -18,7 +19,7 @@ import {
 } from "../utils/env.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
-const CONFIG_FILENAME = "config.json";
+const CONFIG_FILENAME = "kato-config.yaml";
 const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
   "debug",
@@ -70,6 +71,10 @@ const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> =
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isYamlConfigPath(path: string): boolean {
+  return path.trim().toLowerCase().endsWith(".yaml");
 }
 
 function parseRuntimeFeatureFlags(
@@ -440,13 +445,13 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   };
 }
 
-async function writeJsonAtomically(
+async function writeTextAtomically(
   path: string,
-  value: unknown,
+  value: string,
 ): Promise<void> {
   await Deno.mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tempPath, JSON.stringify(value, null, 2));
+  await Deno.writeTextFile(tempPath, value);
   await Deno.rename(tempPath, path);
 }
 
@@ -580,13 +585,16 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
   constructor(private readonly configPath: string) {}
 
   async load(): Promise<RuntimeConfig> {
+    if (!isYamlConfigPath(this.configPath)) {
+      throw new Error("Runtime config path must end with .yaml");
+    }
     const raw = await Deno.readTextFile(this.configPath);
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw) as unknown;
+      parsed = parseYaml(raw);
     } catch {
-      throw new Error("Runtime config file contains invalid JSON");
+      throw new Error("Runtime config file contains invalid YAML");
     }
 
     const config = parseRuntimeConfig(parsed);
@@ -600,6 +608,9 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
   async ensureInitialized(
     defaultConfig: RuntimeConfig,
   ): Promise<EnsureRuntimeConfigResult> {
+    if (!isYamlConfigPath(this.configPath)) {
+      throw new Error("Runtime config path must end with .yaml");
+    }
     try {
       const loaded = await this.load();
       return {
@@ -614,7 +625,8 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
     }
 
     const clonedDefault = cloneConfig(defaultConfig);
-    await writeJsonAtomically(this.configPath, clonedDefault);
+    const serialized = stringifyYaml(clonedDefault).trimEnd() + "\n";
+    await writeTextAtomically(this.configPath, serialized);
     return {
       created: true,
       config: clonedDefault,
