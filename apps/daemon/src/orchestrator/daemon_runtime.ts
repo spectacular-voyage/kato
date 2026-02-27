@@ -864,7 +864,7 @@ async function applyControlCommandsForEvent(
 
     try {
       if (command.name === "record") {
-        await recordingPipeline.startOrRotateRecording({
+        await recordingPipeline.activateRecording({
           provider,
           sessionId,
           targetPath: targetPath!,
@@ -881,7 +881,7 @@ async function applyControlCommandsForEvent(
           title: recordingTitle,
           recordingIds: [recordingId],
         });
-        await recordingPipeline.startOrRotateRecording({
+        await recordingPipeline.activateRecording({
           provider,
           sessionId,
           targetPath: targetPath!,

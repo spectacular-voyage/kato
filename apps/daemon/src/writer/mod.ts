@@ -15,6 +15,7 @@ export {
 } from "./markdown_writer.ts";
 export { JsonlConversationWriter } from "./jsonl_writer.ts";
 export type {
+  ActivateRecordingInput,
   ActiveRecording,
   AppendToActiveRecordingInput,
   AppendToActiveRecordingResult,
@@ -25,7 +26,6 @@ export type {
   RecordingSummary,
   SnapshotExportInput,
   SnapshotExportResult,
-  StartOrRotateRecordingInput,
   ValidateDestinationPathInput,
 } from "./recording_pipeline.ts";
 export { RecordingPipeline } from "./recording_pipeline.ts";

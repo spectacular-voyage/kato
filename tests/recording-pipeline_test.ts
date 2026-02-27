@@ -194,7 +194,7 @@ Deno.test("RecordingPipeline evaluates policy before record writer start", async
     now: () => new Date("2026-02-22T10:00:00.000Z"),
   });
 
-  const recording = await pipeline.startOrRotateRecording({
+  const recording = await pipeline.activateRecording({
     provider: "codex",
     sessionId: "session-1",
     targetPath: "notes/record.md",
@@ -217,7 +217,7 @@ Deno.test("RecordingPipeline normalizes caller-provided recordingId", async () =
     now: () => new Date("2026-02-22T10:00:00.000Z"),
   });
 
-  const trimmed = await pipeline.startOrRotateRecording({
+  const trimmed = await pipeline.activateRecording({
     provider: "codex",
     sessionId: "session-trim",
     targetPath: "notes/record.md",
@@ -225,7 +225,7 @@ Deno.test("RecordingPipeline normalizes caller-provided recordingId", async () =
   });
   assertEquals(trimmed.recordingId, "rec-user-1");
 
-  const generated = await pipeline.startOrRotateRecording({
+  const generated = await pipeline.activateRecording({
     provider: "codex",
     sessionId: "session-trim",
     targetPath: "notes/record-2.md",
@@ -247,7 +247,7 @@ Deno.test(
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
 
-    await pipeline.startOrRotateRecording({
+    await pipeline.activateRecording({
       provider: "claude",
       sessionId: "session-42",
       targetPath: "notes/first.md",
@@ -255,7 +255,7 @@ Deno.test(
 
     await assertRejects(
       () =>
-        pipeline.startOrRotateRecording({
+        pipeline.activateRecording({
           provider: "claude",
           sessionId: "session-42",
           targetPath: "notes/second.md",
@@ -283,7 +283,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     now: () => new Date("2026-02-22T10:00:00.000Z"),
   });
 
-  await pipeline.startOrRotateRecording({
+  await pipeline.activateRecording({
     provider: "codex",
     sessionId: "session-9",
     targetPath: "notes/live-record.md",
@@ -390,7 +390,7 @@ Deno.test(
         ),
     });
 
-    await pipeline.startOrRotateRecording({
+    await pipeline.activateRecording({
       provider: "codex",
       sessionId: "session-append",
       targetPath: "notes/live.md",
@@ -443,7 +443,7 @@ Deno.test(
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
 
-    await pipeline.startOrRotateRecording({
+    await pipeline.activateRecording({
       provider: "codex",
       sessionId: "session-flags",
       targetPath: "notes/with-flags.md",
@@ -492,7 +492,7 @@ Deno.test(
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
 
-    await pipeline.startOrRotateRecording({
+    await pipeline.activateRecording({
       provider: "codex",
       sessionId: "session-kinds",
       targetPath: "notes/kinds.md",
@@ -518,7 +518,7 @@ Deno.test(
       includeConversationEventKindsInFrontmatter: false,
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
-    await pipelineWithoutKinds.startOrRotateRecording({
+    await pipelineWithoutKinds.activateRecording({
       provider: "claude",
       sessionId: "session-no-kinds",
       targetPath: "notes/no-kinds.md",
@@ -543,7 +543,7 @@ Deno.test(
       now: () => new Date("2026-02-22T10:00:00.000Z"),
     });
 
-    await pipeline.startOrRotateRecording({
+    await pipeline.activateRecording({
       provider: "codex",
       sessionId: "session-participants",
       targetPath: "notes/participants.md",
