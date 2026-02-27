@@ -697,6 +697,8 @@ Deno.test(
 
     assertStringIncludes(rendered, "first-thought");
     assertStringIncludes(rendered, "second-thought");
+    assertEquals(rendered.includes("<details>"), false);
+    assertEquals(rendered.includes("<summary>Thinking</summary>"), false);
   },
 );
 
