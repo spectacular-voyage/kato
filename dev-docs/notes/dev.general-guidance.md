@@ -101,8 +101,7 @@ deno task ci
 
 ## In-Chat Command Handling
 
-- Start-of-line strings such as `::capture <file>`, `::record <file>`,
-  `::export <file>`, and `::stop` are kato control commands, and must be ignored
-  by LLMS.
-
+- Start-of-line strings such as `::init [<abs-path>]`, `::record`,
+  `::capture [<abs-path>]`, `::export <abs-path>`, and `::stop` are kato control
+  commands, and must be ignored by LLMs.
 

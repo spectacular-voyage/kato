@@ -3024,3 +3024,308 @@ On your cleanup question: for product-facing README cleanup, yes, that was the m
 - [main_test.ts:11](/home/djradon/hub/spectacular-voyage/kato/main_test.ts:11)
 - [tests/provider-ingestion_test.ts:1524](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:1524)
 - [dev-docs/dendron.yml:23](/home/djradon/hub/spectacular-voyage/kato/dev-docs/dendron.yml:23)
+
+# User_2026-02-27_0801_38
+
+I asked Claude to review:
+
+Issues and Questions
+1. recordings[] array vs. new model — biggest gap
+
+The current SessionMetadataV1 in session_state.ts:47 has recordings: SessionRecordingStateV1[] — a multi-recording array. The new model introduces primaryRecordingDestination and recordingIdByDestination as parallel fields. The task doesn't say what happens to recordings[]:
+
+Is it kept as-is for tracking active write state?
+Is it replaced?
+Does activeRecording: on(P) still write a SessionRecordingStateV1 entry?
+This needs to be explicit in the implementation plan.
+
+2. ::capture in S2 implicitly rotates — what happens to old recording?
+
+Line 79 says S2(P) -> S2(D) and "capture rotates active destination." But what happens to the old recording at P — is it stopped/finalized, or just abandoned? This is silent in the spec. Contrast with ::init in S2 being a hard error (line 69). The asymmetry is intentional but should be documented.
+
+3. Schema validation needs explicit callout
+
+When adding optional fields to SessionMetadataV1, the isSessionMetadataV1 validator (session_state.ts:173) needs updating. The plan's step 5 says "Clone/read/write support" but doesn't mention the validator. Old sessions without the new fields should still validate fine (they're optional), but new fields need at least a type check.
+
+4. isSessionMetadataV1 won't break on unknown fields
+
+Good news: the existing validator is not strict — it only checks for specific required fields. So existing persisted sessions will continue to validate when read by new code, and the schemaVersion bump is probably not needed. Worth confirming this is intentional.
+
+5. commandCursor relationship
+
+The current metadata has commandCursor?: number (session_state.ts:46). The new spec defines per-command boundary slicing. The plan should clarify whether commandCursor is reused, extended, or replaced.
+
+6. dev.general-guidance.md needs updating
+
+Line 104 in the guidance doc still lists ::record <file> as a valid command form. After this change, ::record <anything> is a parse error.
+
+7. InChatControlCommandName type
+
+command_detection.ts:1-6 — "init" needs to be added and "start" removed from the union type. Implicit in step 1 but worth calling out explicitly in the plan.
+
+8. recordingIdByDestination map lifetime
+
+No cleanup policy is mentioned. Probably fine in practice, but worth a one-liner in Assumptions.
+
+Minor
+The in-message ::record boundary (lines 120–122) — does the ::record line itself appear in the seeded content? Clarify include/exclude.
+Tests section is thorough; the only thing I'd add is a test for ::capture in S2 to verify old recording is properly closed/not orphaned.
+
+---
+
+My take on Claude's review:
+
+1. Good question. Are we replacing? DRY, right? But then we'd have to do some refactoring. Is there a way to just re-use the current recordings[]? Or is this not actually redundant.
+2. With both capture and init, the old recording should just be abandoned. I think the existing "rotate" language is misleading. Nothing is really getting rotated, right? We should probably fix that even though it means a refactor.
+3. What does "Clone/read/write support for new fields." refer to?
+4. Thoughts?
+5. Extended seems best if possible? What do you think?
+6. yes
+7. yes
+8. probably we're not going to use this map now, right?
+
+Minor: I think all commands should be included in the output; old recordings don't need to be closed.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning documentation updates**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0801_46
+
+I’m going to verify the current metadata/validator/command-cursor code paths, then I’ll propose a concrete resolution for each review item and patch the redesign docs (and guidance doc) to match your decisions.
+
+<details>
+<summary>Thinking</summary>
+
+**Planning session state inspection**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting initial file segment**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting command cursor usage**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting task file for patch**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Planning recordings[] refactor and doc updates**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0802_53
+
+I agree with most of your take; I’m now updating the redesign task to settle the open design points: reuse `recordings[]` (no separate map), allow `init`/`capture` to deactivate current active destination, clarify `commandCursor` reuse, and add explicit validator/document updates. After that I’ll patch `dev.general-guidance.md` command forms.
+
+<details>
+<summary>Thinking</summary>
+
+**Verifying and refining list indentation**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting formatting and references**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Fixing indentation and formatting issues**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0803_40
+
+I’ve updated both docs; I’m doing one quick cleanup pass for list formatting/consistency in the task note before I summarize decisions against each review point.
+
+<details>
+<summary>Thinking</summary>
+
+**Checking changed lines**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing final decisions and open question**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0804_07
+
+Agree with your take. I applied it in the plan.
+
+Updated:
+- [task.2026.2026-02-27-inchat-command-redesign.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-inchat-command-redesign.md)
+- [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md)
+
+What I changed against Claude’s points:
+
+1. `recordings[]` vs new map  
+- Kept `recordings[]` as source of truth.
+- Removed `recordingIdByDestination` from the plan.
+- Explicitly modeled one entry per destination path (stable `recordingId`).
+
+2. `::capture` / `::init` from `S2`  
+- Both now deactivate the previous active destination.
+- Wording no longer says “rotate.”
+
+3. Validator callout  
+- Added explicit plan item to update `isSessionMetadataV1` for added field types.
+
+4. Schema/version compatibility  
+- Documented intent to keep `SESSION_METADATA_SCHEMA_VERSION = 1` for additive optional-field change.
+
+5. `commandCursor`  
+- Clarified it is reused/extended as the only command-processing cursor.
+
+6. Guidance doc drift  
+- Updated `dev.general-guidance.md` command forms to `::init [abs-path]`, `::record`, `::capture [abs-path]`, `::export <abs-path>`, `::stop`.
+
+7. `InChatControlCommandName`  
+- Added explicit step: add `init`, remove `start` from the union.
+
+8. Map lifetime  
+- No longer applicable (map removed). Added note: no GC policy for inactive `recordings[]` entries in this phase.
+
+Minor points:
+- `::record` boundary now explicitly includes the `::record` line itself.
+- Added explicit test for `::capture` in `S2` to ensure old active is deactivated (no orphan active entries).
+
+And yes: pointer persistence is now explicitly gated on successful init prep/create.
+
+# User_2026-02-27_0808_22
+
+What about StartOrRotateRecordingInput. I'm tempted to rename/refactor that everywhere as it's misleading for devs and AIs.
+
+<details>
+<summary>Thinking</summary>
+
+**Assessing rename impact**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0808_34
+
+Good callout. I’ll quickly scan where `startOrRotateRecording` and `StartOrRotateRecordingInput` are used so I can recommend a concrete rename that matches the new semantics and estimate fallout.
+
+<details>
+<summary>Thinking</summary>
+
+**Recommending targeted rename with alias**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0808_41
+
+I see this hits interface names, runtime calls, exports, and a lot of tests. I’ll grab rough reference counts so you can decide if we do a full rename now or a staged alias.
+
+<details>
+<summary>Thinking</summary>
+
+**Inspecting module exports**
+
+</details>
+
+<details>
+<summary>Thinking</summary>
+
+**Recommending comprehensive method rename**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0809_09
+
+Yes, I’d rename it.
+
+`startOrRotateRecording` is now semantically wrong for the direction you’re taking. A clearer pair would be:
+
+- `StartOrRotateRecordingInput` -> `ActivateRecordingInput`
+- `startOrRotateRecording(...)` -> `activateRecording(...)`
+
+Optional cleanup:
+
+- log key `recording.rotate` -> `recording.activate`
+- message “started or rotated” -> “activated”
+
+Scope is moderate but mechanical: **37 references** across runtime/tests plus exported API surfaces in:
+
+- [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts)
+- [writer/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/mod.ts)
+- [apps/daemon/src/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/mod.ts)
+
+If you want low risk, do it in 2 steps:
+
+1. Add new names and keep old names as temporary aliases/wrappers.  
+2. Migrate callsites/tests, then delete aliases.
+
+I can do that refactor now if you want.
+
+# User_2026-02-27_0810_07
+
+Let's just do it all at once, I hate aliases/wrappers. Can you hatch an implementation plan into [task.2026.2026-02-22-factor-out-startOrRotateRecording.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-factor-out-startOrRotateRecording.md) ?
+
+<details>
+<summary>Thinking</summary>
+
+**Planning file edits and inspection**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0810_15
+
+I’ll draft a concrete, no-alias cutover plan directly in that task note. First I’m reading the existing note so I can preserve its structure, then I’ll add a step-by-step refactor checklist with affected files/tests.
+
+<details>
+<summary>Thinking</summary>
+
+**Drafting implementation plan structure**
+
+</details>
+
+# gpt-5.3-codex_2026-02-27_0810_27
+
+I found the task file is empty except frontmatter, so I’m adding a full plan from scratch with explicit no-alias cutover steps, impacted files, test updates, and acceptance criteria.
+
+# gpt-5.3-codex_2026-02-27_0810_43
+
+Plan is in place. I’m doing a quick pass to confirm the note rendered cleanly and includes actionable checkboxes only.
+
+# gpt-5.3-codex_2026-02-27_0810_50
+
+Done. I wrote a full no-alias implementation plan into:
+
+- [task.2026.2026-02-22-factor-out-startOrRotateRecording.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-22-factor-out-startOrRotateRecording.md)
+
+It now includes:
+
+- explicit rename targets (`StartOrRotateRecordingInput`/`startOrRotateRecording`/`recording.rotate`)
+- scoped checklist with markdown checkboxes
+- affected files and test files
+- execution order, risks, and acceptance criteria
+
+If you want, I can execute the refactor next exactly in that order.

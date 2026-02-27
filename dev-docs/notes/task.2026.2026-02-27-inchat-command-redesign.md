@@ -12,7 +12,7 @@ created: 1772198606696
 Replace overloaded `::record` semantics with a single-primary, no-UI model that is explicit about session state versus recording state.
 
 1. Session owns a single `primaryRecordingDestination` pointer.
-2. Session maintains one stable `recordingId` per destination path.
+2. Reuse `recordings[]` as the destination registry: one stable `recordingId` per destination path.
 3. Recording runtime state is either active or inactive for that session.
 4. Add `::init [abs-path]` to set/prepare destination without starting.
 5. Make `::record` argument-less and define it as start/resume at session primary destination.
@@ -28,6 +28,7 @@ Replace overloaded `::record` semantics with a single-primary, no-UI model that 
 4. Ensure outcomes remain inspectable in logs without UI feedback.
 5. Support in-message command sequencing with command-level recording boundaries.
 6. Make destination identity allocation idempotent: one `recordingId` per path.
+7. Avoid parallel metadata maps when `recordings[]` can remain the single source of truth.
 
 ## Command Contract
 1. Valid commands:
@@ -53,7 +54,7 @@ State is split into session state and recording state.
 
 1. Session state:
 - `primaryRecordingDestination`: `unset | set(absPath)`
-- `recordingIdByDestination`: map of canonical absolute destination to stable `recordingId`
+- `recordings[]`: one entry per canonical destination path (stable `recordingId`, `desiredState`, `writeCursor`, `periods`)
 2. Recording state:
 - `activeRecording`: `off | on(absPath)`
 
@@ -66,18 +67,18 @@ Transition rules:
 1. `::init` with resolved destination `P`:
 - `S0 -> S1(P)`
 - `S1(Pold) -> S1(P)`
-- `S2(Pold) -> error` (must `::stop` first; no implicit rotate during active recording).
-- `ensureRecordingId(P)` is idempotent (allocate only if missing).
+- `S2(Pold) -> S1(P)` (deactivate active `Pold`; no implicit append/flush; pointer moves to `P` only after successful init prep).
+- `ensureRecordingEntry(P)` is idempotent (create only if missing, reuse existing recordingId when present).
 2. `::record`:
 - `S0 -> S2(G)` where `G` is generated global default and also persisted as pointer.
 - `S1(P) -> S2(P)`
 - `S2(P) -> S2(P)` no-op.
-- `ensureRecordingId(activeDestination)` before activation.
+- `ensureRecordingEntry(activeDestination)` before activation.
 3. `::capture` with resolved destination `D`:
 - `S0 -> S2(D)` and pointer set `D`.
 - `S1(P) -> S2(D)` and pointer set `D`.
-- `S2(P) -> S2(D)` and pointer set `D` (capture rotates active destination).
-- `ensureRecordingId(D)` is idempotent (reuse when already allocated).
+- `S2(P) -> S2(D)` and pointer set `D` (deactivate prior active destination; no explicit close/finalize step required).
+- `ensureRecordingEntry(D)` is idempotent (reuse when already allocated).
 4. `::stop`:
 - `S2(P) -> S1(P)`
 - `S0`, `S1(P)` remain unchanged (no-op).
@@ -93,8 +94,8 @@ Transition rules:
 - Else use generated global default destination.
 2. Validate resolved destination and policy gate before mutation.
 3. Ensure stable destination identity:
-- If destination has no `recordingId`, allocate one as a pending value.
-- If destination already has one, reuse it (no new allocation).
+- If `recordings[]` has no entry for destination, allocate one as a pending value.
+- If destination entry already exists, reuse its `recordingId` (no new allocation).
 4. If file does not exist, create it.
 5. For Markdown targets when frontmatter is enabled, write full frontmatter on create using command-time snapshot context:
 - `title` from snapshot title resolver.
@@ -107,7 +108,7 @@ Transition rules:
 8. Persist `primaryRecordingDestination` only after file preparation succeeds:
 - Missing file: pointer commit happens only if create succeeds.
 - Existing file: pointer commit happens only after validation succeeds.
-9. Commit pending/new destination `recordingId` only with the same successful pointer commit.
+9. Commit pending/new destination recording entry only with the same successful pointer commit.
 
 ## In-Message Sequential Execution and Boundaries
 Commands inside one `message.user` are processed in source order using parsed line numbers.
@@ -118,24 +119,24 @@ Commands inside one `message.user` are processed in source order using parsed li
 - Snapshot boundary for `capture` and `export`: all conversation up to and including command boundary.
 - Start boundary for `record` in inactive state: do not include content before the `::record` line.
 4. `record` in inactive state with trailing text in same message:
-- Seed append only the text between this command line and the next command line (or message end).
+- Seed append includes the `::record` command line itself plus text until the next command line (or message end).
 - This gives in-message granularity without recording earlier lines from same message.
 5. If `record` is no-op in `S2`, it does not reseed any same-message content.
 
 ## Failure and Atomicity Rules
 1. `init` failure leaves pointer unchanged.
-2. `init` failure leaves destination identity map unchanged.
+2. `init` failure leaves destination recording registry unchanged.
 3. `record` failure leaves pointer unchanged.
 4. `capture` failure leaves pointer and active state unchanged.
-5. `capture` failure leaves destination identity map unchanged if allocation/write fails before commit.
+5. `capture` failure leaves destination recording registry unchanged if allocation/write fails before commit.
 6. `export` failure leaves pointer and active state unchanged.
 7. Sequential execution is not transactional across commands in one message:
 - Earlier successful commands persist even if a later command fails.
 
 ## Implementation Plan
 1. Update parser in [command_detection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/command_detection.ts):
-- Add `init` command support.
-- Remove `start` support.
+- Add `init` command support and include it in `InChatControlCommandName`.
+- Remove `start` support and remove it from `InChatControlCommandName`.
 - Enforce `record` has no argument.
 - Enforce `stop` has no argument.
 - Keep `capture` optional argument.
@@ -143,25 +144,28 @@ Commands inside one `message.user` are processed in source order using parsed li
 2. Refactor command execution in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts):
 - Remove `record -> start` alias.
 - Add `init` command branch with prepare-file behavior.
-- Add explicit composite-state transition handling (`S0`, `S1`, `S2`).
+- Add explicit composite-state transition handling (`S0`, `S1`, `S2`) including deactivate-on-init and deactivate-on-capture behavior.
 - Add no-op path for `record` in active state.
 - Add command-boundary slicing for same-message execution.
+- Reuse `commandCursor` as the only command-processing cursor (no additional cursor field).
 3. Add runtime helpers:
 - `resolvePrimaryDestination(...)` to return pointer or generated global default.
 - `setPrimaryDestination(...)` and pointer normalization.
-- `ensureDestinationRecordingId(...)` to allocate/reuse stable per-path ID.
+- `getOrCreateDestinationRecording(...)` to allocate/reuse one `recordings[]` entry per destination.
 - `prepareInitDestination(...)` to create file/stub safely.
 - `resolveCommandBoundaries(...)` and segment extraction for same-message granularity.
 4. Extend metadata contract in [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts):
 - Add `primaryRecordingDestination?: string`.
-- Add `recordingIdByDestination?: Record<string, string>` (canonical path key -> stable recordingId).
+- Keep `recordings[]` as-is structurally; enforce one-entry-per-destination invariant in runtime logic.
+- Keep schemaVersion unchanged (`SESSION_METADATA_SCHEMA_VERSION = 1`) for this additive optional-field change.
 5. Persist pointer in [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/session_state_store.ts):
 - Clone/read/write support for new fields.
+- Update `isSessionMetadataV1` validation for any added field types.
 6. Keep path policy gate unchanged in [path_policy.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/path_policy.ts):
 - Still gate absolute canonical destination against allowed roots.
 7. Update docs:
 - Update command semantics in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
-- Update workspace note linkage to current note files and remove stale filename references.
+- Update in-chat command references in [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).
 
 ## Tests and Scenarios
 1. Update parser tests in [command-detection_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/command-detection_test.ts):
@@ -177,7 +181,7 @@ Commands inside one `message.user` are processed in source order using parsed li
 - `::init /abs/a.md` in inactive state sets pointer and prepares file, active unchanged.
 - `::init` in `S0` creates default destination file, sets pointer, and allocates destination ID.
 - `::init` with existing pointer and existing file is content no-op.
-- `::init` in active state fails.
+- `::init` in `S2` deactivates old active recording and transitions to inactive pointer-at-new-destination state.
 - Failed `init` leaves pointer unchanged.
 - Failed `record` leaves pointer unchanged.
 - `::record` in `S1` starts active at pointer.
@@ -188,10 +192,12 @@ Commands inside one `message.user` are processed in source order using parsed li
 - `::capture` no arg captures to pointer if set, otherwise generated default, and activates there.
 - Repeated `::init`/`::capture` to same destination reuses the same destination `recordingId`.
 - Two different destinations allocate two distinct `recordingId` values.
+- `::capture` in `S2` deactivates prior active destination and leaves no orphan active entries.
 - Frontmatter on file creation includes the stable destination `recordingId`.
 - `::export /abs/e.md` exports snapshot boundary only; pointer and active unchanged.
 - Sequential one-message commands execute in order (`::stop`, `::init`, `::record`).
 - In-message `::record` granularity excludes lines before command boundary.
+- In-message `::record` granularity includes the `::record` command line.
 - Relative arg rejection for `init`, `capture`, and `export`.
 3. Replace obsolete tests:
 - Remove/replace tests that depend on ambiguous `::stop` target matching.
@@ -215,4 +221,5 @@ Commands inside one `message.user` are processed in source order using parsed li
 2. No persisted metadata migration is required for multi-active cleanup.
 3. Primary destination pointer is session-scoped and persisted.
 4. Global fallback root remains `~/.kato/recordings` (or `.kato/recordings` when home cannot be resolved).
-5. Destination identity is canonical-path-scoped and persisted as one `recordingId` per path.
+5. Destination identity is canonical-path-scoped and persisted as one `recordingId` per path via `recordings[]`.
+6. No cleanup/GC policy for inactive destination entries in `recordings[]` in this phase.
