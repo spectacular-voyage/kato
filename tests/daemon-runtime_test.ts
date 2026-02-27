@@ -1662,13 +1662,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
       const baselineMessage = makeEvent(
         "m1",
         "message.user",
-        "::record @notes/old.md\nold command",
+        "::init /tmp/old.md\n::record\nold command",
         "2026-02-22T09:59:59.000Z",
       );
       const newCommandMessage = makeEvent(
         "m2",
         "message.user",
-        "::record @notes/new.md\nnew command",
+        "::init /tmp/new.md\n::record\nnew command",
         "2026-02-22T10:00:01.000Z",
       );
       const assistantReply = makeEvent(
@@ -1830,7 +1830,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
     pollIntervalMs: 10,
   });
 
-  assertEquals(activatedTargets, ["notes/new.md"]);
+  assertEquals(activatedTargets, ["/tmp/new.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
@@ -1887,7 +1887,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
       const captureCommandMessage = makeEvent(
         "m2",
         "message.user",
-        "::capture @notes/captured.md\ncapture now",
+        "::capture /tmp/captured.md\ncapture now",
         "2026-02-22T10:00:01.000Z",
       );
       const assistantReply = makeEvent(
@@ -2064,8 +2064,8 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
   });
 
   assertEquals(callOrder, ["capture", "record"]);
-  assertEquals(captureTargets, ["notes/captured.md"]);
-  assertEquals(activatedTargets, ["notes/captured.md"]);
+  assertEquals(captureTargets, ["/tmp/captured.md"]);
+  assertEquals(activatedTargets, ["/tmp/captured.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
@@ -2124,7 +2124,7 @@ Deno.test(
               makeEvent(
                 "m1",
                 "message.user",
-                "::capture notes/first-seen.md",
+                "::capture /tmp/first-seen.md",
                 "2026-02-22T10:00:01.000Z",
               ),
             ],
@@ -2245,8 +2245,8 @@ Deno.test(
     });
 
     assertEquals(callOrder, ["capture", "record"]);
-    assertEquals(captureTargets, ["notes/first-seen.md"]);
-    assertEquals(activatedTargets, ["notes/first-seen.md"]);
+    assertEquals(captureTargets, ["/tmp/first-seen.md"]);
+    assertEquals(activatedTargets, ["/tmp/first-seen.md"]);
   },
 );
 
@@ -2977,6 +2977,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
       now: () => new Date("2026-02-22T10:00:00.000Z"),
       makeSessionId: () => "kato-session-persist-1234",
     });
+    const persistentDestination = join(stateDir, "persistent-recording.md");
 
     const makeLocalEvent = (
       id: string,
@@ -3008,7 +3009,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
         const startCommand = makeLocalEvent(
           "u-start",
           "message.user",
-          "::start /tmp/persistent-recording.md",
+          `::init ${persistentDestination}\n::record`,
           "2026-02-22T10:00:00.000Z",
         );
         const assistantMessage = makeLocalEvent(
@@ -3153,7 +3154,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
       pollIntervalMs: 10,
     });
 
-    assertEquals(appendCalls, [1]);
+    assertEquals(appendCalls, [1, 1]);
     const metadataList = await sessionStateStore.listSessionMetadata();
     assertEquals(metadataList.length, 1);
     const recording = metadataList[0]?.recordings[0];
@@ -3525,230 +3526,7 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
   assertEquals(metadataReads, 3);
 });
 
-Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple recordings", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-multi-recording-",
-  });
-  try {
-    let currentStatus: DaemonStatusSnapshot = {
-      schemaVersion: 1,
-      generatedAt: "2026-02-22T10:00:00.000Z",
-      heartbeatAt: "2026-02-22T10:00:00.000Z",
-      daemonRunning: false,
-      providers: [],
-      recordings: { activeRecordings: 0, destinations: 0 },
-    };
-    const statusStore: DaemonStatusSnapshotStoreLike = {
-      load() {
-        return Promise.resolve({
-          ...currentStatus,
-          providers: [...currentStatus.providers],
-          recordings: { ...currentStatus.recordings },
-        });
-      },
-      save(snapshot) {
-        currentStatus = {
-          ...snapshot,
-          providers: [...snapshot.providers],
-          recordings: { ...snapshot.recordings },
-        };
-        return Promise.resolve();
-      },
-    };
-
-    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-    });
-    const sessionStateStore = new PersistentSessionStateStore({
-      katoDir: join(stateDir, ".kato"),
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-      makeSessionId: () => "kato-session-multi-rec-1234",
-    });
-
-    const mk = (
-      id: string,
-      kind: "message.user" | "message.assistant",
-      content: string,
-      timestamp: string,
-    ): ConversationEvent => ({
-      eventId: id,
-      provider: "codex",
-      sessionId: "session-multi-rec",
-      timestamp,
-      kind,
-      role: kind === "message.user" ? "user" : "assistant",
-      content,
-      source: {
-        providerEventType: kind === "message.user" ? "user" : "assistant",
-        providerEventId: id,
-      },
-    } as ConversationEvent);
-
-    let pollCount = 0;
-    const ingestionRunner: ProviderIngestionRunner = {
-      provider: "codex",
-      start() {
-        return Promise.resolve();
-      },
-      poll() {
-        pollCount += 1;
-        const e1 = mk(
-          "u-start-a",
-          "message.user",
-          "::start /tmp/multi-a.md",
-          "2026-02-22T10:00:00.000Z",
-        );
-        const e2 = mk(
-          "a-1",
-          "message.assistant",
-          "first message",
-          "2026-02-22T10:00:01.000Z",
-        );
-        const e3 = mk(
-          "u-start-b",
-          "message.user",
-          "::start /tmp/multi-b.md",
-          "2026-02-22T10:00:02.000Z",
-        );
-        const e4 = mk(
-          "a-2",
-          "message.assistant",
-          "second message",
-          "2026-02-22T10:00:03.000Z",
-        );
-
-        if (pollCount === 1) {
-          sessionSnapshotStore.upsert({
-            provider: "codex",
-            sessionId: "session-multi-rec",
-            cursor: { kind: "byte-offset", value: 1 },
-            events: [e1, e2],
-          });
-          return Promise.resolve({
-            provider: "codex",
-            polledAt: "2026-02-22T10:00:00.000Z",
-            sessionsUpdated: 1,
-            eventsObserved: 2,
-          });
-        }
-        if (pollCount === 2) {
-          sessionSnapshotStore.upsert({
-            provider: "codex",
-            sessionId: "session-multi-rec",
-            cursor: { kind: "byte-offset", value: 2 },
-            events: [e1, e2, e3, e4],
-          });
-          return Promise.resolve({
-            provider: "codex",
-            polledAt: "2026-02-22T10:00:01.000Z",
-            sessionsUpdated: 1,
-            eventsObserved: 2,
-          });
-        }
-        return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:02.000Z",
-          sessionsUpdated: 0,
-          eventsObserved: 0,
-        });
-      },
-      stop() {
-        return Promise.resolve();
-      },
-    };
-
-    const requests = [{
-      requestId: "req-stop-multi-recording",
-      requestedAt: "2026-02-22T10:00:05.000Z",
-      command: "stop" as const,
-    }];
-    const controlStore: DaemonControlRequestStoreLike = {
-      list() {
-        return Promise.resolve(
-          pollCount >= 3 ? requests.map((request) => ({ ...request })) : [],
-        );
-      },
-      enqueue(_request) {
-        throw new Error("enqueue should not be called");
-      },
-      markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) =>
-          request.requestId === requestId
-        );
-        if (idx >= 0) {
-          requests.splice(0, idx + 1);
-        }
-        return Promise.resolve();
-      },
-    };
-
-    const appendByDestination = new Map<string, string[]>();
-    const recordingPipeline: RecordingPipelineLike = {
-      activateRecording() {
-        throw new Error("not used");
-      },
-      captureSnapshot() {
-        throw new Error("not used");
-      },
-      exportSnapshot() {
-        throw new Error("not used");
-      },
-      appendToActiveRecording() {
-        return Promise.resolve({ appended: false, deduped: false });
-      },
-      appendToDestination(input) {
-        const ids = input.events.map((event) => event.eventId);
-        const current = appendByDestination.get(input.targetPath) ?? [];
-        appendByDestination.set(input.targetPath, [...current, ...ids]);
-        return Promise.resolve({
-          mode: "append",
-          outputPath: input.targetPath,
-          wrote: true,
-          deduped: false,
-        });
-      },
-      stopRecording() {
-        return true;
-      },
-      getActiveRecording() {
-        return undefined;
-      },
-      listActiveRecordings() {
-        return [];
-      },
-      getRecordingSummary() {
-        return { activeRecordings: 0, destinations: 0 };
-      },
-    };
-
-    await runDaemonRuntimeLoop({
-      statusStore,
-      controlStore,
-      recordingPipeline,
-      ingestionRunners: [ingestionRunner],
-      sessionSnapshotStore,
-      sessionStateStore,
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-      pid: 4242,
-      heartbeatIntervalMs: 50,
-      pollIntervalMs: 10,
-    });
-
-    assertEquals(
-      appendByDestination.get("/tmp/multi-a.md"),
-      ["a-1", "u-start-b", "a-2"],
-    );
-    assertEquals(appendByDestination.get("/tmp/multi-b.md"), ["a-2"]);
-    assertEquals(currentStatus.recordings.activeRecordings, 2);
-    assertEquals(currentStatus.recordings.destinations, 2);
-  } finally {
-    await Deno.remove(stateDir, { recursive: true });
-  }
-});
-
-Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and destination matches", async () => {
+Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error and leaves state unchanged", async () => {
   await Deno.mkdir(".kato/test-tmp", { recursive: true });
   const stateDir = await Deno.makeTempDir({
     dir: ".kato/test-tmp",
@@ -3947,11 +3725,11 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
     assertExists(item);
     assertEquals(
       item!.recordings.map((recording) => recording.desiredState),
-      ["off", "off"],
+      ["on", "on"],
     );
     assert(
       sink.records.some((record) =>
-        record.event === "recording.command.stop.ambiguous" &&
+        record.event === "recording.command.parse_error" &&
         record.channel === "operational"
       ),
     );
@@ -3960,7 +3738,7 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
   }
 });
 
-Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", async () => {
+Deno.test("runDaemonRuntimeLoop uses default destination for empty ::record", async () => {
   await Deno.mkdir(".kato/test-tmp", { recursive: true });
   const stateDir = await Deno.makeTempDir({
     dir: ".kato/test-tmp",
@@ -4022,7 +3800,7 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
               timestamp: "2026-02-22T10:00:00.000Z",
               kind: "message.user",
               role: "user",
-              content: "::start",
+              content: "::record",
               source: {
                 providerEventType: "user",
                 providerEventId: "u-start-default",

@@ -111,6 +111,12 @@ export interface RecordingPipelineLike {
   ): ActiveRecording | undefined;
   listActiveRecordings(): ActiveRecording[];
   getRecordingSummary(): RecordingSummary;
+  getMarkdownFrontmatterSettings?(): {
+    includeFrontmatter: boolean;
+    includeUpdatedInFrontmatter: boolean;
+    includeConversationEventKinds: boolean;
+    participantUsername?: string;
+  };
 }
 
 export interface RecordingPipelineOptions {
@@ -463,6 +469,20 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return {
       activeRecordings: this.recordings.size,
       destinations: destinations.size,
+    };
+  }
+
+  getMarkdownFrontmatterSettings(): {
+    includeFrontmatter: boolean;
+    includeUpdatedInFrontmatter: boolean;
+    includeConversationEventKinds: boolean;
+    participantUsername?: string;
+  } {
+    return {
+      includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
+      includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
+      includeConversationEventKinds: this.includeConversationEventKindsInFrontmatter,
+      participantUsername: this.frontmatterParticipantUsername,
     };
   }
 

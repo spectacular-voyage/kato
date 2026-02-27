@@ -87,14 +87,20 @@ deno run -A apps/daemon/src/main.ts --version
 
 Kato also watches user messages for in-chat control commands:
 
-- `::start [<destination>]`
-- `::capture [<destination>]`
+- `::init [<abs-path>]`
+- `::record`
+- `::capture [<abs-path>]`
+- `::export <abs-path>`
 - `::stop`
-- `::stop id:<recording-id-or-prefix>`
-- `::stop dest:<destination>`
 
-When destination is omitted for `::start` / `::capture`, kato generates a file
-under `~/.kato/recordings/`.
+Rules:
+
+- All explicit path arguments must be absolute.
+- `::init` sets/prepares the session primary destination without starting
+  recording.
+- `::record` starts/resumes recording at the session primary destination.
+- If no primary destination is set, destination-resolving commands fall back to
+  a generated file under `~/.kato/recordings/`.
 
 ## Runtime Files
 

@@ -131,6 +131,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.commandCursor !== undefined
       ? { commandCursor: metadata.commandCursor }
       : {}),
+    ...(metadata.primaryRecordingDestination !== undefined
+      ? { primaryRecordingDestination: metadata.primaryRecordingDestination }
+      : {}),
     recordings: metadata.recordings.map((recording) => ({
       recordingId: recording.recordingId,
       destination: recording.destination,

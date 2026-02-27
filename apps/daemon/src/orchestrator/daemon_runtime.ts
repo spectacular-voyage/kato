@@ -9,17 +9,19 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import { join } from "@std/path";
+import { dirname, isAbsolute, join } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
+  type InChatControlCommand,
   detectInChatControlCommands,
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../policy/mod.ts";
+import { renderFrontmatter } from "../writer/frontmatter.ts";
 import {
   type ActiveRecording,
   RecordingPipeline,
@@ -120,6 +122,7 @@ function readTimeMs(value: string | undefined): number | undefined {
 interface SessionEventProcessingState {
   seenEventSignatures: Set<string>;
   lastSeenFileModifiedAtMs?: number;
+  primaryRecordingDestination?: string;
 }
 
 interface ProcessInChatRecordingUpdatesOptions {
@@ -129,6 +132,7 @@ interface ProcessInChatRecordingUpdatesOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   processEventsFromMs: number;
+  now: () => Date;
 }
 
 interface ProcessPersistentRecordingUpdatesOptions {
@@ -146,9 +150,11 @@ interface ApplyControlCommandsForEventOptions {
   events: ConversationEvent[];
   eventIndex: number;
   event: ConversationEvent & { kind: "message.user" };
+  sessionEventState: SessionEventProcessingState;
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
+  now: () => Date;
 }
 
 function makeSessionProcessingKey(provider: string, sessionId: string): string {
@@ -195,7 +201,7 @@ function unwrapMatchingDelimiters(value: string): string {
   return value;
 }
 
-function normalizeCommandTargetPath(
+function normalizeRawCommandTargetPath(
   rawArgument: string | undefined,
 ): string | undefined {
   if (!rawArgument) return undefined;
@@ -209,12 +215,49 @@ function normalizeCommandTargetPath(
   }
 
   normalized = unwrapMatchingDelimiters(normalized);
-  if (normalized.startsWith("@")) {
-    normalized = normalized.slice(1).trim();
-  }
-  normalized = unwrapMatchingDelimiters(normalized);
 
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function resolveExplicitAbsolutePathArgument(
+  rawArgument: string | undefined,
+): { path?: string; reason?: string } {
+  const normalized = normalizeRawCommandTargetPath(rawArgument);
+  if (!normalized) {
+    return { reason: "Path argument is missing" };
+  }
+  if (normalized.startsWith("@")) {
+    return {
+      reason: "Path argument must be an absolute filesystem path (mentions are not allowed)",
+    };
+  }
+  if (!isAbsolute(normalized)) {
+    return { reason: "Path argument must be absolute" };
+  }
+  return { path: normalized };
+}
+
+function normalizePrimaryDestination(
+  metadata: SessionMetadataV1,
+): string | undefined {
+  const raw = metadata.primaryRecordingDestination;
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const normalized = raw.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function setPrimaryDestination(
+  metadata: SessionMetadataV1,
+  destination: string | undefined,
+): void {
+  const normalized = destination?.trim();
+  if (!normalized) {
+    delete metadata.primaryRecordingDestination;
+    return;
+  }
+  metadata.primaryRecordingDestination = normalized;
 }
 
 function resolveConversationTitle(
@@ -240,6 +283,23 @@ interface PersistentRecordingCommandContext {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
+}
+
+interface InChatCommandBoundary {
+  command: InChatControlCommand;
+  nextCommandLine: number;
+  lastLineInSegment: number;
+}
+
+interface InitFrontmatterSettings {
+  includeFrontmatter: boolean;
+  includeUpdatedInFrontmatter: boolean;
+  includeConversationEventKinds: boolean;
+  participantUsername?: string;
+}
+
+interface RecordingPipelineFrontmatterSettingsProvider {
+  getMarkdownFrontmatterSettings?(): InitFrontmatterSettings;
 }
 
 function resolveDefaultRecordingRootDir(): string {
@@ -329,26 +389,278 @@ function activeSessionRecordings(
   return metadata.recordings.filter((entry) => entry.desiredState === "on");
 }
 
-function resolveRecordingsByDestination(
+function findRecordingByDestination(
   metadata: SessionMetadataV1,
   destination: string,
-): SessionMetadataV1["recordings"] {
-  return activeSessionRecordings(metadata).filter((entry) =>
-    entry.destination === destination
-  );
+): SessionMetadataV1["recordings"][number] | undefined {
+  return metadata.recordings.find((entry) => entry.destination === destination);
 }
 
-function resolveRecordingsByIdPrefix(
+function createDestinationRecording(
+  destination: string,
+  writeCursor: number,
+  nowIso: string,
+): SessionMetadataV1["recordings"][number] {
+  return {
+    recordingId: crypto.randomUUID(),
+    destination,
+    desiredState: "off",
+    writeCursor,
+    createdAt: nowIso,
+    periods: [],
+  };
+}
+
+function listRecordingIdsForDestination(
   metadata: SessionMetadataV1,
-  prefix: string,
-): SessionMetadataV1["recordings"] {
-  const normalized = prefix.trim().toLowerCase();
-  if (normalized.length < 8) {
+  destination: string,
+  pending?: SessionMetadataV1["recordings"][number],
+): string[] {
+  const ids = new Set<string>();
+  for (const entry of metadata.recordings) {
+    if (entry.destination === destination) {
+      ids.add(entry.recordingId);
+    }
+  }
+  if (pending && pending.destination === destination) {
+    ids.add(pending.recordingId);
+  }
+  return Array.from(ids);
+}
+
+function deactivateActiveRecordings(
+  metadata: SessionMetadataV1,
+  stopCursor: number,
+  nowIso: string,
+): string[] {
+  const changed: string[] = [];
+  for (const recording of metadata.recordings) {
+    if (recording.desiredState !== "on") {
+      continue;
+    }
+    recording.desiredState = "off";
+    closeRecordingPeriod(
+      metadata,
+      recording.recordingId,
+      stopCursor,
+      nowIso,
+      stopCursor,
+    );
+    changed.push(recording.recordingId);
+  }
+  return changed;
+}
+
+function resolveCommandBoundaries(
+  content: string,
+  commands: InChatControlCommand[],
+): InChatCommandBoundary[] {
+  if (commands.length === 0) {
     return [];
   }
-  return activeSessionRecordings(metadata).filter((entry) =>
-    entry.recordingId.toLowerCase().startsWith(normalized)
+  const totalLines = content.replace(/\r\n?/g, "\n").split("\n").length;
+  return commands.map((command, index) => {
+    const nextCommandLine = commands[index + 1]?.line ?? (totalLines + 1);
+    const lastLineInSegment = Math.max(command.line, nextCommandLine - 1);
+    return {
+      command,
+      nextCommandLine,
+      lastLineInSegment,
+    };
+  });
+}
+
+function sliceContentByLineRange(
+  content: string,
+  startLineInclusive: number,
+  endLineInclusive: number,
+): string {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const start = Math.max(1, startLineInclusive);
+  const end = Math.min(lines.length, endLineInclusive);
+  if (end < start) {
+    return "";
+  }
+  return lines.slice(start - 1, end).join("\n");
+}
+
+function withUserEventContent(
+  event: ConversationEvent & { kind: "message.user" },
+  content: string,
+): ConversationEvent & { kind: "message.user" } {
+  return {
+    ...event,
+    content,
+  };
+}
+
+function buildBoundarySnapshotEvents(
+  events: ConversationEvent[],
+  eventIndex: number,
+  event: ConversationEvent & { kind: "message.user" },
+  boundaryLine: number,
+): ConversationEvent[] {
+  const slice = events.slice(0, eventIndex + 1);
+  if (slice.length === 0) {
+    return [];
+  }
+  const boundaryContent = sliceContentByLineRange(event.content, 1, boundaryLine);
+  slice[slice.length - 1] = withUserEventContent(event, boundaryContent);
+  return slice;
+}
+
+function buildCommandSeedEvents(
+  event: ConversationEvent & { kind: "message.user" },
+  startLineInclusive: number,
+  endLineInclusive: number,
+): ConversationEvent[] {
+  const content = sliceContentByLineRange(
+    event.content,
+    startLineInclusive,
+    endLineInclusive,
   );
+  if (content.trim().length === 0) {
+    return [];
+  }
+  return [withUserEventContent(event, content)];
+}
+
+function resolvePrimaryDestination(
+  metadata: SessionMetadataV1,
+  provider: string,
+  katoSessionId: string,
+  now: () => Date,
+): string {
+  const fromPointer = normalizePrimaryDestination(metadata);
+  if (fromPointer && isAbsolute(fromPointer)) {
+    return fromPointer;
+  }
+  return makeDefaultRecordingDestinationPath(provider, katoSessionId, now());
+}
+
+async function validateDestinationPathForCommand(
+  recordingPipeline: RecordingPipelineLike,
+  provider: string,
+  sessionId: string,
+  destination: string,
+  commandName: "record" | "capture" | "export",
+): Promise<string> {
+  if (!recordingPipeline.validateDestinationPath) {
+    return destination;
+  }
+  return await recordingPipeline.validateDestinationPath({
+    provider,
+    sessionId,
+    targetPath: destination,
+    commandName,
+  });
+}
+
+function resolveFrontmatterSettings(
+  recordingPipeline: RecordingPipelineLike,
+): InitFrontmatterSettings {
+  const provider = recordingPipeline as RecordingPipelineFrontmatterSettingsProvider;
+  if (provider.getMarkdownFrontmatterSettings) {
+    return provider.getMarkdownFrontmatterSettings();
+  }
+  return {
+    includeFrontmatter: true,
+    includeUpdatedInFrontmatter: true,
+    includeConversationEventKinds: true,
+  };
+}
+
+function buildFrontmatterParticipants(
+  provider: string,
+  events: ConversationEvent[],
+  participantUsername: string | undefined,
+): string[] | undefined {
+  const participants: string[] = [];
+  if (participantUsername) {
+    participants.push(`user.${participantUsername}`);
+  }
+  const assistantParticipants = new Set<string>();
+  for (const event of events) {
+    if (event.kind !== "message.assistant") {
+      continue;
+    }
+    const eventProvider = event.provider?.trim() || provider;
+    const model = event.model?.trim();
+    assistantParticipants.add(
+      model && model.length > 0
+        ? `${eventProvider}.${model}`
+        : `${eventProvider}.assistant`,
+    );
+  }
+  participants.push(
+    ...Array.from(assistantParticipants).sort((a, b) => a.localeCompare(b)),
+  );
+  return participants.length > 0 ? participants : undefined;
+}
+
+function buildFrontmatterConversationKinds(
+  events: ConversationEvent[],
+): string[] | undefined {
+  const kinds = Array.from(new Set(events.map((event) => event.kind)))
+    .sort((a, b) => a.localeCompare(b));
+  return kinds.length > 0 ? kinds : undefined;
+}
+
+function isMarkdownDestination(path: string): boolean {
+  return path.toLowerCase().endsWith(".md");
+}
+
+async function prepareInitDestination(
+  destination: string,
+  provider: string,
+  providerSessionId: string,
+  boundaryEvents: ConversationEvent[],
+  recordingId: string,
+  recordingPipeline: RecordingPipelineLike,
+  now: () => Date,
+): Promise<void> {
+  await Deno.mkdir(dirname(destination), { recursive: true });
+  try {
+    const stat = await Deno.stat(destination);
+    if (stat.isFile) {
+      return;
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
+  }
+
+  if (!isMarkdownDestination(destination)) {
+    await Deno.writeTextFile(destination, "");
+    return;
+  }
+
+  const frontmatterSettings = resolveFrontmatterSettings(recordingPipeline);
+  if (!frontmatterSettings.includeFrontmatter) {
+    await Deno.writeTextFile(destination, "");
+    return;
+  }
+
+  const title = resolveConversationTitle(boundaryEvents, providerSessionId);
+  const participants = buildFrontmatterParticipants(
+    provider,
+    boundaryEvents,
+    frontmatterSettings.participantUsername,
+  );
+  const conversationEventKinds = frontmatterSettings.includeConversationEventKinds
+    ? buildFrontmatterConversationKinds(boundaryEvents)
+    : undefined;
+  const frontmatter = renderFrontmatter({
+    title,
+    now: now(),
+    sessionId: providerSessionId,
+    recordingIds: [recordingId],
+    participants,
+    conversationEventKinds,
+    includeUpdated: frontmatterSettings.includeUpdatedInFrontmatter,
+  });
+  await Deno.writeTextFile(destination, `${frontmatter}\n`);
 }
 
 function matchesCaptureBoundaryEvent(
@@ -390,10 +702,11 @@ function matchesCaptureBoundaryEvent(
   return true;
 }
 
-async function resolveCaptureEventsFromTwinStart(
+async function resolveBoundaryEventsFromTwinStart(
   metadata: SessionMetadataV1,
-  snapshotSlice: ConversationEvent[],
+  fallbackBoundaryEvents: ConversationEvent[],
   commandEvent: ConversationEvent & { kind: "message.user" },
+  boundaryLine: number,
   sessionStateStore: PersistentSessionStateStore,
 ): Promise<ConversationEvent[]> {
   let twinEvents: Awaited<
@@ -402,15 +715,15 @@ async function resolveCaptureEventsFromTwinStart(
   try {
     twinEvents = await sessionStateStore.readTwinEvents(metadata, 1);
   } catch {
-    return snapshotSlice;
+    return fallbackBoundaryEvents;
   }
   if (twinEvents.length === 0) {
-    return snapshotSlice;
+    return fallbackBoundaryEvents;
   }
 
   const twinConversation = mapTwinEventsToConversation(twinEvents);
   if (twinConversation.length === 0) {
-    return snapshotSlice;
+    return fallbackBoundaryEvents;
   }
 
   let boundaryIndex = -1;
@@ -423,140 +736,68 @@ async function resolveCaptureEventsFromTwinStart(
   }
 
   if (boundaryIndex >= 0) {
-    return twinConversation.slice(0, boundaryIndex + 1);
+    const slice = twinConversation.slice(0, boundaryIndex + 1);
+    const boundaryEvent = slice[slice.length - 1];
+    if (boundaryEvent?.kind === "message.user") {
+      const boundaryContent = sliceContentByLineRange(
+        boundaryEvent.content,
+        1,
+        boundaryLine,
+      );
+      slice[slice.length - 1] = withUserEventContent(
+        boundaryEvent,
+        boundaryContent,
+      );
+    }
+    return slice;
   }
-  return twinConversation;
+  return fallbackBoundaryEvents;
 }
 
-async function applyPersistentStopCommand(
-  metadata: SessionMetadataV1,
-  commandArgument: string | undefined,
-  eventIndex: number,
-  provider: string,
-  providerSessionId: string,
-  eventId: string,
-  operationalLogger: StructuredLogger,
-  auditLogger: AuditLogger,
-  now: () => Date,
-): Promise<boolean> {
-  const nowIso = now().toISOString();
-  const stopSeq = eventIndex + 1;
-  const active = activeSessionRecordings(metadata);
-  if (active.length === 0) {
-    return false;
-  }
-
-  let targets: SessionMetadataV1["recordings"] = [];
-  const normalizedArg = normalizeCommandTargetPath(commandArgument);
-  if (!normalizedArg) {
-    targets = active;
-  } else if (normalizedArg.toLowerCase().startsWith("id:")) {
-    const prefix = normalizedArg.slice(3).trim();
-    targets = resolveRecordingsByIdPrefix(metadata, prefix);
-    if (prefix.length < 8) {
-      await operationalLogger.warn(
-        "recording.command.stop.invalid_prefix",
-        "Ignoring stop target because recording id prefix is too short",
-        {
-          provider,
-          sessionId: providerSessionId,
-          eventId,
-          argument: commandArgument,
-          minPrefixLength: 8,
-        },
-      );
-      return false;
-    }
-    if (targets.length > 1) {
-      await operationalLogger.warn(
-        "recording.command.stop.ambiguous",
-        "Recording id prefix matched multiple active recordings",
-        {
-          provider,
-          sessionId: providerSessionId,
-          eventId,
-          argument: commandArgument,
-          candidates: targets.map((entry) => ({
-            recordingId: entry.recordingId,
-            recordingShortId: entry.recordingId.slice(0, 8),
-            destination: entry.destination,
-          })),
-        },
-      );
-      return false;
-    }
-  } else if (normalizedArg.toLowerCase().startsWith("dest:")) {
-    const destination = normalizeCommandTargetPath(normalizedArg.slice(5));
-    targets = destination
-      ? resolveRecordingsByDestination(metadata, destination)
-      : [];
-  } else {
-    const idMatches = resolveRecordingsByIdPrefix(metadata, normalizedArg);
-    const destMatches = resolveRecordingsByDestination(metadata, normalizedArg);
-    const byId = new Set(idMatches.map((entry) => entry.recordingId));
-    const union = [...idMatches];
-    for (const candidate of destMatches) {
-      if (!byId.has(candidate.recordingId)) {
-        union.push(candidate);
-      }
-    }
-    if (idMatches.length > 0 && destMatches.length > 0) {
-      await operationalLogger.warn(
-        "recording.command.stop.ambiguous",
-        "Bare ::stop target matched both destination and recording id prefix; stopping all matches",
-        {
-          provider,
-          sessionId: providerSessionId,
-          eventId,
-          argument: commandArgument,
-          idMatches: idMatches.map((entry) => entry.recordingId.slice(0, 8)),
-          destinationMatches: destMatches.map((entry) => entry.destination),
-        },
-      );
-    }
-    targets = union;
-  }
-
-  if (targets.length === 0) {
-    await operationalLogger.warn(
-      "recording.command.stop.not_found",
-      "No active recording matched stop target",
-      {
-        provider,
-        sessionId: providerSessionId,
-        eventId,
-        argument: commandArgument,
-      },
-    );
-    return false;
-  }
-
-  for (const target of targets) {
-    target.desiredState = "off";
-    closeRecordingPeriod(
-      metadata,
-      target.recordingId,
-      stopSeq,
-      nowIso,
-      stopSeq,
-    );
-  }
-
-  await auditLogger.record(
-    "recording.command.stop.applied",
-    "Stopped active recording targets",
+async function logInvalidTargetForCommand(options: {
+  provider: string;
+  sessionId: string;
+  eventId: string;
+  command: string;
+  rawArgument: string | undefined;
+  reason: string;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+}): Promise<void> {
+  const {
+    provider,
+    sessionId,
+    eventId,
+    command,
+    rawArgument,
+    reason,
+    operationalLogger,
+    auditLogger,
+  } = options;
+  await operationalLogger.warn(
+    "recording.command.invalid_target",
+    "Skipping in-chat control command because target path is invalid",
     {
       provider,
-      sessionId: providerSessionId,
+      sessionId,
       eventId,
-      targets: targets.map((entry) => ({
-        recordingId: entry.recordingId,
-        destination: entry.destination,
-      })),
+      command,
+      rawArgument,
+      reason,
     },
   );
-
-  return true;
+  await auditLogger.record(
+    "recording.command.invalid_target",
+    "In-chat control command target path invalid",
+    {
+      provider,
+      sessionId,
+      eventId,
+      command,
+      rawArgument,
+      reason,
+    },
+  );
 }
 
 async function applyPersistentControlCommandsForEvent(
@@ -609,137 +850,316 @@ async function applyPersistentControlCommandsForEvent(
     return false;
   }
 
-  const snapshotSlice = events.slice(0, eventIndex + 1);
-  const snapshotTitle = resolveConversationTitle(
-    snapshotSlice,
-    providerSessionId,
+  const commandBoundaries = resolveCommandBoundaries(
+    event.content,
+    detection.commands,
   );
   const writeCursor = eventIndex + 1;
   let metadataChanged = false;
-  let captureEvents: ConversationEvent[] | undefined;
 
-  for (const command of detection.commands) {
-    const canonicalCommand = command.name === "record" ? "start" : command.name;
-    const targetPath = normalizeCommandTargetPath(command.argument);
-    const defaultDestination = makeDefaultRecordingDestinationPath(
-      provider,
-      metadata.sessionId,
-      now(),
+  for (const boundary of commandBoundaries) {
+    const { command } = boundary;
+    const boundarySnapshot = buildBoundarySnapshotEvents(
+      events,
+      eventIndex,
+      event,
+      command.line,
     );
-    const destination = targetPath ?? defaultDestination;
-    let resolvedDestination = destination;
-    let commandApplied = true;
+    const boundarySnapshotTitle = resolveConversationTitle(
+      boundarySnapshot,
+      providerSessionId,
+    );
+    let commandNoop = false;
+    let loggedTargetPath: string | undefined;
 
     try {
-      if (canonicalCommand === "start") {
-        if (recordingPipeline.validateDestinationPath) {
-          resolvedDestination = await recordingPipeline.validateDestinationPath(
-            {
-              provider,
-              sessionId: providerSessionId,
-              targetPath: destination,
-              commandName: "record",
-            },
-          );
+      if (command.name === "init") {
+        const explicit = command.argument
+          ? resolveExplicitAbsolutePathArgument(command.argument)
+          : undefined;
+        if (command.argument && !explicit?.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId: providerSessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit?.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
         }
-        const recordingId = crypto.randomUUID();
+        const destination = explicit?.path ??
+          resolvePrimaryDestination(metadata, provider, metadata.sessionId, now);
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
+          provider,
+          providerSessionId,
+          destination,
+          "record",
+        );
+        loggedTargetPath = resolvedDestination;
         const nowIso = now().toISOString();
-        metadata.recordings.push({
-          recordingId,
-          destination: resolvedDestination,
-          desiredState: "on",
-          writeCursor,
-          createdAt: nowIso,
-          periods: [],
-        });
-        openRecordingPeriod(
-          metadata,
-          recordingId,
+        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const pending = existing ?? createDestinationRecording(
+          resolvedDestination,
           writeCursor,
           nowIso,
-          writeCursor,
         );
-        metadataChanged = true;
-      } else if (canonicalCommand === "capture") {
-        if (!captureEvents) {
-          captureEvents = await resolveCaptureEventsFromTwinStart(
-            metadata,
-            snapshotSlice,
-            event,
-            sessionStateStore,
-          );
+        const boundaryEvents = await resolveBoundaryEventsFromTwinStart(
+          metadata,
+          boundarySnapshot,
+          event,
+          command.line,
+          sessionStateStore,
+        );
+        await prepareInitDestination(
+          resolvedDestination,
+          provider,
+          providerSessionId,
+          boundaryEvents,
+          pending.recordingId,
+          recordingPipeline,
+          now,
+        );
+        const deactivated = deactivateActiveRecordings(metadata, writeCursor, nowIso);
+        const previousPointer = normalizePrimaryDestination(metadata);
+        if (!existing) {
+          metadata.recordings.push(pending);
         }
-        const recordingId = crypto.randomUUID();
+        pending.desiredState = "off";
+        pending.writeCursor = writeCursor;
+        setPrimaryDestination(metadata, resolvedDestination);
+        if (
+          deactivated.length > 0 ||
+          !existing ||
+          previousPointer !== resolvedDestination
+        ) {
+          metadataChanged = true;
+        }
+      } else if (command.name === "record") {
+        const destination = resolvePrimaryDestination(
+          metadata,
+          provider,
+          metadata.sessionId,
+          now,
+        );
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
+          provider,
+          providerSessionId,
+          destination,
+          "record",
+        );
+        loggedTargetPath = resolvedDestination;
+        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const active = activeSessionRecordings(metadata);
+        const activeOnResolvedDestination = active.some((entry) =>
+          entry.destination === resolvedDestination
+        );
+        if (activeOnResolvedDestination) {
+          setPrimaryDestination(metadata, resolvedDestination);
+          commandNoop = true;
+        } else {
+          const nowIso = now().toISOString();
+          const pending = existing ?? createDestinationRecording(
+            resolvedDestination,
+            writeCursor,
+            nowIso,
+          );
+          const seedEvents = buildCommandSeedEvents(
+            event,
+            command.line,
+            boundary.lastLineInSegment,
+          );
+          if (seedEvents.length > 0) {
+            if (!recordingPipeline.appendToDestination) {
+              throw new Error(
+                "Recording pipeline does not support appendToDestination",
+              );
+            }
+            await recordingPipeline.appendToDestination({
+              provider,
+              sessionId: providerSessionId,
+              targetPath: resolvedDestination,
+              events: seedEvents,
+              title: boundarySnapshotTitle,
+              recordingId: pending.recordingId,
+              recordingIds: listRecordingIdsForDestination(
+                metadata,
+                resolvedDestination,
+                pending,
+              ),
+            });
+          }
+          deactivateActiveRecordings(metadata, writeCursor, nowIso);
+          if (!existing) {
+            metadata.recordings.push(pending);
+          }
+          pending.desiredState = "on";
+          pending.writeCursor = writeCursor;
+          setPrimaryDestination(metadata, resolvedDestination);
+          openRecordingPeriod(
+            metadata,
+            pending.recordingId,
+            writeCursor,
+            nowIso,
+            writeCursor,
+          );
+          metadataChanged = true;
+        }
+      } else if (command.name === "capture") {
+        const explicit = command.argument
+          ? resolveExplicitAbsolutePathArgument(command.argument)
+          : undefined;
+        if (command.argument && !explicit?.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId: providerSessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit?.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
+        }
+        const destination = explicit?.path ??
+          resolvePrimaryDestination(metadata, provider, metadata.sessionId, now);
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
+          provider,
+          providerSessionId,
+          destination,
+          "capture",
+        );
+        loggedTargetPath = resolvedDestination;
+        const nowIso = now().toISOString();
+        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const pending = existing ?? createDestinationRecording(
+          resolvedDestination,
+          writeCursor,
+          nowIso,
+        );
+        const captureEvents = await resolveBoundaryEventsFromTwinStart(
+          metadata,
+          boundarySnapshot,
+          event,
+          command.line,
+          sessionStateStore,
+        );
         const captureTitle = resolveConversationTitle(
           captureEvents,
           providerSessionId,
         );
-        const captureResult = await recordingPipeline.captureSnapshot({
+        await recordingPipeline.captureSnapshot({
           provider,
           sessionId: providerSessionId,
-          targetPath: destination,
+          targetPath: resolvedDestination,
           events: captureEvents,
           title: captureTitle,
-          recordingIds: [recordingId],
+          recordingIds: [pending.recordingId],
         });
-        resolvedDestination = captureResult.outputPath;
-        const nowIso = now().toISOString();
-        metadata.recordings.push({
-          recordingId,
-          destination: resolvedDestination,
-          desiredState: "on",
-          writeCursor,
-          createdAt: nowIso,
-          periods: [],
-        });
+        const continuationEvents = buildCommandSeedEvents(
+          event,
+          command.line + 1,
+          boundary.lastLineInSegment,
+        );
+        if (continuationEvents.length > 0) {
+          if (!recordingPipeline.appendToDestination) {
+            throw new Error(
+              "Recording pipeline does not support appendToDestination",
+            );
+          }
+          await recordingPipeline.appendToDestination({
+            provider,
+            sessionId: providerSessionId,
+            targetPath: resolvedDestination,
+            events: continuationEvents,
+            title: captureTitle,
+            recordingId: pending.recordingId,
+            recordingIds: listRecordingIdsForDestination(
+              metadata,
+              resolvedDestination,
+              pending,
+            ),
+          });
+        }
+        deactivateActiveRecordings(metadata, writeCursor, nowIso);
+        if (!existing) {
+          metadata.recordings.push(pending);
+        }
+        pending.desiredState = "on";
+        pending.writeCursor = writeCursor;
+        setPrimaryDestination(metadata, resolvedDestination);
         openRecordingPeriod(
           metadata,
-          recordingId,
+          pending.recordingId,
           writeCursor,
           nowIso,
           writeCursor,
         );
         metadataChanged = true;
-      } else if (canonicalCommand === "export") {
-        if (!targetPath) {
-          await operationalLogger.warn(
-            "recording.command.invalid_target",
-            "Skipping in-chat export because target path is missing",
+      } else if (command.name === "export") {
+        const explicit = resolveExplicitAbsolutePathArgument(command.argument);
+        if (!explicit.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId: providerSessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
+        }
+        loggedTargetPath = explicit.path;
+        const exportEvents = await resolveBoundaryEventsFromTwinStart(
+          metadata,
+          boundarySnapshot,
+          event,
+          command.line,
+          sessionStateStore,
+        );
+        const snapshotTitle = resolveConversationTitle(
+          exportEvents,
+          providerSessionId,
+        );
+        await recordingPipeline.exportSnapshot({
+          provider,
+          sessionId: providerSessionId,
+          targetPath: explicit.path,
+          events: exportEvents,
+          title: snapshotTitle,
+        });
+      } else if (command.name === "stop") {
+        const nowIso = now().toISOString();
+        const deactivated = deactivateActiveRecordings(
+          metadata,
+          writeCursor,
+          nowIso,
+        );
+        if (deactivated.length === 0) {
+          commandNoop = true;
+        } else {
+          metadataChanged = true;
+          await auditLogger.record(
+            "recording.command.stop.applied",
+            "Stopped active recording targets",
             {
               provider,
               sessionId: providerSessionId,
               eventId: event.eventId,
-              command: command.name,
+              targets: deactivated,
             },
           );
-          continue;
         }
-        await recordingPipeline.exportSnapshot({
-          provider,
-          sessionId: providerSessionId,
-          targetPath,
-          events: snapshotSlice,
-          title: snapshotTitle,
-        });
-      } else if (canonicalCommand === "stop") {
-        const stopped = await applyPersistentStopCommand(
-          metadata,
-          command.argument,
-          eventIndex,
-          provider,
-          providerSessionId,
-          event.eventId,
-          operationalLogger,
-          auditLogger,
-          now,
-        );
-        metadataChanged = metadataChanged || stopped;
-        commandApplied = stopped;
       }
 
-      if (!commandApplied) {
-        continue;
-      }
       await operationalLogger.info(
         "recording.command.applied",
         "Applied in-chat control command",
@@ -747,9 +1167,9 @@ async function applyPersistentControlCommandsForEvent(
           provider,
           sessionId: providerSessionId,
           eventId: event.eventId,
-          command: canonicalCommand,
-          ...(targetPath ? { targetPath } : {}),
-          ...(targetPath ? {} : { targetPath: resolvedDestination }),
+          command: command.name,
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
+          ...(commandNoop ? { noop: true } : {}),
         },
       );
     } catch (error) {
@@ -760,8 +1180,8 @@ async function applyPersistentControlCommandsForEvent(
           provider,
           sessionId: providerSessionId,
           eventId: event.eventId,
-          command: canonicalCommand,
-          ...(targetPath ? { targetPath } : {}),
+          command: command.name,
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
         },
       );
@@ -772,8 +1192,8 @@ async function applyPersistentControlCommandsForEvent(
           provider,
           sessionId: providerSessionId,
           eventId: event.eventId,
-          command: canonicalCommand,
-          ...(targetPath ? { targetPath } : {}),
+          command: command.name,
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
         },
       );
@@ -792,9 +1212,11 @@ async function applyControlCommandsForEvent(
     events,
     eventIndex,
     event,
+    sessionEventState,
     recordingPipeline,
     operationalLogger,
     auditLogger,
+    now,
   } = options;
 
   const detection = detectInChatControlCommands(event.content);
@@ -830,74 +1252,151 @@ async function applyControlCommandsForEvent(
     return;
   }
 
-  const snapshotSlice = events.slice(0, eventIndex + 1);
-  const recordingTitle = resolveConversationTitle(snapshotSlice, sessionId);
+  const boundaries = resolveCommandBoundaries(event.content, detection.commands);
 
-  for (const command of detection.commands) {
-    const targetPath = normalizeCommandTargetPath(command.argument);
-
-    if (command.name !== "stop" && !targetPath) {
-      await operationalLogger.warn(
-        "recording.command.invalid_target",
-        "Skipping in-chat control command because target path is invalid",
-        {
-          provider,
-          sessionId,
-          eventId: event.eventId,
-          command: command.name,
-          rawArgument: command.argument,
-        },
-      );
-      await auditLogger.record(
-        "recording.command.invalid_target",
-        "In-chat control command target path invalid",
-        {
-          provider,
-          sessionId,
-          eventId: event.eventId,
-          command: command.name,
-          rawArgument: command.argument,
-        },
-      );
-      continue;
-    }
+  for (const boundary of boundaries) {
+    const { command } = boundary;
+    const boundarySnapshot = buildBoundarySnapshotEvents(
+      events,
+      eventIndex,
+      event,
+      command.line,
+    );
+    const recordingTitle = resolveConversationTitle(boundarySnapshot, sessionId);
+    let loggedTargetPath: string | undefined;
+    let commandNoop = false;
 
     try {
-      if (command.name === "record") {
-        await recordingPipeline.activateRecording({
+      if (command.name === "init") {
+        const explicit = command.argument
+          ? resolveExplicitAbsolutePathArgument(command.argument)
+          : undefined;
+        if (command.argument && !explicit?.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit?.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
+        }
+        const destination = explicit?.path ??
+          sessionEventState.primaryRecordingDestination ??
+          makeDefaultRecordingDestinationPath(provider, sessionId, now());
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
           provider,
           sessionId,
-          targetPath: targetPath!,
-          seedEvents: snapshotSlice,
-          title: recordingTitle,
-        });
+          destination,
+          "record",
+        );
+        sessionEventState.primaryRecordingDestination = resolvedDestination;
+        loggedTargetPath = resolvedDestination;
+        recordingPipeline.stopRecording(provider, sessionId);
+      } else if (command.name === "record") {
+        const destination = sessionEventState.primaryRecordingDestination ??
+          makeDefaultRecordingDestinationPath(provider, sessionId, now());
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
+          provider,
+          sessionId,
+          destination,
+          "record",
+        );
+        loggedTargetPath = resolvedDestination;
+        const active = recordingPipeline.getActiveRecording(provider, sessionId);
+        if (active && active.outputPath === resolvedDestination) {
+          commandNoop = true;
+        } else {
+          const seedEvents = buildCommandSeedEvents(
+            event,
+            command.line,
+            boundary.lastLineInSegment,
+          );
+          await recordingPipeline.activateRecording({
+            provider,
+            sessionId,
+            targetPath: resolvedDestination,
+            seedEvents,
+            title: recordingTitle,
+          });
+        }
+        sessionEventState.primaryRecordingDestination = resolvedDestination;
       } else if (command.name === "capture") {
+        const explicit = command.argument
+          ? resolveExplicitAbsolutePathArgument(command.argument)
+          : undefined;
+        if (command.argument && !explicit?.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit?.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
+        }
+        const destination = explicit?.path ??
+          sessionEventState.primaryRecordingDestination ??
+          makeDefaultRecordingDestinationPath(provider, sessionId, now());
+        const resolvedDestination = await validateDestinationPathForCommand(
+          recordingPipeline,
+          provider,
+          sessionId,
+          destination,
+          "capture",
+        );
+        loggedTargetPath = resolvedDestination;
         const recordingId = crypto.randomUUID();
         await recordingPipeline.captureSnapshot({
           provider,
           sessionId,
-          targetPath: targetPath!,
-          events: snapshotSlice,
+          targetPath: resolvedDestination,
+          events: boundarySnapshot,
           title: recordingTitle,
           recordingIds: [recordingId],
         });
         await recordingPipeline.activateRecording({
           provider,
           sessionId,
-          targetPath: targetPath!,
+          targetPath: resolvedDestination,
           title: recordingTitle,
           recordingId,
         });
+        sessionEventState.primaryRecordingDestination = resolvedDestination;
       } else if (command.name === "export") {
+        const explicit = resolveExplicitAbsolutePathArgument(command.argument);
+        if (!explicit.path) {
+          await logInvalidTargetForCommand({
+            provider,
+            sessionId,
+            eventId: event.eventId,
+            command: command.name,
+            rawArgument: command.argument,
+            reason: explicit.reason ?? "Path argument is invalid",
+            operationalLogger,
+            auditLogger,
+          });
+          continue;
+        }
+        loggedTargetPath = explicit.path;
         await recordingPipeline.exportSnapshot({
           provider,
           sessionId,
-          targetPath: targetPath!,
-          events: snapshotSlice,
+          targetPath: explicit.path,
+          events: boundarySnapshot,
           title: recordingTitle,
         });
       } else {
-        recordingPipeline.stopRecording(provider, sessionId);
+        const stopped = recordingPipeline.stopRecording(provider, sessionId);
+        commandNoop = !stopped;
       }
 
       await operationalLogger.info(
@@ -908,7 +1407,8 @@ async function applyControlCommandsForEvent(
           sessionId,
           eventId: event.eventId,
           command: command.name,
-          ...(targetPath ? { targetPath } : {}),
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
+          ...(commandNoop ? { noop: true } : {}),
         },
       );
       await auditLogger.record(
@@ -919,7 +1419,8 @@ async function applyControlCommandsForEvent(
           sessionId,
           eventId: event.eventId,
           command: command.name,
-          ...(targetPath ? { targetPath } : {}),
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
+          ...(commandNoop ? { noop: true } : {}),
         },
       );
     } catch (error) {
@@ -931,7 +1432,7 @@ async function applyControlCommandsForEvent(
           sessionId,
           eventId: event.eventId,
           command: command.name,
-          ...(targetPath ? { targetPath } : {}),
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
         },
       );
@@ -943,7 +1444,7 @@ async function applyControlCommandsForEvent(
           sessionId,
           eventId: event.eventId,
           command: command.name,
-          ...(targetPath ? { targetPath } : {}),
+          ...(loggedTargetPath ? { targetPath: loggedTargetPath } : {}),
           error: error instanceof Error ? error.message : String(error),
         },
       );
@@ -961,6 +1462,7 @@ async function processInChatRecordingUpdates(
     operationalLogger,
     auditLogger,
     processEventsFromMs,
+    now,
   } = options;
 
   // Use metadata-only listing to avoid deep-cloning events for every session
@@ -1042,9 +1544,11 @@ async function processInChatRecordingUpdates(
           events: snapshot.events,
           eventIndex: i,
           event: event as ConversationEvent & { kind: "message.user" },
+          sessionEventState: state,
           recordingPipeline,
           operationalLogger,
           auditLogger,
+          now,
         });
       }
 
@@ -1750,6 +2254,7 @@ export async function runDaemonRuntimeLoop(
             operationalLogger,
             auditLogger,
             processEventsFromMs,
+            now,
           });
         }
       } catch (error) {
