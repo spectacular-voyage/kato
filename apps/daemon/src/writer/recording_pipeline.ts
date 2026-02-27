@@ -32,7 +32,7 @@ export interface ActiveRecording {
   lastWriteAt: string;
 }
 
-export interface StartOrRotateRecordingInput {
+export interface ActivateRecordingInput {
   provider: string;
   sessionId: string;
   targetPath: string;
@@ -90,8 +90,8 @@ export interface AppendToActiveRecordingResult {
 }
 
 export interface RecordingPipelineLike {
-  startOrRotateRecording(
-    input: StartOrRotateRecordingInput,
+  activateRecording(
+    input: ActivateRecordingInput,
   ): Promise<ActiveRecording>;
   captureSnapshot(input: SnapshotExportInput): Promise<SnapshotExportResult>;
   exportSnapshot(input: SnapshotExportInput): Promise<SnapshotExportResult>;
@@ -220,8 +220,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
       ?.trim() || undefined;
   }
 
-  async startOrRotateRecording(
-    input: StartOrRotateRecordingInput,
+  async activateRecording(
+    input: ActivateRecordingInput,
   ): Promise<ActiveRecording> {
     const decision = await this.evaluatePathPolicy({
       commandName: "record",
@@ -273,8 +273,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
     }
 
     await this.operationalLogger.info(
-      "recording.rotate",
-      "Recording stream started or rotated",
+      "recording.activate",
+      "Recording stream activated",
       {
         provider: input.provider,
         sessionId: input.sessionId,

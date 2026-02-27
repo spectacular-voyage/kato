@@ -126,6 +126,7 @@ export {
   OpenFeatureClient,
 } from "./feature_flags/mod.ts";
 export type {
+  ActivateRecordingInput,
   ActiveRecording,
   AppendToActiveRecordingInput,
   AppendToActiveRecordingResult,
@@ -140,7 +141,6 @@ export type {
   RecordingSummary,
   SnapshotExportInput,
   SnapshotExportResult,
-  StartOrRotateRecordingInput,
 } from "./writer/mod.ts";
 export {
   makeCompactFrontmatterId,

@@ -205,7 +205,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
   }> = [];
 
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
+    activateRecording() {
       throw new Error("not used");
     },
     captureSnapshot() {
@@ -370,7 +370,7 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
 
   const exported: Array<{ provider: string; sessionId: string }> = [];
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
+    activateRecording() {
       throw new Error("not used");
     },
     captureSnapshot() {
@@ -517,7 +517,7 @@ Deno.test("runDaemonRuntimeLoop resolves export short session selectors via sess
 
     const exportedSessionIds: string[] = [];
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {
@@ -655,7 +655,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot is missing", 
 
   const exported: Array<{ sessionId: string }> = [];
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
+    activateRecording() {
       throw new Error("not used");
     },
     captureSnapshot() {
@@ -793,7 +793,7 @@ Deno.test("runDaemonRuntimeLoop skips export when session snapshot has no events
 
   const exported: Array<{ sessionId: string }> = [];
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
+    activateRecording() {
       throw new Error("not used");
     },
     captureSnapshot() {
@@ -934,7 +934,7 @@ Deno.test("runDaemonRuntimeLoop skips export requests when export feature is dis
 
   const exported: Array<{ sessionId: string }> = [];
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
+    activateRecording() {
       throw new Error("not used");
     },
     captureSnapshot() {
@@ -1761,13 +1761,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
     },
   };
 
-  const rotatedTargets: string[] = [];
+  const activatedTargets: string[] = [];
   const appendedMessageIds: string[] = [];
   let activeRecording = false;
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording(input) {
+    activateRecording(input) {
       activeRecording = true;
-      rotatedTargets.push(input.targetPath);
+      activatedTargets.push(input.targetPath);
       const nowIso = "2026-02-22T10:00:01.000Z";
       return Promise.resolve({
         recordingId: "rec-1",
@@ -1830,7 +1830,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
     pollIntervalMs: 10,
   });
 
-  assertEquals(rotatedTargets, ["notes/new.md"]);
+  assertEquals(activatedTargets, ["notes/new.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
@@ -1982,14 +1982,14 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
 
   const callOrder: string[] = [];
   const captureTargets: string[] = [];
-  const rotatedTargets: string[] = [];
+  const activatedTargets: string[] = [];
   const appendedMessageIds: string[] = [];
   let activeRecording = false;
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording(input) {
+    activateRecording(input) {
       callOrder.push("record");
       activeRecording = true;
-      rotatedTargets.push(input.targetPath);
+      activatedTargets.push(input.targetPath);
       const nowIso = "2026-02-22T10:00:01.000Z";
       return Promise.resolve({
         recordingId: "rec-capture",
@@ -2065,7 +2065,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
 
   assertEquals(callOrder, ["capture", "record"]);
   assertEquals(captureTargets, ["notes/captured.md"]);
-  assertEquals(rotatedTargets, ["notes/captured.md"]);
+  assertEquals(activatedTargets, ["notes/captured.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
@@ -2177,11 +2177,11 @@ Deno.test(
 
     const callOrder: string[] = [];
     const captureTargets: string[] = [];
-    const rotatedTargets: string[] = [];
+    const activatedTargets: string[] = [];
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording(input) {
+      activateRecording(input) {
         callOrder.push("record");
-        rotatedTargets.push(input.targetPath);
+        activatedTargets.push(input.targetPath);
         const nowIso = "2026-02-22T10:00:01.000Z";
         return Promise.resolve({
           recordingId: "rec-first-seen",
@@ -2246,7 +2246,7 @@ Deno.test(
 
     assertEquals(callOrder, ["capture", "record"]);
     assertEquals(captureTargets, ["notes/first-seen.md"]);
-    assertEquals(rotatedTargets, ["notes/first-seen.md"]);
+    assertEquals(activatedTargets, ["notes/first-seen.md"]);
   },
 );
 
@@ -2359,7 +2359,7 @@ Deno.test(
     let captureCalls = 0;
     let recordCalls = 0;
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         recordCalls += 1;
         throw new Error("should not be called");
       },
@@ -2535,10 +2535,10 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
     },
   };
 
-  let startOrRotateCalls = 0;
+  let activateCalls = 0;
   const recordingPipeline: RecordingPipelineLike = {
-    startOrRotateRecording() {
-      startOrRotateCalls += 1;
+    activateRecording() {
+      activateCalls += 1;
       throw new Error("should not be called");
     },
     captureSnapshot() {
@@ -2598,7 +2598,7 @@ Deno.test("runDaemonRuntimeLoop fails closed when in-chat command parsing report
     pollIntervalMs: 10,
   });
 
-  assertEquals(startOrRotateCalls, 0);
+  assertEquals(activateCalls, 0);
   assert(
     sink.records.some((record) =>
       record.event === "recording.command.parse_error" &&
@@ -3105,7 +3105,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
 
     const appendCalls: number[] = [];
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {
@@ -3311,7 +3311,7 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
 
     let capturedSummary: Array<{ kind: string; content?: string }> = [];
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot(input) {
@@ -3686,7 +3686,7 @@ Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple
 
     const appendByDestination = new Map<string, string[]>();
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {
@@ -3899,7 +3899,7 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
     };
 
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {
@@ -4086,7 +4086,7 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
     };
 
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {
@@ -4256,7 +4256,7 @@ Deno.test("runDaemonRuntimeLoop initializes missing session metadata from defaul
     };
 
     const recordingPipeline: RecordingPipelineLike = {
-      startOrRotateRecording() {
+      activateRecording() {
         throw new Error("not used");
       },
       captureSnapshot() {

@@ -315,16 +315,9 @@ export function renderEventsToMarkdown(
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;
-      const thinkingParts = [
-        "",
-        "<details>",
-        "<summary>Thinking</summary>",
-        "",
-        event.content.trim(),
-        "",
-        "</details>",
-      ];
-      parts.push(thinkingParts.join("\n"), "");
+      const thinkingContent = event.content.trim();
+      if (thinkingContent.length === 0) continue;
+      parts.push(thinkingContent, "");
       lastSignature = undefined;
     } else if (event.kind === "decision") {
       const metadata = event.metadata;
