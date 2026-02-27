@@ -324,3 +324,32 @@ Deno.test(
     assertEquals(result[1].sessionId, "stale-older-message");
   },
 );
+
+Deno.test(
+  "sortSessionsByRecency groups sessions with recordings before sessions without recordings",
+  () => {
+    const sessions: DaemonSessionStatus[] = [
+      {
+        provider: "claude",
+        sessionId: "no-recording-newer",
+        stale: false,
+        updatedAt: "2026-02-24T12:00:00.000Z",
+      },
+      {
+        provider: "claude",
+        sessionId: "recording-older",
+        stale: false,
+        updatedAt: "2026-02-24T11:00:00.000Z",
+        recording: {
+          outputPath: "/out.md",
+          startedAt: "2026-02-24T10:00:00.000Z",
+          lastWriteAt: "2026-02-24T11:00:00.000Z",
+        },
+      },
+    ];
+
+    const result = sortSessionsByRecency(sessions);
+    assertEquals(result[0].sessionId, "recording-older");
+    assertEquals(result[1].sessionId, "no-recording-newer");
+  },
+);

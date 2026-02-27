@@ -563,6 +563,52 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "runDaemonCli status preserves stale sessions when lastMessageAt is missing",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore({
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: true,
+      daemonPid: 4242,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+      sessions: [
+        {
+          provider: "codex",
+          sessionId: "missing-last-message",
+          updatedAt: "2026-02-22T10:00:00.000Z",
+          stale: true,
+        },
+      ],
+    });
+    const controlStore = makeInMemoryControlStore();
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+
+    const code = await runDaemonCli(["status"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+
+    assertEquals(code, 0);
+    const output = harness.stdout.join("");
+    assertStringIncludes(output, "sessions: 0 active, 1 stale");
+    assertStringIncludes(output, "run with --all to show 1 stale");
+  },
+);
+
 Deno.test("runDaemonCli uses control queue and status snapshot stores", async () => {
   const controlStore = makeInMemoryControlStore();
   const statusStore = makeInMemoryStatusStore({

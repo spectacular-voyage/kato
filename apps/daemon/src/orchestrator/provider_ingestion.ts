@@ -1317,6 +1317,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             const appendResult = await this.sessionStateStore.appendTwinEvents(
               stateMetadata,
               twinDrafts,
+              { touchUpdatedAt: false },
             );
             if (appendResult.droppedAsDuplicate > 0) {
               await this.operationalLogger.debug(
@@ -1449,6 +1450,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         const appendResult = await this.sessionStateStore.appendTwinEvents(
           stateMetadata,
           twinDrafts,
+          { touchUpdatedAt: true },
         );
         appendedTwinCount = appendResult.appended.length;
         appendedTwinEvents = appendResult.appended;

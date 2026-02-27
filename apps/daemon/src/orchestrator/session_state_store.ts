@@ -49,6 +49,14 @@ export interface PersistentSessionStateStoreOptions {
   recentFingerprintLimit?: number;
 }
 
+export interface SaveSessionMetadataOptions {
+  touchUpdatedAt?: boolean;
+}
+
+export interface AppendTwinEventsOptions {
+  touchUpdatedAt?: boolean;
+}
+
 interface TwinAppendResult {
   appended: SessionTwinEventV1[];
   droppedAsDuplicate: number;
@@ -331,10 +339,14 @@ export class PersistentSessionStateStore {
     return cloneSessionMetadata(created);
   }
 
-  async saveSessionMetadata(metadata: SessionMetadataV1): Promise<void> {
+  async saveSessionMetadata(
+    metadata: SessionMetadataV1,
+    options: SaveSessionMetadataOptions = {},
+  ): Promise<void> {
     const cloned = cloneSessionMetadata(metadata);
-    const nowIso = this.now().toISOString();
-    cloned.updatedAt = nowIso;
+    if (options.touchUpdatedAt) {
+      cloned.updatedAt = this.now().toISOString();
+    }
     const location = this.resolveLocation({
       provider: cloned.provider,
       providerSessionId: cloned.providerSessionId,
@@ -349,7 +361,7 @@ export class PersistentSessionStateStore {
       sessionShortId: makeSessionShortId(cloned.sessionId),
       metadataPath: location.metadataPath,
       twinPath: cloned.twinPath,
-      updatedAt: nowIso,
+      updatedAt: cloned.updatedAt,
     });
   }
 
@@ -378,6 +390,7 @@ export class PersistentSessionStateStore {
   async appendTwinEvents(
     metadata: SessionMetadataV1,
     events: SessionTwinEventV1[],
+    options: AppendTwinEventsOptions = {},
   ): Promise<TwinAppendResult> {
     if (events.length === 0) {
       return { appended: [], droppedAsDuplicate: 0 };
@@ -429,13 +442,17 @@ export class PersistentSessionStateStore {
       }
     }
 
-    if (current.recentFingerprints.length > this.recentFingerprintLimit) {
-      current.recentFingerprints = current.recentFingerprints.slice(
-        -this.recentFingerprintLimit,
-      );
+    if (appended.length > 0) {
+      if (current.recentFingerprints.length > this.recentFingerprintLimit) {
+        current.recentFingerprints = current.recentFingerprints.slice(
+          -this.recentFingerprintLimit,
+        );
+      }
+      current.nextTwinSeq = nextSeq;
+      await this.saveSessionMetadata(current, {
+        touchUpdatedAt: options.touchUpdatedAt,
+      });
     }
-    current.nextTwinSeq = nextSeq;
-    await this.saveSessionMetadata(current);
 
     return { appended, droppedAsDuplicate };
   }

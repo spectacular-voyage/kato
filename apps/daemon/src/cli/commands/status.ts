@@ -139,6 +139,8 @@ function normalizeSnapshotForStatusDisplay(
     ...session,
     stale: session.lastMessageAt
       ? isSessionStale(session.lastMessageAt, now)
+      : typeof session.stale === "boolean"
+      ? session.stale
       : session.updatedAt
       ? isSessionStale(session.updatedAt, now)
       : true,

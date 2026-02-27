@@ -37,6 +37,11 @@ created: 1771812869620
 
 - [ ] Add `kato config validate` command for preflight runtime config checks.
 - [ ] Improve startup error UX for config/schema failures with actionable remediation hints.
+- [ ] Add workspace command surface: `kato workspace register|list|unregister|discover`.
+- [ ] Add workspace pre-persist verification and runtime re-verification status
+      (`valid|invalid|unverified`) with explicit error reasons.
+- [ ] Add workspace-aware relative path resolution (session workspace identity)
+      so in-chat relative targets do not depend on daemon cwd.
 
 ## Config And Feature-Flag Evolution
 

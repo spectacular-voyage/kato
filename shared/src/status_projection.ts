@@ -143,12 +143,17 @@ function recencyKey(s: DaemonSessionStatus): number {
 }
 
 /**
- * Sort sessions by recency descending, then by provider+sessionId as tiebreaker.
+ * Sort sessions with active recordings first, then by recency descending,
+ * then by provider+sessionId as tiebreaker.
  */
 export function sortSessionsByRecency(
   sessions: DaemonSessionStatus[],
 ): DaemonSessionStatus[] {
   return [...sessions].sort((a, b) => {
+    const recordingDiff = Number(b.recording !== undefined) -
+      Number(a.recording !== undefined);
+    if (recordingDiff !== 0) return recordingDiff;
+
     const diff = recencyKey(b) - recencyKey(a);
     if (diff !== 0) return diff;
     return `${a.provider}/${a.sessionId}`.localeCompare(

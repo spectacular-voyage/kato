@@ -1804,3 +1804,24 @@ I found no obvious doc mismatch from a quick grep, but there is still a pending 
 # gpt-5.3-codex_2026-02-26_1441_47
 
 I confirmed `markdown_writer.ts` diff is intentional and required for participant accretion merges. I’ll do one last quick scan for stale “legacy migration” wording in docs/tests, then I’ll give a clean yes/no on merge readiness.
+
+<details>
+<summary>Thinking</summary>
+
+**Summarizing remaining tasks**
+
+</details>
+
+# gpt-5.3-codex_2026-02-26_1441_59
+
+Core task looks done.
+
+- Behavior is now aligned: canonical merge only, `conversationEventKinds` accumulates from observed events during active recording, and participant merge path is wired.
+- Focused tests pass: `tests/writer-markdown_test.ts` and `tests/recording-pipeline_test.ts` (31/31).
+
+Only remaining pre-merge checks I’d suggest:
+1. Run the broader suite (`deno task test` / your CI command) since I only ran focused tests.
+2. Decide whether to include the conversation-note churn (`dev-docs/notes/conv.*`) in this PR.
+3. Confirm you’re okay with no auto-migration: existing files that already contain legacy `tags`/`messageEventKinds` stay as-is.
+
+If you want, I can run the full suite now and give a final go/no-go.

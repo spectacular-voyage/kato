@@ -296,6 +296,18 @@ unavailable.
 - in-memory snapshot store: runtime projection/cache while daemon runs.
 - exported markdown: derived artifact, never the runtime source of truth.
 
+## Workspace Status (As Of 2026-02-26)
+
+- Workspace-specific config loading (`<workspace>/.kato/kato-config.yaml`) is
+  not implemented yet; runtime uses global config only (`~/.kato/kato-config.yaml`).
+- `kato workspace register/list/unregister/discover` command surface is planned
+  but not implemented.
+- Workspace-aware relative path resolution for in-chat commands is still
+  follow-up work; current runtime does not yet persist authoritative workspace
+  identity per session.
+- Tracking task:
+  - `dev-docs/notes/task.2026.2026-02-26-workspace-settings.md`
+
 ## Key Interaction Flows
 
 ### Ingestion to Status Flow
