@@ -308,3 +308,250 @@ I’ll quickly compare the task ticket checklist against what was implemented so
 Yes, the ticket’s implementation scope is done in code and docs, and validation is green (`deno task lint`, `deno task check`, `deno task test` all passed).
 
 Only thing not done inside the ticket itself is bookkeeping: I didn’t edit the task note to mark completion items/status. I can do that next if you want.
+
+# User_2026-02-27_0915_35
+
+Claude's feedback:
+
+2. Missing parser test: bare ::init
+command-detection_test.ts tests ::init /tmp/session.md but never tests bare ::init (no argument). The spec item "::init parses" is uncovered.
+
+3. Large gap in runtime test coverage
+The task's "Tests and Scenarios" section lists ~20 runtime scenarios. Many are not present in daemon-runtime_test.ts. Missing dedicated tests include:
+
+Spec scenario	Status
+::init /abs/a.md sets pointer + prepares file, active unchanged	Missing
+::init (bare) in S0 creates default dest file, sets pointer	Missing
+::init with existing pointer + existing file is content no-op	Missing
+::init in S2 deactivates old recording, transitions to S1	Missing
+Failed init leaves pointer unchanged	Missing
+Failed record leaves pointer unchanged	Missing
+::record in S1 starts active at pointer (dedicated test)	Missing
+::record in S2 is no-op (dedicated test)	Missing
+::stop in S2 preserves pointer	Missing
+::record after ::stop resumes pointer destination	Missing
+::capture no-arg captures to pointer (when set)	Missing
+Same destination reuses same recordingId (idempotent)	Missing
+Two different destinations → two distinct recordingIds	Missing
+::capture in S2 deactivates prior active, no orphan entries	Missing
+Frontmatter on new file includes stable recordingId	Missing
+::export leaves pointer + active unchanged	Missing
+Sequential one-message ::stop → ::init → ::record	Missing
+In-message ::record excludes pre-command lines	Missing
+In-message ::record includes ::record command line itself	Missing
+Relative arg rejection for init, capture, export	Missing
+4. Session-event path ::init skips file preparation
+applyControlCommandsForEvent (line 1270+, the non-persistent in-memory path) handles ::init by setting the pointer and calling stopRecording, but never calls prepareInitDestination. The persistent path correctly does file prep; this path doesn't. If this is intentional (different code path, different semantics), it should be documented. If not, it's a bug.
+
+5. validateDestinationPathForCommand called with "record" for ::init
+Both code paths pass "record" as the commandName when validating ::init destinations (daemon_runtime.ts:900, daemon_runtime.ts:1295). The function's type signature doesn't include "init". Functionally this probably works (same path policy gate), but it misrepresents the command in any logging or validation context that inspects commandName. Minor, but worth a note.
+
+**Planning feedback fixes and tests**
+
+# gpt-5.3-codex_2026-02-27_0916_19
+
+I agree with the feedback on items 4 and 5; I’m patching those first (so behavior is correct), then I’ll add the missing bare-`::init` parser assertion and expand runtime coverage where it’s still thin.
+
+**Planning patch sequence**
+
+**Locating state map initialization**
+
+**Preparing command initialization patch**
+
+**Cleaning up ID assignment and patching paths**
+
+**Verifying function signature consistency**
+
+**Reviewing prepare call argument**
+
+**Adding non-persistent capture variable**
+
+**Assessing state initialization and test permissions**
+
+**Testing regex matching with restricted runtime**
+
+**Fixing test paths for write access**
+
+# gpt-5.3-codex_2026-02-27_0917_35
+
+I found a real regression from fixing `::init` in the non-persistent path: one runtime test was still using `/tmp/...`, so init now fails under the constrained test permissions and falls back to default destination. I’m updating that test to use an absolute path under `.kato/` (allowed root), then I’ll address the coverage items.
+
+**Adding bare init parser test**
+
+**Planning extensive persistent scenario tests**
+
+**Designing persistent scenario helper**
+
+**Providing initial commentary update**
+
+# gpt-5.3-codex_2026-02-27_0920_09
+
+I’m going to verify the current state against Claude’s feedback by running the targeted tests and inspecting the touched files, then I’ll implement any remaining gaps and re-run the suite.
+
+**Running parallel status and search**
+
+**Preparing targeted test runs**
+
+# gpt-5.3-codex_2026-02-27_0920_15
+
+I confirmed the pending edits are still local and the new bare `::init` parser test is present. Next I’m running the command-detection and daemon runtime tests to identify remaining gaps before adding any new cases.
+
+**Planning selective Deno tests run**
+
+# gpt-5.3-codex_2026-02-27_0920_22
+
+The tests are still running; once they finish I’ll use failures (if any) to drive the missing runtime coverage additions from Claude’s checklist.
+
+**Reviewing missing tests and daemon runtime**
+
+# gpt-5.3-codex_2026-02-27_0920_28
+
+I found one runtime test that now needs `--allow-env` because it resolves the default destination from `HOME`; aside from that, current tests pass. I’m now mapping Claude’s scenario list against `daemon-runtime_test.ts` and adding the missing dedicated cases.
+
+**Listing Deno test names**
+
+**Reviewing in-chat command tests**
+
+**Inspecting daemon runtime code**
+
+**Inspecting code start lines**
+
+**Planning code inspection around initialization and validation**
+
+**Inspecting persistent apply logic**
+
+**Inspecting test harness helpers**
+
+**Planning test coverage review**
+
+# gpt-5.3-codex_2026-02-27_0920_59
+
+I’ve confirmed the implementation changes are in place for `::init` command-name typing and non-persistent `::init` file prep. Next I’m using the task ticket’s scenario list to add focused persistent-runtime tests for each missing state transition and failure invariant.
+
+**Planning test coverage expansion**
+
+**Reviewing existing parser tests**
+
+**Reviewing test and metadata structure**
+
+**Assessing existing persistence tests**
+
+**Planning test environment handling**
+
+**Planning thorough persistent scenario tests**
+
+**Identifying path validation helper**
+
+**Planning tests for link target handling**
+
+**Planning comprehensive persistent tests**
+**Detailing test scenarios and helpers**
+**Designing session metadata helpers and logging tests**
+
+**Adding test helpers and session metadata**
+
+**Drafting comprehensive tests and helpers**
+
+# gpt-5.3-codex_2026-02-27_0925_33
+
+I’m now adding a focused persistent-runtime test block that directly covers the missing `::init`/`::record`/`::capture`/`::stop`/`::export` state-machine and boundary scenarios Claude listed, including failure and idempotence cases.
+
+**Applying patch**
+
+**Planning formatting and tests**
+
+# gpt-5.3-codex_2026-02-27_0927_33
+
+I’ve added the missing persistent runtime scenario tests and shared helpers in `daemon-runtime_test.ts`. I’ll run the targeted test file now to catch any typing/behavior mismatches, then tighten any failing assertions.
+
+**Running targeted tests with permissions**
+
+**Implementing event content extraction helper**
+
+**Adding helper to extract event content**
+
+**Rerunning targeted tests**
+
+**Verifying code integrity with full checks**
+
+# gpt-5.3-codex_2026-02-27_0927_59
+
+The new scenario tests compile and pass (51 tests in the two targeted files). I’m running full `lint`, `check`, and `test` next to confirm the branch is clean end-to-end.
+
+**Deciding sequential lint/check/test**
+
+**Planning completion polling**
+
+**Running full tests**
+
+# gpt-5.3-codex_2026-02-27_0928_09
+
+`lint` and `check` are clean. I’m running the full test task now to verify everything passes together, including the expanded runtime scenarios.
+
+**Planning result polling**
+
+**Checking remaining tests**
+
+**Confirming test and lint pass, reviewing docs update need**
+
+# gpt-5.3-codex_2026-02-27_0928_29
+
+All quality gates passed (`deno task lint`, `deno task check`, `deno task test`). I’m doing a quick diff review now so I can confirm exactly what’s complete vs. what remains from Claude’s list.
+
+**Evaluating .kato cleanup risk**
+
+**Gathering line references for changes**
+
+**Correcting tool usage**
+
+**Correcting command execution approach**
+
+**Planning line number extraction**
+
+**Planning test coverage for nonpersistent init**
+
+**Adding file existence assertion to test**
+
+**Rerunning targeted daemon runtime tests**
+
+# gpt-5.3-codex_2026-02-27_0929_10
+
+I added one regression assertion in the existing non-persistent command test to ensure `::init` actually prepares the destination file. I’m re-running runtime tests to confirm it stays green.
+
+**Rerunning full task tests**
+
+**Considering polling to handle output limits**
+
+**Verifying lint pass after patch**
+
+**Checking changed file stats**
+
+**Reviewing relevant code diffs**
+
+**Reviewing recording pipeline changes**
+
+**Reviewing parser test changes**
+
+**Planning enhanced line referencing**
+
+**Planning code navigation aids**
+
+**Summarizing final response structure**
+
+# gpt-5.3-codex_2026-02-27_0930_25
+
+Yes. I addressed all 5 Claude feedback items.
+
+- `::init` command-name typing is fixed (`"init"` now supported end-to-end in validation types and call sites): [daemon_runtime.ts:547](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:547), [daemon_runtime.ts:898](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:898), [recording_pipeline.ts:80](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:80), [recording_pipeline.ts:142](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:142)
+- Non-persistent `::init` now performs destination preparation (including stable per-destination ID reuse map): [daemon_runtime.ts:122](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:122), [daemon_runtime.ts:1271](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1271), [daemon_runtime.ts:1308](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1308)
+- Added missing parser coverage for bare `::init`: [command-detection_test.ts:41](/home/djradon/hub/spectacular-voyage/kato/tests/command-detection_test.ts:41)
+- Added broad persistent runtime scenario coverage for the missing state-machine/failure/boundary cases Claude listed (init/record/capture/stop/export, idempotence, relative-path rejection, in-message boundaries): [daemon-runtime_test.ts:302](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:302) through [daemon-runtime_test.ts:1200](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:1200)
+- Added a regression assertion in non-persistent runtime flow that `::init` actually prepares the file: [daemon-runtime_test.ts:3004](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:3004)
+
+Validation:
+- `deno task lint` passed
+- `deno task check` passed
+- `deno task test` passed (`279 passed, 0 failed`)
+
+Suggestion for `dev.general-guidance.md` as follow-up:
+- Add a rule requiring a scenario-to-test mapping table for command/state-machine redesigns, with explicit persistent/non-persistent parity checks.

@@ -123,6 +123,7 @@ interface SessionEventProcessingState {
   seenEventSignatures: Set<string>;
   lastSeenFileModifiedAtMs?: number;
   primaryRecordingDestination?: string;
+  destinationRecordingIds: Map<string, string>;
 }
 
 interface ProcessInChatRecordingUpdatesOptions {
@@ -543,7 +544,7 @@ async function validateDestinationPathForCommand(
   provider: string,
   sessionId: string,
   destination: string,
-  commandName: "record" | "capture" | "export",
+  commandName: "init" | "record" | "capture" | "export",
 ): Promise<string> {
   if (!recordingPipeline.validateDestinationPath) {
     return destination;
@@ -897,7 +898,7 @@ async function applyPersistentControlCommandsForEvent(
           provider,
           providerSessionId,
           destination,
-          "record",
+          "init",
         );
         loggedTargetPath = resolvedDestination;
         const nowIso = now().toISOString();
@@ -1292,7 +1293,26 @@ async function applyControlCommandsForEvent(
           provider,
           sessionId,
           destination,
-          "record",
+          "init",
+        );
+        let recordingId = sessionEventState.destinationRecordingIds.get(
+          resolvedDestination,
+        );
+        if (!recordingId) {
+          recordingId = crypto.randomUUID();
+          sessionEventState.destinationRecordingIds.set(
+            resolvedDestination,
+            recordingId,
+          );
+        }
+        await prepareInitDestination(
+          resolvedDestination,
+          provider,
+          sessionId,
+          boundarySnapshot,
+          recordingId,
+          recordingPipeline,
+          now,
         );
         sessionEventState.primaryRecordingDestination = resolvedDestination;
         loggedTargetPath = resolvedDestination;
@@ -1355,20 +1375,30 @@ async function applyControlCommandsForEvent(
         );
         loggedTargetPath = resolvedDestination;
         const recordingId = crypto.randomUUID();
+        const existingRecordingId = sessionEventState.destinationRecordingIds.get(
+          resolvedDestination,
+        );
+        const recordingIdToUse = existingRecordingId ?? recordingId;
+        if (!existingRecordingId) {
+          sessionEventState.destinationRecordingIds.set(
+            resolvedDestination,
+            recordingIdToUse,
+          );
+        }
         await recordingPipeline.captureSnapshot({
           provider,
           sessionId,
           targetPath: resolvedDestination,
           events: boundarySnapshot,
           title: recordingTitle,
-          recordingIds: [recordingId],
+          recordingIds: [recordingIdToUse],
         });
         await recordingPipeline.activateRecording({
           provider,
           sessionId,
           targetPath: resolvedDestination,
           title: recordingTitle,
-          recordingId,
+          recordingId: recordingIdToUse,
         });
         sessionEventState.primaryRecordingDestination = resolvedDestination;
       } else if (command.name === "export") {
@@ -1507,6 +1537,7 @@ async function processInChatRecordingUpdates(
     const state = existingState ?? {
       seenEventSignatures: new Set<string>(),
       lastSeenFileModifiedAtMs: currentFileModifiedAtMs,
+      destinationRecordingIds: new Map<string, string>(),
     };
     if (!existingState) {
       for (let i = 0; i < snapshot.events.length; i += 1) {

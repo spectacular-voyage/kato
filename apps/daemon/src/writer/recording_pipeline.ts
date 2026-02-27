@@ -80,7 +80,7 @@ export interface ValidateDestinationPathInput {
   provider: string;
   sessionId: string;
   targetPath: string;
-  commandName?: "record" | "capture" | "export";
+  commandName?: "init" | "record" | "capture" | "export";
 }
 
 export interface AppendToActiveRecordingResult {
@@ -142,7 +142,7 @@ export interface RecordingPipelineOptions {
 }
 
 interface PathDecisionContext {
-  commandName: "record" | "capture" | "export";
+  commandName: "init" | "record" | "capture" | "export";
   provider: string;
   sessionId: string;
   targetPath: string;

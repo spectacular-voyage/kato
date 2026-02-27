@@ -38,6 +38,17 @@ Use \`::record notes/not-a-command.md\` in docs.
   assertEquals(result.commands[0]?.argument, "notes/real-command.md");
 });
 
+Deno.test("detectInChatControlCommands parses bare ::init", () => {
+  const result = detectInChatControlCommands(`
+::init
+`);
+
+  assertEquals(result.errors.length, 0);
+  assertEquals(result.commands.length, 1);
+  assertEquals(result.commands[0]?.name, "init");
+  assertEquals(result.commands[0]?.argument, undefined);
+});
+
 Deno.test("detectInChatControlCommands fails closed on invalid command lines", () => {
   const result = detectInChatControlCommands(`
 ::start
