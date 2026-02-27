@@ -1,13 +1,21 @@
 ---
 id: rename-startorrotatereco-019c9fea
-title: 'Rename `startOrRotateRecording` to `activateRecording`  Let…'
+title: Rename `startOrRotateRecording` to `activateRecording`  Let…
 desc: ''
-created: 1772209589095
 updated: 1772209589095
-participants: [user.djradon, codex.gpt-5.3-codex]
+created: 1772209589095
+participants:
+  - user.djradon
+  - codex.gpt-5.3-codex
 sessionId: 019c9fea-8228-70b0-8875-57eae15ecbba
-recordingIds: [8c00103f-4c44-493b-beac-ba56a754dac7]
-conversationEventKinds: [message.user, thinking, message.assistant, tool.call, tool.result]
+recordingIds:
+  - 8c00103f-4c44-493b-beac-ba56a754dac7
+conversationEventKinds:
+  - message.user
+  - thinking
+  - message.assistant
+  - tool.call
+  - tool.result
 ---
 
 # User_2026-02-27_0826_29
@@ -127,3 +135,29 @@ Do we need to clean our state (meta)?
 # gpt-5.3-codex_2026-02-27_0829_57
 
 I’ll verify whether this rename touched any persisted metadata schema or on-disk state keys, then check current `.kato` state files for rotate-era fields.
+
+**Inspecting shared session metadata schema**
+
+# gpt-5.3-codex_2026-02-27_0830_05
+
+I confirmed this rename did not obviously touch session metadata storage paths, but I’m doing one precise pass on the metadata schema/types to be certain no on-disk key changed.
+
+**Inspecting shared session contract**
+
+**Confirming no metadata cleanup needed**
+
+# gpt-5.3-codex_2026-02-27_0830_17
+
+Short answer is likely no, but I’m grabbing exact schema/log call locations so I can answer conclusively and note the only cases where cleanup is useful.
+
+**Confirming no metadata cleanup needed**
+
+# gpt-5.3-codex_2026-02-27_0830_31
+
+No, not for this rename.
+
+- Persisted session metadata schema and keys did not change (`schemaVersion` is still `1`, same `recordings` shape): [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts:3), [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts:31).
+- The change is API/log naming only (`activateRecording`, `recording.activate`): [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:93), [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts:276).
+
+Only practical step: restart any running daemon process so it picks up the new code.  
+Optional cleanup is just for hygiene (e.g. test artifacts under `.kato/test-*`), not correctness.
