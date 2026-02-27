@@ -189,28 +189,6 @@ Notes:
 - Older daemon builds may fail to start with newer config files containing
   additional flags.
 
-## Workspace Registration (Current Status)
-
-Workspace registration commands are not implemented yet.
-
-- `kato workspace register ...`
-- `kato workspace list`
-- `kato workspace unregister ...`
-- `kato workspace discover ...`
-
-Until that lands, use this manual workflow:
-
-1. Keep all active settings in global config: `~/.kato/kato-config.yaml`.
-2. Ensure your project root is included in `allowedWriteRoots`.
-3. Use absolute output paths for `::start` / `::capture` / `kato export` when
-   possible.
-4. Do not add a `workspaces` section yet; config validation is fail-closed and
-   unknown keys are rejected.
-
-Planned behavior and command surface are tracked in:
-
-- `dev-docs/notes/task.2026.2026-02-26-workspace-settings.md`
-
 ## Current MVP Status
 
 Working now:
@@ -232,8 +210,6 @@ Working now:
 Known limits:
 
 - `clean --recordings` is accepted but not implemented yet.
-- Workspace registration/discovery and workspace config loading are not
-  implemented yet (global config only).
 - SessionTwin logs are append-only and currently unbounded (no compaction or
   retention policy yet).
 - `globalAutoGenerateSnapshots=false` currently keeps command processing
