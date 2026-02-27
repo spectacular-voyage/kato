@@ -128,30 +128,29 @@ export function projectSessionStatus(opts: {
 /**
  * Key used for recency sorting.
  *
- * For active sessions, recording write recency is a useful "currently active"
- * signal, so prefer lastWriteAt > lastMessageAt > updatedAt.
- *
- * For stale sessions, sort by conversational recency (lastMessageAt) so old
- * sessions with recently touched recording files don't bubble to the top.
+ * Sort by incoming message recency first. Fallback to updatedAt when message
+ * timestamp is unavailable.
  */
 function recencyKey(s: DaemonSessionStatus): number {
-  const ts = s.stale
-    ? (s.lastMessageAt ?? s.updatedAt)
-    : (s.recording?.lastWriteAt ?? s.lastMessageAt ?? s.updatedAt);
+  const ts = s.lastMessageAt ?? s.updatedAt;
   const parsed = Date.parse(ts);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function hasActiveRecording(s: DaemonSessionStatus): boolean {
+  return !s.stale && s.recording !== undefined;
+}
+
 /**
- * Sort sessions with active recordings first, then by recency descending,
- * then by provider+sessionId as tiebreaker.
+ * Sort sessions with active recordings first, then by incoming-message
+ * recency descending, then by provider+sessionId as tiebreaker.
  */
 export function sortSessionsByRecency(
   sessions: DaemonSessionStatus[],
 ): DaemonSessionStatus[] {
   return [...sessions].sort((a, b) => {
-    const recordingDiff = Number(b.recording !== undefined) -
-      Number(a.recording !== undefined);
+    const recordingDiff = Number(hasActiveRecording(b)) -
+      Number(hasActiveRecording(a));
     if (recordingDiff !== 0) return recordingDiff;
 
     const diff = recencyKey(b) - recencyKey(a);

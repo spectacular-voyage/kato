@@ -247,12 +247,14 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
       sessionId: "older",
       stale: false,
       updatedAt: "2026-02-24T09:00:00.000Z",
+      lastMessageAt: "2026-02-24T09:00:00.000Z",
     },
     {
       provider: "claude",
       sessionId: "newer",
       stale: false,
       updatedAt: "2026-02-24T10:00:00.000Z",
+      lastMessageAt: "2026-02-24T10:00:00.000Z",
     },
   ];
   const result = filterSessionsForDisplay(sessions, {
@@ -264,28 +266,36 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
 
 // ─── sortSessionsByRecency ────────────────────────────────────────────────────
 
-Deno.test("sortSessionsByRecency uses lastWriteAt over updatedAt", () => {
+Deno.test("sortSessionsByRecency for active recordings uses lastMessageAt over lastWriteAt", () => {
   const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
-      sessionId: "no-rec",
+      sessionId: "older-message",
       stale: false,
-      updatedAt: "2026-02-24T11:00:00.000Z",
+      updatedAt: "2026-02-24T10:00:00.000Z",
+      lastMessageAt: "2026-02-24T10:00:00.000Z",
+      recording: {
+        outputPath: "/out-older.md",
+        startedAt: "2026-02-24T09:00:00.000Z",
+        // Intentionally newer than newer-message session. Should be ignored.
+        lastWriteAt: "2026-02-24T12:00:00.000Z",
+      },
     },
     {
       provider: "claude",
-      sessionId: "with-rec",
+      sessionId: "newer-message",
       stale: false,
-      updatedAt: "2026-02-24T09:00:00.000Z",
+      updatedAt: "2026-02-24T11:00:00.000Z",
+      lastMessageAt: "2026-02-24T11:00:00.000Z",
       recording: {
-        outputPath: "/out.md",
-        startedAt: "2026-02-24T09:00:00.000Z",
-        lastWriteAt: "2026-02-24T12:00:00.000Z",
+        outputPath: "/out-newer.md",
+        startedAt: "2026-02-24T10:00:00.000Z",
+        lastWriteAt: "2026-02-24T11:00:00.000Z",
       },
     },
   ];
   const result = sortSessionsByRecency(sessions);
-  assertEquals(result[0].sessionId, "with-rec");
+  assertEquals(result[0].sessionId, "newer-message");
 });
 
 Deno.test(
@@ -351,5 +361,41 @@ Deno.test(
     const result = sortSessionsByRecency(sessions);
     assertEquals(result[0].sessionId, "recording-older");
     assertEquals(result[1].sessionId, "no-recording-newer");
+  },
+);
+
+Deno.test(
+  "sortSessionsByRecency only prioritizes active recordings (stale recordings are not in top bucket)",
+  () => {
+    const sessions: DaemonSessionStatus[] = [
+      {
+        provider: "claude",
+        sessionId: "active-recording",
+        stale: false,
+        updatedAt: "2026-02-24T09:00:00.000Z",
+        lastMessageAt: "2026-02-24T09:00:00.000Z",
+        recording: {
+          outputPath: "/active.md",
+          startedAt: "2026-02-24T08:00:00.000Z",
+          lastWriteAt: "2026-02-24T09:00:00.000Z",
+        },
+      },
+      {
+        provider: "claude",
+        sessionId: "stale-recording",
+        stale: true,
+        updatedAt: "2026-02-24T11:00:00.000Z",
+        lastMessageAt: "2026-02-24T11:00:00.000Z",
+        recording: {
+          outputPath: "/stale.md",
+          startedAt: "2026-02-24T08:30:00.000Z",
+          lastWriteAt: "2026-02-24T11:30:00.000Z",
+        },
+      },
+    ];
+
+    const result = sortSessionsByRecency(sessions);
+    assertEquals(result[0].sessionId, "active-recording");
+    assertEquals(result[1].sessionId, "stale-recording");
   },
 );
