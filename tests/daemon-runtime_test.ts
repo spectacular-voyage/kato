@@ -2954,6 +2954,8 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
   );
   const oldPath = join(inChatCommandDir, "old.md");
   const newPath = join(inChatCommandDir, "new.md");
+  await removeDirIfPresent(inChatCommandDir);
+  await Deno.mkdir(inChatCommandDir, { recursive: true });
 
   let pollCount = 0;
   const ingestionRunner: ProviderIngestionRunner = {
@@ -3067,15 +3069,18 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
   };
 
   const activatedTargets: string[] = [];
+  const activatedRecordingIds: string[] = [];
   const appendedMessageIds: string[] = [];
   let activeRecording = false;
   const recordingPipeline: RecordingPipelineLike = {
     activateRecording(input) {
       activeRecording = true;
       activatedTargets.push(input.targetPath);
+      const recordingId = input.recordingId ?? "rec-1";
+      activatedRecordingIds.push(recordingId);
       const nowIso = "2026-02-22T10:00:01.000Z";
       return Promise.resolve({
-        recordingId: "rec-1",
+        recordingId,
         provider: input.provider,
         sessionId: input.sessionId,
         outputPath: input.targetPath,
@@ -3136,9 +3141,13 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
   });
 
   assertEquals(activatedTargets, [newPath]);
+  assertEquals(activatedRecordingIds.length, 1);
+  assert(activatedRecordingIds[0].length > 0);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
   const newDestinationStat = await Deno.stat(newPath);
   assert(newDestinationStat.isFile);
+  const newDestinationContent = await Deno.readTextFile(newPath);
+  assert(newDestinationContent.includes(activatedRecordingIds[0]));
 });
 
 Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recording on same path", async () => {

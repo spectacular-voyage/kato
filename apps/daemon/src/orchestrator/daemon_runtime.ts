@@ -1368,7 +1368,21 @@ async function applyControlCommandsForEvent(
           provider,
           sessionId,
         );
-        if (active && active.outputPath === resolvedDestination) {
+        const activeOnResolvedDestination = active &&
+          active.outputPath === resolvedDestination;
+        const existingRecordingId = sessionEventState.destinationRecordingIds.get(
+          resolvedDestination,
+        );
+        const recordingIdToUse = existingRecordingId ??
+          (activeOnResolvedDestination ? active.recordingId : undefined) ??
+          crypto.randomUUID();
+        if (!existingRecordingId) {
+          sessionEventState.destinationRecordingIds.set(
+            resolvedDestination,
+            recordingIdToUse,
+          );
+        }
+        if (activeOnResolvedDestination) {
           commandNoop = true;
         } else {
           const seedEvents = buildCommandSeedEvents(
@@ -1382,6 +1396,7 @@ async function applyControlCommandsForEvent(
             targetPath: resolvedDestination,
             seedEvents,
             title: recordingTitle,
+            recordingId: recordingIdToUse,
           });
         }
         sessionEventState.primaryRecordingDestination = resolvedDestination;

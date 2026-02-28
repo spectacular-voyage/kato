@@ -743,3 +743,102 @@ So the clean status split is:
 I’d mark the redesign task complete, with one brief note in it:
 - relative explicit path support is intentionally deferred to the per-workspace daemon task
 - `primaryRecordingDestination` remains the session pointer; `defaultOutputPath` will be a config default, not a rename of that field
+
+# User_2026-02-27_2154_41
+
+coderabbit feedback:
+
+In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
+- Around line 1321-1347: The ::record branch activates a recording without
+reusing an existing recordingId, which can rotate IDs for the same destination
+and break stability; look up sessionEventState.destinationRecordingIds for the
+resolved destination (the same key used by ::init/::capture), and when calling
+recordingPipeline.activateRecording pass the existing recordingId (or preserve
+it in the activateRecording payload) instead of always creating a new one;
+update the activation call in the block using resolvedDestination,
+recordingPipeline.getActiveRecording, and recordingPipeline.activateRecording to
+include/reuse the recordingId from
+sessionEventState.destinationRecordingIds[resolvedDestination] when present.
+
+**Planning code inspection and fix**
+
+# gpt-5.3-codex_2026-02-27_2154_48
+
+I’m checking that `::record` path in the non-persistent runtime branch against the current code, then I’ll patch it and add a regression test if the feedback is valid.
+
+**Exploring record branch code**
+
+**Planning stable recording ID reuse**
+**Designing stable recording ID handling**
+**Augmenting existing test for ID reuse**
+**Implementing robust recordingId handling and test adjustments**
+
+# gpt-5.3-codex_2026-02-27_2155_31
+
+I confirmed the feedback is valid: the non-persistent `::record` branch was not passing a stable `recordingId`. I’m patching that branch now and tightening the existing non-persistent `::init + ::record` test so it proves the activated ID matches the init-prepared file.
+
+**Adding activated recording ID tracking**
+
+**Running targeted tests**
+
+# gpt-5.3-codex_2026-02-27_2155_53
+
+I patched the runtime branch and added a regression assertion in the existing non-persistent `::init + ::record` test to prove the activated `recordingId` matches the init-prepared file. I’m running the targeted tests now.
+
+**Running full lint and tests**
+
+# gpt-5.3-codex_2026-02-27_2156_06
+
+The targeted regression passes. I’m running the full quality gates now because this touches core runtime behavior.
+
+# gpt-5.3-codex_2026-02-27_2156_09
+
+`lint` is done; `check` and the full test suite are still running. Once they complete I’ll give you the exact change summary and whether this feedback item is fully cleared.
+
+**Fixing test file cleanup to ensure fresh state**
+
+# gpt-5.3-codex_2026-02-27_2156_22
+
+The full suite exposed a test hygiene issue, not a logic regression: that non-persistent test reuses a fixed `.kato/test-tmp/.../new.md` path, so stale files can make the new frontmatter assertion nondeterministic. I’m making that test clean its temp directory before it runs.
+
+**Adding async directory cleanup**
+
+**Rerunning full tests and checks**
+
+# gpt-5.3-codex_2026-02-27_2156_37
+
+I fixed the flaky temp-file reuse in the regression test. `check` and the full test suite are running again; once they finish, this feedback item should be closed cleanly.
+
+**Planning detailed git diff inspection**
+
+**Extending code view for ID trace**
+
+**Summarizing fix and validation**
+
+# gpt-5.3-codex_2026-02-27_2157_05
+
+The feedback was valid, and it’s fixed.
+
+What changed:
+- The non-persistent `::record` branch now reuses the stable per-destination `recordingId` from `sessionEventState.destinationRecordingIds`, falls back to the active recording’s ID on same-target no-op, and only generates a new ID if neither exists.
+- That reused ID is now passed into `recordingPipeline.activateRecording(...)`.
+
+Code:
+- Reuse/seed stable ID: [daemon_runtime.ts:1371](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1371)
+- Pass reused ID into activation: [daemon_runtime.ts:1393](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1393)
+
+Regression coverage:
+- Tightened the existing non-persistent `::init + ::record` test so it now verifies the activated `recordingId` is non-empty and matches the ID written into the init-prepared file’s frontmatter.
+- Also made that test clear its temp directory first so it can’t be polluted by stale files from prior runs.
+
+Test updates:
+- Temp-dir cleanup: [daemon-runtime_test.ts:2957](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:2957)
+- Capture activation `recordingId`: [daemon-runtime_test.ts:3071](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:3071)
+- Assert file contains the same ID: [daemon-runtime_test.ts:3143](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:3143)
+
+Validation:
+- `deno task lint` passed
+- `deno task check` passed
+- `deno task test` passed (`279 passed, 0 failed`)
+
+So this CodeRabbit item is cleared.
