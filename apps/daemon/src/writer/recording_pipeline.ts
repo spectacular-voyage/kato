@@ -481,7 +481,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return {
       includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
       includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
-      includeConversationEventKinds: this.includeConversationEventKindsInFrontmatter,
+      includeConversationEventKinds:
+        this.includeConversationEventKindsInFrontmatter,
       participantUsername: this.frontmatterParticipantUsername,
     };
   }

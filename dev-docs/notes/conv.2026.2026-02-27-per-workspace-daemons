@@ -1,0 +1,65 @@
+---
+id: per-workspace-daemon-ins-019ca269
+title: 'Per-workspace daemon instances  I figured out a solution fo…'
+desc: ''
+created: 1772257800960
+updated: 1772257800960
+participants: [user.djradon, codex.gpt-5.3-codex]
+sessionId: 019ca269-7f1d-7861-a0f4-f886e3bae577
+recordingIds: [f6674fb1-6a40-49e7-804a-1f6679d228e7]
+conversationEventKinds: [message.user, message.assistant, thinking, tool.call, tool.result]
+---
+
+# User_2026-02-27_2150_00
+
+template filename can be kato-config.template.yaml
+
+Yes, if no argument is provided for export, the same filename generator and defaultOutputPath should be used.
+
+One more feature idea: if the output argument is just a directory path, use that instead of defaultOutputPath, but still use the filename generator.
+
+**Preparing concise note patch**
+
+# gpt-5.3-codex_2026-02-27_2150_05
+
+I’m folding those decisions into the task note now: lock the template filename, apply the same generated-path behavior to pathless `export`, and add the “directory argument means generate filename in that directory” rule.
+
+# gpt-5.3-codex_2026-02-27_2150_08
+
+I’m patching the existing sections directly so the note stays internally consistent rather than appending extra bullets.
+
+**Checking list numbering consistency**
+
+# gpt-5.3-codex_2026-02-27_2150_38
+
+I’m checking the note once to catch any awkward wording or numbering drift from the patch.
+
+**Clarifying directory output behavior**
+**Refining export command behavior**
+
+# gpt-5.3-codex_2026-02-27_2150_54
+
+There’s one small cleanup: the goal list has a duplicated `4`, and I’m also tightening the directory-argument rule so it explicitly covers CLI `kato export --output <dir>` rather than leaving that as an open question.
+
+# gpt-5.3-codex_2026-02-27_2151_03
+
+I’ve cleaned that up. I’m doing a quick readback of the edited sections to confirm the list and the CLI export rule are now aligned.
+
+**Noting timestamp update nuance**
+
+# gpt-5.3-codex_2026-02-27_2151_12
+
+I updated [task.2026.2026-02-27-per-workspace-daemons.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-per-workspace-daemons.md) with those decisions.
+
+It now explicitly locks:
+- the template path as `~/.kato/kato-config.template.yaml`
+- pathless `export` using the same `filenameTemplate` + `defaultOutputPath` generator
+- directory-path arguments as “override the base directory, still generate the filename”
+- the same directory rule for CLI `kato export <id> --output <dir>`
+
+I also removed the now-obsolete open question about CLI export directory behavior and cleaned up the numbering in the goal list.
+
+No tests were run since this was a doc-only edit.
+
+1. If you want, I can make one more pass on the note to lock the non-existent-directory rule (for example: existing dir only vs trailing slash also counts as dir).
+2. If you want to start implementation, the next sensible step is updating the config contract and runtime config loader.

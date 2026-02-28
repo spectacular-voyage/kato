@@ -16,8 +16,8 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
-  type InChatControlCommand,
   detectInChatControlCommands,
+  type InChatControlCommand,
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../policy/mod.ts";
@@ -229,7 +229,8 @@ function resolveExplicitAbsolutePathArgument(
   }
   if (normalized.startsWith("@")) {
     return {
-      reason: "Path argument must be an absolute filesystem path (mentions are not allowed)",
+      reason:
+        "Path argument must be an absolute filesystem path (mentions are not allowed)",
     };
   }
   if (!isAbsolute(normalized)) {
@@ -505,7 +506,11 @@ function buildBoundarySnapshotEvents(
   if (slice.length === 0) {
     return [];
   }
-  const boundaryContent = sliceContentByLineRange(event.content, 1, boundaryLine);
+  const boundaryContent = sliceContentByLineRange(
+    event.content,
+    1,
+    boundaryLine,
+  );
   slice[slice.length - 1] = withUserEventContent(event, boundaryContent);
   return slice;
 }
@@ -560,7 +565,8 @@ async function validateDestinationPathForCommand(
 function resolveFrontmatterSettings(
   recordingPipeline: RecordingPipelineLike,
 ): InitFrontmatterSettings {
-  const provider = recordingPipeline as RecordingPipelineFrontmatterSettingsProvider;
+  const provider =
+    recordingPipeline as RecordingPipelineFrontmatterSettingsProvider;
   if (provider.getMarkdownFrontmatterSettings) {
     return provider.getMarkdownFrontmatterSettings();
   }
@@ -649,9 +655,10 @@ async function prepareInitDestination(
     boundaryEvents,
     frontmatterSettings.participantUsername,
   );
-  const conversationEventKinds = frontmatterSettings.includeConversationEventKinds
-    ? buildFrontmatterConversationKinds(boundaryEvents)
-    : undefined;
+  const conversationEventKinds =
+    frontmatterSettings.includeConversationEventKinds
+      ? buildFrontmatterConversationKinds(boundaryEvents)
+      : undefined;
   const frontmatter = renderFrontmatter({
     title,
     now: now(),
@@ -892,7 +899,12 @@ async function applyPersistentControlCommandsForEvent(
           continue;
         }
         const destination = explicit?.path ??
-          resolvePrimaryDestination(metadata, provider, metadata.sessionId, now);
+          resolvePrimaryDestination(
+            metadata,
+            provider,
+            metadata.sessionId,
+            now,
+          );
         const resolvedDestination = await validateDestinationPathForCommand(
           recordingPipeline,
           provider,
@@ -902,7 +914,10 @@ async function applyPersistentControlCommandsForEvent(
         );
         loggedTargetPath = resolvedDestination;
         const nowIso = now().toISOString();
-        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const existing = findRecordingByDestination(
+          metadata,
+          resolvedDestination,
+        );
         const pending = existing ?? createDestinationRecording(
           resolvedDestination,
           writeCursor,
@@ -924,7 +939,11 @@ async function applyPersistentControlCommandsForEvent(
           recordingPipeline,
           now,
         );
-        const deactivated = deactivateActiveRecordings(metadata, writeCursor, nowIso);
+        const deactivated = deactivateActiveRecordings(
+          metadata,
+          writeCursor,
+          nowIso,
+        );
         const previousPointer = normalizePrimaryDestination(metadata);
         if (!existing) {
           metadata.recordings.push(pending);
@@ -954,7 +973,10 @@ async function applyPersistentControlCommandsForEvent(
           "record",
         );
         loggedTargetPath = resolvedDestination;
-        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const existing = findRecordingByDestination(
+          metadata,
+          resolvedDestination,
+        );
         const active = activeSessionRecordings(metadata);
         const activeOnResolvedDestination = active.some((entry) =>
           entry.destination === resolvedDestination
@@ -1028,7 +1050,12 @@ async function applyPersistentControlCommandsForEvent(
           continue;
         }
         const destination = explicit?.path ??
-          resolvePrimaryDestination(metadata, provider, metadata.sessionId, now);
+          resolvePrimaryDestination(
+            metadata,
+            provider,
+            metadata.sessionId,
+            now,
+          );
         const resolvedDestination = await validateDestinationPathForCommand(
           recordingPipeline,
           provider,
@@ -1038,7 +1065,10 @@ async function applyPersistentControlCommandsForEvent(
         );
         loggedTargetPath = resolvedDestination;
         const nowIso = now().toISOString();
-        const existing = findRecordingByDestination(metadata, resolvedDestination);
+        const existing = findRecordingByDestination(
+          metadata,
+          resolvedDestination,
+        );
         const pending = existing ?? createDestinationRecording(
           resolvedDestination,
           writeCursor,
@@ -1253,7 +1283,10 @@ async function applyControlCommandsForEvent(
     return;
   }
 
-  const boundaries = resolveCommandBoundaries(event.content, detection.commands);
+  const boundaries = resolveCommandBoundaries(
+    event.content,
+    detection.commands,
+  );
 
   for (const boundary of boundaries) {
     const { command } = boundary;
@@ -1263,7 +1296,10 @@ async function applyControlCommandsForEvent(
       event,
       command.line,
     );
-    const recordingTitle = resolveConversationTitle(boundarySnapshot, sessionId);
+    const recordingTitle = resolveConversationTitle(
+      boundarySnapshot,
+      sessionId,
+    );
     let loggedTargetPath: string | undefined;
     let commandNoop = false;
 
@@ -1328,7 +1364,10 @@ async function applyControlCommandsForEvent(
           "record",
         );
         loggedTargetPath = resolvedDestination;
-        const active = recordingPipeline.getActiveRecording(provider, sessionId);
+        const active = recordingPipeline.getActiveRecording(
+          provider,
+          sessionId,
+        );
         if (active && active.outputPath === resolvedDestination) {
           commandNoop = true;
         } else {
@@ -1375,9 +1414,10 @@ async function applyControlCommandsForEvent(
         );
         loggedTargetPath = resolvedDestination;
         const recordingId = crypto.randomUUID();
-        const existingRecordingId = sessionEventState.destinationRecordingIds.get(
-          resolvedDestination,
-        );
+        const existingRecordingId = sessionEventState.destinationRecordingIds
+          .get(
+            resolvedDestination,
+          );
         const recordingIdToUse = existingRecordingId ?? recordingId;
         if (!existingRecordingId) {
           sessionEventState.destinationRecordingIds.set(

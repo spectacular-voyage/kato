@@ -61,7 +61,9 @@ async function runPersistentInChatScenario(
 ): Promise<{
   stateDir: string;
   currentStatus: DaemonStatusSnapshot;
-  metadataList: Awaited<ReturnType<PersistentSessionStateStore["listSessionMetadata"]>>;
+  metadataList: Awaited<
+    ReturnType<PersistentSessionStateStore["listSessionMetadata"]>
+  >;
 }> {
   await Deno.mkdir(".kato/test-tmp", { recursive: true });
   const stateDir = await Deno.makeTempDir({
@@ -157,7 +159,9 @@ async function runPersistentInChatScenario(
       throw new Error("enqueue should not be called");
     },
     markProcessed(requestId: string) {
-      const idx = requests.findIndex((request) => request.requestId === requestId);
+      const idx = requests.findIndex((request) =>
+        request.requestId === requestId
+      );
       if (idx >= 0) {
         requests.splice(0, idx + 1);
       }
@@ -294,19 +298,25 @@ async function prepopulateScenarioSessionMetadata(
 }
 
 function findScenarioMetadata(metadataList: ScenarioMetadataList) {
-  const session = metadataList.find((entry) => entry.providerSessionId === "session-1");
+  const session = metadataList.find((entry) =>
+    entry.providerSessionId === "session-1"
+  );
   assertExists(session);
   return session;
 }
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with explicit path sets pointer and prepares file", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-explicit-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-explicit-",
+  );
   let stateDir: string | undefined;
 
   try {
     const destination = join(scenarioDir, "init-explicit.md");
     const result = await runPersistentInChatScenario({
-      events: [makeEvent("u-init-explicit", "message.user", `::init ${destination}`)],
+      events: [
+        makeEvent("u-init-explicit", "message.user", `::init ${destination}`),
+      ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
     });
     stateDir = result.stateDir;
@@ -331,7 +341,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with explicit path set
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat bare ::init in S0 sets pointer and prepares destination", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-bare-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-bare-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -366,7 +378,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat bare ::init in S0 sets pointe
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with existing pointer and file leaves content unchanged", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-noop-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-noop-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -378,16 +392,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with existing pointer 
       events: [makeEvent("u-init-noop", "message.user", "::init")],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-existing",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-existing",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -414,19 +431,27 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::init in S2 deactivates old 
     const newDestination = join(scenarioDir, "new.md");
 
     const result = await runPersistentInChatScenario({
-      events: [makeEvent("u-init-s2", "message.user", `::init ${newDestination}`)],
+      events: [
+        makeEvent("u-init-s2", "message.user", `::init ${newDestination}`),
+      ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = oldDestination;
-          metadata.recordings = [{
-            recordingId: "rec-old",
-            destination: oldDestination,
-            desiredState: "on",
-            writeCursor: 0,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 0,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -457,7 +482,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::init in S2 deactivates old 
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::init leaves pointer unchanged", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-fail-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-fail-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -466,7 +493,11 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::init leaves pointer 
 
     const result = await runPersistentInChatScenario({
       events: [
-        makeEvent("u-init-fail", "message.user", `::init ${rejectedDestination}`),
+        makeEvent(
+          "u-init-fail",
+          "message.user",
+          `::init ${rejectedDestination}`,
+        ),
       ],
       recordingPipeline: makePersistentInChatRecordingPipeline({
         validateDestinationPath() {
@@ -474,16 +505,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::init leaves pointer 
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = oldDestination;
-          metadata.recordings = [{
-            recordingId: "rec-old",
-            destination: oldDestination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -503,7 +537,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::init leaves pointer 
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::record leaves pointer unchanged", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-record-fail-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-fail-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -518,16 +554,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::record leaves pointe
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-pointer",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -544,7 +583,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::record leaves pointe
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S1 starts active at pointer", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-record-s1-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-s1-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -553,16 +594,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S1 starts active 
       events: [makeEvent("u-record-s1", "message.user", "::record")],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-pointer",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -583,7 +627,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S1 starts active 
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S2 is a no-op", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-record-s2-noop-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-s2-noop-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -603,16 +649,22 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S2 is a no-op", a
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-active",
-            destination,
-            desiredState: "on",
-            writeCursor: 1,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -639,16 +691,22 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::stop in S2 preserves pointe
       events: [makeEvent("u-stop-s2", "message.user", "::stop")],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-active",
-            destination,
-            desiredState: "on",
-            writeCursor: 1,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -665,7 +723,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::stop in S2 preserves pointe
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::record after ::stop resumes pointer destination", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-stop-record-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-stop-record-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -677,16 +737,22 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record after ::stop resumes
       ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-resume",
-            destination,
-            desiredState: "on",
-            writeCursor: 0,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-resume",
+              destination,
+              desiredState: "on",
+              writeCursor: 0,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -707,7 +773,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record after ::stop resumes
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture without argument captures to pointer", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-capture-no-arg-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-capture-no-arg-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -733,16 +801,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture without argument ca
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-pointer",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -762,7 +833,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture without argument ca
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat same destination reuses one recordingId", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-idempotent-id-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-idempotent-id-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -805,7 +878,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat same destination reuses one r
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat distinct destinations allocate distinct recordingIds", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-distinct-ids-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-distinct-ids-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -837,26 +912,40 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat distinct destinations allocat
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture in S2 deactivates prior active destination", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-capture-switch-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-capture-switch-",
+  );
   let stateDir: string | undefined;
 
   try {
     const oldDestination = join(scenarioDir, "old.md");
     const newDestination = join(scenarioDir, "new.md");
     const result = await runPersistentInChatScenario({
-      events: [makeEvent("u-capture-switch", "message.user", `::capture ${newDestination}`)],
+      events: [
+        makeEvent(
+          "u-capture-switch",
+          "message.user",
+          `::capture ${newDestination}`,
+        ),
+      ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = oldDestination;
-          metadata.recordings = [{
-            recordingId: "rec-old",
-            destination: oldDestination,
-            desiredState: "on",
-            writeCursor: 1,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -883,13 +972,21 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture in S2 deactivates p
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::init frontmatter includes stable recordingId", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-frontmatter-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-frontmatter-",
+  );
   let stateDir: string | undefined;
 
   try {
     const destination = join(scenarioDir, "frontmatter.md");
     const result = await runPersistentInChatScenario({
-      events: [makeEvent("u-init-frontmatter", "message.user", `::init ${destination}`)],
+      events: [
+        makeEvent(
+          "u-init-frontmatter",
+          "message.user",
+          `::init ${destination}`,
+        ),
+      ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
     });
     stateDir = result.stateDir;
@@ -909,7 +1006,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::init frontmatter includes s
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::export leaves pointer and active state unchanged", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-export-invariant-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-export-invariant-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -917,7 +1016,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::export leaves pointer and a
     const exportTarget = join(scenarioDir, "export.md");
     const exportTargets: string[] = [];
     const result = await runPersistentInChatScenario({
-      events: [makeEvent("u-export", "message.user", `::export ${exportTarget}`)],
+      events: [
+        makeEvent("u-export", "message.user", `::export ${exportTarget}`),
+      ],
       recordingPipeline: makePersistentInChatRecordingPipeline({
         exportSnapshot(input) {
           exportTargets.push(input.targetPath);
@@ -934,16 +1035,22 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::export leaves pointer and a
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-active",
-            destination,
-            desiredState: "on",
-            writeCursor: 1,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -960,7 +1067,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::export leaves pointer and a
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat executes one-message ::stop then ::init then ::record in order", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-sequential-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-sequential-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -976,16 +1085,22 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat executes one-message ::stop t
       ],
       recordingPipeline: makePersistentInChatRecordingPipeline(),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = oldDestination;
-          metadata.recordings = [{
-            recordingId: "rec-old",
-            destination: oldDestination,
-            desiredState: "on",
-            writeCursor: 1,
-            periods: [{ startedCursor: 0, startedAt: "2026-02-22T09:59:00.000Z" }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -1009,7 +1124,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat executes one-message ::stop t
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed excludes lines before command boundary", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-record-boundary-exclude-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-boundary-exclude-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -1039,16 +1156,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed excludes lines 
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-boundary",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-boundary",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -1062,7 +1182,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed excludes lines 
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed includes the ::record command line", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-record-boundary-include-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-boundary-include-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -1092,16 +1214,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed includes the ::
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-boundary",
-            destination,
-            desiredState: "off",
-            writeCursor: 0,
-            periods: [],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-boundary",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
       },
     });
     stateDir = result.stateDir;
@@ -1115,7 +1240,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed includes the ::
 });
 
 Deno.test("runDaemonRuntimeLoop persistent in-chat rejects relative arguments for ::init, ::capture, and ::export", async () => {
-  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-relative-args-");
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-relative-args-",
+  );
   let stateDir: string | undefined;
 
   try {
@@ -1138,7 +1265,11 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat rejects relative arguments fo
     let exportCalls = 0;
     const result = await runPersistentInChatScenario({
       events: [
-        makeEvent("u-rel-init", "message.user", "::init notes/relative-init.md"),
+        makeEvent(
+          "u-rel-init",
+          "message.user",
+          "::init notes/relative-init.md",
+        ),
         makeEvent(
           "u-rel-capture",
           "message.user",
@@ -1161,16 +1292,19 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat rejects relative arguments fo
         },
       }),
       prepopulate: async (sessionStateStore) => {
-        await prepopulateScenarioSessionMetadata(sessionStateStore, (metadata) => {
-          metadata.primaryRecordingDestination = destination;
-          metadata.recordings = [{
-            recordingId: "rec-active",
-            destination,
-            desiredState: "on",
-            writeCursor: 3,
-            periods: [{ startedCursor: 0 }],
-          }];
-        });
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 3,
+              periods: [{ startedCursor: 0 }],
+            }];
+          },
+        );
       },
       operationalLogger,
       auditLogger,
@@ -1186,7 +1320,9 @@ Deno.test("runDaemonRuntimeLoop persistent in-chat rejects relative arguments fo
     );
     assertEquals(invalidTargetLogs.length, 3);
     const invalidCommands = new Set(
-      invalidTargetLogs.map((record) => String(record.attributes?.command ?? "")),
+      invalidTargetLogs.map((record) =>
+        String(record.attributes?.command ?? "")
+      ),
     );
     assert(invalidCommands.has("init"));
     assert(invalidCommands.has("capture"));
