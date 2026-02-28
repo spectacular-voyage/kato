@@ -1,9 +1,9 @@
 ---
-id: per-workspace-daemon-ins-019ca269
+id: per-workspace-daemon-ins-019ca268
 title: 'Per-workspace daemon instances  I figured out a solution fo…'
 desc: ''
 created: 1772260187547
-updated: 1772260187547
+updated: 1772300630472
 participants: [user.djradon, codex.gpt-5.3-codex]
 sessionId: 019ca269-7f1d-7861-a0f4-f886e3bae577
 recordingIds: [97f2f2f6-4a04-41ce-8aee-8c8ff3d4f6bd]

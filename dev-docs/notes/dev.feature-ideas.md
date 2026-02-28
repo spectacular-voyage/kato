@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772140846496
+updated: 1772301830137
 created: 1771724652182
 ---
 
@@ -21,3 +21,7 @@ created: 1771724652182
 - support flag in in-chat comments, e.g. to start including thinking or tool use
 - folder-based session-state and twin files (maybe just by year? or probably year-month)
 - instead of "User_unknown-time" headings, we could number sequentially, or use the event IDs
+- explicit support for running the daemon from multiple locations:
+  - still should be able to keep status (and control?) the same
+  - need to add a config item for where the sessions/twins are stored so they can be re-used
+  - dangerous that if a common status/control is not used in the workspace config, multiple katos could overwrite each other :(, but maybe we can work around by daemon awareness somehow

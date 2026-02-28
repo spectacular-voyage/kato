@@ -1,7 +1,7 @@
 ---
 id: 3hcvyoruw53sn36me1xjvfz
 title: 2026 02 27 per Workspace Daemons
-desc: ""
+desc: ''
 updated: 1772260869646
 created: 1772252011318
 ---
