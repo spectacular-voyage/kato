@@ -34,55 +34,55 @@ Out of scope:
 
 ### 1) Pipeline API and Types
 
-- [ ] Rename type in [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts):
+- [x] Rename type in [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts):
   - `StartOrRotateRecordingInput` -> `ActivateRecordingInput`.
-- [ ] Rename interface method in `RecordingPipelineLike`:
+- [x] Rename interface method in `RecordingPipelineLike`:
   - `startOrRotateRecording(input)` -> `activateRecording(input)`.
-- [ ] Rename concrete class method in `RecordingPipeline`:
+- [x] Rename concrete class method in `RecordingPipeline`:
   - `async startOrRotateRecording(...)` -> `async activateRecording(...)`.
-- [ ] Update any internal comments/messages referencing "rotate" to "activate" where accurate.
+- [x] Update any internal comments/messages referencing "rotate" to "activate" where accurate.
 
 ### 2) Exports and Public Surface
 
-- [ ] Update writer exports in [writer/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/mod.ts):
+- [x] Update writer exports in [writer/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/mod.ts):
   - export `ActivateRecordingInput` instead of `StartOrRotateRecordingInput`.
-- [ ] Update top-level daemon exports in [apps/daemon/src/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/mod.ts):
+- [x] Update top-level daemon exports in [apps/daemon/src/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/mod.ts):
   - export `ActivateRecordingInput`.
-- [ ] Ensure there are no remaining symbol exports under old names.
+- [x] Ensure there are no remaining symbol exports under old names.
 
 ### 3) Runtime Call Sites
 
-- [ ] Update command handling callsites in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts):
+- [x] Update command handling callsites in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts):
   - replace `recordingPipeline.startOrRotateRecording(...)` with `recordingPipeline.activateRecording(...)`.
-- [ ] Run repo-wide search to ensure zero production callsites remain with old method/type names.
+- [x] Run repo-wide search to ensure zero production callsites remain with old method/type names.
 
 ### 4) Logging Event Rename
 
-- [ ] Rename structured event key in [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts):
+- [x] Rename structured event key in [recording_pipeline.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/recording_pipeline.ts):
   - `"recording.rotate"` -> `"recording.activate"`.
-- [ ] Update associated human-readable message:
+- [x] Update associated human-readable message:
   - "Recording stream started or rotated" -> "Recording stream activated".
-- [ ] Update tests that assert the old event key/message.
+- [x] Update tests that assert the old event key/message.
 
 ### 5) Test Refactor
 
-- [ ] Update all usages in [recording-pipeline_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/recording-pipeline_test.ts):
+- [x] Update all usages in [recording-pipeline_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/recording-pipeline_test.ts):
   - calls to `startOrRotateRecording(...)` -> `activateRecording(...)`.
-- [ ] Update all daemon runtime mocks and call assertions in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts):
+- [x] Update all daemon runtime mocks and call assertions in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts):
   - mock method names and invocation capture fields.
   - rename helper variable names where appropriate (`rotatedTargets` -> `activatedTargets`) for readability.
-- [ ] Run focused tests:
+- [x] Run focused tests:
   - `tests/recording-pipeline_test.ts`
   - `tests/daemon-runtime_test.ts`
 
 ### 6) Final Safety Sweep
 
-- [ ] Confirm no remaining references:
+- [x] Confirm no remaining references:
   - `StartOrRotateRecordingInput`
   - `startOrRotateRecording(`
   - `recording.rotate`
-- [ ] Confirm no alias/wrapper was introduced.
-- [ ] Confirm TypeScript build/test passes with only new names.
+- [x] Confirm no alias/wrapper was introduced.
+- [x] Confirm TypeScript build/test passes with only new names.
 
 ## Suggested Execution Order
 

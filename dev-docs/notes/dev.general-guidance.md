@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1771980330029
+updated: 1772253246061
 created: 1771724621833
 ---
 
@@ -109,3 +109,12 @@ deno task ci
   - `::record` and `::stop` do not accept arguments.
 - Explicit path arguments for `::init`, `::capture`, and `::export` must be
   absolute paths.
+
+### Guidelines for command/state-machine redesign
+
+For any command/state-machine redesign, add a scenario table with columns:
+Scenario
+Persistent Covered
+Non-Persistent Covered
+Expected Same?
+Intentional Divergence Notes

@@ -555,3 +555,191 @@ Validation:
 
 Suggestion for `dev.general-guidance.md` as follow-up:
 - Add a rule requiring a scenario-to-test mapping table for command/state-machine redesigns, with explicit persistent/non-persistent parity checks.
+
+# User_2026-02-27_2031_05
+
+Regarding "Add a rule requiring a scenario-to-test mapping table for command/state-machine redesigns, with explicit persistent/non-persistent parity checks.", what do you mean by "persistent/non-persistent parity checks."
+
+**Explaining persistent vs non-persistent parity**
+**Planning parity checks documentation**
+
+# gpt-5.3-codex_2026-02-27_2031_28
+
+“Persistent/non-persistent parity checks” means: when the daemon supports the same in-chat command behavior through two different runtime paths, we should explicitly verify that both paths produce the same user-visible outcome for the same scenario.
+
+In this codebase, those two paths are:
+
+- Persistent path: uses `sessionStateStore` and updates durable session metadata/`recordings[]` in [daemon_runtime.ts:877](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:877)
+- Non-persistent path: in-memory-only path used when there is no persisted session state, handled in [daemon_runtime.ts:1207](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1207)
+
+What “parity” means in practice:
+
+- `::init` should validate paths the same way in both paths
+- `::init` should prepare the destination file in both paths
+- `::record` should treat active/no-op/resume the same way
+- `::capture` should switch destinations the same way
+- `::stop` should preserve pointer / no-op the same way
+- Invalid relative args should be rejected the same way
+- Same-message command boundaries should slice content the same way
+
+What does not need to be identical:
+
+- The persistent path should also assert metadata persistence (`primaryRecordingDestination`, `recordings[]`, periods, stable `recordingId`)
+- The non-persistent path may only assert immediate runtime effects (active target, file creation, pipeline calls, logging)
+
+So the “parity check” is not “identical internals”; it is “same external semantics where both paths implement the feature.”
+
+Concrete example:
+- Claude’s bug report caught that persistent `::init` prepared the file, but non-persistent `::init` only changed the pointer and stopped recording. That was a parity gap.
+
+What I’d put in the guidance doc:
+- For any command/state-machine redesign, add a scenario table with columns:
+  - `Scenario`
+  - `Persistent Covered`
+  - `Non-Persistent Covered`
+  - `Expected Same?`
+  - `Intentional Divergence Notes`
+
+That forces us to either:
+- test both paths, or
+- document why one path intentionally differs.
+
+# User_2026-02-27_2036_47
+
+OK, Claude took your feedback and we made some updates. Are we ready to go?
+
+**Preparing to assess repo readiness**
+
+# gpt-5.3-codex_2026-02-27_2037_01
+
+I’m verifying the current branch state against the in-chat redesign work: I’ll inspect the diff, then run the quality gates so I can tell you whether it’s actually ready or if there are remaining gaps.
+
+**Confirming test and lint status**
+
+# gpt-5.3-codex_2026-02-27_2037_11
+
+The working tree only has note/doc changes right now; no code files are currently modified. I’m still running the full Deno gates to confirm the checked-in codebase is green before calling it ready.
+
+# gpt-5.3-codex_2026-02-27_2037_16
+
+`lint` is already green; `check` and the full test suite are still running. Once they finish I’ll tell you if there’s anything blocking release-readiness or just docs cleanup left.
+
+**Noticing untracked duplicate doc files**
+
+# gpt-5.3-codex_2026-02-27_2037_27
+
+The codebase is green. I’m checking the note/doc diffs now, mainly because there’s a suspicious duplicate untracked conversation file without a `.md` extension that may be worth cleaning up before you call this done.
+
+**Summarizing readiness with minor doc cleanup**
+
+# gpt-5.3-codex_2026-02-27_2037_43
+
+No blocking code findings.
+
+Readiness status:
+- `deno task lint` passed
+- `deno task check` passed
+- `deno task test` passed (`279 passed, 0 failed`)
+- Current working tree has no code-file edits; only note/doc changes are uncommitted
+
+So if you mean “is the implementation ready,” yes.
+
+Non-blocking cleanup I’d still call out:
+- The guidance update is conceptually fine, but the new section in [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md) is just raw lines. I’d format it as bullets or a markdown table, and add the missing trailing newline.
+- There’s a duplicate untracked conversation note without an extension:
+  - [conv.2026.2026-02-27-per-workspace-daemons](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-27-per-workspace-daemons)
+  - [conv.2026.2026-02-27-per-workspace-daemons.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-27-per-workspace-daemons.md)
+- There are unrelated note changes still present, including [task.2026.2026-02-27-lastMessageAt-fix.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-lastMessageAt-fix.md)
+
+If you want a strict “ready to commit/merge” answer: yes for code, but I’d clean the note-file clutter first.
+
+# User_2026-02-27_2133_37
+
+OH, in view of the forthcoming per-workspace daemon instance approach, should we support non-absolute paths as argument for init and capture and export? 
+
+It's tempting to re-introduce support for @-mentions, but since we can't guarantee that the running kato daemon is only working in this workspace, it's a little tricky. Now that we support setting the defaultOutputPath, I expect people to just use that most of the time.
+
+ in view of the coming [task.2026.2026-02-27-per-workspace-daemons.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-per-workspace-daemons.md) should we change primaryRecordingDestination to defaultOutputPath?
+
+**Analyzing design question context**
+
+# gpt-5.3-codex_2026-02-27_2133_45
+
+I’m reading the per-workspace daemon task so I can answer this against the actual planned model, not by inference. Then I’ll separate the path-policy question from the field-naming question.
+
+**Clarifying relative path support**
+**Clarifying path resolution semantics**
+**Clarifying path resolution policy**
+
+# gpt-5.3-codex_2026-02-27_2134_23
+
+Yes on relative filesystem paths, no on `@` aliases, and no on renaming `primaryRecordingDestination` to `defaultOutputPath`.
+
+Why:
+
+- `defaultOutputPath` and `primaryRecordingDestination` are different layers.
+- `defaultOutputPath` is config-level: a base directory used only when Kato needs to generate a path for a pathless command.
+- `primaryRecordingDestination` is session-level: the current concrete file target that `::record` resumes and `::stop` preserves.
+
+So `defaultOutputPath` is a directory/default generator input; `primaryRecordingDestination` is a resolved file path/state-machine pointer. Renaming one to the other would conflate two different concepts.
+
+I’d keep this split:
+
+- `defaultOutputPath`: runtime config field
+- `primaryRecordingDestination`: persisted session metadata field
+
+If the metadata name feels clunky, a better rename would be something like `primaryOutputDestination` or `sessionOutputDestination`, but not `defaultOutputPath`.
+
+On path arguments:
+
+- Support relative filesystem paths only once the per-workspace daemon/config-root model is in place.
+- Resolve them against the daemon’s config root (`katoDir` / config directory), not process cwd.
+- Immediately normalize them to an absolute canonical path before validation and before storing them in `primaryRecordingDestination`.
+- Keep `allowedWriteRoots` as the hard boundary.
+
+That gives deterministic behavior without reintroducing ambiguous semantics.
+
+On `@mentions`:
+
+- Don’t bring them back here.
+- They are not just “non-absolute paths”; they’re an aliasing feature with implicit workspace meaning.
+- They are harder to audit, harder to reason about across daemon instances, and they blur path parsing with user shorthand.
+- With `defaultOutputPath` plus pathless `::init` / `::record` / `::capture`, most of the ergonomic need is already covered.
+
+So the clean rule is:
+
+- Pathless commands: use config-driven generated defaults
+- Relative explicit paths: OK in per-workspace mode, resolved against config root
+- Absolute explicit paths: always OK
+- `@mentions`: still no
+
+I’d also tighten the task note to say “allow relative filesystem paths” rather than “allow non-absolute paths,” so it doesn’t imply `@` aliases.
+
+# User_2026-02-27_2141_11
+
+OK, so are we ready to mark this task complete?
+
+**Clarifying which task to mark complete**
+
+# gpt-5.3-codex_2026-02-27_2141_30
+
+Yes, for the in-chat command redesign task.
+
+Reason:
+- The implementation is in place.
+- Claude’s follow-up issues were addressed.
+- The parser/runtime coverage gaps were closed.
+- `deno task lint`, `deno task check`, and `deno task test` are all passing.
+
+What should not block completion:
+- The per-workspace daemon work is a separate follow-on task.
+- Supporting relative explicit paths belongs to that task, not this one.
+- `defaultOutputPath` is a config concern for the future task; it does not replace the session-scoped `primaryRecordingDestination` pointer in this task.
+
+So the clean status split is:
+- [task.2026.2026-02-27-inchat-command-redesign.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-inchat-command-redesign.md): ready to mark complete
+- [task.2026.2026-02-27-per-workspace-daemons.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-per-workspace-daemons.md): not complete; it is the place to introduce relative-path support and config-driven default generation
+
+I’d mark the redesign task complete, with one brief note in it:
+- relative explicit path support is intentionally deferred to the per-workspace daemon task
+- `primaryRecordingDestination` remains the session pointer; `defaultOutputPath` will be a config default, not a rename of that field
