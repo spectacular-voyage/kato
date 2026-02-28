@@ -6,9 +6,10 @@ import {
   renderEventsToMarkdown,
 } from "../apps/daemon/src/mod.ts";
 import type { ConversationEvent } from "@kato/shared";
+import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
 
 function makeSandboxRoot(): string {
-  return join(".kato", "test-writer-markdown", crypto.randomUUID());
+  return makeTestTempPath("test-writer-markdown-");
 }
 
 function makeEvent(
@@ -77,7 +78,7 @@ Deno.test("MarkdownConversationWriter dedupes append tail writes", async () => {
       1,
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -116,7 +117,7 @@ Deno.test("MarkdownConversationWriter overwrite preserves existing frontmatter",
     assertStringIncludes(content, "Replacement content");
     assertEquals(content.split("First content").length - 1, 0);
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -163,7 +164,7 @@ Deno.test(
       );
       assertEquals(content.includes("\nupdated:"), false);
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -194,7 +195,7 @@ Deno.test(
         "recordingIds: ['123', 'true', 'null', '~', rec-safe]",
       );
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -256,7 +257,7 @@ Deno.test(
       assertEquals(content.includes("\nparticipants:"), false);
       assertStringIncludes(content, "assistant reply");
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -318,7 +319,7 @@ Deno.test(
         "conversationEventKinds: [message.assistant, tool.call]",
       );
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -378,7 +379,7 @@ Deno.test(
       assertEquals(content.includes("\nparticipants:"), false);
       assertStringIncludes(content, "assistant follow-up");
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -430,7 +431,7 @@ Deno.test(
       assertStringIncludes(content, "messageEventKinds: [message.user]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -479,7 +480,7 @@ Deno.test(
       assertStringIncludes(content, "recordingIds: [rec-new]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
-      await Deno.remove(root, { recursive: true }).catch(() => {});
+      await removePathIfPresent(root);
     }
   },
 );
@@ -506,7 +507,7 @@ Deno.test("MarkdownConversationWriter create respects includeFrontmatter false",
     assertEquals(content.startsWith("---\n"), false);
     assertStringIncludes(content, "no frontmatter");
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 

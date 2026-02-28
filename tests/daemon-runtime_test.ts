@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import type { ConversationEvent, DaemonStatusSnapshot } from "@kato/shared";
 import {
   AuditLogger,
@@ -16,6 +16,11 @@ import {
   type SessionSnapshotStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
+import {
+  makeTestTempDir,
+  makeTestTempPath,
+  removePathIfPresent as removeDirIfPresent,
+} from "./test_temp.ts";
 
 function makeEvent(
   id: string,
@@ -45,6 +50,1284 @@ class CaptureSink {
     this.records.push(record);
   }
 }
+
+interface PersistentInChatScenarioOptions {
+  events: ConversationEvent[];
+  recordingPipeline: RecordingPipelineLike;
+  prepopulate?: (
+    sessionStateStore: PersistentSessionStateStore,
+  ) => Promise<void>;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+async function runPersistentInChatScenario(
+  options: PersistentInChatScenarioOptions,
+): Promise<{
+  stateDir: string;
+  currentStatus: DaemonStatusSnapshot;
+  metadataList: Awaited<
+    ReturnType<PersistentSessionStateStore["listSessionMetadata"]>
+  >;
+}> {
+  const stateDir = await makeTestTempDir("daemon-runtime-inchat-redesign-");
+
+  const nowIso = "2026-02-22T10:00:00.000Z";
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: nowIso,
+    heartbeatAt: nowIso,
+    daemonRunning: false,
+    providers: [],
+    recordings: { activeRecordings: 0, destinations: 0 },
+  };
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+      };
+      return Promise.resolve();
+    },
+  };
+
+  const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+    now: () => new Date(nowIso),
+  });
+  const sessionStateStore = new PersistentSessionStateStore({
+    katoDir: join(stateDir, ".kato"),
+    now: () => new Date(nowIso),
+    makeSessionId: () => "kato-session-inchat-redesign-1234",
+  });
+  if (options.prepopulate) {
+    await options.prepopulate(sessionStateStore);
+  }
+
+  let pollCount = 0;
+  const ingestionRunner: ProviderIngestionRunner = {
+    provider: "codex",
+    start() {
+      return Promise.resolve();
+    },
+    poll() {
+      pollCount += 1;
+      if (pollCount === 1) {
+        sessionSnapshotStore.upsert({
+          provider: "codex",
+          sessionId: "session-1",
+          cursor: { kind: "byte-offset", value: 1 },
+          events: options.events,
+        });
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: nowIso,
+          sessionsUpdated: 1,
+          eventsObserved: options.events.length,
+        });
+      }
+      return Promise.resolve({
+        provider: "codex",
+        polledAt: "2026-02-22T10:00:01.000Z",
+        sessionsUpdated: 0,
+        eventsObserved: 0,
+      });
+    },
+    stop() {
+      return Promise.resolve();
+    },
+  };
+
+  const requests = [{
+    requestId: "req-stop-inchat-redesign",
+    requestedAt: "2026-02-22T10:00:02.000Z",
+    command: "stop" as const,
+  }];
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(
+        pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+      );
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called");
+    },
+    markProcessed(requestId: string) {
+      const idx = requests.findIndex((request) =>
+        request.requestId === requestId
+      );
+      if (idx >= 0) {
+        requests.splice(0, idx + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    recordingPipeline: options.recordingPipeline,
+    ingestionRunners: [ingestionRunner],
+    sessionSnapshotStore,
+    sessionStateStore,
+    operationalLogger: options.operationalLogger,
+    auditLogger: options.auditLogger,
+    now: () => new Date(nowIso),
+    pid: 4242,
+    heartbeatIntervalMs: 50,
+    pollIntervalMs: 10,
+  });
+
+  const metadataList = await sessionStateStore.listSessionMetadata();
+  return { stateDir, currentStatus, metadataList };
+}
+
+type ScenarioMetadataList = Awaited<
+  ReturnType<PersistentSessionStateStore["listSessionMetadata"]>
+>;
+
+async function makeWritableScenarioDir(prefix: string): Promise<string> {
+  return await makeTestTempDir(prefix);
+}
+
+function makePersistentInChatRecordingPipeline(
+  overrides: Partial<RecordingPipelineLike> = {},
+): RecordingPipelineLike {
+  const nowIso = "2026-02-22T10:00:00.000Z";
+  return {
+    activateRecording(input) {
+      return Promise.resolve({
+        recordingId: input.recordingId ?? "rec-default",
+        provider: input.provider,
+        sessionId: input.sessionId,
+        outputPath: input.targetPath,
+        startedAt: nowIso,
+        lastWriteAt: nowIso,
+      });
+    },
+    captureSnapshot(input) {
+      return Promise.resolve({
+        outputPath: input.targetPath,
+        writeResult: {
+          mode: "overwrite",
+          outputPath: input.targetPath,
+          wrote: true,
+          deduped: false,
+        },
+        format: "markdown" as const,
+      });
+    },
+    exportSnapshot(input) {
+      return Promise.resolve({
+        outputPath: input.targetPath,
+        writeResult: {
+          mode: "overwrite",
+          outputPath: input.targetPath,
+          wrote: true,
+          deduped: false,
+        },
+        format: "markdown" as const,
+      });
+    },
+    appendToActiveRecording() {
+      return Promise.resolve({
+        appended: false,
+        deduped: false,
+      });
+    },
+    appendToDestination(input) {
+      return Promise.resolve({
+        mode: "append",
+        outputPath: input.targetPath,
+        wrote: true,
+        deduped: false,
+      });
+    },
+    stopRecording() {
+      return true;
+    },
+    getActiveRecording() {
+      return undefined;
+    },
+    listActiveRecordings() {
+      return [];
+    },
+    getRecordingSummary() {
+      return {
+        activeRecordings: 0,
+        destinations: 0,
+      };
+    },
+    ...overrides,
+  };
+}
+
+async function prepopulateScenarioSessionMetadata(
+  sessionStateStore: PersistentSessionStateStore,
+  mutate: (metadata: ScenarioMetadataList[number]) => void,
+): Promise<void> {
+  const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+    provider: "codex",
+    providerSessionId: "session-1",
+    sourceFilePath: "/tmp/mock-source.jsonl",
+    initialCursor: { kind: "byte-offset", value: 0 },
+  });
+  mutate(metadata);
+  await sessionStateStore.saveSessionMetadata(metadata);
+}
+
+function findScenarioMetadata(metadataList: ScenarioMetadataList) {
+  const session = metadataList.find((entry) =>
+    entry.providerSessionId === "session-1"
+  );
+  assertExists(session);
+  return session;
+}
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with explicit path sets pointer and prepares file", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-explicit-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "init-explicit.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-init-explicit", "message.user", `::init ${destination}`),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.destination, destination);
+    assertEquals(session.recordings[0]?.desiredState, "off");
+    assertEquals(
+      session.recordings.filter((recording) => recording.desiredState === "on")
+        .length,
+      0,
+    );
+
+    const stat = await Deno.stat(destination);
+    assert(stat.isFile);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat bare ::init in S0 sets pointer and prepares destination", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-bare-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const rewrittenDestination = join(scenarioDir, "bare-init-default.md");
+    const validateTargets: string[] = [];
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-init-bare", "message.user", "::init")],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        validateDestinationPath(input) {
+          validateTargets.push(input.targetPath);
+          return Promise.resolve(rewrittenDestination);
+        },
+      }),
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(validateTargets.length, 1);
+    assert(isAbsolute(validateTargets[0] ?? ""));
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, rewrittenDestination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.destination, rewrittenDestination);
+    assertEquals(session.recordings[0]?.desiredState, "off");
+
+    const stat = await Deno.stat(rewrittenDestination);
+    assert(stat.isFile);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::init with existing pointer and file leaves content unchanged", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-noop-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "existing.md");
+    const initialContent = "preexisting body\n";
+    await Deno.writeTextFile(destination, initialContent);
+
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-init-noop", "message.user", "::init")],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-existing",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.recordingId, "rec-existing");
+
+    const content = await Deno.readTextFile(destination);
+    assertEquals(content, initialContent);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::init in S2 deactivates old recording and moves pointer", async () => {
+  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-init-s2-");
+  let stateDir: string | undefined;
+
+  try {
+    const oldDestination = join(scenarioDir, "old.md");
+    const newDestination = join(scenarioDir, "new.md");
+
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-init-s2", "message.user", `::init ${newDestination}`),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 0,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, newDestination);
+    assertEquals(session.recordings.length, 2);
+
+    const oldRecording = session.recordings.find((entry) =>
+      entry.destination === oldDestination
+    );
+    const newRecording = session.recordings.find((entry) =>
+      entry.destination === newDestination
+    );
+    assertExists(oldRecording);
+    assertExists(newRecording);
+    assertEquals(oldRecording.desiredState, "off");
+    assertEquals(oldRecording.periods[0]?.stoppedCursor, 1);
+    assertEquals(newRecording.desiredState, "off");
+    assertEquals(
+      session.recordings.filter((entry) => entry.desiredState === "on").length,
+      0,
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::init leaves pointer unchanged", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-fail-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const oldDestination = join(scenarioDir, "old.md");
+    const rejectedDestination = join(scenarioDir, "rejected.md");
+
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-init-fail",
+          "message.user",
+          `::init ${rejectedDestination}`,
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        validateDestinationPath() {
+          throw new Error("validation failed");
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, oldDestination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.destination, oldDestination);
+    await assertRejects(
+      () => Deno.stat(rejectedDestination),
+      Deno.errors.NotFound,
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat failed ::record leaves pointer unchanged", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-fail-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "pointer.md");
+    let appendCalls = 0;
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-record-fail", "message.user", "::record")],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        appendToDestination() {
+          appendCalls += 1;
+          throw new Error("append failed");
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(appendCalls, 1);
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.desiredState, "off");
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S1 starts active at pointer", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-s1-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "pointer.md");
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-record-s1", "message.user", "::record")],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    const recording = session.recordings.find((entry) =>
+      entry.destination === destination
+    );
+    assertExists(recording);
+    assertEquals(recording.desiredState, "on");
+    assertEquals(recording.writeCursor, 1);
+    assertEquals(recording.periods.length, 1);
+    assertEquals(recording.periods[0]?.startedCursor, 1);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::record in S2 is a no-op", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-s2-noop-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "active.md");
+    let appendCalls = 0;
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-record-s2-noop", "message.user", "::record")],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        appendToDestination() {
+          appendCalls += 1;
+          return Promise.resolve({
+            mode: "append",
+            outputPath: destination,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(appendCalls, 0);
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.desiredState, "on");
+    assertEquals(session.recordings[0]?.periods.length, 1);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::stop in S2 preserves pointer", async () => {
+  const scenarioDir = await makeWritableScenarioDir("daemon-runtime-stop-s2-");
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "active.md");
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-stop-s2", "message.user", "::stop")],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.desiredState, "off");
+    assertEquals(session.recordings[0]?.periods[0]?.stoppedCursor, 1);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::record after ::stop resumes pointer destination", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-stop-record-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "resume.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-stop", "message.user", "::stop"),
+        makeEvent("u-record", "message.user", "::record"),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-resume",
+              destination,
+              desiredState: "on",
+              writeCursor: 0,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    const recording = session.recordings[0];
+    assertExists(recording);
+    assertEquals(recording.desiredState, "on");
+    assertEquals(recording.periods.length, 2);
+    assertEquals(recording.periods[0]?.stoppedCursor, 1);
+    assertEquals(recording.periods[1]?.startedCursor, 2);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture without argument captures to pointer", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-capture-no-arg-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "pointer.md");
+    const captureTargets: string[] = [];
+    const captureRecordingIds: string[][] = [];
+    const result = await runPersistentInChatScenario({
+      events: [makeEvent("u-capture-pointer", "message.user", "::capture")],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        captureSnapshot(input) {
+          captureTargets.push(input.targetPath);
+          captureRecordingIds.push(input.recordingIds ?? []);
+          return Promise.resolve({
+            outputPath: input.targetPath,
+            writeResult: {
+              mode: "overwrite",
+              outputPath: input.targetPath,
+              wrote: true,
+              deduped: false,
+            },
+            format: "markdown" as const,
+          });
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-pointer",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(captureTargets, [destination]);
+    assertEquals(captureRecordingIds, [["rec-pointer"]]);
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.recordingId, "rec-pointer");
+    assertEquals(session.recordings[0]?.desiredState, "on");
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat same destination reuses one recordingId", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-idempotent-id-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "same.md");
+    const captureRecordingIds: string[][] = [];
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-init-same", "message.user", `::init ${destination}`),
+        makeEvent("u-capture-same", "message.user", `::capture ${destination}`),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        captureSnapshot(input) {
+          captureRecordingIds.push(input.recordingIds ?? []);
+          return Promise.resolve({
+            outputPath: input.targetPath,
+            writeResult: {
+              mode: "overwrite",
+              outputPath: input.targetPath,
+              wrote: true,
+              deduped: false,
+            },
+            format: "markdown" as const,
+          });
+        },
+      }),
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    const recordings = session.recordings.filter((entry) =>
+      entry.destination === destination
+    );
+    assertEquals(recordings.length, 1);
+    assertEquals(captureRecordingIds.length, 1);
+    assertEquals(captureRecordingIds[0], [recordings[0]?.recordingId]);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat distinct destinations allocate distinct recordingIds", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-distinct-ids-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destinationA = join(scenarioDir, "a.md");
+    const destinationB = join(scenarioDir, "b.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-init-a", "message.user", `::init ${destinationA}`),
+        makeEvent("u-capture-b", "message.user", `::capture ${destinationB}`),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    const recordingA = session.recordings.find((entry) =>
+      entry.destination === destinationA
+    );
+    const recordingB = session.recordings.find((entry) =>
+      entry.destination === destinationB
+    );
+    assertExists(recordingA);
+    assertExists(recordingB);
+    assert(recordingA.recordingId !== recordingB.recordingId);
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::capture in S2 deactivates prior active destination", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-capture-switch-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const oldDestination = join(scenarioDir, "old.md");
+    const newDestination = join(scenarioDir, "new.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-capture-switch",
+          "message.user",
+          `::capture ${newDestination}`,
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    const oldRecording = session.recordings.find((entry) =>
+      entry.destination === oldDestination
+    );
+    const newRecording = session.recordings.find((entry) =>
+      entry.destination === newDestination
+    );
+    assertExists(oldRecording);
+    assertExists(newRecording);
+    assertEquals(oldRecording.desiredState, "off");
+    assertEquals(newRecording.desiredState, "on");
+    assertEquals(
+      session.recordings.filter((entry) => entry.desiredState === "on").length,
+      1,
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::init frontmatter includes stable recordingId", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-init-frontmatter-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "frontmatter.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-init-frontmatter",
+          "message.user",
+          `::init ${destination}`,
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    const recording = session.recordings.find((entry) =>
+      entry.destination === destination
+    );
+    assertExists(recording);
+
+    const content = await Deno.readTextFile(destination);
+    assert(content.includes(recording.recordingId));
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::export leaves pointer and active state unchanged", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-export-invariant-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "active.md");
+    const exportTarget = join(scenarioDir, "export.md");
+    const exportTargets: string[] = [];
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent("u-export", "message.user", `::export ${exportTarget}`),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        exportSnapshot(input) {
+          exportTargets.push(input.targetPath);
+          return Promise.resolve({
+            outputPath: input.targetPath,
+            writeResult: {
+              mode: "overwrite",
+              outputPath: input.targetPath,
+              wrote: true,
+              deduped: false,
+            },
+            format: "markdown" as const,
+          });
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(exportTargets, [exportTarget]);
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.desiredState, "on");
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat executes one-message ::stop then ::init then ::record in order", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-sequential-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const oldDestination = join(scenarioDir, "old.md");
+    const newDestination = join(scenarioDir, "new.md");
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-sequential",
+          "message.user",
+          `::stop\n::init ${newDestination}\n::record`,
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline(),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = oldDestination;
+            metadata.recordings = [{
+              recordingId: "rec-old",
+              destination: oldDestination,
+              desiredState: "on",
+              writeCursor: 1,
+              periods: [{
+                startedCursor: 0,
+                startedAt: "2026-02-22T09:59:00.000Z",
+              }],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, newDestination);
+    const oldRecording = session.recordings.find((entry) =>
+      entry.destination === oldDestination
+    );
+    const newRecording = session.recordings.find((entry) =>
+      entry.destination === newDestination
+    );
+    assertExists(oldRecording);
+    assertExists(newRecording);
+    assertEquals(oldRecording.desiredState, "off");
+    assertEquals(newRecording.desiredState, "on");
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed excludes lines before command boundary", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-boundary-exclude-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "boundary.md");
+    const seedContents: string[] = [];
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-record-boundary-exclude",
+          "message.user",
+          "line before\n::record\nline after",
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          const firstEvent = input.events[0];
+          const content = firstEvent && "content" in firstEvent
+            ? String(firstEvent.content ?? "")
+            : "";
+          seedContents.push(content);
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-boundary",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(seedContents.length, 1);
+    assert(!seedContents[0]?.includes("line before"));
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat ::record seed includes the ::record command line", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-record-boundary-include-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "boundary.md");
+    const seedContents: string[] = [];
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-record-boundary-include",
+          "message.user",
+          "::record\nline after",
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          const firstEvent = input.events[0];
+          const content = firstEvent && "content" in firstEvent
+            ? String(firstEvent.content ?? "")
+            : "";
+          seedContents.push(content);
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-boundary",
+              destination,
+              desiredState: "off",
+              writeCursor: 0,
+              periods: [],
+            }];
+          },
+        );
+      },
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(seedContents.length, 1);
+    assert(seedContents[0]?.startsWith("::record"));
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop persistent in-chat rejects relative arguments for ::init, ::capture, and ::export", async () => {
+  const scenarioDir = await makeWritableScenarioDir(
+    "daemon-runtime-relative-args-",
+  );
+  let stateDir: string | undefined;
+
+  try {
+    const destination = join(scenarioDir, "active.md");
+    const sink = new CaptureSink();
+    const operationalLogger = new StructuredLogger([sink], {
+      channel: "operational",
+      minLevel: "debug",
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const auditLogger = new AuditLogger(
+      new StructuredLogger([sink], {
+        channel: "security-audit",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      }),
+    );
+
+    let captureCalls = 0;
+    let exportCalls = 0;
+    const result = await runPersistentInChatScenario({
+      events: [
+        makeEvent(
+          "u-rel-init",
+          "message.user",
+          "::init notes/relative-init.md",
+        ),
+        makeEvent(
+          "u-rel-capture",
+          "message.user",
+          "::capture notes/relative-capture.md",
+        ),
+        makeEvent(
+          "u-rel-export",
+          "message.user",
+          "::export notes/relative-export.md",
+        ),
+      ],
+      recordingPipeline: makePersistentInChatRecordingPipeline({
+        captureSnapshot() {
+          captureCalls += 1;
+          throw new Error("capture should not run for relative args");
+        },
+        exportSnapshot() {
+          exportCalls += 1;
+          throw new Error("export should not run for relative args");
+        },
+      }),
+      prepopulate: async (sessionStateStore) => {
+        await prepopulateScenarioSessionMetadata(
+          sessionStateStore,
+          (metadata) => {
+            metadata.primaryRecordingDestination = destination;
+            metadata.recordings = [{
+              recordingId: "rec-active",
+              destination,
+              desiredState: "on",
+              writeCursor: 3,
+              periods: [{ startedCursor: 0 }],
+            }];
+          },
+        );
+      },
+      operationalLogger,
+      auditLogger,
+    });
+    stateDir = result.stateDir;
+
+    assertEquals(captureCalls, 0);
+    assertEquals(exportCalls, 0);
+
+    const invalidTargetLogs = sink.records.filter((record) =>
+      record.event === "recording.command.invalid_target" &&
+      record.channel === "operational"
+    );
+    assertEquals(invalidTargetLogs.length, 3);
+    const invalidCommands = new Set(
+      invalidTargetLogs.map((record) =>
+        String(record.attributes?.command ?? "")
+      ),
+    );
+    assert(invalidCommands.has("init"));
+    assert(invalidCommands.has("capture"));
+    assert(invalidCommands.has("export"));
+    assert(
+      invalidTargetLogs.every((record) =>
+        String(record.attributes?.reason ?? "").includes("absolute")
+      ),
+    );
+
+    const session = findScenarioMetadata(result.metadataList);
+    assertEquals(session.primaryRecordingDestination, destination);
+    assertEquals(session.recordings.length, 1);
+    assertEquals(session.recordings[0]?.desiredState, "on");
+  } finally {
+    await removeDirIfPresent(stateDir);
+    await removeDirIfPresent(scenarioDir);
+  }
+});
 
 Deno.test("runDaemonRuntimeLoop processes stop requests and updates status", async () => {
   const statusHistory: DaemonStatusSnapshot[] = [];
@@ -259,11 +1542,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
     ),
   ];
 
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const tempDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-exports-",
-  });
+  const tempDir = await makeTestTempDir("daemon-runtime-exports-");
 
   try {
     await runDaemonRuntimeLoop({
@@ -445,11 +1724,7 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
 });
 
 Deno.test("runDaemonRuntimeLoop resolves export short session selectors via session state metadata", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-export-resolve-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-export-resolve-");
 
   try {
     const statusStore: DaemonStatusSnapshotStoreLike = {
@@ -1453,11 +2728,7 @@ Deno.test("runDaemonRuntimeLoop omits stale provider snapshots from status.provi
 });
 
 Deno.test("runDaemonRuntimeLoop excludes stale recordings from status.recordings.activeRecordings", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-recording-status-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-recording-status-");
   try {
     const statusHistory: DaemonStatusSnapshot[] = [];
     let currentStatus: DaemonStatusSnapshot = {
@@ -1649,189 +2920,206 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
   const sessionSnapshotStore = new InMemorySessionSnapshotStore({
     now: () => new Date("2026-02-22T10:00:00.000Z"),
   });
+  const inChatCommandDir = makeTestTempPath("in-chat-record-commands-");
+  const oldPath = join(inChatCommandDir, "old.md");
+  const newPath = join(inChatCommandDir, "new.md");
+  await removeDirIfPresent(inChatCommandDir);
+  await Deno.mkdir(inChatCommandDir, { recursive: true });
+  try {
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
 
-  let pollCount = 0;
-  const ingestionRunner: ProviderIngestionRunner = {
-    provider: "codex",
-    start() {
-      return Promise.resolve();
-    },
-    poll() {
-      pollCount += 1;
+        const baselineMessage = makeEvent(
+          "m1",
+          "message.user",
+          `::init ${oldPath}\n::record\nold command`,
+          "2026-02-22T09:59:59.000Z",
+        );
+        const newCommandMessage = makeEvent(
+          "m2",
+          "message.user",
+          `::init ${newPath}\n::record\nnew command`,
+          "2026-02-22T10:00:01.000Z",
+        );
+        const assistantReply = makeEvent(
+          "m3",
+          "message.assistant",
+          "recording now",
+          "2026-02-22T10:00:02.000Z",
+        );
 
-      const baselineMessage = makeEvent(
-        "m1",
-        "message.user",
-        "::record @notes/old.md\nold command",
-        "2026-02-22T09:59:59.000Z",
-      );
-      const newCommandMessage = makeEvent(
-        "m2",
-        "message.user",
-        "::record @notes/new.md\nnew command",
-        "2026-02-22T10:00:01.000Z",
-      );
-      const assistantReply = makeEvent(
-        "m3",
-        "message.assistant",
-        "recording now",
-        "2026-02-22T10:00:02.000Z",
-      );
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 10 },
+            events: [baselineMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
 
-      if (pollCount === 1) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 10 },
-          events: [baselineMessage],
-        });
+        if (pollCount === 2) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 20 },
+            events: [baselineMessage, newCommandMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        if (pollCount === 3) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 30 },
+            events: [baselineMessage, newCommandMessage, assistantReply],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:02.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
         return Promise.resolve({
           provider: "codex",
-          polledAt: "2026-02-22T10:00:00.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
+          polledAt: "2026-02-22T10:00:03.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
         });
-      }
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
 
-      if (pollCount === 2) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 20 },
-          events: [baselineMessage, newCommandMessage],
-        });
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        if (pollCount >= 3) {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        }
+        return Promise.resolve([]);
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const activatedTargets: string[] = [];
+    const activatedRecordingIds: string[] = [];
+    const appendedMessageIds: string[] = [];
+    let activeRecording = false;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording(input) {
+        activeRecording = true;
+        activatedTargets.push(input.targetPath);
+        const recordingId = input.recordingId ?? "rec-1";
+        activatedRecordingIds.push(recordingId);
+        const nowIso = "2026-02-22T10:00:01.000Z";
         return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:01.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
+          recordingId,
+          provider: input.provider,
+          sessionId: input.sessionId,
+          outputPath: input.targetPath,
+          startedAt: nowIso,
+          lastWriteAt: nowIso,
         });
-      }
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording(input) {
+        if (!activeRecording) {
+          return Promise.resolve({
+            appended: false,
+            deduped: false,
+          });
+        }
 
-      if (pollCount === 3) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 30 },
-          events: [baselineMessage, newCommandMessage, assistantReply],
-        });
+        for (const event of input.events) {
+          appendedMessageIds.push(event.eventId);
+        }
         return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:02.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
-        });
-      }
-
-      return Promise.resolve({
-        provider: "codex",
-        polledAt: "2026-02-22T10:00:03.000Z",
-        sessionsUpdated: 0,
-        eventsObserved: 0,
-      });
-    },
-    stop() {
-      return Promise.resolve();
-    },
-  };
-
-  const requests = [{
-    requestId: "req-stop",
-    requestedAt: "2026-02-22T10:00:05.000Z",
-    command: "stop" as const,
-  }];
-  const controlStore: DaemonControlRequestStoreLike = {
-    list() {
-      if (pollCount >= 3) {
-        return Promise.resolve(requests.map((request) => ({ ...request })));
-      }
-      return Promise.resolve([]);
-    },
-    enqueue(_request) {
-      throw new Error("enqueue should not be called in this test");
-    },
-    markProcessed(requestId: string) {
-      const index = requests.findIndex((request) =>
-        request.requestId === requestId
-      );
-      if (index >= 0) {
-        requests.splice(0, index + 1);
-      }
-      return Promise.resolve();
-    },
-  };
-
-  const activatedTargets: string[] = [];
-  const appendedMessageIds: string[] = [];
-  let activeRecording = false;
-  const recordingPipeline: RecordingPipelineLike = {
-    activateRecording(input) {
-      activeRecording = true;
-      activatedTargets.push(input.targetPath);
-      const nowIso = "2026-02-22T10:00:01.000Z";
-      return Promise.resolve({
-        recordingId: "rec-1",
-        provider: input.provider,
-        sessionId: input.sessionId,
-        outputPath: input.targetPath,
-        startedAt: nowIso,
-        lastWriteAt: nowIso,
-      });
-    },
-    captureSnapshot() {
-      throw new Error("not used");
-    },
-    exportSnapshot() {
-      throw new Error("not used");
-    },
-    appendToActiveRecording(input) {
-      if (!activeRecording) {
-        return Promise.resolve({
-          appended: false,
+          appended: true,
           deduped: false,
         });
-      }
+      },
+      stopRecording() {
+        activeRecording = false;
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: activeRecording ? 1 : 0,
+          destinations: activeRecording ? 1 : 0,
+        };
+      },
+    };
 
-      for (const event of input.events) {
-        appendedMessageIds.push(event.eventId);
-      }
-      return Promise.resolve({
-        appended: true,
-        deduped: false,
-      });
-    },
-    stopRecording() {
-      activeRecording = false;
-      return true;
-    },
-    getActiveRecording() {
-      return undefined;
-    },
-    listActiveRecordings() {
-      return [];
-    },
-    getRecordingSummary() {
-      return {
-        activeRecordings: activeRecording ? 1 : 0,
-        destinations: activeRecording ? 1 : 0,
-      };
-    },
-  };
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
 
-  await runDaemonRuntimeLoop({
-    statusStore,
-    controlStore,
-    recordingPipeline,
-    ingestionRunners: [ingestionRunner],
-    sessionSnapshotStore,
-    now: () => new Date("2026-02-22T10:00:00.000Z"),
-    pid: 4242,
-    heartbeatIntervalMs: 50,
-    pollIntervalMs: 10,
-  });
-
-  assertEquals(activatedTargets, ["notes/new.md"]);
-  assertEquals(appendedMessageIds, ["m2", "m3"]);
+    assertEquals(activatedTargets, [newPath]);
+    assertEquals(activatedRecordingIds.length, 1);
+    assert(activatedRecordingIds[0].length > 0);
+    assertEquals(appendedMessageIds, ["m2", "m3"]);
+    const newDestinationStat = await Deno.stat(newPath);
+    assert(newDestinationStat.isFile);
+    const newDestinationContent = await Deno.readTextFile(newPath);
+    assert(newDestinationContent.includes(activatedRecordingIds[0]));
+  } finally {
+    await removeDirIfPresent(inChatCommandDir);
+  }
 });
 
 Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recording on same path", async () => {
@@ -1887,7 +3175,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
       const captureCommandMessage = makeEvent(
         "m2",
         "message.user",
-        "::capture @notes/captured.md\ncapture now",
+        "::capture /tmp/captured.md\ncapture now",
         "2026-02-22T10:00:01.000Z",
       );
       const assistantReply = makeEvent(
@@ -2064,8 +3352,8 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recordi
   });
 
   assertEquals(callOrder, ["capture", "record"]);
-  assertEquals(captureTargets, ["notes/captured.md"]);
-  assertEquals(activatedTargets, ["notes/captured.md"]);
+  assertEquals(captureTargets, ["/tmp/captured.md"]);
+  assertEquals(activatedTargets, ["/tmp/captured.md"]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
@@ -2124,7 +3412,7 @@ Deno.test(
               makeEvent(
                 "m1",
                 "message.user",
-                "::capture notes/first-seen.md",
+                "::capture /tmp/first-seen.md",
                 "2026-02-22T10:00:01.000Z",
               ),
             ],
@@ -2245,8 +3533,8 @@ Deno.test(
     });
 
     assertEquals(callOrder, ["capture", "record"]);
-    assertEquals(captureTargets, ["notes/first-seen.md"]);
-    assertEquals(activatedTargets, ["notes/first-seen.md"]);
+    assertEquals(captureTargets, ["/tmp/first-seen.md"]);
+    assertEquals(activatedTargets, ["/tmp/first-seen.md"]);
   },
 );
 
@@ -2931,11 +4219,7 @@ Deno.test("runDaemonRuntimeLoop shuts down cleanly on fatal memory-budget error"
 });
 
 Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-persistent-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-persistent-");
   try {
     const statusHistory: DaemonStatusSnapshot[] = [];
     let currentStatus: DaemonStatusSnapshot = {
@@ -2977,6 +4261,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
       now: () => new Date("2026-02-22T10:00:00.000Z"),
       makeSessionId: () => "kato-session-persist-1234",
     });
+    const persistentDestination = join(stateDir, "persistent-recording.md");
 
     const makeLocalEvent = (
       id: string,
@@ -3008,7 +4293,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
         const startCommand = makeLocalEvent(
           "u-start",
           "message.user",
-          "::start /tmp/persistent-recording.md",
+          `::init ${persistentDestination}\n::record`,
           "2026-02-22T10:00:00.000Z",
         );
         const assistantMessage = makeLocalEvent(
@@ -3153,7 +4438,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
       pollIntervalMs: 10,
     });
 
-    assertEquals(appendCalls, [1]);
+    assertEquals(appendCalls, [1, 1]);
     const metadataList = await sessionStateStore.listSessionMetadata();
     assertEquals(metadataList.length, 1);
     const recording = metadataList[0]?.recordings[0];
@@ -3172,11 +4457,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
 });
 
 Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is truncated", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-capture-twin-start-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-capture-twin-start-");
 
   try {
     let currentStatus: DaemonStatusSnapshot = {
@@ -3525,235 +4806,8 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
   assertEquals(metadataReads, 3);
 });
 
-Deno.test("runDaemonRuntimeLoop maintains independent write cursors for multiple recordings", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-multi-recording-",
-  });
-  try {
-    let currentStatus: DaemonStatusSnapshot = {
-      schemaVersion: 1,
-      generatedAt: "2026-02-22T10:00:00.000Z",
-      heartbeatAt: "2026-02-22T10:00:00.000Z",
-      daemonRunning: false,
-      providers: [],
-      recordings: { activeRecordings: 0, destinations: 0 },
-    };
-    const statusStore: DaemonStatusSnapshotStoreLike = {
-      load() {
-        return Promise.resolve({
-          ...currentStatus,
-          providers: [...currentStatus.providers],
-          recordings: { ...currentStatus.recordings },
-        });
-      },
-      save(snapshot) {
-        currentStatus = {
-          ...snapshot,
-          providers: [...snapshot.providers],
-          recordings: { ...snapshot.recordings },
-        };
-        return Promise.resolve();
-      },
-    };
-
-    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-    });
-    const sessionStateStore = new PersistentSessionStateStore({
-      katoDir: join(stateDir, ".kato"),
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-      makeSessionId: () => "kato-session-multi-rec-1234",
-    });
-
-    const mk = (
-      id: string,
-      kind: "message.user" | "message.assistant",
-      content: string,
-      timestamp: string,
-    ): ConversationEvent => ({
-      eventId: id,
-      provider: "codex",
-      sessionId: "session-multi-rec",
-      timestamp,
-      kind,
-      role: kind === "message.user" ? "user" : "assistant",
-      content,
-      source: {
-        providerEventType: kind === "message.user" ? "user" : "assistant",
-        providerEventId: id,
-      },
-    } as ConversationEvent);
-
-    let pollCount = 0;
-    const ingestionRunner: ProviderIngestionRunner = {
-      provider: "codex",
-      start() {
-        return Promise.resolve();
-      },
-      poll() {
-        pollCount += 1;
-        const e1 = mk(
-          "u-start-a",
-          "message.user",
-          "::start /tmp/multi-a.md",
-          "2026-02-22T10:00:00.000Z",
-        );
-        const e2 = mk(
-          "a-1",
-          "message.assistant",
-          "first message",
-          "2026-02-22T10:00:01.000Z",
-        );
-        const e3 = mk(
-          "u-start-b",
-          "message.user",
-          "::start /tmp/multi-b.md",
-          "2026-02-22T10:00:02.000Z",
-        );
-        const e4 = mk(
-          "a-2",
-          "message.assistant",
-          "second message",
-          "2026-02-22T10:00:03.000Z",
-        );
-
-        if (pollCount === 1) {
-          sessionSnapshotStore.upsert({
-            provider: "codex",
-            sessionId: "session-multi-rec",
-            cursor: { kind: "byte-offset", value: 1 },
-            events: [e1, e2],
-          });
-          return Promise.resolve({
-            provider: "codex",
-            polledAt: "2026-02-22T10:00:00.000Z",
-            sessionsUpdated: 1,
-            eventsObserved: 2,
-          });
-        }
-        if (pollCount === 2) {
-          sessionSnapshotStore.upsert({
-            provider: "codex",
-            sessionId: "session-multi-rec",
-            cursor: { kind: "byte-offset", value: 2 },
-            events: [e1, e2, e3, e4],
-          });
-          return Promise.resolve({
-            provider: "codex",
-            polledAt: "2026-02-22T10:00:01.000Z",
-            sessionsUpdated: 1,
-            eventsObserved: 2,
-          });
-        }
-        return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:02.000Z",
-          sessionsUpdated: 0,
-          eventsObserved: 0,
-        });
-      },
-      stop() {
-        return Promise.resolve();
-      },
-    };
-
-    const requests = [{
-      requestId: "req-stop-multi-recording",
-      requestedAt: "2026-02-22T10:00:05.000Z",
-      command: "stop" as const,
-    }];
-    const controlStore: DaemonControlRequestStoreLike = {
-      list() {
-        return Promise.resolve(
-          pollCount >= 3 ? requests.map((request) => ({ ...request })) : [],
-        );
-      },
-      enqueue(_request) {
-        throw new Error("enqueue should not be called");
-      },
-      markProcessed(requestId: string) {
-        const idx = requests.findIndex((request) =>
-          request.requestId === requestId
-        );
-        if (idx >= 0) {
-          requests.splice(0, idx + 1);
-        }
-        return Promise.resolve();
-      },
-    };
-
-    const appendByDestination = new Map<string, string[]>();
-    const recordingPipeline: RecordingPipelineLike = {
-      activateRecording() {
-        throw new Error("not used");
-      },
-      captureSnapshot() {
-        throw new Error("not used");
-      },
-      exportSnapshot() {
-        throw new Error("not used");
-      },
-      appendToActiveRecording() {
-        return Promise.resolve({ appended: false, deduped: false });
-      },
-      appendToDestination(input) {
-        const ids = input.events.map((event) => event.eventId);
-        const current = appendByDestination.get(input.targetPath) ?? [];
-        appendByDestination.set(input.targetPath, [...current, ...ids]);
-        return Promise.resolve({
-          mode: "append",
-          outputPath: input.targetPath,
-          wrote: true,
-          deduped: false,
-        });
-      },
-      stopRecording() {
-        return true;
-      },
-      getActiveRecording() {
-        return undefined;
-      },
-      listActiveRecordings() {
-        return [];
-      },
-      getRecordingSummary() {
-        return { activeRecordings: 0, destinations: 0 };
-      },
-    };
-
-    await runDaemonRuntimeLoop({
-      statusStore,
-      controlStore,
-      recordingPipeline,
-      ingestionRunners: [ingestionRunner],
-      sessionSnapshotStore,
-      sessionStateStore,
-      now: () => new Date("2026-02-22T10:00:00.000Z"),
-      pid: 4242,
-      heartbeatIntervalMs: 50,
-      pollIntervalMs: 10,
-    });
-
-    assertEquals(
-      appendByDestination.get("/tmp/multi-a.md"),
-      ["a-1", "u-start-b", "a-2"],
-    );
-    assertEquals(appendByDestination.get("/tmp/multi-b.md"), ["a-2"]);
-    assertEquals(currentStatus.recordings.activeRecordings, 2);
-    assertEquals(currentStatus.recordings.destinations, 2);
-  } finally {
-    await Deno.remove(stateDir, { recursive: true });
-  }
-});
-
-Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and destination matches", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-ambiguous-stop-",
-  });
+Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error and leaves state unchanged", async () => {
+  const stateDir = await makeTestTempDir("daemon-runtime-ambiguous-stop-");
   try {
     const sink = new CaptureSink();
     const operationalLogger = new StructuredLogger([sink], {
@@ -3947,11 +5001,11 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
     assertExists(item);
     assertEquals(
       item!.recordings.map((recording) => recording.desiredState),
-      ["off", "off"],
+      ["on", "on"],
     );
     assert(
       sink.records.some((record) =>
-        record.event === "recording.command.stop.ambiguous" &&
+        record.event === "recording.command.parse_error" &&
         record.channel === "operational"
       ),
     );
@@ -3960,12 +5014,8 @@ Deno.test("runDaemonRuntimeLoop applies ambiguous bare ::stop to both id and des
   }
 });
 
-Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-default-destination-",
-  });
+Deno.test("runDaemonRuntimeLoop uses default destination for empty ::record", async () => {
+  const stateDir = await makeTestTempDir("daemon-runtime-default-destination-");
   try {
     let currentStatus: DaemonStatusSnapshot = {
       schemaVersion: 1,
@@ -4022,7 +5072,7 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
               timestamp: "2026-02-22T10:00:00.000Z",
               kind: "message.user",
               role: "user",
-              content: "::start",
+              content: "::record",
               source: {
                 providerEventType: "user",
                 providerEventId: "u-start-default",
@@ -4156,11 +5206,7 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::start", asy
 });
 
 Deno.test("runDaemonRuntimeLoop initializes missing session metadata from default cursor", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-default-cursor-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-default-cursor-");
   try {
     let currentStatus: DaemonStatusSnapshot = {
       schemaVersion: 1,

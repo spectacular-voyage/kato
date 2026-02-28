@@ -44,6 +44,7 @@ export interface SessionMetadataV1 {
   nextTwinSeq: number;
   recentFingerprints: string[];
   commandCursor?: number;
+  primaryRecordingDestination?: string;
   recordings: SessionRecordingStateV1[];
 }
 
@@ -237,6 +238,12 @@ export function isSessionMetadataV1(
     (typeof value["commandCursor"] !== "number" ||
       !Number.isSafeInteger(value["commandCursor"]) ||
       value["commandCursor"] < 0)
+  ) {
+    return false;
+  }
+  if (
+    value["primaryRecordingDestination"] !== undefined &&
+    !isNonEmptyString(value["primaryRecordingDestination"])
   ) {
     return false;
   }

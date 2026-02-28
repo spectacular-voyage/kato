@@ -1,5 +1,5 @@
 export type InChatControlCommandName =
-  | "start"
+  | "init"
   | "record"
   | "capture"
   | "export"
@@ -86,7 +86,7 @@ function parseCommandLine(
     raw: rawLine,
   };
 
-  if (name === "stop") {
+  if (name === "init" || name === "capture") {
     return {
       command: {
         ...commandBase,
@@ -96,16 +96,19 @@ function parseCommandLine(
     };
   }
 
-  if (
-    name === "start" ||
-    name === "record" ||
-    name === "capture"
-  ) {
+  if (name === "record" || name === "stop") {
+    if (argument && argument.length > 0) {
+      return {
+        error: {
+          ...commandBase,
+          reason: `Command '::${name}' does not accept arguments`,
+        },
+      };
+    }
     return {
       command: {
         ...commandBase,
         name,
-        ...(argument && argument.length > 0 ? { argument } : {}),
       },
     };
   }

@@ -23,7 +23,7 @@ function makeUserEvent(content: string): ConversationEvent {
 
 Deno.test("mapConversationEventsToTwin emits canonical kinds and command events", () => {
   const events: ConversationEvent[] = [
-    makeUserEvent("hello\n::start\n::stop id:deadbeef"),
+    makeUserEvent("hello\n::init /tmp/a.md\n::stop"),
     {
       eventId: "a1",
       provider: "codex",
@@ -55,7 +55,7 @@ Deno.test("mapConversationEventsToTwin emits canonical kinds and command events"
     event.kind === "user.kato-command"
   );
   assertEquals(commandEvents.length, 2);
-  assertEquals(commandEvents[0]?.payload["command"], "start");
+  assertEquals(commandEvents[0]?.payload["command"], "init");
   assertEquals(commandEvents[1]?.payload["command"], "stop");
 
   // Codex backfill omits provider timestamps by policy.

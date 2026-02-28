@@ -80,7 +80,7 @@ export interface ValidateDestinationPathInput {
   provider: string;
   sessionId: string;
   targetPath: string;
-  commandName?: "record" | "capture" | "export";
+  commandName?: "init" | "record" | "capture" | "export";
 }
 
 export interface AppendToActiveRecordingResult {
@@ -111,6 +111,12 @@ export interface RecordingPipelineLike {
   ): ActiveRecording | undefined;
   listActiveRecordings(): ActiveRecording[];
   getRecordingSummary(): RecordingSummary;
+  getMarkdownFrontmatterSettings?(): {
+    includeFrontmatter: boolean;
+    includeUpdatedInFrontmatter: boolean;
+    includeConversationEventKinds: boolean;
+    participantUsername?: string;
+  };
 }
 
 export interface RecordingPipelineOptions {
@@ -136,7 +142,7 @@ export interface RecordingPipelineOptions {
 }
 
 interface PathDecisionContext {
-  commandName: "record" | "capture" | "export";
+  commandName: "init" | "record" | "capture" | "export";
   provider: string;
   sessionId: string;
   targetPath: string;
@@ -463,6 +469,21 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return {
       activeRecordings: this.recordings.size,
       destinations: destinations.size,
+    };
+  }
+
+  getMarkdownFrontmatterSettings(): {
+    includeFrontmatter: boolean;
+    includeUpdatedInFrontmatter: boolean;
+    includeConversationEventKinds: boolean;
+    participantUsername?: string;
+  } {
+    return {
+      includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
+      includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
+      includeConversationEventKinds:
+        this.includeConversationEventKindsInFrontmatter,
+      participantUsername: this.frontmatterParticipantUsername,
     };
   }
 

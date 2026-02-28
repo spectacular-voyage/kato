@@ -20,6 +20,7 @@ import {
   type RuntimeConfigStoreLike,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
+import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 function makeRuntimeHarness(runtimeDir: string) {
   const stdout: string[] = [];
@@ -681,11 +682,7 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
 });
 
 Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const rootDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-cli-clean-",
-  });
+  const rootDir = await makeTestTempDir("daemon-cli-clean-");
   const runtimeDir = `${rootDir}/runtime`;
 
   try {
@@ -755,16 +752,12 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     assertEquals(await Deno.readTextFile(auditLogPath), "");
     assertEquals(await Deno.readTextFile(exportsLogPath), "");
   } finally {
-    await Deno.remove(rootDir, { recursive: true });
+    await removePathIfPresent(rootDir);
   }
 });
 
 Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const rootDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-cli-clean-sessions-",
-  });
+  const rootDir = await makeTestTempDir("daemon-cli-clean-sessions-");
   const runtimeDir = `${rootDir}/runtime`;
 
   try {
@@ -821,16 +814,12 @@ Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts
     await Deno.stat(recentMetaPath);
     await Deno.stat(recentTwinPath);
   } finally {
-    await Deno.remove(rootDir, { recursive: true });
+    await removePathIfPresent(rootDir);
   }
 });
 
 Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const rootDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-cli-clean-sessions-dry-",
-  });
+  const rootDir = await makeTestTempDir("daemon-cli-clean-sessions-dry-");
   const runtimeDir = `${rootDir}/runtime`;
 
   try {
@@ -870,7 +859,7 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
     await Deno.stat(oldMetaPath);
     await Deno.stat(oldTwinPath);
   } finally {
-    await Deno.remove(rootDir, { recursive: true });
+    await removePathIfPresent(rootDir);
   }
 });
 

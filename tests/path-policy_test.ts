@@ -1,19 +1,10 @@
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { WritePathPolicyGate } from "../apps/daemon/src/mod.ts";
+import { withTestTempDir } from "./test_temp.ts";
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const dir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "path-policy-",
-  });
-
-  try {
-    await run(dir);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+  await withTestTempDir("path-policy-", run);
 }
 
 Deno.test("WritePathPolicyGate allows targets inside allowed root", async () => {

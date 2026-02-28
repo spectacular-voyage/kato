@@ -1,6 +1,7 @@
 # Deno cache and coverage artifacts
 .deno/
 coverage/
+.test-tmp/
 
 # Editor and OS artifacts
 .DS_Store

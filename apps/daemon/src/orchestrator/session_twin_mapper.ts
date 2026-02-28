@@ -108,33 +108,14 @@ function toKatoCommandPayloads(
 
   return parsed.commands.map((command) => {
     const payload: Record<string, unknown> = {
-      command: command.name === "record" ? "start" : command.name,
+      command: command.name,
     };
     if (command.argument) {
       payload["rawArgument"] = command.argument;
-      const rawArgument = command.argument.trim();
-      if (rawArgument.toLowerCase().startsWith("id:")) {
-        payload["target"] = {
-          kind: "recording-id",
-          value: rawArgument.slice(3).trim(),
-          match: "prefix",
-        };
-      } else if (rawArgument.toLowerCase().startsWith("dest:")) {
-        payload["target"] = {
-          kind: "destination",
-          value: rawArgument.slice(5).trim(),
-        };
-      } else if (command.name === "stop") {
-        payload["target"] = {
-          kind: "ambiguous",
-          value: rawArgument,
-        };
-      } else {
-        payload["target"] = {
-          kind: "destination",
-          value: rawArgument,
-        };
-      }
+      payload["target"] = {
+        kind: "destination",
+        value: command.argument.trim(),
+      };
     } else if (command.name === "stop") {
       payload["target"] = { kind: "all" };
     }
