@@ -12,6 +12,7 @@ import {
   PersistentSessionStateStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
+import { withTestTempDir } from "./test_temp.ts";
 
 function makeEvent(id: string, timestamp: string): ConversationEvent {
   return {
@@ -177,16 +178,7 @@ async function withTempDir(
   prefix: string,
   run: (dir: string) => Promise<void>,
 ): Promise<void> {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const dir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix,
-  });
-  try {
-    await run(dir);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+  await withTestTempDir(prefix, run);
 }
 
 Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch updates", async () => {

@@ -1370,9 +1370,10 @@ async function applyControlCommandsForEvent(
         );
         const activeOnResolvedDestination = active &&
           active.outputPath === resolvedDestination;
-        const existingRecordingId = sessionEventState.destinationRecordingIds.get(
-          resolvedDestination,
-        );
+        const existingRecordingId = sessionEventState.destinationRecordingIds
+          .get(
+            resolvedDestination,
+          );
         const recordingIdToUse = existingRecordingId ??
           (activeOnResolvedDestination ? active.recordingId : undefined) ??
           crypto.randomUUID();

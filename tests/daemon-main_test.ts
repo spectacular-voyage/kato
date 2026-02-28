@@ -6,6 +6,7 @@ import {
   type RunDaemonSubprocessOptions,
   type RuntimeConfigStoreLike,
 } from "../apps/daemon/src/mod.ts";
+import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
   return {
@@ -106,11 +107,7 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
 });
 
 Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log files", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const runtimeDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-main-logs-",
-  });
+  const runtimeDir = await makeTestTempDir("daemon-main-logs-");
 
   try {
     const config = makeRuntimeConfig(runtimeDir);
@@ -150,16 +147,12 @@ Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log 
     assertStringIncludes(operationalLog, '"event":"test.operational"');
     assertStringIncludes(auditLog, '"event":"test.audit"');
   } finally {
-    await Deno.remove(runtimeDir, { recursive: true });
+    await removePathIfPresent(runtimeDir);
   }
 });
 
 Deno.test("runDaemonSubprocess respects configured logger min levels", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const runtimeDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-main-log-levels-",
-  });
+  const runtimeDir = await makeTestTempDir("daemon-main-log-levels-");
 
   try {
     const config = makeRuntimeConfig(runtimeDir);
@@ -202,16 +195,12 @@ Deno.test("runDaemonSubprocess respects configured logger min levels", async () 
     assertEquals(operationalLog.includes('"event":"test.info"'), false);
     assertEquals(auditLog.includes('"event":"test.audit.info"'), false);
   } finally {
-    await Deno.remove(runtimeDir, { recursive: true });
+    await removePathIfPresent(runtimeDir);
   }
 });
 
 Deno.test("runDaemonSubprocess applies log-level env overrides", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const runtimeDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-main-log-level-env-",
-  });
+  const runtimeDir = await makeTestTempDir("daemon-main-log-level-env-");
 
   const originalOperational = Deno.env.get("KATO_LOGGING_OPERATIONAL_LEVEL");
   const originalAudit = Deno.env.get("KATO_LOGGING_AUDIT_LEVEL");
@@ -268,7 +257,7 @@ Deno.test("runDaemonSubprocess applies log-level env overrides", async () => {
     } else {
       Deno.env.set("KATO_LOGGING_AUDIT_LEVEL", originalAudit);
     }
-    await Deno.remove(runtimeDir, { recursive: true });
+    await removePathIfPresent(runtimeDir);
   }
 });
 
@@ -313,11 +302,7 @@ Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", 
 });
 
 Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state paths", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const rootDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-main-katodir-",
-  });
+  const rootDir = await makeTestTempDir("daemon-main-katodir-");
 
   try {
     const runtimeDir = join(rootDir, "runtime");
@@ -357,6 +342,6 @@ Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state p
       true,
     );
   } finally {
-    await Deno.remove(rootDir, { recursive: true });
+    await removePathIfPresent(rootDir);
   }
 });

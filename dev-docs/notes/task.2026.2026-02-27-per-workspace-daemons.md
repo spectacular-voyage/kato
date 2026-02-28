@@ -2,7 +2,7 @@
 id: 3hcvyoruw53sn36me1xjvfz
 title: 2026 02 27 per Workspace Daemons
 desc: ''
-updated: 1772257805807
+updated: 1772259284723
 created: 1772252011318
 ---
 
@@ -50,21 +50,21 @@ Add the minimum config surface needed to make workspace-local setups practical:
 
 Add two optional runtime-config fields:
 
-- `defaultOutputPath?: string`
+- `defaultOutputDir?: string`
 - `filenameTemplate?: string`
 
 Recommended semantics:
 
-- `defaultOutputPath` is the base directory used when Kato needs to generate a
+- `defaultOutputDir` is the base directory used when Kato needs to generate a
   destination for a pathless command.
 - `filenameTemplate` is the filename pattern used under that directory.
 - If either field is omitted, Kato falls back to the current behavior so older
   configs remain valid.
 
-Recommended default values (to preserve current behavior):
+Recommended default values:
 
-- `defaultOutputPath: ~/.kato/recordings`
-- `filenameTemplate: "{provider}-{shortSessionId}-{YYYY}{MM}{DD}-{HH}{mm}{ss}.md"`
+- `defaultOutputDir: .kato/recordings`
+- `filenameTemplate: "conv.{YYYY}-{MM}-{DD}_{HH}{mm}-{snippetSlug}-{provider}.md"`
 
 ## Config Template For New Workspaces
 
@@ -92,7 +92,7 @@ Important path rule:
 
 - Relative paths in the template should be copied into the new workspace config
   as relative values, not resolved against `~/.kato/` at scaffold time.
-- That way a template value like `defaultOutputPath: dev-docs/notes` remains
+- That way a template value like `defaultOutputDir: dev-docs/notes` remains
   portable and resolves relative to each workspace config after initialization.
 
 ## Filename Template Contract
@@ -128,8 +128,8 @@ Rules:
 
 - Generated paths should resolve as:
   `join(resolvedDefaultOutputDir, renderedFilename)`.
-- If `defaultOutputPath` is absolute, use it directly.
-- If `defaultOutputPath` is relative, resolve it against the config root
+- If `defaultOutputDir` is absolute, use it directly.
+- If `defaultOutputDir` is relative, resolve it against the config root
   (`katoDir` / the directory containing the runtime config), not against the
   daemon process cwd.
 - Explicit relative command arguments should also resolve against that same
@@ -141,13 +141,18 @@ Rules:
   `::export` when a path argument is present but names a directory.
 - The same directory-argument behavior should apply to CLI
   `kato export <session> --output <dir>`.
+- Directory detection rule:
+  - [ ] an existing directory always counts as a directory
+  - [ ] a non-existent path counts as a directory only if the raw argument ends
+    with a path separator
+  - [ ] otherwise, treat it as a file path
 - The final generated path still goes through the existing write-path policy
   gate.
 - `allowedWriteRoots` remains the hard security boundary.
 
 ## Scope
 
-- [ ] Add `defaultOutputPath` and `filenameTemplate` to the runtime config
+- [ ] Add `defaultOutputDir` and `filenameTemplate` to the runtime config
   contract.
 - [ ] Add a global config-template file that `kato init` can use to seed new
   workspace configs.
@@ -171,7 +176,7 @@ Rules:
 - [ ] Update
   [/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/config.ts)
   to add:
-  - [ ] `defaultOutputPath?: string`
+  - [ ] `defaultOutputDir?: string`
   - [ ] `filenameTemplate?: string`
 
 ### 2. Extend runtime config parsing/defaults
@@ -180,8 +185,8 @@ Rules:
   [/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/runtime_config.ts)
   to:
   - [ ] validate both fields as strings when present
-  - [ ] expand `~` for `defaultOutputPath` during load
-  - [ ] resolve/normalize relative `defaultOutputPath` against `katoDir`
+  - [ ] expand `~` for `defaultOutputDir` during load
+  - [ ] resolve/normalize relative `defaultOutputDir` against `katoDir`
   - [ ] preserve home shorthand when generating default config (same style as
     existing path fields)
   - [ ] clone both fields correctly
@@ -208,7 +213,7 @@ Rules:
   - [ ] replace `resolveDefaultRecordingRootDir()`
   - [ ] replace `makeDefaultRecordingDestinationPath(...)`
   - [ ] introduce a config-aware helper that builds the generated destination
-    from `defaultOutputPath` + `filenameTemplate`
+    from `defaultOutputDir` + `filenameTemplate`
   - [ ] use that helper anywhere pathless `::init`, `::record`, `::capture`,
     or `::export` currently falls back to a generated path
   - [ ] generate timestamp pieces from local time, not `toISOString()`
@@ -231,7 +236,7 @@ Rules:
 ### 6. Surface new defaults in `kato init`
 
 - [ ] Ensure the generated config written by `kato init` includes
-  `defaultOutputPath` and `filenameTemplate`.
+  `defaultOutputDir` and `filenameTemplate`.
 - [ ] If the global config template exists, use it to seed the new workspace
   config before writing the file.
 
@@ -242,7 +247,7 @@ Rules:
   - [ ] accept valid values
   - [ ] reject invalid types
   - [ ] preserve backward compatibility when fields are missing
-  - [ ] verify relative `defaultOutputPath` resolves against config location
+  - [ ] verify relative `defaultOutputDir` resolves against config location
   - [ ] verify `filenameTemplate` loads and clones correctly
 - [ ] Update
   [/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts)
@@ -267,6 +272,8 @@ Rules:
     filename
   - [ ] explicit directory-path `::export` uses that directory plus generated
     filename
+  - [ ] non-existent path with trailing separator is treated as a directory
+  - [ ] non-existent path without trailing separator is treated as a file path
   - [ ] filename template rendering uses expected tokens, including
     `snippetSlug`
   - [ ] local-time date-part tokens render correctly
@@ -283,18 +290,21 @@ Rules:
 
 ## Acceptance Criteria
 
-- [ ] A runtime config can define `defaultOutputPath` and
+- [ ] A runtime config can define `defaultOutputDir` and
   `filenameTemplate`.
 - [ ] Pathless `::init`, `::record`, and `::capture` use those defaults instead
   of the current hard-coded `~/.kato/recordings/...` path.
-- [ ] Pathless `::export` uses the same generator and `defaultOutputPath`.
+- [ ] Pathless `::export` uses the same generator and `defaultOutputDir`.
 - [ ] Explicit relative command paths are accepted and resolve against the
   workspace config root.
 - [ ] If an explicit output argument resolves to a directory, that directory is
   used as the output root and the filename is still generated.
 - [ ] CLI `kato export <id> --output <dir>` uses that directory as the output
   root and still generates the filename.
-- [ ] Relative `defaultOutputPath` is resolved against config location, not
+- [ ] Existing directories are treated as directory arguments, and non-existent
+  paths are treated as directory arguments only when the raw input ends with a
+  path separator.
+- [ ] Relative `defaultOutputDir` is resolved against config location, not
   daemon cwd.
 - [ ] `kato init` can seed a new workspace config from a reusable template in
   `~/.kato/kato-config.template.yaml`, when present.
@@ -306,7 +316,7 @@ Rules:
 
 ## Risks and Mitigations
 
-- Risk: `defaultOutputPath` is ambiguous (file path vs directory path).
+- Risk: `defaultOutputDir` is ambiguous (file path vs directory path).
   Mitigation: define it explicitly as a base directory for generated
   destinations.
 - Risk: template surface grows into a mini DSL.
@@ -318,8 +328,8 @@ Rules:
   write-path policy gate on the final path.
 - Risk: directory-path detection may be ambiguous for non-existent targets.
   Mitigation: define the contract explicitly (existing directory always counts
-  as directory; trailing-separator handling may also opt into directory mode if
-  desired).
+  as directory; non-existent path requires a trailing separator to opt into
+  directory mode).
 - Risk: a broken global config template could silently create bad workspace
   configs.
   Mitigation: validate the template before use and fail init clearly on errors.

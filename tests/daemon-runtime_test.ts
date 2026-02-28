@@ -16,6 +16,11 @@ import {
   type SessionSnapshotStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
+import {
+  makeTestTempDir,
+  makeTestTempPath,
+  removePathIfPresent as removeDirIfPresent,
+} from "./test_temp.ts";
 
 function makeEvent(
   id: string,
@@ -65,11 +70,7 @@ async function runPersistentInChatScenario(
     ReturnType<PersistentSessionStateStore["listSessionMetadata"]>
   >;
 }> {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-inchat-redesign-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-inchat-redesign-");
 
   const nowIso = "2026-02-22T10:00:00.000Z";
   let currentStatus: DaemonStatusSnapshot = {
@@ -193,22 +194,7 @@ type ScenarioMetadataList = Awaited<
 >;
 
 async function makeWritableScenarioDir(prefix: string): Promise<string> {
-  const baseDir = join(Deno.cwd(), ".kato", "test-tmp");
-  await Deno.mkdir(baseDir, { recursive: true });
-  return await Deno.makeTempDir({ dir: baseDir, prefix });
-}
-
-async function removeDirIfPresent(path: string | undefined): Promise<void> {
-  if (!path) {
-    return;
-  }
-  try {
-    await Deno.remove(path, { recursive: true });
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
-  }
+  return await makeTestTempDir(prefix);
 }
 
 function makePersistentInChatRecordingPipeline(
@@ -1556,11 +1542,7 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
     ),
   ];
 
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const tempDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-exports-",
-  });
+  const tempDir = await makeTestTempDir("daemon-runtime-exports-");
 
   try {
     await runDaemonRuntimeLoop({
@@ -1742,11 +1724,7 @@ Deno.test("runDaemonRuntimeLoop uses provider-aware session snapshots when avail
 });
 
 Deno.test("runDaemonRuntimeLoop resolves export short session selectors via session state metadata", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-export-resolve-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-export-resolve-");
 
   try {
     const statusStore: DaemonStatusSnapshotStoreLike = {
@@ -2750,11 +2728,7 @@ Deno.test("runDaemonRuntimeLoop omits stale provider snapshots from status.provi
 });
 
 Deno.test("runDaemonRuntimeLoop excludes stale recordings from status.recordings.activeRecordings", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-recording-status-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-recording-status-");
   try {
     const statusHistory: DaemonStatusSnapshot[] = [];
     let currentStatus: DaemonStatusSnapshot = {
@@ -2946,208 +2920,206 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::record commands from newly ing
   const sessionSnapshotStore = new InMemorySessionSnapshotStore({
     now: () => new Date("2026-02-22T10:00:00.000Z"),
   });
-  const inChatCommandDir = join(
-    Deno.cwd(),
-    ".kato",
-    "test-tmp",
-    "in-chat-record-commands",
-  );
+  const inChatCommandDir = makeTestTempPath("in-chat-record-commands-");
   const oldPath = join(inChatCommandDir, "old.md");
   const newPath = join(inChatCommandDir, "new.md");
   await removeDirIfPresent(inChatCommandDir);
   await Deno.mkdir(inChatCommandDir, { recursive: true });
+  try {
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
 
-  let pollCount = 0;
-  const ingestionRunner: ProviderIngestionRunner = {
-    provider: "codex",
-    start() {
-      return Promise.resolve();
-    },
-    poll() {
-      pollCount += 1;
+        const baselineMessage = makeEvent(
+          "m1",
+          "message.user",
+          `::init ${oldPath}\n::record\nold command`,
+          "2026-02-22T09:59:59.000Z",
+        );
+        const newCommandMessage = makeEvent(
+          "m2",
+          "message.user",
+          `::init ${newPath}\n::record\nnew command`,
+          "2026-02-22T10:00:01.000Z",
+        );
+        const assistantReply = makeEvent(
+          "m3",
+          "message.assistant",
+          "recording now",
+          "2026-02-22T10:00:02.000Z",
+        );
 
-      const baselineMessage = makeEvent(
-        "m1",
-        "message.user",
-        `::init ${oldPath}\n::record\nold command`,
-        "2026-02-22T09:59:59.000Z",
-      );
-      const newCommandMessage = makeEvent(
-        "m2",
-        "message.user",
-        `::init ${newPath}\n::record\nnew command`,
-        "2026-02-22T10:00:01.000Z",
-      );
-      const assistantReply = makeEvent(
-        "m3",
-        "message.assistant",
-        "recording now",
-        "2026-02-22T10:00:02.000Z",
-      );
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 10 },
+            events: [baselineMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
 
-      if (pollCount === 1) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 10 },
-          events: [baselineMessage],
-        });
+        if (pollCount === 2) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 20 },
+            events: [baselineMessage, newCommandMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        if (pollCount === 3) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-1",
+            cursor: { kind: "byte-offset", value: 30 },
+            events: [baselineMessage, newCommandMessage, assistantReply],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:02.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
         return Promise.resolve({
           provider: "codex",
-          polledAt: "2026-02-22T10:00:00.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
+          polledAt: "2026-02-22T10:00:03.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
         });
-      }
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
 
-      if (pollCount === 2) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 20 },
-          events: [baselineMessage, newCommandMessage],
-        });
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        if (pollCount >= 3) {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        }
+        return Promise.resolve([]);
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const activatedTargets: string[] = [];
+    const activatedRecordingIds: string[] = [];
+    const appendedMessageIds: string[] = [];
+    let activeRecording = false;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording(input) {
+        activeRecording = true;
+        activatedTargets.push(input.targetPath);
+        const recordingId = input.recordingId ?? "rec-1";
+        activatedRecordingIds.push(recordingId);
+        const nowIso = "2026-02-22T10:00:01.000Z";
         return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:01.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
+          recordingId,
+          provider: input.provider,
+          sessionId: input.sessionId,
+          outputPath: input.targetPath,
+          startedAt: nowIso,
+          lastWriteAt: nowIso,
         });
-      }
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording(input) {
+        if (!activeRecording) {
+          return Promise.resolve({
+            appended: false,
+            deduped: false,
+          });
+        }
 
-      if (pollCount === 3) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
-          cursor: { kind: "byte-offset", value: 30 },
-          events: [baselineMessage, newCommandMessage, assistantReply],
-        });
+        for (const event of input.events) {
+          appendedMessageIds.push(event.eventId);
+        }
         return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:02.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
-        });
-      }
-
-      return Promise.resolve({
-        provider: "codex",
-        polledAt: "2026-02-22T10:00:03.000Z",
-        sessionsUpdated: 0,
-        eventsObserved: 0,
-      });
-    },
-    stop() {
-      return Promise.resolve();
-    },
-  };
-
-  const requests = [{
-    requestId: "req-stop",
-    requestedAt: "2026-02-22T10:00:05.000Z",
-    command: "stop" as const,
-  }];
-  const controlStore: DaemonControlRequestStoreLike = {
-    list() {
-      if (pollCount >= 3) {
-        return Promise.resolve(requests.map((request) => ({ ...request })));
-      }
-      return Promise.resolve([]);
-    },
-    enqueue(_request) {
-      throw new Error("enqueue should not be called in this test");
-    },
-    markProcessed(requestId: string) {
-      const index = requests.findIndex((request) =>
-        request.requestId === requestId
-      );
-      if (index >= 0) {
-        requests.splice(0, index + 1);
-      }
-      return Promise.resolve();
-    },
-  };
-
-  const activatedTargets: string[] = [];
-  const activatedRecordingIds: string[] = [];
-  const appendedMessageIds: string[] = [];
-  let activeRecording = false;
-  const recordingPipeline: RecordingPipelineLike = {
-    activateRecording(input) {
-      activeRecording = true;
-      activatedTargets.push(input.targetPath);
-      const recordingId = input.recordingId ?? "rec-1";
-      activatedRecordingIds.push(recordingId);
-      const nowIso = "2026-02-22T10:00:01.000Z";
-      return Promise.resolve({
-        recordingId,
-        provider: input.provider,
-        sessionId: input.sessionId,
-        outputPath: input.targetPath,
-        startedAt: nowIso,
-        lastWriteAt: nowIso,
-      });
-    },
-    captureSnapshot() {
-      throw new Error("not used");
-    },
-    exportSnapshot() {
-      throw new Error("not used");
-    },
-    appendToActiveRecording(input) {
-      if (!activeRecording) {
-        return Promise.resolve({
-          appended: false,
+          appended: true,
           deduped: false,
         });
-      }
+      },
+      stopRecording() {
+        activeRecording = false;
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: activeRecording ? 1 : 0,
+          destinations: activeRecording ? 1 : 0,
+        };
+      },
+    };
 
-      for (const event of input.events) {
-        appendedMessageIds.push(event.eventId);
-      }
-      return Promise.resolve({
-        appended: true,
-        deduped: false,
-      });
-    },
-    stopRecording() {
-      activeRecording = false;
-      return true;
-    },
-    getActiveRecording() {
-      return undefined;
-    },
-    listActiveRecordings() {
-      return [];
-    },
-    getRecordingSummary() {
-      return {
-        activeRecordings: activeRecording ? 1 : 0,
-        destinations: activeRecording ? 1 : 0,
-      };
-    },
-  };
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
 
-  await runDaemonRuntimeLoop({
-    statusStore,
-    controlStore,
-    recordingPipeline,
-    ingestionRunners: [ingestionRunner],
-    sessionSnapshotStore,
-    now: () => new Date("2026-02-22T10:00:00.000Z"),
-    pid: 4242,
-    heartbeatIntervalMs: 50,
-    pollIntervalMs: 10,
-  });
-
-  assertEquals(activatedTargets, [newPath]);
-  assertEquals(activatedRecordingIds.length, 1);
-  assert(activatedRecordingIds[0].length > 0);
-  assertEquals(appendedMessageIds, ["m2", "m3"]);
-  const newDestinationStat = await Deno.stat(newPath);
-  assert(newDestinationStat.isFile);
-  const newDestinationContent = await Deno.readTextFile(newPath);
-  assert(newDestinationContent.includes(activatedRecordingIds[0]));
+    assertEquals(activatedTargets, [newPath]);
+    assertEquals(activatedRecordingIds.length, 1);
+    assert(activatedRecordingIds[0].length > 0);
+    assertEquals(appendedMessageIds, ["m2", "m3"]);
+    const newDestinationStat = await Deno.stat(newPath);
+    assert(newDestinationStat.isFile);
+    const newDestinationContent = await Deno.readTextFile(newPath);
+    assert(newDestinationContent.includes(activatedRecordingIds[0]));
+  } finally {
+    await removeDirIfPresent(inChatCommandDir);
+  }
 });
 
 Deno.test("runDaemonRuntimeLoop applies in-chat ::capture then activates recording on same path", async () => {
@@ -4247,11 +4219,7 @@ Deno.test("runDaemonRuntimeLoop shuts down cleanly on fatal memory-budget error"
 });
 
 Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-persistent-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-persistent-");
   try {
     const statusHistory: DaemonStatusSnapshot[] = [];
     let currentStatus: DaemonStatusSnapshot = {
@@ -4489,11 +4457,7 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
 });
 
 Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is truncated", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-capture-twin-start-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-capture-twin-start-");
 
   try {
     let currentStatus: DaemonStatusSnapshot = {
@@ -4843,11 +4807,7 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
 });
 
 Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error and leaves state unchanged", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-ambiguous-stop-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-ambiguous-stop-");
   try {
     const sink = new CaptureSink();
     const operationalLogger = new StructuredLogger([sink], {
@@ -5055,11 +5015,7 @@ Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error 
 });
 
 Deno.test("runDaemonRuntimeLoop uses default destination for empty ::record", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-default-destination-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-default-destination-");
   try {
     let currentStatus: DaemonStatusSnapshot = {
       schemaVersion: 1,
@@ -5250,11 +5206,7 @@ Deno.test("runDaemonRuntimeLoop uses default destination for empty ::record", as
 });
 
 Deno.test("runDaemonRuntimeLoop initializes missing session metadata from default cursor", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const stateDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-runtime-default-cursor-",
-  });
+  const stateDir = await makeTestTempDir("daemon-runtime-default-cursor-");
   try {
     let currentStatus: DaemonStatusSnapshot = {
       schemaVersion: 1,

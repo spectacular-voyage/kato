@@ -3,6 +3,7 @@ import {
   DebouncedPathAccumulator,
   watchFsDebounced,
 } from "../apps/daemon/src/mod.ts";
+import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 function createFsEvent(
   kind: Deno.FsEvent["kind"],
@@ -53,11 +54,7 @@ Deno.test("DebouncedPathAccumulator flush returns null with no pending events", 
 });
 
 Deno.test("watchFsDebounced exits promptly when aborted without filesystem events", async () => {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const dir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "watch-abort-",
-  });
+  const dir = await makeTestTempDir("watch-abort-");
 
   try {
     const abortController = new AbortController();
@@ -84,6 +81,6 @@ Deno.test("watchFsDebounced exits promptly when aborted without filesystem event
 
     assertEquals(completed, true);
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await removePathIfPresent(dir);
   }
 });

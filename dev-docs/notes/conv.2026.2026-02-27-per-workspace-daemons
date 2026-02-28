@@ -63,3 +63,40 @@ No tests were run since this was a doc-only edit.
 
 1. If you want, I can make one more pass on the note to lock the non-existent-directory rule (for example: existing dir only vs trailing slash also counts as dir).
 2. If you want to start implementation, the next sensible step is updating the config contract and runtime config loader.
+
+# User_2026-02-27_2203_46
+
+#1 yes.
+
+I will start a new conversation for implementation.
+
+**Locking directory-path rule in docs**
+
+# gpt-5.3-codex_2026-02-27_2203_57
+
+I’m locking the directory-path rule in the task note so implementation has a deterministic contract: existing directory always counts, and a non-existent path counts as a directory only when the user explicitly signals it with a trailing separator.
+
+# gpt-5.3-codex_2026-02-27_2203_59
+
+I’m patching the note now in the path rules, tests, and risk section so the implementation conversation can treat that behavior as settled.
+
+**Verifying nested bullet formatting**
+
+# gpt-5.3-codex_2026-02-27_2204_14
+
+I’m checking the edited section once so the rule reads cleanly and doesn’t conflict with the rest of the task note.
+
+**Summarizing update readiness**
+
+# gpt-5.3-codex_2026-02-27_2204_19
+
+I updated [task.2026.2026-02-27-per-workspace-daemons.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-27-per-workspace-daemons.md) to lock the directory-detection rule.
+
+The note now treats directory arguments as:
+- existing directory: always a directory
+- non-existent path ending with a path separator: directory
+- otherwise: file path
+
+I also reflected that in the tests, acceptance criteria, and risk/mitigation text so the implementation thread can treat it as settled.
+
+No tests were run since this was a doc-only edit.

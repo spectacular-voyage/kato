@@ -10,9 +10,10 @@ import {
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
 } from "../apps/daemon/src/mod.ts";
+import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
 
 function makeSandboxRoot(): string {
-  return join(".kato", "test-runtime-config", crypto.randomUUID());
+  return makeTestTempPath("test-runtime-config-");
 }
 
 Deno.test("RuntimeConfigFileStore initializes missing config atomically", async () => {
@@ -50,7 +51,7 @@ Deno.test("RuntimeConfigFileStore initializes missing config atomically", async 
       false,
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -78,7 +79,7 @@ Deno.test("RuntimeConfigFileStore rejects unsupported schema", async () => {
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -115,7 +116,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid YAML", async () => {
       "invalid YAML",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -147,7 +148,7 @@ Deno.test("RuntimeConfigFileStore supports YAML comments", async () => {
     assertEquals(loaded.runtimeDir, runtimeDir);
     assertEquals(loaded.controlPath, join(runtimeDir, "control.json"));
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -183,7 +184,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
     );
     assertEquals(loaded.katoDir, dirname(runtimeDir));
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -220,7 +221,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", asy
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -256,7 +257,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value type
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -295,7 +296,7 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
       includeConversationEventKinds: true,
     });
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -332,7 +333,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -365,7 +366,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -399,7 +400,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async (
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -433,7 +434,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
     assertEquals(loaded.providerSessionRoots.codex, defaultRoots.codex);
     assertEquals(loaded.providerSessionRoots.gemini, defaultRoots.gemini);
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -466,7 +467,7 @@ Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => 
       auditLevel: "warn",
     });
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -498,7 +499,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
       "unsupported schema",
     );
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -524,7 +525,7 @@ Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () =
     const loaded = await store.load();
     assertEquals(loaded.daemonMaxMemoryMb, 500);
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -551,7 +552,7 @@ Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => 
     const loaded = await store.load();
     assertEquals(loaded.daemonMaxMemoryMb, 512);
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 
@@ -591,7 +592,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid daemonMaxMemoryMb", async () =
       );
     }
   } finally {
-    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await removePathIfPresent(root);
   }
 });
 

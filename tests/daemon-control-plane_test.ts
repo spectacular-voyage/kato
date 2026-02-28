@@ -4,21 +4,12 @@ import {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
 } from "../apps/daemon/src/mod.ts";
+import { withTestTempDir } from "./test_temp.ts";
 
 async function withTempRuntimeDir(
   run: (runtimeDir: string) => Promise<void>,
 ): Promise<void> {
-  await Deno.mkdir(".kato/test-tmp", { recursive: true });
-  const runtimeDir = await Deno.makeTempDir({
-    dir: ".kato/test-tmp",
-    prefix: "daemon-control-plane-",
-  });
-
-  try {
-    await run(runtimeDir);
-  } finally {
-    await Deno.remove(runtimeDir, { recursive: true });
-  }
+  await withTestTempDir("daemon-control-plane-", run);
 }
 
 Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async () => {
