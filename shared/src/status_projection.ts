@@ -49,10 +49,12 @@ export function extractSnippet(
 ): string | undefined {
   for (const ev of events) {
     if (ev.kind === "message.user") {
-      const text = ev.content.replace(/\r?\n|\r/g, " ").trim();
-      if (text.length === 0) continue;
-      if (text.length <= SNIPPET_MAX_CHARS) return text;
-      return text.slice(0, SNIPPET_MAX_CHARS - 1) + "…";
+      const firstLine = ev.content.split(/\r?\n|\r/).find((l) =>
+        l.trim().length > 0
+      )?.trim();
+      if (!firstLine) continue;
+      if (firstLine.length <= SNIPPET_MAX_CHARS) return firstLine;
+      return firstLine.slice(0, SNIPPET_MAX_CHARS - 1) + "…";
     }
   }
   return undefined;

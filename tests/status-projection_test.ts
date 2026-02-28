@@ -75,6 +75,13 @@ Deno.test("extractSnippet returns undefined when all user messages are blank", (
   assertEquals(extractSnippet([makeUserEvent("   ")]), undefined);
 });
 
+Deno.test("extractSnippet returns only the first line of a multi-line message", () => {
+  assertEquals(
+    extractSnippet([makeUserEvent("first line\nsecond line\nthird line")]),
+    "first line",
+  );
+});
+
 // ─── isSessionStale ───────────────────────────────────────────────────────────
 
 Deno.test("isSessionStale returns false for recent timestamp", () => {
