@@ -165,3 +165,58 @@ Deno.test(
     });
   },
 );
+
+Deno.test("PersistentSessionStateStore persists workspace attachments", async () => {
+  await withTempDir("session-state-store-attachment-", async (dir) => {
+    const katoDir = join(dir, ".kato");
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-02-28T10:00:00.000Z"),
+      makeSessionId: () => "session-uuid-attach-1234",
+    });
+
+    const created = await store.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-attach",
+      sourceFilePath: "/tmp/codex-session-attach.jsonl",
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+
+    const updated = structuredClone(created);
+    updated.workspaceAttachment = {
+      attachedAt: "2026-02-28T10:00:00.000Z",
+      sourceConfigPath: `${dir}/workspace/.kato/kato-config.yaml`,
+      workspaceRoot: `${dir}/workspace`,
+      resolvedDefaultOutputDir: `${dir}/workspace/notes`,
+      filenameTemplate: "{provider}-{sessionShortId}.md",
+      writerFeatureFlags: {
+        writerIncludeCommentary: false,
+        writerIncludeThinking: true,
+        writerIncludeToolCalls: false,
+        writerItalicizeUserMessages: true,
+      },
+    };
+
+    await store.saveSessionMetadata(updated, { touchUpdatedAt: true });
+
+    const reloadedStore = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-02-28T10:05:00.000Z"),
+    });
+    const reloaded = (await reloadedStore.listSessionMetadata())[0];
+    assertExists(reloaded);
+    assertExists(reloaded.workspaceAttachment);
+    assertEquals(
+      reloaded.workspaceAttachment.workspaceRoot,
+      `${dir}/workspace`,
+    );
+    assertEquals(
+      reloaded.workspaceAttachment.writerFeatureFlags.writerIncludeCommentary,
+      false,
+    );
+    assertEquals(
+      reloaded.workspaceAttachment.writerFeatureFlags.writerIncludeThinking,
+      true,
+    );
+  });
+});

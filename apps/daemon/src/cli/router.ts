@@ -32,7 +32,10 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
+  runAttachCommand,
+  runAttachmentsCommand,
   runCleanCommand,
+  runDetachCommand,
   runExportCommand,
   runInitCommand,
   runRestartCommand,
@@ -64,11 +67,18 @@ function writeToStream(
 
 export function createDefaultCliRuntime(): DaemonCliRuntime {
   const runtimeDir = resolveDefaultRuntimeDir();
+  let cwdPath: string | undefined;
+  try {
+    cwdPath = Deno.cwd();
+  } catch {
+    cwdPath = undefined;
+  }
   return {
     runtimeDir,
     configPath: resolveDefaultConfigPath(runtimeDir),
     statusPath: resolveDefaultStatusPath(runtimeDir),
     controlPath: resolveDefaultControlPath(runtimeDir),
+    cwdPath,
     now: () => new Date(),
     pid: Deno.pid,
     writeStdout: (text) => writeToStream(Deno.stdout, text),
@@ -289,6 +299,19 @@ export async function runDaemonCli(
           intent.command.all,
           intent.command.live,
         );
+        return 0;
+      case "attach":
+        await runAttachCommand(
+          commandContext,
+          intent.command.sessionId,
+          intent.command.outputPath,
+        );
+        return 0;
+      case "attachments":
+        await runAttachmentsCommand(commandContext, intent.command.all);
+        return 0;
+      case "detach":
+        await runDetachCommand(commandContext, intent.command.sessionId);
         return 0;
       case "export":
         await runExportCommand(

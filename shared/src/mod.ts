@@ -64,6 +64,7 @@ export {
   DAEMON_CONTROL_SCHEMA_VERSION,
   isDaemonControlIndexV1,
   isSessionMetadataV1,
+  isSessionWorkspaceAttachmentV1,
   SESSION_METADATA_SCHEMA_VERSION,
 } from "./contracts/session_state.ts";
 export type {
@@ -74,4 +75,6 @@ export type {
   SessionMetadataV1,
   SessionRecordingPeriodV1,
   SessionRecordingStateV1,
+  SessionWorkspaceAttachmentV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "./contracts/session_state.ts";

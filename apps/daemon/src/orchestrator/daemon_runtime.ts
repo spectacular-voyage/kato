@@ -3,9 +3,11 @@ import type {
   DaemonSessionStatus,
   ProviderStatus,
   SessionMetadataV1,
+  SessionWorkspaceAttachmentV1,
 } from "@kato/shared";
 import {
   extractSnippet,
+  isSessionWorkspaceAttachmentV1,
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
@@ -2600,6 +2602,23 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function readWorkspaceAttachment(
+  value: unknown,
+): SessionWorkspaceAttachmentV1 | undefined {
+  if (!isSessionWorkspaceAttachmentV1(value)) {
+    return undefined;
+  }
+  return structuredClone(value);
+}
+
+async function findSessionMetadataByExactSessionId(
+  sessionId: string,
+  sessionStateStore: PersistentSessionStateStore,
+): Promise<SessionMetadataV1 | undefined> {
+  const metadataList = await sessionStateStore.listSessionMetadata();
+  return metadataList.find((entry) => entry.sessionId === sessionId);
+}
+
 type ExportSessionResolutionMatch =
   | "passthrough"
   | "provider_session_id"
@@ -2784,6 +2803,191 @@ async function handleControlRequest(
       requestedAt: request.requestedAt,
     },
   );
+
+  if (request.command === "attach") {
+    const payload = request.payload;
+    const sessionId = isRecord(payload)
+      ? readString(payload["sessionId"])
+      : undefined;
+    const workspaceAttachment = isRecord(payload)
+      ? readWorkspaceAttachment(payload["workspaceAttachment"])
+      : undefined;
+    const outputPath = isRecord(payload)
+      ? readString(payload["resolvedOutputPath"]) ??
+        readString(payload["outputPath"])
+      : undefined;
+
+    if (!sessionStateStore) {
+      await warnExportSkipped(
+        "daemon.control.attach.unhandled",
+        "Attach request skipped because session state store is unavailable",
+        {
+          requestId: request.requestId,
+          ...(sessionId ? { sessionId } : {}),
+          ...(outputPath ? { outputPath } : {}),
+        },
+        operationalLogger,
+        auditLogger,
+      );
+    } else if (!sessionId || !workspaceAttachment) {
+      await operationalLogger.warn(
+        "daemon.control.attach.invalid",
+        "Attach request payload is missing required fields",
+        { requestId: request.requestId, payload },
+      );
+      await auditLogger.record(
+        "daemon.control.attach.invalid",
+        "Attach request payload is invalid",
+        { requestId: request.requestId },
+      );
+    } else {
+      const metadata = await findSessionMetadataByExactSessionId(
+        sessionId,
+        sessionStateStore,
+      );
+      if (!metadata) {
+        await operationalLogger.warn(
+          "daemon.control.attach.session_missing",
+          "Attach request skipped because session metadata was not found",
+          { requestId: request.requestId, sessionId },
+        );
+        await auditLogger.record(
+          "daemon.control.attach.session_missing",
+          "Attach request skipped because session metadata was not found",
+          { requestId: request.requestId, sessionId },
+        );
+      } else {
+        const nextMetadata = structuredClone(metadata);
+        const previousWorkspaceRoot = nextMetadata.workspaceAttachment
+          ?.workspaceRoot;
+        nextMetadata.workspaceAttachment = workspaceAttachment;
+        if (outputPath) {
+          nextMetadata.primaryRecordingDestination = outputPath;
+        }
+        await sessionStateStore.saveSessionMetadata(nextMetadata, {
+          touchUpdatedAt: true,
+        });
+
+        await operationalLogger.info(
+          "workspace.attach.updated",
+          "Updated session workspace attachment",
+          {
+            requestId: request.requestId,
+            sessionId: nextMetadata.sessionId,
+            provider: nextMetadata.provider,
+            providerSessionId: nextMetadata.providerSessionId,
+            workspaceRoot: workspaceAttachment.workspaceRoot,
+            ...(previousWorkspaceRoot ? { previousWorkspaceRoot } : {}),
+            ...(outputPath ? { outputPath } : {}),
+          },
+        );
+        await auditLogger.record(
+          "workspace.attach.updated",
+          "Session workspace attachment updated",
+          {
+            requestId: request.requestId,
+            sessionId: nextMetadata.sessionId,
+            provider: nextMetadata.provider,
+            providerSessionId: nextMetadata.providerSessionId,
+            workspaceRoot: workspaceAttachment.workspaceRoot,
+            sourceConfigPath: workspaceAttachment.sourceConfigPath,
+            ...(previousWorkspaceRoot ? { previousWorkspaceRoot } : {}),
+            ...(outputPath ? { outputPath } : {}),
+          },
+        );
+      }
+    }
+  }
+
+  if (request.command === "detach") {
+    const payload = request.payload;
+    const sessionId = isRecord(payload)
+      ? readString(payload["sessionId"])
+      : undefined;
+
+    if (!sessionStateStore) {
+      await warnExportSkipped(
+        "daemon.control.detach.unhandled",
+        "Detach request skipped because session state store is unavailable",
+        {
+          requestId: request.requestId,
+          ...(sessionId ? { sessionId } : {}),
+        },
+        operationalLogger,
+        auditLogger,
+      );
+    } else if (!sessionId) {
+      await operationalLogger.warn(
+        "daemon.control.detach.invalid",
+        "Detach request payload is missing required fields",
+        { requestId: request.requestId, payload },
+      );
+      await auditLogger.record(
+        "daemon.control.detach.invalid",
+        "Detach request payload is invalid",
+        { requestId: request.requestId },
+      );
+    } else {
+      const metadata = await findSessionMetadataByExactSessionId(
+        sessionId,
+        sessionStateStore,
+      );
+      if (!metadata) {
+        await operationalLogger.warn(
+          "daemon.control.detach.session_missing",
+          "Detach request skipped because session metadata was not found",
+          { requestId: request.requestId, sessionId },
+        );
+        await auditLogger.record(
+          "daemon.control.detach.session_missing",
+          "Detach request skipped because session metadata was not found",
+          { requestId: request.requestId, sessionId },
+        );
+      } else if (!metadata.workspaceAttachment) {
+        await operationalLogger.info(
+          "workspace.detach.noop",
+          "Detach request skipped because session already uses the default workspace",
+          {
+            requestId: request.requestId,
+            sessionId: metadata.sessionId,
+            provider: metadata.provider,
+            providerSessionId: metadata.providerSessionId,
+          },
+        );
+      } else {
+        const previousWorkspaceRoot =
+          metadata.workspaceAttachment.workspaceRoot;
+        const nextMetadata = structuredClone(metadata);
+        delete nextMetadata.workspaceAttachment;
+        await sessionStateStore.saveSessionMetadata(nextMetadata, {
+          touchUpdatedAt: true,
+        });
+
+        await operationalLogger.info(
+          "workspace.detach.updated",
+          "Cleared session workspace attachment",
+          {
+            requestId: request.requestId,
+            sessionId: nextMetadata.sessionId,
+            provider: nextMetadata.provider,
+            providerSessionId: nextMetadata.providerSessionId,
+            previousWorkspaceRoot,
+          },
+        );
+        await auditLogger.record(
+          "workspace.detach.updated",
+          "Session workspace attachment cleared",
+          {
+            requestId: request.requestId,
+            sessionId: nextMetadata.sessionId,
+            provider: nextMetadata.provider,
+            providerSessionId: nextMetadata.providerSessionId,
+            previousWorkspaceRoot,
+          },
+        );
+      }
+    }
+  }
 
   if (request.command === "export") {
     const payload = request.payload;

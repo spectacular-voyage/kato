@@ -138,6 +138,85 @@ function parseStatus(rest: string[]): DaemonCliIntent {
   };
 }
 
+function parseAttach(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    string: ["output"],
+    alias: {
+      h: "help",
+      o: "output",
+    },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "attach" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length !== 1) {
+    throw new CliUsageError(
+      "Command 'attach' requires exactly one <session-id> positional argument",
+    );
+  }
+
+  const outputPath =
+    typeof parsed.output === "string" && parsed.output.length > 0
+      ? parsed.output
+      : undefined;
+
+  return {
+    kind: "command",
+    command: {
+      name: "attach",
+      sessionId: positionals[0]!,
+      ...(outputPath ? { outputPath } : {}),
+    },
+  };
+}
+
+function parseAttachments(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help", "all"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "attachments" };
+  }
+
+  requireNoPositionals("attachments", toPositionals(parsed));
+  return {
+    kind: "command",
+    command: { name: "attachments", all: parsed.all === true },
+  };
+}
+
+function parseDetach(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "detach" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length !== 1) {
+    throw new CliUsageError(
+      "Command 'detach' requires exactly one <session-id> positional argument",
+    );
+  }
+
+  return {
+    kind: "command",
+    command: {
+      name: "detach",
+      sessionId: positionals[0]!,
+    },
+  };
+}
+
 function parseExport(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
@@ -253,6 +332,9 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
         topic === "restart" ||
         topic === "stop" ||
         topic === "status" ||
+        topic === "attach" ||
+        topic === "attachments" ||
+        topic === "detach" ||
         topic === "export" ||
         topic === "clean"
       ) {
@@ -261,7 +343,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     }
 
     throw new CliUsageError(
-      "Usage: kato help [init|start|restart|stop|status|export|clean]",
+      "Usage: kato help [init|start|restart|stop|status|attach|attachments|detach|export|clean]",
     );
   }
 
@@ -279,6 +361,15 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
   if (commandName === "status") {
     return parseStatus(rest);
+  }
+  if (commandName === "attach") {
+    return parseAttach(rest);
+  }
+  if (commandName === "attachments") {
+    return parseAttachments(rest);
+  }
+  if (commandName === "detach") {
+    return parseDetach(rest);
   }
   if (commandName === "export") {
     return parseExport(rest);

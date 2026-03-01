@@ -722,42 +722,42 @@ Operational implication:
 
 ### 3. Add session attachment state
 
-- [ ] Extend the shared session-state contract with an optional
+- [x] Extend the shared session-state contract with an optional
       `workspaceAttachment` block.
-- [ ] Update the session metadata validator and clone logic.
-- [ ] Keep `workspaceAttachment` as an additive optional field; do not bump the
+- [x] Update the session metadata validator and clone logic.
+- [x] Keep `workspaceAttachment` as an additive optional field; do not bump the
       session-metadata schema version in the first pass.
-- [ ] Persist and reload attachment state in the session-state store.
-- [ ] Include workspace-scoped writer feature flags in the persisted attachment
+- [x] Persist and reload attachment state in the session-state store.
+- [x] Include workspace-scoped writer feature flags in the persisted attachment
       profile.
 
 ### 4. Add attachment control and management
 
-- [ ] Extend the daemon control command union to include `attach` and `detach`.
-- [ ] Add CLI parser/types/usage support for
+- [x] Extend the daemon control command union to include `attach` and `detach`.
+- [x] Add CLI parser/types/usage support for
       `kato attach <session-selector> [--output <path>]`,
       `kato attachments`, and `kato detach <session-selector>`.
-- [ ] Add daemon-side control handling for `attach` and `detach`.
-- [ ] Expose attachment state through a listable surface (`kato attachments`
+- [x] Add daemon-side control handling for `attach` and `detach`.
+- [x] Expose attachment state through a listable surface (`kato attachments`
       and/or status output).
-- [ ] Audit-log attach, re-attach, and detach actions clearly.
+- [x] Audit-log attach, re-attach, and detach actions clearly.
 
 ### 5. Resolve workspace profiles in the CLI
 
-- [ ] Add "nearest ancestor `.kato/kato-config.yaml`" discovery for `attach`.
-- [ ] Fail clearly when no local workspace config exists.
+- [x] Add "nearest ancestor `.kato/kato-config.yaml`" discovery for `attach`.
+- [x] Fail clearly when no local workspace config exists.
 - [ ] Check whether the resolved workspace has a registry entry.
 - [ ] Fail clearly with a `kato workspace register` action when it is not.
-- [ ] Load the workspace config in the CLI.
-- [ ] Treat the workspace config as partial and synthesize it against global
+- [x] Load the workspace config in the CLI.
+- [x] Treat the workspace config as partial and synthesize it against global
       output settings plus built-in defaults.
-- [ ] Extract only the allowed output-shaping fields from that synthesized
+- [x] Extract only the allowed output-shaping fields from that synthesized
       profile.
-- [ ] Extract the supported workspace-scoped writer feature flags from that
+- [x] Extract the supported workspace-scoped writer feature flags from that
       synthesized profile.
-- [ ] Discard daemon-scoped and host-global fields when they appear in a
+- [x] Discard daemon-scoped and host-global fields when they appear in a
       workspace config.
-- [ ] Resolve relative output defaults against that profile's `workspaceRoot`
+- [x] Resolve relative output defaults against that profile's `workspaceRoot`
       before sending them to the daemon.
 
 ### 6. Route recording/export behavior through session attachment
@@ -829,13 +829,13 @@ Writer render lookup changes:
 - [ ] Add CLI/config tests showing `workspace unregister` prunes orphaned
       `allowedWriteRoots` entries while retaining roots still needed by other
       registered workspaces.
-- [ ] Add parser/CLI tests for `attach`.
-- [ ] Add parser/CLI tests for `attachments` and `detach`.
-- [ ] Add control-plane tests for `attach` queueing and handling.
-- [ ] Add control-plane tests for `detach` queueing and handling.
-- [ ] Add control-plane tests showing re-attach audit logs include the previous
+- [x] Add parser/CLI tests for `attach`.
+- [x] Add parser/CLI tests for `attachments` and `detach`.
+- [x] Add control-plane tests for `attach` queueing and handling.
+- [x] Add control-plane tests for `detach` queueing and handling.
+- [x] Add control-plane tests showing re-attach audit logs include the previous
       `workspaceRoot`.
-- [ ] Add session-state tests for persisting/reloading `workspaceAttachment`.
+- [x] Add session-state tests for persisting/reloading `workspaceAttachment`.
 - [ ] Add runtime tests showing registry-file changes add or remove config-file
       watchers without requiring a restart when the daemon already has read
       access.

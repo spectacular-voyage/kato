@@ -7,6 +7,7 @@ import {
   type DaemonStatusSnapshotStoreLike,
   InMemorySessionSnapshotStore,
   type LogRecord,
+  makeDefaultSessionCursor,
   mapConversationEventsToTwin,
   PersistentSessionStateStore,
   type ProviderIngestionRunner,
@@ -1407,6 +1408,352 @@ Deno.test("runDaemonRuntimeLoop processes stop requests and updates status", asy
   assertEquals(last?.daemonRunning, false);
   assertEquals(last?.daemonPid, undefined);
   assertEquals(requests.length, 0);
+});
+
+Deno.test(
+  "runDaemonRuntimeLoop applies attach control requests and logs previous workspace on reattach",
+  async () => {
+    const nowIso = "2026-02-22T10:00:00.000Z";
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: nowIso,
+      heartbeatAt: nowIso,
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    const stateDir = await makeTestTempDir("daemon-runtime-attach-control-");
+    try {
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date(nowIso),
+        makeSessionId: () => "kato-session-attach-control-1234",
+      });
+      const created = await sessionStateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-session-1",
+        sourceFilePath: join(stateDir, "provider-session-1.jsonl"),
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const preattached = structuredClone(created);
+      preattached.workspaceAttachment = {
+        attachedAt: "2026-02-22T09:55:00.000Z",
+        sourceConfigPath: "/old/workspace/.kato/kato-config.yaml",
+        workspaceRoot: "/old/workspace",
+        resolvedDefaultOutputDir: "/old/workspace/out",
+        filenameTemplate: "{provider}-{sessionShortId}.md",
+        writerFeatureFlags: {
+          writerIncludeCommentary: true,
+          writerIncludeThinking: true,
+          writerIncludeToolCalls: true,
+          writerItalicizeUserMessages: false,
+        },
+      };
+      await sessionStateStore.saveSessionMetadata(preattached, {
+        touchUpdatedAt: true,
+      });
+
+      const requests = [
+        {
+          requestId: "req-attach",
+          requestedAt: nowIso,
+          command: "attach" as const,
+          payload: {
+            sessionId: created.sessionId,
+            resolvedOutputPath: "/new/workspace/out/session.md",
+            workspaceAttachment: {
+              attachedAt: nowIso,
+              sourceConfigPath: "/new/workspace/.kato/kato-config.yaml",
+              workspaceRoot: "/new/workspace",
+              resolvedDefaultOutputDir: "/new/workspace/out",
+              filenameTemplate: "{provider}-{sessionShortId}.md",
+              writerFeatureFlags: {
+                writerIncludeCommentary: false,
+                writerIncludeThinking: true,
+                writerIncludeToolCalls: false,
+                writerItalicizeUserMessages: true,
+              },
+            },
+          },
+        },
+        {
+          requestId: "req-stop",
+          requestedAt: "2026-02-22T10:00:01.000Z",
+          command: "stop" as const,
+        },
+      ];
+      const controlStore: DaemonControlRequestStoreLike = {
+        list() {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        },
+        enqueue(_request) {
+          throw new Error("enqueue should not be called in this test");
+        },
+        markProcessed(requestId: string) {
+          const index = requests.findIndex((request) =>
+            request.requestId === requestId
+          );
+          if (index >= 0) {
+            requests.splice(0, index + 1);
+          }
+          return Promise.resolve();
+        },
+      };
+
+      const operationalSink = new CaptureSink();
+      const auditSink = new CaptureSink();
+      const operationalLogger = new StructuredLogger([operationalSink], {
+        channel: "operational",
+        minLevel: "info",
+        now: () => new Date(nowIso),
+      });
+      const auditLogger = new AuditLogger(
+        new StructuredLogger([auditSink], {
+          channel: "security-audit",
+          minLevel: "info",
+          now: () => new Date(nowIso),
+        }),
+      );
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        sessionStateStore,
+        operationalLogger,
+        auditLogger,
+        now: () => new Date(nowIso),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+      });
+
+      const attached = (await sessionStateStore.listSessionMetadata())[0];
+      assertExists(attached);
+      assertExists(attached.workspaceAttachment);
+      assertEquals(
+        attached.workspaceAttachment.workspaceRoot,
+        "/new/workspace",
+      );
+      assertEquals(
+        attached.primaryRecordingDestination,
+        "/new/workspace/out/session.md",
+      );
+
+      const auditRecord = auditSink.records.find((record) =>
+        record.event === "workspace.attach.updated"
+      );
+      assertExists(auditRecord);
+      assertEquals(
+        auditRecord.attributes?.previousWorkspaceRoot,
+        "/old/workspace",
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test("runDaemonRuntimeLoop applies detach control requests", async () => {
+  const nowIso = "2026-02-22T10:00:00.000Z";
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: nowIso,
+    heartbeatAt: nowIso,
+    daemonRunning: false,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+      };
+      return Promise.resolve();
+    },
+  };
+
+  const recordingPipeline: RecordingPipelineLike = {
+    activateRecording() {
+      throw new Error("not used");
+    },
+    captureSnapshot() {
+      throw new Error("not used");
+    },
+    exportSnapshot() {
+      throw new Error("not used");
+    },
+    appendToActiveRecording() {
+      throw new Error("not used");
+    },
+    stopRecording() {
+      return true;
+    },
+    getActiveRecording() {
+      return undefined;
+    },
+    listActiveRecordings() {
+      return [];
+    },
+    getRecordingSummary() {
+      return {
+        activeRecordings: 0,
+        destinations: 0,
+      };
+    },
+  };
+
+  const stateDir = await makeTestTempDir("daemon-runtime-detach-control-");
+  try {
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date(nowIso),
+      makeSessionId: () => "kato-session-detach-control-1234",
+    });
+    const created = await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "provider-session-1",
+      sourceFilePath: join(stateDir, "provider-session-1.jsonl"),
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+    const preattached = structuredClone(created);
+    preattached.primaryRecordingDestination = "/workspace/out/session.md";
+    preattached.workspaceAttachment = {
+      attachedAt: "2026-02-22T09:55:00.000Z",
+      sourceConfigPath: "/workspace/.kato/kato-config.yaml",
+      workspaceRoot: "/workspace",
+      resolvedDefaultOutputDir: "/workspace/out",
+      filenameTemplate: "{provider}-{sessionShortId}.md",
+      writerFeatureFlags: {
+        writerIncludeCommentary: true,
+        writerIncludeThinking: true,
+        writerIncludeToolCalls: true,
+        writerItalicizeUserMessages: false,
+      },
+    };
+    await sessionStateStore.saveSessionMetadata(preattached, {
+      touchUpdatedAt: true,
+    });
+
+    const requests = [
+      {
+        requestId: "req-detach",
+        requestedAt: nowIso,
+        command: "detach" as const,
+        payload: {
+          sessionId: created.sessionId,
+        },
+      },
+      {
+        requestId: "req-stop",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "stop" as const,
+      },
+    ];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionStateStore,
+      now: () => new Date(nowIso),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    const detached = (await sessionStateStore.listSessionMetadata())[0];
+    assertExists(detached);
+    assertEquals(detached.workspaceAttachment, undefined);
+    assertEquals(
+      detached.primaryRecordingDestination,
+      "/workspace/out/session.md",
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
 });
 
 Deno.test("runDaemonRuntimeLoop routes export requests through recording pipeline", async () => {

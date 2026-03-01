@@ -16,7 +16,13 @@ const CONTROL_SCHEMA_VERSION = 1;
 const MAX_CONTROL_QUEUE_LENGTH = 10_000;
 const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 30_000;
 
-export type DaemonControlCommand = "start" | "stop" | "export" | "clean";
+export type DaemonControlCommand =
+  | "start"
+  | "stop"
+  | "attach"
+  | "detach"
+  | "export"
+  | "clean";
 
 export interface DaemonControlRequestDraft {
   command: DaemonControlCommand;
@@ -142,6 +148,8 @@ function isDaemonControlRequest(value: unknown): value is DaemonControlRequest {
   if (
     command !== "start" &&
     command !== "stop" &&
+    command !== "attach" &&
+    command !== "detach" &&
     command !== "export" &&
     command !== "clean"
   ) {

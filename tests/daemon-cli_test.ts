@@ -1,10 +1,11 @@
 import {
   assertEquals,
+  assertExists,
   assertRejects,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { dirname } from "@std/path";
+import { dirname, join } from "@std/path";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
@@ -15,7 +16,9 @@ import {
   type DaemonControlRequestStoreLike,
   type DaemonProcessLauncherLike,
   type DaemonStatusSnapshotStoreLike,
+  makeDefaultSessionCursor,
   parseDaemonCliArgs,
+  PersistentSessionStateStore,
   runDaemonCli,
   type RuntimeConfigStoreLike,
   type WritePathPolicyGateLike,
@@ -34,6 +37,7 @@ function makeRuntimeHarness(runtimeDir: string) {
       configPath: `${runtimeDir}/kato-config.yaml`,
       statusPath: `${runtimeDir}/status.json`,
       controlPath: `${runtimeDir}/control.json`,
+      cwdPath: runtimeDir,
       now: () => new Date("2026-02-22T10:00:00.000Z"),
       pid: 4242,
       writeStdout: (text: string) => {
@@ -373,6 +377,37 @@ Deno.test("cli parser accepts restart", () => {
   }
 
   assertEquals(parsed.command.name, "restart");
+});
+
+Deno.test("cli parser accepts attach, attachments, and detach", () => {
+  const attach = parseDaemonCliArgs([
+    "attach",
+    "abc12345",
+    "--output",
+    "notes/",
+  ]);
+  assertEquals(attach.kind, "command");
+  if (attach.kind !== "command" || attach.command.name !== "attach") {
+    throw new Error("expected attach command");
+  }
+  assertEquals(attach.command.sessionId, "abc12345");
+  assertEquals(attach.command.outputPath, "notes/");
+
+  const attachments = parseDaemonCliArgs(["attachments", "--all"]);
+  assertEquals(attachments.kind, "command");
+  if (
+    attachments.kind !== "command" || attachments.command.name !== "attachments"
+  ) {
+    throw new Error("expected attachments command");
+  }
+  assertEquals(attachments.command.all, true);
+
+  const detach = parseDaemonCliArgs(["detach", "abc12345"]);
+  assertEquals(detach.kind, "command");
+  if (detach.kind !== "command" || detach.command.name !== "detach") {
+    throw new Error("expected detach command");
+  }
+  assertEquals(detach.command.sessionId, "abc12345");
 });
 
 Deno.test("runDaemonCli prints version without loading config", async () => {
@@ -1113,3 +1148,169 @@ Deno.test("runDaemonCli returns usage error code for unknown flag", async () => 
   assertEquals(code, 2);
   assertStringIncludes(harness.stderr.join(""), "Unknown flag");
 });
+
+Deno.test(
+  "runDaemonCli queues attach and detach requests while attachments reads persisted state",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-attach-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const workspaceDir = join(tempDir, "workspace");
+      const workspaceConfigDir = join(workspaceDir, ".kato");
+      const notesDir = join(workspaceDir, "notes");
+      await Deno.mkdir(workspaceConfigDir, { recursive: true });
+      await Deno.mkdir(notesDir, { recursive: true });
+      await Deno.writeTextFile(
+        join(workspaceConfigDir, "kato-config.yaml"),
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}-{sessionShortId}.md"',
+          "featureFlags:",
+          "  writerIncludeCommentary: false",
+        ].join("\n") + "\n",
+      );
+
+      const runtimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [workspaceDir, katoDir],
+      };
+      const { store: configStore } = makeInMemoryConfigStore(runtimeConfig);
+      const statusStore = makeInMemoryStatusStore();
+      const controlStore = makeInMemoryControlStore();
+      const pathPolicyGate: WritePathPolicyGateLike = {
+        evaluateWritePath(targetPath: string) {
+          return Promise.resolve({
+            decision: "allow",
+            targetPath,
+            reason: "allowed-for-test",
+            canonicalTargetPath: targetPath,
+          });
+        },
+      };
+
+      const sessionStateStore = new PersistentSessionStateStore({ katoDir });
+      const created = await sessionStateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-session-1",
+        sourceFilePath: join(tempDir, "provider-session-1.jsonl"),
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const selector = created.sessionId.slice(0, 8);
+
+      const attachHarness = makeRuntimeHarness(runtimeDir);
+      attachHarness.runtime.cwdPath = workspaceDir;
+      const attachCode = await runDaemonCli(
+        ["attach", selector, "--output", "notes/"],
+        {
+          runtime: attachHarness.runtime,
+          defaultRuntimeConfig: runtimeConfig,
+          configStore,
+          statusStore,
+          controlStore: controlStore.store,
+          pathPolicyGate,
+        },
+      );
+
+      assertEquals(attachCode, 0);
+      assertStringIncludes(
+        attachHarness.stdout.join(""),
+        "attach request queued: session=codex/",
+      );
+
+      assertEquals(controlStore.requests.length, 1);
+      assertEquals(controlStore.requests[0]?.command, "attach");
+      assertEquals(
+        controlStore.requests[0]?.payload?.["sessionId"],
+        created.sessionId,
+      );
+      assertEquals(
+        controlStore.requests[0]?.payload?.["resolvedOutputPath"],
+        join(notesDir, `codex-${created.sessionId.slice(0, 8)}.md`),
+      );
+
+      const afterAttachQueue =
+        (await sessionStateStore.listSessionMetadata())[0];
+      assertExists(afterAttachQueue);
+      assertEquals(afterAttachQueue.workspaceAttachment, undefined);
+
+      const simulatedAttached = structuredClone(afterAttachQueue);
+      simulatedAttached.workspaceAttachment = {
+        attachedAt: "2026-02-22T10:00:00.000Z",
+        sourceConfigPath: join(workspaceConfigDir, "kato-config.yaml"),
+        workspaceRoot: workspaceDir,
+        resolvedDefaultOutputDir: notesDir,
+        filenameTemplate: "{provider}-{sessionShortId}.md",
+        writerFeatureFlags: {
+          writerIncludeCommentary: false,
+          writerIncludeThinking: true,
+          writerIncludeToolCalls: true,
+          writerItalicizeUserMessages: false,
+        },
+      };
+      simulatedAttached.primaryRecordingDestination = join(
+        notesDir,
+        `codex-${created.sessionId.slice(0, 8)}.md`,
+      );
+      await sessionStateStore.saveSessionMetadata(simulatedAttached, {
+        touchUpdatedAt: true,
+      });
+
+      const listHarness = makeRuntimeHarness(runtimeDir);
+      const listCode = await runDaemonCli(["attachments"], {
+        runtime: listHarness.runtime,
+        defaultRuntimeConfig: runtimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+      assertEquals(listCode, 0);
+      assertStringIncludes(listHarness.stdout.join(""), "[attached]");
+      assertStringIncludes(listHarness.stdout.join(""), workspaceDir);
+
+      const detachHarness = makeRuntimeHarness(runtimeDir);
+      const detachCode = await runDaemonCli(["detach", selector], {
+        runtime: detachHarness.runtime,
+        defaultRuntimeConfig: runtimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+      assertEquals(detachCode, 0);
+      assertStringIncludes(
+        detachHarness.stdout.join(""),
+        "detach request queued: session=codex/",
+      );
+
+      assertEquals(controlStore.requests.length, 2);
+      assertEquals(controlStore.requests[1]?.command, "detach");
+      assertEquals(
+        controlStore.requests[1]?.payload?.["sessionId"],
+        created.sessionId,
+      );
+
+      const simulatedDetached = structuredClone(
+        (await sessionStateStore.listSessionMetadata())[0],
+      );
+      assertExists(simulatedDetached);
+      delete simulatedDetached.workspaceAttachment;
+      await sessionStateStore.saveSessionMetadata(simulatedDetached, {
+        touchUpdatedAt: true,
+      });
+
+      const listAllHarness = makeRuntimeHarness(runtimeDir);
+      const listAllCode = await runDaemonCli(["attachments", "--all"], {
+        runtime: listAllHarness.runtime,
+        defaultRuntimeConfig: runtimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+      assertEquals(listAllCode, 0);
+      assertStringIncludes(listAllHarness.stdout.join(""), "[default]");
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);

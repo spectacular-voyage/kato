@@ -28,6 +28,22 @@ export interface SessionIngestAnchorV1 {
   payloadHash?: string;
 }
 
+export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
+  writerIncludeCommentary: boolean;
+  writerIncludeThinking: boolean;
+  writerIncludeToolCalls: boolean;
+  writerItalicizeUserMessages: boolean;
+}
+
+export interface SessionWorkspaceAttachmentV1 {
+  attachedAt: string;
+  sourceConfigPath?: string;
+  workspaceRoot: string;
+  resolvedDefaultOutputDir: string;
+  filenameTemplate: string;
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+}
+
 export interface SessionMetadataV1 {
   schemaVersion: typeof SESSION_METADATA_SCHEMA_VERSION;
   sessionKey: string;
@@ -45,6 +61,7 @@ export interface SessionMetadataV1 {
   recentFingerprints: string[];
   commandCursor?: number;
   primaryRecordingDestination?: string;
+  workspaceAttachment?: SessionWorkspaceAttachmentV1;
   recordings: SessionRecordingStateV1[];
 }
 
@@ -171,6 +188,44 @@ function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
   return true;
 }
 
+function isWorkspaceAttachmentWriterFeatureFlags(
+  value: unknown,
+): value is SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value["writerIncludeCommentary"] === "boolean" &&
+    typeof value["writerIncludeThinking"] === "boolean" &&
+    typeof value["writerIncludeToolCalls"] === "boolean" &&
+    typeof value["writerItalicizeUserMessages"] === "boolean";
+}
+
+export function isSessionWorkspaceAttachmentV1(
+  value: unknown,
+): value is SessionWorkspaceAttachmentV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    !isNonEmptyString(value["attachedAt"]) ||
+    !isNonEmptyString(value["workspaceRoot"]) ||
+    !isNonEmptyString(value["resolvedDefaultOutputDir"]) ||
+    !isNonEmptyString(value["filenameTemplate"])
+  ) {
+    return false;
+  }
+  if (
+    value["sourceConfigPath"] !== undefined &&
+    !isNonEmptyString(value["sourceConfigPath"])
+  ) {
+    return false;
+  }
+  if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
+    return false;
+  }
+  return true;
+}
+
 export function isSessionMetadataV1(
   value: unknown,
 ): value is SessionMetadataV1 {
@@ -244,6 +299,12 @@ export function isSessionMetadataV1(
   if (
     value["primaryRecordingDestination"] !== undefined &&
     !isNonEmptyString(value["primaryRecordingDestination"])
+  ) {
+    return false;
+  }
+  if (
+    value["workspaceAttachment"] !== undefined &&
+    !isSessionWorkspaceAttachmentV1(value["workspaceAttachment"])
   ) {
     return false;
   }

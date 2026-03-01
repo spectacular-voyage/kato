@@ -81,26 +81,38 @@ Deno.test("DaemonControlRequestFileStore appends and lists requests", async () =
       command: "stop",
       payload: { requestedByPid: 2222 },
     });
+    const attachRequest = await store.enqueue({
+      command: "attach",
+      payload: { sessionId: "session-1" },
+    });
+    const detachRequest = await store.enqueue({
+      command: "detach",
+      payload: { sessionId: "session-1" },
+    });
 
     assertEquals(startRequest.requestId, "req-1");
     assertEquals(stopRequest.requestId, "req-2");
+    assertEquals(attachRequest.requestId, "req-3");
+    assertEquals(detachRequest.requestId, "req-4");
     assertEquals(startRequest.requestedAt, "2026-02-22T12:15:00.000Z");
 
     const listed = await store.list();
-    assertEquals(listed.length, 2);
+    assertEquals(listed.length, 4);
     assertEquals(listed[0]?.command, "start");
     assertEquals(listed[1]?.command, "stop");
+    assertEquals(listed[2]?.command, "attach");
+    assertEquals(listed[3]?.command, "detach");
 
     const raw = JSON.parse(await Deno.readTextFile(controlPath)) as {
       requests?: unknown[];
     };
     assertExists(raw.requests);
-    assertEquals(raw.requests.length, 2);
+    assertEquals(raw.requests.length, 4);
 
-    await store.markProcessed("req-1");
+    await store.markProcessed("req-2");
     const afterFirstProcess = await store.list();
-    assertEquals(afterFirstProcess.length, 1);
-    assertEquals(afterFirstProcess[0]?.requestId, "req-2");
+    assertEquals(afterFirstProcess.length, 2);
+    assertEquals(afterFirstProcess[0]?.requestId, "req-3");
   });
 });
 

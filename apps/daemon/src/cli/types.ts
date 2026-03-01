@@ -6,6 +6,9 @@ export type DaemonCliCommandName =
   | "restart"
   | "stop"
   | "status"
+  | "attach"
+  | "attachments"
+  | "detach"
   | "export"
   | "clean";
 
@@ -15,6 +18,16 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
+  | {
+    name: "attach";
+    sessionId: string;
+    outputPath?: string;
+  }
+  | { name: "attachments"; all: boolean }
+  | {
+    name: "detach";
+    sessionId: string;
+  }
   | {
     name: "export";
     sessionId: string;
@@ -39,6 +52,7 @@ export interface DaemonCliRuntime {
   configPath: string;
   statusPath: string;
   controlPath: string;
+  cwdPath?: string;
   allowedWriteRoots?: string[];
   providerSessionRoots?: ProviderSessionRoots;
   now: () => Date;

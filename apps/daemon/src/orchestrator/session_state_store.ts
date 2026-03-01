@@ -134,6 +134,25 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.primaryRecordingDestination !== undefined
       ? { primaryRecordingDestination: metadata.primaryRecordingDestination }
       : {}),
+    ...(metadata.workspaceAttachment
+      ? {
+        workspaceAttachment: {
+          attachedAt: metadata.workspaceAttachment.attachedAt,
+          ...(metadata.workspaceAttachment.sourceConfigPath
+            ? {
+              sourceConfigPath: metadata.workspaceAttachment.sourceConfigPath,
+            }
+            : {}),
+          workspaceRoot: metadata.workspaceAttachment.workspaceRoot,
+          resolvedDefaultOutputDir:
+            metadata.workspaceAttachment.resolvedDefaultOutputDir,
+          filenameTemplate: metadata.workspaceAttachment.filenameTemplate,
+          writerFeatureFlags: {
+            ...metadata.workspaceAttachment.writerFeatureFlags,
+          },
+        },
+      }
+      : {}),
     recordings: metadata.recordings.map((recording) => ({
       recordingId: recording.recordingId,
       destination: recording.destination,
