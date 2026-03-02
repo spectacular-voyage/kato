@@ -1,8 +1,8 @@
 export { type CleanCommandOptions, runCleanCommand } from "./clean.ts";
 export { runExportCommand } from "./export.ts";
 export {
-  ensureGlobalConfigInitialized,
   type EnsureGlobalConfigInitializationResult,
+  ensureGlobalConfigInitialized,
   runInitCommand,
 } from "./init.ts";
 export { runRestartCommand } from "./restart.ts";

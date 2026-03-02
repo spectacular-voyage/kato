@@ -42,6 +42,9 @@ export async function runWorkspaceRegisterCommand(
   const existingByAlias = entries.find((entry) =>
     entry.alias === requestedAlias
   );
+  const existingByWorkspaceIdAlias = entries.find((entry) =>
+    entry.workspaceId === requestedAlias
+  );
   const existingByWorkspaceId = configuredWorkspaceId
     ? entries.find((entry) => entry.workspaceId === configuredWorkspaceId)
     : undefined;
@@ -60,6 +63,10 @@ export async function runWorkspaceRegisterCommand(
     );
   }
   const existingWorkspace = existingByWorkspaceId ?? existingByRoot;
+
+  if (existingByWorkspaceIdAlias) {
+    throw new Error(`Workspace alias already registered: ${requestedAlias}`);
+  }
 
   if (
     existingByAlias &&

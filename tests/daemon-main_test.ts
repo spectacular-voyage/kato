@@ -4,6 +4,7 @@ import type { RuntimeConfig } from "@kato/shared";
 import {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  DEFAULT_WORKSPACE_REGISTRY_FILENAME,
   runDaemonSubprocess,
   type RunDaemonSubprocessOptions,
   type RuntimeConfigStoreLike,
@@ -343,6 +344,44 @@ Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state p
       observedMetadataPaths[0]?.startsWith(join(explicitKatoDir, "sessions")),
       true,
     );
+  } finally {
+    await removePathIfPresent(rootDir);
+  }
+});
+
+Deno.test("runDaemonSubprocess falls back to runtimeDir parent when runtimeConfig.katoDir is empty", async () => {
+  const rootDir = await makeTestTempDir("daemon-main-empty-katodir-");
+
+  try {
+    const runtimeDir = join(rootDir, "runtime");
+    const config = makeRuntimeConfig(runtimeDir);
+    config.katoDir = "";
+    const configStore: RuntimeConfigStoreLike = {
+      load() {
+        return Promise.resolve(config);
+      },
+      ensureInitialized() {
+        throw new Error("not used");
+      },
+    };
+
+    const exitCode = await runDaemonSubprocess({
+      configStore,
+      runtimeLoop(options = {}) {
+        if (!options.workspaceRegistryStore) {
+          throw new Error("workspaceRegistryStore should be defined");
+        }
+        return options.workspaceRegistryStore.save([]);
+      },
+    });
+
+    assertEquals(exitCode, 0);
+    const fallbackRegistryPath = join(
+      rootDir,
+      DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+    );
+    const stat = await Deno.stat(fallbackRegistryPath);
+    assertEquals(stat.isFile, true);
   } finally {
     await removePathIfPresent(rootDir);
   }

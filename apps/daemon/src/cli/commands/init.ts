@@ -26,8 +26,8 @@ export async function ensureGlobalConfigInitialized(
   const defaultWorkspaceConfigStore = new DefaultWorkspaceConfigFileStore(
     resolveDefaultWorkspaceTemplateConfigPath(options.runtimeConfigPath),
   );
-  const defaultWorkspaceResult =
-    await defaultWorkspaceConfigStore.ensureInitialized();
+  const defaultWorkspaceResult = await defaultWorkspaceConfigStore
+    .ensureInitialized();
 
   return {
     runtimeConfigCreated: runtimeResult.created,

@@ -69,7 +69,7 @@ function makeInMemoryWorkspaceRegistryStore(
 }
 
 Deno.test(
-  "WorkspaceCatalog applies new entries and removals live but defers existing alias mutations",
+  "WorkspaceCatalog applies new entries, alias mutations, and removals live",
   async () => {
     const first = makeWorkspace({
       workspaceId: "ws-1",
@@ -100,10 +100,10 @@ Deno.test(
       second,
     ]);
 
-    const stillOldAlias = await catalog.getByAlias("My.Proj");
-    assertExists(stillOldAlias);
-    assertEquals(stillOldAlias.alias, "My.Proj");
-    assertEquals(await catalog.getByAlias("Renamed.Proj"), undefined);
+    assertEquals(await catalog.getByAlias("My.Proj"), undefined);
+    const renamed = await catalog.getByAlias("Renamed.Proj");
+    assertExists(renamed);
+    assertEquals(renamed.alias, "Renamed.Proj");
 
     const liveSecond = await catalog.getByAlias("New.Proj");
     assertExists(liveSecond);
@@ -157,7 +157,8 @@ Deno.test(
         true,
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      const firstStat = await Deno.stat(configPath);
+      const firstMtimeMs = firstStat.mtime?.getTime() ?? Date.now();
       await Deno.writeTextFile(
         configPath,
         [
@@ -167,6 +168,11 @@ Deno.test(
           "  writerIncludeCommentary: false",
         ].join("\n") + "\n",
       );
+      await Deno.utime(
+        configPath,
+        firstStat.atime ?? new Date(firstMtimeMs),
+        new Date(firstMtimeMs + 1_000),
+      );
 
       const second = await resolver.resolveForCommand(workspace);
       assertEquals(
@@ -175,6 +181,53 @@ Deno.test(
       );
       assertEquals(second.filenameTemplate, "{provider}.md");
       assertEquals(second.writerFeatureFlags.writerIncludeCommentary, false);
+    });
+  },
+);
+
+Deno.test(
+  "WorkspaceProfileResolver refreshes alias and workspaceRoot when entry metadata changes",
+  async () => {
+    await withTestTempDir("workspace-profile-metadata-", async (tempDir) => {
+      const workspaceRoot = join(tempDir, "My.Proj");
+      const configPath = join(
+        workspaceRoot,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}.md"',
+        ].join("\n") + "\n",
+      );
+
+      const workspace = makeWorkspace({
+        workspaceId: "ws-1",
+        alias: "My.Proj",
+        workspaceRoot,
+        configPath,
+      });
+      const resolver = new WorkspaceProfileResolver();
+
+      const first = await resolver.resolveForCommand(workspace);
+      assertEquals(first.alias, "My.Proj");
+      assertEquals(first.workspaceRoot, workspaceRoot);
+      assertEquals(
+        first.resolvedDefaultOutputDir,
+        join(workspaceRoot, "notes"),
+      );
+
+      const renamedRoot = join(tempDir, "Renamed.Proj");
+      const second = await resolver.resolveForCommand({
+        ...workspace,
+        alias: "Renamed.Proj",
+        workspaceRoot: renamedRoot,
+      });
+      assertEquals(second.alias, "Renamed.Proj");
+      assertEquals(second.workspaceRoot, renamedRoot);
+      assertEquals(second.resolvedDefaultOutputDir, join(renamedRoot, "notes"));
     });
   },
 );

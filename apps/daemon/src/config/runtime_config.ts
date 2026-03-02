@@ -561,11 +561,15 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     return undefined;
   }
 
-  const daemonFeatureFlags = parseDaemonFeatureFlags(value["daemonFeatureFlags"]);
+  const daemonFeatureFlags = parseDaemonFeatureFlags(
+    value["daemonFeatureFlags"],
+  );
   if (!daemonFeatureFlags) {
     return undefined;
   }
-  const exportFeatureFlags = parseExportFeatureFlags(value["exportFeatureFlags"]);
+  const exportFeatureFlags = parseExportFeatureFlags(
+    value["exportFeatureFlags"],
+  );
   if (!exportFeatureFlags) {
     return undefined;
   }

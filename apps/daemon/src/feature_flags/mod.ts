@@ -1,6 +1,6 @@
 export type {
-  DaemonFeatureSettings,
   DaemonFeatureFlagKey,
+  DaemonFeatureSettings,
   OpenFeatureBooleanProviderLike,
   OpenFeatureEvaluationContext,
 } from "./openfeature.ts";

@@ -37,12 +37,15 @@ import { WritePathPolicyGate } from "./policy/mod.ts";
 import { readOptionalEnv, resolveHomeDir } from "./utils/env.ts";
 import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import {
-  resolveDefaultWorkspaceRegistryPath,
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
+  resolveDefaultWorkspaceRegistryPath,
   WorkspaceRegistryFileStore,
 } from "./workspace/mod.ts";
-import { type RecordingOutputOverrides, RecordingPipeline } from "./writer/mod.ts";
+import {
+  type RecordingOutputOverrides,
+  RecordingPipeline,
+} from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
   runtimeDir?: string;
@@ -314,7 +317,7 @@ export async function runDaemonSubprocess(
       }),
       workspaceRegistryStore: new WorkspaceRegistryFileStore(
         resolveDefaultWorkspaceRegistryPath(
-          runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir),
+          katoDir,
         ),
       ),
       operationalLogger,

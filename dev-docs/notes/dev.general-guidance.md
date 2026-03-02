@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772421669877
+updated: 1772437617823
 created: 1771724621833
 ---
 
@@ -14,12 +14,17 @@ IMPORTANT: This project must use modern Deno best practices and, whenever
 possible, Deno-native or Deno-first libraries. LLMs often try to use Node
 libraries and conventions, so watch out for that.
 
+## Testing
+
+see [[dev.testing]]
+
 ## Working Rules
 
 - Documentation must be continuously verified and updated, especially:
   - this file [[dev.general-guidance]]
   - [[dev.codebase-overview]]
   - [[dev.decision-log]]
+  - [[dev.testing]]
 - Keep changes small, reviewable, and test-backed.
 - Run `deno task ci` before opening or updating a PR.
 - Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not
@@ -38,7 +43,7 @@ libraries and conventions, so watch out for that.
 
 ## Task notes
 
-Before start new implementation, a task node should be written and refined. Task notes live in `dev-docs/notes/`. Individual "To-Do" items should be includes in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
+Before start new implementation, a task note should be written and refined. Task notes live in `dev-docs/notes/`. Individual "To-Do" items should be included in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
 
 Sections should include
 - Goal

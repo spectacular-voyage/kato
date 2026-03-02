@@ -36,6 +36,10 @@ interface ConversationEventBase {
   eventId: string;
   provider: string;
   sessionId: string;
+  /**
+   * Canonical provider event time when available; if absent, consumers should
+   * fall back to server `createdAt`/receive time for display/sorting and dedupe by stable ids/content.
+   */
   timestamp?: string;
   kind: ConversationEventKind;
   turnId?: string;

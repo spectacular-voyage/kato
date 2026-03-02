@@ -596,10 +596,28 @@ async function readGeminiMessages(
   );
 }
 
+function serializeCursor(cursor: ProviderCursor | undefined): string {
+  if (!cursor) {
+    return "";
+  }
+  return `${cursor.kind}:${String(cursor.value)}`;
+}
+
+function resolveStableCursorComponent(event: ConversationEvent): string {
+  if (isNonEmptyString(event.turnId)) {
+    return `turn:${event.turnId}`;
+  }
+  if (isNonEmptyString(event.source.providerEventId)) {
+    return "";
+  }
+  return serializeCursor(event.source.rawCursor);
+}
+
 function eventSignature(event: ConversationEvent): string {
+  const stableCursorComponent = resolveStableCursorComponent(event);
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp ?? ""}`;
+  }\0${event.timestamp ?? ""}\0${stableCursorComponent}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
@@ -641,6 +659,12 @@ function mergeEvents(
   }
 
   return { mergedEvents, droppedEvents };
+}
+
+function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
+  return (stateMetadata.workspaceOutputs ?? []).some((output) =>
+    output.desiredState === "on"
+  );
 }
 
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
@@ -1242,11 +1266,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = (stateMetadata.workspaceOutputs ?? []).some(
-        (output) => output.desiredState === "on",
-      );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
-        hasActiveRecordings;
+        hasActiveRecordings(stateMetadata);
       if (shouldAppendTwin) {
         let twinExists = true;
         try {
@@ -1450,11 +1471,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = (stateMetadata.workspaceOutputs ?? []).some(
-        (output) => output.desiredState === "on",
-      );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
-        hasActiveRecordings;
+        hasActiveRecordings(stateMetadata);
       let appendedTwinCount = 0;
       let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
         [];

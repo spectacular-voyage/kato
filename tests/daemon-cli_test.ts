@@ -777,6 +777,126 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli workspace init fails when the config path exists as a non-file",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-workspace-init-nonfile-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const workspaceDir = join(tempDir, "nonfile-config");
+      const configPath = join(workspaceDir, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+      await Deno.mkdir(configPath, { recursive: true });
+
+      const defaultRuntimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [workspaceDir, katoDir],
+      };
+
+      const initHarness = makeRuntimeHarness(runtimeDir);
+      initHarness.runtime.cwdPath = workspaceDir;
+      const initCode = await runDaemonCli(["workspace", "init"], {
+        runtime: initHarness.runtime,
+        defaultRuntimeConfig,
+      });
+
+      assertEquals(initCode, 1);
+      assertStringIncludes(
+        initHarness.stderr.join(""),
+        `Command failed: Config path exists and is not a file: ${configPath}`,
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonCli workspace register rejects aliases that collide with existing workspaceIds",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-workspace-alias-id-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const firstWorkspaceDir = join(tempDir, "workspace-one");
+      const secondWorkspaceDir = join(tempDir, "workspace-two");
+      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      await Deno.mkdir(firstWorkspaceDir, { recursive: true });
+      await Deno.mkdir(secondWorkspaceDir, { recursive: true });
+
+      const defaultRuntimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+
+      const firstInitHarness = makeRuntimeHarness(runtimeDir);
+      firstInitHarness.runtime.cwdPath = firstWorkspaceDir;
+      assertEquals(
+        await runDaemonCli(["workspace", "init"], {
+          runtime: firstInitHarness.runtime,
+          defaultRuntimeConfig,
+        }),
+        0,
+      );
+
+      const firstRegisterHarness = makeRuntimeHarness(runtimeDir);
+      firstRegisterHarness.runtime.cwdPath = firstWorkspaceDir;
+      assertEquals(
+        await runDaemonCli([
+          "workspace",
+          "register",
+          "--alias",
+          "workspace-one",
+        ], {
+          runtime: firstRegisterHarness.runtime,
+          defaultRuntimeConfig,
+        }),
+        0,
+      );
+
+      const firstRegistry = JSON.parse(
+        await Deno.readTextFile(registryPath),
+      ) as {
+        workspaces?: Array<{ workspaceId?: string }>;
+      };
+      const firstWorkspaceId = firstRegistry.workspaces?.[0]?.workspaceId;
+      assertExists(firstWorkspaceId);
+
+      const secondInitHarness = makeRuntimeHarness(runtimeDir);
+      secondInitHarness.runtime.cwdPath = secondWorkspaceDir;
+      assertEquals(
+        await runDaemonCli(["workspace", "init"], {
+          runtime: secondInitHarness.runtime,
+          defaultRuntimeConfig,
+        }),
+        0,
+      );
+
+      const secondRegisterHarness = makeRuntimeHarness(runtimeDir);
+      secondRegisterHarness.runtime.cwdPath = secondWorkspaceDir;
+      const secondRegisterCode = await runDaemonCli([
+        "workspace",
+        "register",
+        "--alias",
+        firstWorkspaceId,
+      ], {
+        runtime: secondRegisterHarness.runtime,
+        defaultRuntimeConfig,
+      });
+
+      assertEquals(secondRegisterCode, 1);
+      assertStringIncludes(
+        secondRegisterHarness.stderr.join(""),
+        `Command failed: Workspace alias already registered: ${firstWorkspaceId}`,
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonCli workspace register ignores legacy .kato workspace config paths",
   async () => {
     const tempDir = await makeTestTempDir("daemon-cli-workspace-missing-");
@@ -942,7 +1062,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli start auto-initializes runtime config when missing",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = ".test-tmp/test-runtime";
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
@@ -976,7 +1096,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli restart auto-initializes runtime config when missing",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = ".test-tmp/test-runtime";
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();

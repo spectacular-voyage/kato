@@ -32,8 +32,8 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
-  runCleanCommand,
   ensureGlobalConfigInitialized,
+  runCleanCommand,
   runExportCommand,
   runInitCommand,
   runRestartCommand,
@@ -72,8 +72,15 @@ export function createDefaultCliRuntime(): DaemonCliRuntime {
   let cwdPath: string | undefined;
   try {
     cwdPath = Deno.cwd();
-  } catch {
-    cwdPath = undefined;
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      cwdPath = undefined;
+    } else {
+      throw error;
+    }
   }
   return {
     runtimeDir,
@@ -280,7 +287,8 @@ export async function runDaemonCli(
 
   if (
     (intent.command.name === "start" || intent.command.name === "restart") &&
-    (autoInitializedRuntimeConfigPath || autoInitializedDefaultWorkspaceConfigPath)
+    (autoInitializedRuntimeConfigPath ||
+      autoInitializedDefaultWorkspaceConfigPath)
   ) {
     const lines: string[] = [];
     if (autoInitializedRuntimeConfigPath) {

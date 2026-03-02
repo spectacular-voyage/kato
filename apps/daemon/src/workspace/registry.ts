@@ -50,7 +50,8 @@ const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
 ] as const;
 
 type WriterFeatureFlagKey = typeof WRITER_FEATURE_FLAG_KEYS[number];
-type WorkspaceConfigTopLevelKey = typeof WORKSPACE_CONFIG_TOP_LEVEL_KEYS[number];
+type WorkspaceConfigTopLevelKey =
+  typeof WORKSPACE_CONFIG_TOP_LEVEL_KEYS[number];
 type WorkspaceTemplateTopLevelKey =
   typeof WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS[number];
 type WorkspaceMarkdownFrontmatterKey =
@@ -189,7 +190,10 @@ export function resolveDefaultWorkspaceRegistryPath(
 export function resolveDefaultWorkspaceTemplateConfigPath(
   runtimeConfigPath: string,
 ): string {
-  return join(dirname(resolve(runtimeConfigPath)), DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME);
+  return join(
+    dirname(resolve(runtimeConfigPath)),
+    DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME,
+  );
 }
 
 export class WorkspaceRegistryFileStore implements WorkspaceRegistryStoreLike {
@@ -281,7 +285,7 @@ export class WorkspaceCatalog implements WorkspaceCatalogLike {
       const unchanged = fresh.alias === prior.alias &&
         fresh.workspaceRoot === prior.workspaceRoot &&
         fresh.configPath === prior.configPath;
-      const live = unchanged ? fresh : prior;
+      const live = unchanged ? prior : fresh;
       nextByWorkspaceId.set(workspaceId, cloneWorkspace(live));
       nextByAlias.set(live.alias, cloneWorkspace(live));
     }
@@ -340,8 +344,7 @@ export function createDefaultWorkspaceWriterFeatureFlags(
     writerIncludeCommentary: overrides.writerIncludeCommentary ?? true,
     writerIncludeThinking: overrides.writerIncludeThinking ?? true,
     writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? true,
-    writerItalicizeUserMessages:
-      overrides.writerItalicizeUserMessages ?? false,
+    writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ?? false,
   };
 }
 
@@ -355,8 +358,8 @@ export function createDefaultWorkspaceMarkdownFrontmatterConfig(
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ?? false,
     defaultParticipantUsername: overrides.defaultParticipantUsername ?? "",
-    includeConversationEventKinds:
-      overrides.includeConversationEventKinds ?? false,
+    includeConversationEventKinds: overrides.includeConversationEventKinds ??
+      false,
   };
 }
 
@@ -461,17 +464,18 @@ async function loadWorkspaceConfigLikeOverrides(
     return { writerFeatureFlags: {} };
   }
 
-  const allowedKeys = options.allowWorkspaceId
-    ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS
-    : WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS;
   for (const key of Object.keys(parsed)) {
     const isAllowed = options.allowWorkspaceId
-      ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS.includes(key as WorkspaceConfigTopLevelKey)
+      ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS.includes(
+        key as WorkspaceConfigTopLevelKey,
+      )
       : WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS.includes(
         key as WorkspaceTemplateTopLevelKey,
       );
     if (!isAllowed) {
-      throw new Error(`Unsupported workspace config key '${key}': ${configPath}`);
+      throw new Error(
+        `Unsupported workspace config key '${key}': ${configPath}`,
+      );
     }
   }
 
@@ -624,11 +628,14 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
   async resolveForCommand(
     workspace: RegisteredWorkspace,
   ): Promise<ResolvedWorkspaceProfile> {
+    const resolvedWorkspaceRoot = resolve(workspace.workspaceRoot);
     const sourceMtimeMs = await this.readMtime(workspace.configPath);
     const cached = this.cache.get(workspace.workspaceId);
     if (
       cached &&
       cached.configPath === workspace.configPath &&
+      cached.profile.alias === workspace.alias &&
+      cached.profile.workspaceRoot === resolvedWorkspaceRoot &&
       cached.sourceMtimeMs === sourceMtimeMs
     ) {
       return {
@@ -643,11 +650,11 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE;
     const resolvedDefaultOutputDir = isAbsolute(defaultOutputDir)
       ? resolve(defaultOutputDir)
-      : resolve(workspace.workspaceRoot, defaultOutputDir);
+      : resolve(resolvedWorkspaceRoot, defaultOutputDir);
     const profile: ResolvedWorkspaceProfile = {
       workspaceId: workspace.workspaceId,
       alias: workspace.alias,
-      workspaceRoot: resolve(workspace.workspaceRoot),
+      workspaceRoot: resolvedWorkspaceRoot,
       configPath: workspace.configPath,
       resolvedDefaultOutputDir,
       filenameTemplate: overrides.filenameTemplate ??

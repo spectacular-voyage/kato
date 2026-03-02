@@ -2,13 +2,13 @@ import { dirname, join, resolve } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
   createWorkspaceConfigScaffold,
-  DefaultWorkspaceConfigFileStore,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  DefaultWorkspaceConfigFileStore,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
   type RegisteredWorkspace,
-  resolveDefaultWorkspaceTemplateConfigPath,
   resolveDefaultWorkspaceRegistryPath,
+  resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
   WorkspaceRegistryFileStore,
 } from "../../workspace/mod.ts";
@@ -51,7 +51,9 @@ export async function resolveRegisterTarget(
     const configPath = await resolveWorkspaceConfigPath(workspaceRoot);
     if (!configPath) {
       throw new Error(
-        `No workspace config found at ${join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)}. Run \`kato workspace init ${dirPath}\` first.`,
+        `No workspace config found at ${
+          join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)
+        }. Run \`kato workspace init ${dirPath}\` first.`,
       );
     }
     return { workspaceRoot, configPath };
@@ -93,6 +95,7 @@ export async function ensureWorkspaceConfigInitialized(
     if (stat.isFile) {
       return false;
     }
+    throw new Error(`Config path exists and is not a file: ${configPath}`);
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) {
       throw error;

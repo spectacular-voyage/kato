@@ -2,9 +2,9 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { dirname, join } from "@std/path";
 import { stringify } from "@std/yaml";
 import {
-  createDefaultRuntimeConfig,
   createDefaultDaemonFeatureFlags,
   createDefaultExportFeatureFlags,
+  createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
   resolveDefaultConfigPath,

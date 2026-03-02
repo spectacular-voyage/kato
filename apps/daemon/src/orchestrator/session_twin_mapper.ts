@@ -356,12 +356,20 @@ export function mapTwinEventsToConversation(
           continue;
         }
         const command = normalizeText(event.payload["command"]);
+        const workspaceAlias = normalizeText(event.payload["workspaceAlias"]);
+        const rawArgument = normalizeText(event.payload["rawArgument"]);
         if (command.length === 0) continue;
+        const scopedCommand = workspaceAlias.length > 0
+          ? `${command}-${workspaceAlias}`
+          : command;
+        const content = rawArgument.length > 0
+          ? `::${scopedCommand} ${rawArgument}`
+          : `::${scopedCommand}`;
         output.push({
           ...common,
           kind: "message.user",
           role: "user",
-          content: `::${command}`,
+          content,
         } as ConversationEvent);
         break;
       }

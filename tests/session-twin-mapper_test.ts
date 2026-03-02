@@ -140,3 +140,62 @@ Deno.test("mapTwinEventsToConversation uses empty timestamp for codex backfill w
   const roundTrip = mapTwinEventsToConversation(twin);
   assertEquals(roundTrip[0]?.timestamp, "");
 });
+
+Deno.test("mapTwinEventsToConversation reconstructs scoped kato commands with raw arguments", () => {
+  const roundTrip = mapTwinEventsToConversation(
+    [
+      {
+        schemaVersion: 1,
+        seq: 1,
+        session: {
+          provider: "codex",
+          providerSessionId: "provider-session-5",
+          sessionId: "kato-session-5",
+        },
+        kind: "user.kato-command",
+        source: {
+          providerEventType: "user.kato-command",
+          cursor: { kind: "byte-offset", value: 1 },
+          emitIndex: 1,
+        },
+        payload: {
+          command: "init",
+          workspaceAlias: "My.Proj",
+          rawArgument: "/tmp/a.md",
+        },
+      },
+      {
+        schemaVersion: 1,
+        seq: 2,
+        session: {
+          provider: "codex",
+          providerSessionId: "provider-session-5",
+          sessionId: "kato-session-5",
+        },
+        kind: "user.kato-command",
+        source: {
+          providerEventType: "user.kato-command",
+          cursor: { kind: "byte-offset", value: 2 },
+          emitIndex: 1,
+        },
+        payload: {
+          command: "stop",
+          workspaceAlias: "My.Proj",
+        },
+      },
+    ],
+    { includeKatoCommandsAsUserMessages: true },
+  );
+
+  assertEquals(roundTrip.length, 2);
+  assertEquals(roundTrip[0]?.kind, "message.user");
+  if (roundTrip[0]?.kind !== "message.user") {
+    throw new Error("expected first event to be message.user");
+  }
+  assertEquals(roundTrip[0].content, "::init-My.Proj /tmp/a.md");
+  assertEquals(roundTrip[1]?.kind, "message.user");
+  if (roundTrip[1]?.kind !== "message.user") {
+    throw new Error("expected second event to be message.user");
+  }
+  assertEquals(roundTrip[1].content, "::stop-My.Proj");
+});

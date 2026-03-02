@@ -1,7 +1,7 @@
 import type {
   ConversationEvent,
-  DaemonSessionStatus,
   DaemonFeatureFlags,
+  DaemonSessionStatus,
   MarkdownFrontmatterConfig,
   ProviderStatus,
   SessionMetadataV1,
@@ -11,7 +11,14 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -26,8 +33,8 @@ import {
 import { renderFrontmatter } from "../writer/frontmatter.ts";
 import {
   type ActiveRecording,
-  RecordingPipeline,
   type RecordingOutputOverrides,
+  RecordingPipeline,
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
 import { appendExportsLogEntry } from "../utils/exports_log.ts";
@@ -139,6 +146,28 @@ function readTimeMs(value: string | undefined): number | undefined {
   return timeMs;
 }
 
+function serializeRuntimeCursor(
+  cursor: ConversationEvent["source"]["rawCursor"],
+): string {
+  if (!cursor) {
+    return "";
+  }
+  return `${cursor.kind}:${String(cursor.value)}`;
+}
+
+function resolveRuntimeStableCursorComponent(event: ConversationEvent): string {
+  if (event.turnId && event.turnId.trim().length > 0) {
+    return `turn:${event.turnId}`;
+  }
+  if (
+    event.source.providerEventId &&
+    event.source.providerEventId.trim().length > 0
+  ) {
+    return "";
+  }
+  return serializeRuntimeCursor(event.source.rawCursor);
+}
+
 interface SessionEventProcessingState {
   seenEventSignatures: Set<string>;
   lastSeenFileModifiedAtMs?: number;
@@ -201,9 +230,10 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
 }
 
 function makeRuntimeEventSignature(event: ConversationEvent): string {
+  const stableCursorComponent = resolveRuntimeStableCursorComponent(event);
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp ?? ""}`;
+  }\0${event.timestamp ?? ""}\0${stableCursorComponent}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
@@ -340,7 +370,10 @@ function closeWorkspaceOutputCycle(
 ): boolean {
   const cycleId = output.activeRecordingCycleId;
   if (!cycleId) {
-    return false;
+    const changed = output.desiredState !== "off";
+    delete output.activeRecordingCycleId;
+    output.desiredState = "off";
+    return changed;
   }
   for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
     const cycle = output.recordingCycles[i];
@@ -670,8 +703,8 @@ function resolveFrontmatterSettings(
 ): InitFrontmatterSettings {
   return {
     includeFrontmatter: outputOverrides.includeFrontmatter !== false,
-    includeUpdatedInFrontmatter:
-      outputOverrides.includeUpdatedInFrontmatter ?? false,
+    includeUpdatedInFrontmatter: outputOverrides.includeUpdatedInFrontmatter ??
+      false,
     includeConversationEventKinds:
       outputOverrides.includeConversationEventKinds ?? false,
     participantUsername: outputOverrides.participantUsername,
@@ -2801,7 +2834,8 @@ export async function runDaemonRuntimeLoop(
         sessionStateStore,
         loadSessionSnapshot,
         exportEnabled,
-        defaultCliExportOutputOverrides: options.defaultCliExportOutputOverrides,
+        defaultCliExportOutputOverrides:
+          options.defaultCliExportOutputOverrides,
         exportsLogPath,
         now,
         operationalLogger,

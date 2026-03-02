@@ -1551,6 +1551,83 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
   });
 });
 
+Deno.test(
+  "FileProviderIngestionRunner keeps distinct events when provider ids and timestamps are missing",
+  async () => {
+    await withTempDir("provider-ingestion-missing-id-", async (dir) => {
+      const sessionFile = join(dir, "session-missing-id.jsonl");
+      await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+      const harness = makeWatchHarness();
+      const store = new InMemorySessionSnapshotStore();
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        watchFs: harness.watchFn,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-missing-id",
+            filePath: sessionFile,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          return (async function* () {
+            if (fromOffset !== 0) {
+              return;
+            }
+            yield {
+              event: {
+                eventId: "e1",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                kind: "message.assistant",
+                role: "assistant",
+                content: "same-content",
+                turnId: "turn-1",
+                source: {
+                  providerEventType: "assistant",
+                  rawCursor: { kind: "byte-offset", value: 10 },
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+            yield {
+              event: {
+                eventId: "e2",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                kind: "message.assistant",
+                role: "assistant",
+                content: "same-content",
+                turnId: "turn-2",
+                source: {
+                  providerEventType: "assistant",
+                  rawCursor: { kind: "byte-offset", value: 20 },
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 20 },
+            };
+          })();
+        },
+      });
+
+      await runner.start();
+      await runner.poll();
+      await runner.stop();
+
+      const snapshot = store.get("session-missing-id");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.length, 2);
+    });
+  },
+);
+
 Deno.test("FileProviderIngestionRunner logs duplicate session discovery warnings once per duplicate set", async () => {
   await withTempDir("provider-ingestion-duplicate-sessions-", async (dir) => {
     const sessionFileA = join(dir, "session-dup-a.jsonl");
