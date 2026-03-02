@@ -38,6 +38,7 @@ export interface DaemonRecordingStatus {
   workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
+  restartedAt?: string;
   lastWriteAt: string;
 }
 

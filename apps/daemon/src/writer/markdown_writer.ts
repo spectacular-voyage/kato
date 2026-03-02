@@ -89,6 +89,15 @@ function formatModelName(model: string): string {
   return model.replace(/-(\d+)-(\d+)$/, "-$1.$2");
 }
 
+function resolveAssistantSpeaker(
+  model: string | undefined,
+  speakerNames: MarkdownSpeakerNames | undefined,
+): string {
+  return model
+    ? formatModelName(model)
+    : (speakerNames?.assistant ?? "Assistant");
+}
+
 function formatUserMessageContent(content: string): string {
   return content.split("\n").map((line) => {
     const trimmed = line.trim();
@@ -128,12 +137,8 @@ function formatMessageHeading(
   } else if (event.kind === "message.system") {
     speaker = speakerNames?.system ?? "System";
   } else {
-    const model = "model" in event
-      ? (event.model as string | undefined)
-      : undefined;
-    speaker = model
-      ? formatModelName(model)
-      : (speakerNames?.assistant ?? "Assistant");
+    const model = "model" in event ? event.model : undefined;
+    speaker = resolveAssistantSpeaker(model, speakerNames);
   }
   return `# ${speaker}_${formatHeadingTimestamp(event.timestamp)}`;
 }
@@ -199,10 +204,18 @@ export function renderEventsToMarkdown(
 
   let lastRole: string | undefined;
   let lastSignature: string | undefined;
+  let lastAssistantSpeaker = options.speakerNames?.assistant ?? "Assistant";
 
   // Pass 2: Render events in sequence.
   for (let i = 0; i < events.length; i++) {
     const event = events[i]!;
+    if (event.kind === "message.assistant") {
+      lastAssistantSpeaker = resolveAssistantSpeaker(
+        event.model,
+        options.speakerNames,
+      );
+    }
+
     if (isMessageEvent(event)) {
       if (event.kind === "message.system" && !includeSystemEvents) {
         continue;
@@ -272,10 +285,13 @@ export function renderEventsToMarkdown(
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
 
-      const callSummary = `Tool: ${event.name}${
-        event.description ? ` — ${event.description}` : ""
-      }`;
-      parts.push(`**${callSummary}**`, "");
+      const callParts: string[] = [
+        `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-${event.name}`,
+      ];
+      if (event.description?.trim().length) {
+        callParts.push("", event.description);
+      }
+      parts.push(callParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "tool.result") {
       if (!includeToolResults) {

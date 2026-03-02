@@ -983,7 +983,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> without an argument captures to the current workspace binding",
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> without an argument resolves a new default destination",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(
       "daemon-runtime-capture-no-arg-",
@@ -1041,14 +1041,19 @@ Deno.test(
       });
       stateDir = result.stateDir;
 
-      assertEquals(captureTargets, [destination]);
-      assertEquals(captureRecordingCycleIds, [["cycle-pointer"]]);
+      const expectedTargetPath = join(
+        result.workspace.profile.resolvedDefaultOutputDir,
+        "codex-session.md",
+      );
+      assertEquals(captureTargets, [expectedTargetPath]);
+      assertEquals(captureRecordingCycleIds, [[]]);
 
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
-      assertEquals(output.currentResolvedPath, destination);
+      assertEquals(output.currentResolvedPath, expectedTargetPath);
       assertEquals(output.desiredState, "on");
-      assertEquals(output.activeRecordingCycleId, "cycle-pointer");
+      assertExists(output.activeRecordingCycleId);
+      assert(output.activeRecordingCycleId !== "cycle-pointer");
     } finally {
       await removeDirIfPresent(stateDir);
       await removeDirIfPresent(scenarioDir);
@@ -1186,7 +1191,10 @@ Deno.test(
 
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
-      assertEquals(output.currentResolvedPath, destination);
+      assertEquals(
+        output.currentResolvedPath,
+        join(result.workspace.profile.resolvedDefaultOutputDir, "codex-session.md"),
+      );
       assertEquals(output.desiredState, "on");
       assertExists(output.activeRecordingCycleId);
       assert(output.activeRecordingCycleId !== "cycle-stale");
@@ -1445,6 +1453,94 @@ Deno.test(
       assertEquals(output.currentResolvedPath, destination);
       assertEquals(output.desiredState, "on");
       assertEquals(output.activeRecordingCycleId, "cycle-active");
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> fails on existing destination without mutating state",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-existing-target-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const oldDestination = join(scenarioDir, "old.md");
+      const existingDestination = join(scenarioDir, "existing.md");
+      await Deno.writeTextFile(existingDestination, "already-here");
+
+      let captureCalls = 0;
+      const sink = new CaptureSink();
+      const operationalLogger = new StructuredLogger([sink], {
+        channel: "operational",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const auditLogger = new AuditLogger(
+        new StructuredLogger([sink], {
+          channel: "security-audit",
+          minLevel: "debug",
+          now: () => new Date("2026-02-22T10:00:00.000Z"),
+        }),
+      );
+
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-existing",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${existingDestination}`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(_input) {
+            captureCalls += 1;
+            throw new Error("captureSnapshot should not be called");
+          },
+        }),
+        operationalLogger,
+        auditLogger,
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: oldDestination,
+                  desiredState: "on",
+                  writeCursor: 1,
+                  activeRecordingCycleId: "cycle-existing-before",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-existing-before",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      assertEquals(captureCalls, 0);
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(output.currentResolvedPath, oldDestination);
+      assertEquals(output.desiredState, "on");
+      assertEquals(output.activeRecordingCycleId, "cycle-existing-before");
+      assertEquals(output.recordingCycles.length, 1);
+      assertEquals(output.recordingCycles[0]?.stoppedCursor, undefined);
+      assert(
+        sink.records.some((record) =>
+          record.event === "recording.command.failed" &&
+          String(record.attributes?.["command"] ?? "") === "capture"
+        ),
+      );
     } finally {
       await removeDirIfPresent(stateDir);
       await removeDirIfPresent(scenarioDir);
@@ -2623,6 +2719,7 @@ Deno.test(
     let stateDir: string | undefined;
 
     try {
+      const oldDestination = join(scenarioDir, "capture-frontmatter-old.md");
       const destination = join(scenarioDir, "capture-frontmatter.md");
       const recordingPipeline = new RecordingPipeline({
         pathPolicyGate: makeAllowAllPathPolicyGate(),
@@ -2633,7 +2730,7 @@ Deno.test(
           makeEvent(
             "u-capture-frontmatter-e2e",
             "message.user",
-            `Before capture\n::capture-${TEST_WORKSPACE_ALIAS}\nAfter capture`,
+            `Before capture\n::capture-${TEST_WORKSPACE_ALIAS} ${destination}\nAfter capture`,
           ),
         ],
         recordingPipeline,
@@ -2643,7 +2740,7 @@ Deno.test(
             (metadata) => {
               metadata.workspaceOutputs = [
                 makeWorkspaceOutputState(workspace, {
-                  currentResolvedPath: destination,
+                  currentResolvedPath: oldDestination,
                   desiredState: "on",
                   writeCursor: 0,
                   activeRecordingCycleId: "cycle-capture-e2e",
@@ -2661,9 +2758,14 @@ Deno.test(
       stateDir = result.stateDir;
 
       const content = await Deno.readTextFile(destination);
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
       assert(content.includes("kato-sessionIds: [session-1]"));
       assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
-      assert(content.includes("kato-recordingIds: [cycle-capture-e2e]"));
+      assertExists(output.activeRecordingCycleId);
+      assert(
+        content.includes(`kato-recordingIds: [${output.activeRecordingCycleId}]`),
+      );
       assert(content.includes("Before capture"));
       assert(content.includes("After capture"));
       assert(

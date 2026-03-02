@@ -37,6 +37,7 @@ export interface RecordingProjectionInput {
   workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
+  restartedAt?: string;
   lastWriteAt: string;
 }
 
@@ -123,6 +124,9 @@ export function projectSessionStatus(opts: {
         : {}),
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
+      ...(recording.restartedAt
+        ? { restartedAt: recording.restartedAt }
+        : {}),
       lastWriteAt: recording.lastWriteAt,
     }));
   }

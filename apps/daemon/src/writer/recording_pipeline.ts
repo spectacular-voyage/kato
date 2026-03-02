@@ -53,6 +53,7 @@ export interface ActiveRecording {
   workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
+  restartedAt?: string;
   lastWriteAt: string;
 }
 

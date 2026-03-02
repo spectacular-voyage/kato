@@ -61,6 +61,8 @@ Supported commands:
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
   - Show daemon status.
+  - Text mode includes a `Recent Errors` section sourced from runtime
+    operational/security-audit WARN and ERROR log entries.
 - `workspace init [<dir>]`
   - Create `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
@@ -114,9 +116,12 @@ Rules:
 
 - `::record`, `::capture`, and `::export` require a workspace alias suffix.
 - `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
-- `::capture-<alias>` writes a snapshot and activates recording for that
-  workspace output (current binding when pathless, resolved target when path is
-  provided).
+- `::capture-<alias>` is create-only: it fails when the resolved target path
+  already exists.
+- Pathless `::capture-<alias>` always resolves a fresh default filename for the
+  workspace (it does not reuse the current recording binding).
+- Successful `::capture-<alias>` writes a full snapshot to the resolved target
+  and then activates recording for subsequent events at that destination.
 - `::stop` stops all active workspace outputs for the session.
 - `::stop-<alias>` stops only the active output bound to that alias.
 - Explicit path arguments may be absolute or relative, and may point to a file

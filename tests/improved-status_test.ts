@@ -9,6 +9,7 @@ import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import {
   isLiveExitKey,
   renderStatusText,
+  type StatusRecentError,
   type WorkspaceStatusSummary,
 } from "../apps/daemon/src/cli/commands/status.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
@@ -162,6 +163,39 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
   assertStringIncludes(out, "workspace: k");
 });
 
+Deno.test("renderStatusText: recording detail line is shown before destination path", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "layout-ordered",
+    snippet: "layout",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: false,
+    recordings: [{
+      workspaceAlias: "k",
+      outputPath: "/home/user/notes.md",
+      startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+      lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    }],
+  }];
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    terminalWidth: 160,
+  });
+  const lines = out.split("\n");
+  const detailIndex = lines.findIndex((line) =>
+    line.includes("recording (layout-ordered)") && line.includes("started")
+  );
+  const pathIndex = lines.findIndex((line) =>
+    line.includes("-> /home/user/notes.md")
+  );
+  assert(detailIndex >= 0);
+  assert(pathIndex >= 0);
+  assert(detailIndex < pathIndex);
+});
+
 Deno.test("renderStatusText: recording workspace alias strips ANSI and controls", () => {
   const sessions: DaemonSessionStatus[] = [{
     provider: "claude",
@@ -185,6 +219,34 @@ Deno.test("renderStatusText: recording workspace alias strips ANSI and controls"
   });
   assertStringIncludes(out, "workspace: My Proj");
   assertEquals(out.includes("\u001b["), false);
+});
+
+Deno.test("renderStatusText: recent errors section renders warn/error records", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "warn",
+    channel: "operational",
+    event: "provider.ingestion.read_denied",
+    message: "permission denied",
+  }, {
+    timestamp: "2026-02-24T09:59:00.000Z",
+    level: "error",
+    channel: "security-audit",
+    event: "recording.command.failed",
+    message: "capture destination already exists",
+  }];
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "Recent Errors (2)");
+  assertStringIncludes(out, "WARN operational provider.ingestion.read_denied");
+  assertStringIncludes(out, "ERROR audit recording.command.failed");
+  assertStringIncludes(out, "permission denied");
+  assertStringIncludes(out, "capture destination already exists");
 });
 
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {

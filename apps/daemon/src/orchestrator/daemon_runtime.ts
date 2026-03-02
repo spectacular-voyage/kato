@@ -943,6 +943,20 @@ async function validateDestinationPathForCommand(
   });
 }
 
+async function assertCaptureDestinationDoesNotExist(
+  targetPath: string,
+): Promise<void> {
+  try {
+    await Deno.stat(targetPath);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Capture destination already exists: ${targetPath}`);
+}
+
 function normalizeFrontmatterParticipantUsername(
   value: string | undefined,
 ): string | undefined {
@@ -1435,65 +1449,26 @@ async function applyPersistentControlCommandsForEvent(
             metadataChanged = true;
           }
         } else if (command.verb === "capture") {
-          let targetPath: string;
-          let resolvedBinding:
-            | NonNullable<SessionMetadataV1["workspaceOutputs"]>[number][
-              "currentDestination"
-            ]
-            | undefined;
-          let stateChanged = false;
-          if (!command.argument && output) {
-            targetPath = output.currentResolvedPath;
-          } else {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId: providerSessionId,
-              snapshotSnippet,
-              boundarySnapshot,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            resolvedBinding = resolved.binding;
-            targetPath = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              providerSessionId,
-              resolved.resolvedPath,
-              "capture",
-            );
-            if (!output) {
-              output = createWorkspaceOutputState({
-                profile,
-                binding: resolved.binding,
-                resolvedPath: targetPath,
-                desiredState: "off",
-                writeCursor,
-                nowIso: now().toISOString(),
-              });
-              readWorkspaceOutputs(metadata).push(output);
-              stateChanged = true;
-            } else if (output.currentResolvedPath !== targetPath) {
-              closeWorkspaceOutputCycle(
-                output,
-                writeCursor,
-                now().toISOString(),
-              );
-              applyWorkspaceProfileSnapshot(output, profile);
-              if (resolvedBinding) {
-                output.currentDestination = resolvedBinding;
-              }
-              output.currentResolvedPath = targetPath;
-              output.writeCursor = writeCursor;
-              output.desiredState = "off";
-              stateChanged = true;
-            }
-          }
-          if (!output) {
-            throw new Error("Workspace output state was not created");
-          }
-          applyWorkspaceProfileSnapshot(output, profile);
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
+            provider,
+            sessionId: providerSessionId,
+            snapshotSnippet,
+            boundarySnapshot,
+            rawArgument: command.argument,
+            now: now(),
+          });
+          const targetPath = await validateDestinationPathForCommand(
+            recordingPipeline,
+            provider,
+            providerSessionId,
+            resolved.resolvedPath,
+            "capture",
+          );
+          await assertCaptureDestinationDoesNotExist(targetPath);
           loggedTargetPath = targetPath;
+          const destinationChanged = !output ||
+            output.currentResolvedPath !== targetPath;
           const captureEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
             boundarySnapshot,
@@ -1506,8 +1481,9 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
             { snapshotSnippet },
           );
-          const currentCycleId = output.activeRecordingCycleId;
-          const captureRecordingCycleIds = output.desiredState === "on" &&
+          const currentCycleId = output?.activeRecordingCycleId;
+          const captureRecordingCycleIds = !destinationChanged &&
+              output?.desiredState === "on" &&
               currentCycleId
             ? [currentCycleId]
             : undefined;
@@ -1521,6 +1497,32 @@ async function applyPersistentControlCommandsForEvent(
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
+          let stateChanged = false;
+          if (!output) {
+            output = createWorkspaceOutputState({
+              profile,
+              binding: resolved.binding,
+              resolvedPath: targetPath,
+              desiredState: "off",
+              writeCursor,
+              nowIso: now().toISOString(),
+            });
+            readWorkspaceOutputs(metadata).push(output);
+            stateChanged = true;
+          } else if (destinationChanged) {
+            closeWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            stateChanged = true;
+          }
+          if (!output) {
+            throw new Error("Workspace output state was not created");
+          }
+          applyWorkspaceProfileSnapshot(output, profile);
+          output.currentDestination = resolved.binding;
+          output.currentResolvedPath = targetPath;
           let activeCycleId = output.activeRecordingCycleId;
           if (!activeCycleId || output.desiredState !== "on") {
             activeCycleId = openWorkspaceOutputCycle(
@@ -1864,28 +1866,23 @@ async function applyControlCommandsForEvent(
             );
           }
         } else if (command.verb === "capture") {
-          let resolvedDestination = existingState?.currentResolvedPath;
-          if (!existingState || command.argument) {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId,
-              snapshotSnippet,
-              boundarySnapshot,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            resolvedDestination = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              sessionId,
-              resolved.resolvedPath,
-              "capture",
-            );
-          }
-          if (!resolvedDestination) {
-            throw new Error("Unable to resolve workspace capture destination");
-          }
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
+            provider,
+            sessionId,
+            snapshotSnippet,
+            boundarySnapshot,
+            rawArgument: command.argument,
+            now: now(),
+          });
+          const resolvedDestination = await validateDestinationPathForCommand(
+            recordingPipeline,
+            provider,
+            sessionId,
+            resolved.resolvedPath,
+            "capture",
+          );
+          await assertCaptureDestinationDoesNotExist(resolvedDestination);
           loggedTargetPath = resolvedDestination;
           const state = existingState ?? {
             workspaceId: workspace.workspaceId,
@@ -1896,21 +1893,8 @@ async function applyControlCommandsForEvent(
           };
           const destinationChanged = state.currentResolvedPath !==
             resolvedDestination;
-          if (destinationChanged && state.desiredState) {
-            recordingPipeline.stopRecording(
-              provider,
-              sessionId,
-              workspace.workspaceId,
-            );
-          }
-          if (destinationChanged) {
-            state.currentResolvedPath = resolvedDestination;
-            state.desiredState = false;
-            delete state.recordingCycleId;
-          }
-          state.workspaceAlias = profile.alias;
-          state.outputOverrides = outputOverrides;
           const activeCycleId = state.desiredState && state.recordingCycleId
+              && !destinationChanged
             ? state.recordingCycleId
             : undefined;
           await recordingPipeline.captureSnapshot({
@@ -1928,7 +1912,7 @@ async function applyControlCommandsForEvent(
             command.line + 1,
             boundary.lastLineInSegment,
           );
-          if (state.desiredState && state.recordingCycleId) {
+          if (activeCycleId) {
             if (continuationEvents.length > 0) {
               await recordingPipeline.appendToActiveRecording({
                 provider,
@@ -1936,12 +1920,19 @@ async function applyControlCommandsForEvent(
                 recordingKey: workspace.workspaceId,
                 events: continuationEvents,
                 title: recordingTitle,
-                recordingCycleIds: [state.recordingCycleId],
+                recordingCycleIds: [activeCycleId],
                 workspaceIds: [workspace.workspaceId],
                 outputOverrides,
               });
             }
           } else {
+            if (state.desiredState) {
+              recordingPipeline.stopRecording(
+                provider,
+                sessionId,
+                workspace.workspaceId,
+              );
+            }
             const recordingCycleId = crypto.randomUUID();
             await recordingPipeline.activateRecording({
               provider,
@@ -1958,6 +1949,9 @@ async function applyControlCommandsForEvent(
             state.desiredState = true;
             state.recordingCycleId = recordingCycleId;
           }
+          state.currentResolvedPath = resolvedDestination;
+          state.workspaceAlias = profile.alias;
+          state.outputOverrides = outputOverrides;
           sessionEventState.workspaceOutputs.set(workspace.workspaceId, state);
         } else if (command.verb === "export") {
           const resolved = await resolveWorkspaceCommandDestination({
@@ -2243,16 +2237,28 @@ async function processInChatRecordingUpdates(
   }
 }
 
-function readWorkspaceOutputStartedAt(
+function readWorkspaceOutputInitialStartedAt(
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
 ): string {
-  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < output.recordingCycles.length; i += 1) {
     const cycle = output.recordingCycles[i];
     if (cycle?.startedAt) {
       return cycle.startedAt;
     }
   }
   return output.createdAt ?? "";
+}
+
+function readWorkspaceOutputLatestStartedAt(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string | undefined {
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (cycle?.startedAt) {
+      return cycle.startedAt;
+    }
+  }
+  return undefined;
 }
 
 async function processPersistentRecordingUpdates(
@@ -2447,13 +2453,19 @@ function toActiveRecordingsFromMetadata(
       if (output.desiredState !== "on") {
         continue;
       }
+      const startedAt = readWorkspaceOutputInitialStartedAt(output) ||
+        metadata.updatedAt;
+      const restartedAt = readWorkspaceOutputLatestStartedAt(output);
       recordings.push({
         recordingId: output.activeRecordingCycleId ?? output.workspaceId,
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
         workspaceAlias: output.workspaceAliasSnapshot,
         outputPath: output.currentResolvedPath,
-        startedAt: readWorkspaceOutputStartedAt(output) || metadata.updatedAt,
+        startedAt,
+        ...(restartedAt && restartedAt !== startedAt
+          ? { restartedAt }
+          : {}),
         lastWriteAt: metadata.updatedAt,
       });
     }

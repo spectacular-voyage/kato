@@ -710,6 +710,8 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-no-results",
       name: "search",
+      description: "search internet for weather",
+      input: { q: "weather sf" },
       source: {
         providerEventType: "tool_call",
         providerEventId: "tc-no-results",
@@ -736,8 +738,60 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(rendered, "**Tool: search**");
+    assertStringIncludes(rendered, "# Assistant_2026-02-22_0200_00_Tool-search");
+    assertStringIncludes(rendered, "search internet for weather");
+    assertEquals(rendered.includes("\"q\": \"weather sf\""), false);
     assertEquals(rendered.includes("result-content"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown uses latest assistant model for tool call headings",
+  () => {
+    const assistant: ConversationEvent = {
+      eventId: "assistant-tool-heading-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Preparing command.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-model",
+      },
+    } as unknown as ConversationEvent;
+    const toolCall: ConversationEvent = {
+      eventId: "tc-heading-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:09.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-model",
+      name: "exec_command",
+      description: "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-model",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall], {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeToolResults: false,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "# gpt-5.3-codex_2026-03-02_0222_09_Tool-exec_command",
+    );
+    assertStringIncludes(
+      rendered,
+      "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+    );
   },
 );
 
