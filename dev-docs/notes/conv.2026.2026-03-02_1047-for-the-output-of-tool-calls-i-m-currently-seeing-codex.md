@@ -677,3 +677,429 @@ I found the exact captured example in that note. Next I’m updating `decision` 
 ```
 
 </details>
+
+**Designing detailed decision rendering**
+
+<details>
+<summary>Tool: exec_command — find . -maxdepth 4 -type d | rg '/\.kato$|/\.kato/|kato-data|daemon-state' -n</summary>
+
+```json
+{
+  "cmd": "find . -maxdepth 4 -type d | rg '/\\.kato$|/\\.kato/|kato-data|daemon-state' -n"
+}
+```
+
+</details>
+
+**Planning comprehensive testing**
+
+# gpt-5.3-codex_2026-03-02_1123_44
+
+Planned changes:
+1. Update `decision` markdown rendering for questionnaire decisions to emit a top-level heading: `# <assistant/model>_<timestamp>_Tool-decision-<decisionKey>`.
+2. Render structured sections under it:
+   - `## Prompt`
+   - `## Options` (when available)
+   - `## User Selection` (for accepted decisions)
+3. Keep existing include flags semantics (`includeDecisionPrompt`, `includeDecisionOptions`, `includeDecisionSelection`).
+4. Add writer tests for the new decision heading/sections and adjust existing decision assertions.
+5. Run `tests/writer-markdown_test.ts` and fix any regressions.
+
+**Designing questionnaire decision handling**
+
+# gpt-5.3-codex_2026-03-02_1124_13
+
+I’ve identified the root of the options gap in rendering: accepted questionnaire decisions were intentionally collapsed to one line, so metadata options were never shown. I’m patching the writer to render questionnaire decisions as a headed block with `Prompt/Options/User Selection`, while keeping non-questionnaire decisions unchanged.
+
+**Adjusting tests for optional fields**
+
+# gpt-5.3-codex_2026-03-02_1124_46
+
+I’ve patched the writer. I’m updating the decision-format tests now to assert the new heading plus section layout, then I’ll run the writer test suite.
+
+**Assessing duplicate rendering of decision blocks**
+
+<details>
+<summary>Tool: exec_command — deno test --allow-read --allow-write tests/writer-markdown_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test --allow-read --allow-write tests/writer-markdown_test.ts",
+  "workdir": "/home/djradon/hub/spectacular-voyage/kato",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 6000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 57022,
+  "chars": "",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 6000
+}
+```
+
+</details>
+
+**Checking diff for references**
+
+# gpt-5.3-codex_2026-03-02_1125_19
+
+The new decision layout is implemented and tests are passing. I’m grabbing exact file refs so you can review quickly, then I’ll summarize behavior changes against your example.
+
+<details>
+<summary>Tool: exec_command — git diff -- apps/daemon/src/writer/markdown_writer.ts tests/writer-markdown_test.ts</summary>
+
+```json
+{
+  "cmd": "git diff -- apps/daemon/src/writer/markdown_writer.ts tests/writer-markdown_test.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — nl -ba apps/daemon/src/writer/markdown_writer.ts | sed -n '88,430p'</summary>
+
+```json
+{
+  "cmd": "nl -ba apps/daemon/src/writer/markdown_writer.ts | sed -n '88,430p'"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — nl -ba tests/writer-markdown_test.ts | sed -n '1048,1260p'</summary>
+
+```json
+{
+  "cmd": "nl -ba tests/writer-markdown_test.ts | sed -n '1048,1260p'"
+}
+```
+
+</details>
+
+**Planning parser matching improvements**
+
+<details>
+<summary>Tool: exec_command — rg -n "function normalizeDecisionKey" apps/daemon/src/providers/claude/parser.ts && sed -n '150,220p' apps/daemon/src/providers/claude/parser.ts</summary>
+
+```json
+{
+  "cmd": "rg -n \"function normalizeDecisionKey\" apps/daemon/src/providers/claude/parser.ts && sed -n '150,220p' apps/daemon/src/providers/claude/parser.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '120,160p' apps/daemon/src/providers/claude/parser.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '120,160p' apps/daemon/src/providers/claude/parser.ts"
+}
+```
+
+</details>
+
+**Enhancing key normalization for question mapping**
+
+# gpt-5.3-codex_2026-03-02_1125_47
+
+I’m adding one parser hardening step too: for Claude `AskUserQuestion` answers, I’ll improve question matching so options survive even when answer keys are normalized/slugged, and I’ll attach `providerQuestionId` on proposed decisions for better correlation. Then I’ll run Claude parser + writer tests.
+
+**Planning parallel test runs**
+
+<details>
+<summary>Tool: exec_command — deno test tests/claude-parser_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test tests/claude-parser_test.ts",
+  "workdir": "/home/djradon/hub/spectacular-voyage/kato",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — deno test --allow-read --allow-write tests/writer-markdown_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test --allow-read --allow-write tests/writer-markdown_test.ts",
+  "workdir": "/home/djradon/hub/spectacular-voyage/kato",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+**Noting need to poll both sessions**
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 62313,
+  "chars": "",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 16250,
+  "chars": "",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+**Enabling read access for parser**
+
+<details>
+<summary>Tool: exec_command — deno test --allow-read tests/claude-parser_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test --allow-read tests/claude-parser_test.ts",
+  "workdir": "/home/djradon/hub/spectacular-voyage/kato",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 30716,
+  "chars": "",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+**Confirming test success and preparing diffs**
+
+# gpt-5.3-codex_2026-03-02_1126_16
+
+Writer and parser tests are now both green. I’m collecting final line references, including the Claude parser correlation fix that helps preserve options when answer keys are normalized.
+
+<details>
+<summary>Tool: exec_command — git diff -- apps/daemon/src/writer/markdown_writer.ts apps/daemon/src/providers/claude/parser.ts tests/writer-markdown_test.ts</summary>
+
+```json
+{
+  "cmd": "git diff -- apps/daemon/src/writer/markdown_writer.ts apps/daemon/src/providers/claude/parser.ts tests/writer-markdown_test.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — nl -ba apps/daemon/src/providers/claude/parser.ts | sed -n '286,460p'</summary>
+
+```json
+{
+  "cmd": "nl -ba apps/daemon/src/providers/claude/parser.ts | sed -n '286,460p'"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — nl -ba apps/daemon/src/writer/markdown_writer.ts | sed -n '380,520p'</summary>
+
+```json
+{
+  "cmd": "nl -ba apps/daemon/src/writer/markdown_writer.ts | sed -n '380,520p'"
+}
+```
+
+</details>
+
+**Summarizing implemented decision heading and tests**
+
+# gpt-5.3-codex_2026-03-02_1126_38
+
+Implemented.
+
+### What changed
+- Questionnaire `decision` events now render as a top-level headed block:
+  - `# <assistant/model>_<timestamp>_Tool-decision-<decisionKey>`
+  - `## Prompt`
+  - `## Options`
+  - `## User Selection` (for accepted decisions)
+- Non-questionnaire decisions keep the previous compact format.
+
+Updated in:
+- [apps/daemon/src/writer/markdown_writer.ts:385](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts:385)
+
+Also hardened Claude parsing so options are preserved when answer keys are normalized/sluggified, and proposed decisions carry `providerQuestionId` for better correlation:
+- [apps/daemon/src/providers/claude/parser.ts:307](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts:307)
+- [apps/daemon/src/providers/claude/parser.ts:421](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/claude/parser.ts:421)
+
+Tests updated/passing:
+- [tests/writer-markdown_test.ts:1054](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts:1054)
+- `deno test --allow-read --allow-write tests/writer-markdown_test.ts` (28/28 passed)
+- `deno test --allow-read tests/claude-parser_test.ts` (10/10 passed)
+
+If you want, next step is:
+1. Re-run `::capture-k` (or export) so this conversation re-renders with the new decision block format.
+
+# User_2026-03-02_1131_23
+
+subsequent ::capture-k in that claude conversation don't seem to be creating a new file as I would expect.
+
+**Planning investigation of capture behavior**
+
+# gpt-5.3-codex_2026-03-02_1131_31
+
+I’ll trace `::capture-<alias>` destination resolution in runtime and reproduce the behavior from tests/logs to see why repeated captures reuse a file instead of rotating to a new one. I’ll start in `daemon_runtime.ts` around command application and default destination generation.
+
+<details>
+<summary>Tool: exec_command — rg -n "capture-|::capture|capture" apps/daemon/src/orchestrator/daemon_runtime.ts apps/daemon/src/policy/command_detection.ts tests/daemon-runtime_test.ts -S</summary>
+
+```json
+{
+  "cmd": "rg -n \"capture-|::capture|capture\" apps/daemon/src/orchestrator/daemon_runtime.ts apps/daemon/src/policy/command_detection.ts tests/daemon-runtime_test.ts -S"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — rg -n "primaryRecordingDestination|workspace output|resolveWorkspaceCommandDestination|generated destination|defaultOutputDir|filenameTemplate" apps/daemon/src/orchestrator/daemon_runtime.ts -S</summary>
+
+```json
+{
+  "cmd": "rg -n \"primaryRecordingDestination|workspace output|resolveWorkspaceCommandDestination|generated destination|defaultOutputDir|filenameTemplate\" apps/daemon/src/orchestrator/daemon_runtime.ts -S"
+}
+```
+
+</details>
+
+**Identifying command destination handling**
+
+<details>
+<summary>Tool: exec_command — sed -n '520,760p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '520,760p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '1340,1525p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1340,1525p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '1768,1935p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1768,1935p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+**Continuing analysis near state updates**
+
+<details>
+<summary>Tool: exec_command — sed -n '1935,2035p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1935,2035p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+**Analyzing capture destination conflicts**
+
+<details>
+<summary>Tool: exec_command — rg -n "capture-<alias> without an argument resolves a new default destination|capture-no-arg|subsequent|second capture|capture twice|::capture-.*without an argument" tests/daemon-runtime_test.ts -S</summary>
+
+```json
+{
+  "cmd": "rg -n \"capture-<alias> without an argument resolves a new default destination|capture-no-arg|subsequent|second capture|capture twice|::capture-.*without an argument\" tests/daemon-runtime_test.ts -S"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '940,1085p' tests/daemon-runtime_test.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '940,1085p' tests/daemon-runtime_test.ts"
+}
+```
+
+</details>
+
+**Investigating repeated filename collisions**
+
+<details>
+<summary>Tool: exec_command — sed -n '1,260p' dev-docs/notes/kato-workspace-config.yaml</summary>
+
+```json
+{
+  "cmd": "sed -n '1,260p' dev-docs/notes/kato-workspace-config.yaml"
+}
+```
+
+</details>
+
+**Inspecting timestamp template parsing**
+
+<details>
+<summary>Tool: exec_command — rg -n "function readTimestampTemplateParts|timestampHumane|filenameTemplateTimezone" -S apps shared</summary>
+
+```json
+{
+  "cmd": "rg -n \"function readTimestampTemplateParts|timestampHumane|filenameTemplateTimezone\" -S apps shared"
+}
+```
+
+</details>

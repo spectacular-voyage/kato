@@ -115,6 +115,62 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}...`;
 }
 
+function parseQuestionnaireOptionLines(
+  metadata: Record<string, unknown> | undefined,
+): string[] {
+  const optionsValue = metadata?.["options"];
+  return Array.isArray(optionsValue)
+    ? optionsValue
+      .filter((option): option is Record<string, unknown> =>
+        typeof option === "object" && option !== null
+      )
+      .map((option) => {
+        const label = String(option["label"] ?? "").trim();
+        if (label.length === 0) return "";
+        const description = String(option["description"] ?? "").trim();
+        return description.length > 0
+          ? `- ${label}: ${description}`
+          : `- ${label}`;
+      })
+      .filter((line) => line.length > 0)
+    : [];
+}
+
+function splitAcceptedDecisionSummary(
+  summary: string,
+): { prompt?: string; selection?: string } {
+  const trimmed = summary.trim();
+  const separator = " -> ";
+  const separatorIndex = trimmed.lastIndexOf(separator);
+  if (separatorIndex >= 0) {
+    const prompt = trimmed.slice(0, separatorIndex).trim();
+    const selection = trimmed.slice(separatorIndex + separator.length).trim();
+    return {
+      ...(prompt.length > 0 ? { prompt } : {}),
+      ...(selection.length > 0 ? { selection } : {}),
+    };
+  }
+  return {
+    ...(trimmed.length > 0 ? { selection: trimmed } : {}),
+  };
+}
+
+function normalizeDecisionContextKey(value: string | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function resolveDecisionHeadingSegment(decisionKey: string): string {
+  const segment = decisionKey
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_.-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return segment.length > 0 ? segment : "unknown";
+}
+
 type MessageEvent = ConversationEvent & {
   kind: "message.user" | "message.assistant" | "message.system";
 };
@@ -182,6 +238,10 @@ export function renderEventsToMarkdown(
   const truncateToolResults = options.truncateToolResults ?? 4_000;
 
   const parts: string[] = [];
+  const questionnaireContextByKey = new Map<
+    string,
+    { prompt?: string; optionLines: string[] }
+  >();
 
   if (includeFrontmatter) {
     const title = options.title ?? "Untitled Conversation";
@@ -323,73 +383,117 @@ export function renderEventsToMarkdown(
       parts.push(thinkingContent, "");
       lastSignature = undefined;
     } else if (event.kind === "decision") {
-      const metadata = event.metadata;
-      const questionnaireDecision = typeof metadata === "object" &&
-        metadata !== null &&
-        "providerQuestionId" in metadata;
-      const questionnaireMetadata = questionnaireDecision
-        ? metadata
+      const metadata = typeof event.metadata === "object" &&
+          event.metadata !== null
+        ? event.metadata as Record<string, unknown>
         : undefined;
-
+      const providerQuestionId = String(metadata?.["providerQuestionId"] ?? "")
+        .trim();
+      const parsedOptionLines = parseQuestionnaireOptionLines(metadata);
+      const questionnaireDecision = providerQuestionId.length > 0 ||
+        parsedOptionLines.length > 0;
       const questionnaireAcceptedDecision = questionnaireDecision &&
         event.status === "accepted";
       const questionnaireProposedDecision = questionnaireDecision &&
         event.status === "proposed";
 
-      let decisionParts: string[];
-      if (questionnaireAcceptedDecision) {
-        if (!includeDecisionSelection) {
+      if (questionnaireAcceptedDecision || questionnaireProposedDecision) {
+        if (questionnaireAcceptedDecision && !includeDecisionSelection) {
           continue;
         }
-        decisionParts = [
-          "",
-          `**Decision [${event.decisionKey}]:** ${event.summary}`,
-        ];
-      } else if (questionnaireProposedDecision) {
-        if (!includeDecisionPrompt && !includeDecisionOptions) {
+        if (
+          questionnaireProposedDecision &&
+          !includeDecisionPrompt &&
+          !includeDecisionOptions
+        ) {
           continue;
         }
-        const optionsValue = questionnaireMetadata?.["options"];
-        const optionLines = Array.isArray(optionsValue)
-          ? optionsValue
-            .filter((option): option is Record<string, unknown> =>
-              typeof option === "object" && option !== null
-            )
-            .map((option) => {
-              const label = String(option["label"] ?? "").trim();
-              if (label.length === 0) return "";
-              const description = String(option["description"] ?? "").trim();
-              return description.length > 0
-                ? `- ${label}: ${description}`
-                : `- ${label}`;
-            })
-            .filter((line) => line.length > 0)
-          : [];
-        decisionParts = [""];
-        if (includeDecisionPrompt) {
-          decisionParts.push(
-            `**Decision [${event.decisionKey}]:** ${event.summary}`,
-          );
+
+        const parsedSummary = questionnaireAcceptedDecision
+          ? splitAcceptedDecisionSummary(event.summary)
+          : { prompt: event.summary.trim() };
+        const contextKeys = new Set<string>();
+        const decisionKeyContext = normalizeDecisionContextKey(event.decisionKey);
+        if (decisionKeyContext) contextKeys.add(decisionKeyContext);
+        const providerQuestionIdContext = normalizeDecisionContextKey(
+          providerQuestionId,
+        );
+        if (providerQuestionIdContext) contextKeys.add(providerQuestionIdContext);
+        const promptContext = normalizeDecisionContextKey(parsedSummary.prompt);
+        if (promptContext) contextKeys.add(promptContext);
+
+        let storedPrompt: string | undefined;
+        let storedOptionLines: string[] = [];
+        for (const key of contextKeys) {
+          const existing = questionnaireContextByKey.get(key);
+          if (!existing) continue;
+          if (!storedPrompt && existing.prompt) {
+            storedPrompt = existing.prompt;
+          }
+          if (storedOptionLines.length === 0 && existing.optionLines.length > 0) {
+            storedOptionLines = existing.optionLines;
+          }
         }
-        if (includeDecisionOptions) {
-          decisionParts.push(...optionLines);
+
+        const prompt = parsedSummary.prompt && parsedSummary.prompt.length > 0
+          ? parsedSummary.prompt
+          : storedPrompt;
+        const optionLines = parsedOptionLines.length > 0
+          ? parsedOptionLines
+          : storedOptionLines;
+        const selection = questionnaireAcceptedDecision
+          ? (parsedSummary.selection && parsedSummary.selection.length > 0
+            ? parsedSummary.selection
+            : event.summary.trim())
+          : undefined;
+
+        if (contextKeys.size > 0 && (prompt || optionLines.length > 0)) {
+          for (const key of contextKeys) {
+            questionnaireContextByKey.set(key, {
+              prompt,
+              optionLines,
+            });
+          }
+        }
+
+        const decisionHeading =
+          `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-decision-${
+            resolveDecisionHeadingSegment(event.decisionKey)
+          }`;
+        const decisionParts = [decisionHeading];
+        if (includeDecisionPrompt && prompt && prompt.length > 0) {
+          decisionParts.push("", "## Prompt", "", prompt);
+        }
+        if (includeDecisionOptions && optionLines.length > 0) {
+          decisionParts.push("", "## Options", "", ...optionLines);
+        }
+        if (
+          questionnaireAcceptedDecision &&
+          includeDecisionSelection &&
+          selection &&
+          selection.length > 0
+        ) {
+          decisionParts.push("", "## User Selection", "", selection);
         }
         if (decisionParts.length === 1) {
           continue;
         }
-      } else {
-        const includeNonQuestionnaireDecision = event.status === "accepted"
-          ? includeDecisionSelection
-          : includeDecisionPrompt;
-        if (!includeNonQuestionnaireDecision) {
-          continue;
-        }
-        decisionParts = [
-          "",
-          `**Decision [${event.decisionKey}]:** ${event.summary}`,
-          `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
-        ];
+        parts.push(decisionParts.join("\n"), "");
+        lastSignature = undefined;
+        continue;
       }
+
+      const includeNonQuestionnaireDecision = event.status === "accepted"
+        ? includeDecisionSelection
+        : includeDecisionPrompt;
+      if (!includeNonQuestionnaireDecision) {
+        continue;
+      }
+      const decisionParts = [
+        "",
+        `**Decision [${event.decisionKey}]:** ${event.summary}`,
+        `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
+      ];
       parts.push(decisionParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "provider.info") {

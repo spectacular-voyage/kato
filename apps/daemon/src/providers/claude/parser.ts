@@ -304,13 +304,22 @@ export async function* parseClaudeEvents(
         if (answerPairs.length > 0) {
           let decisionIndex = 0;
           for (const [key, value] of answerPairs) {
+            const normalizedAnswerKey = normalizeDecisionKey(key, decisionIndex);
             const questionEntry = questions.find((question) =>
               String(question["id"] ?? "") === key ||
-              String(question["question"] ?? "") === key
+              String(question["question"] ?? "") === key ||
+              normalizeDecisionKey(String(question["id"] ?? ""), 0) ===
+                normalizedAnswerKey ||
+              normalizeDecisionKey(String(question["question"] ?? ""), 0) ===
+                normalizedAnswerKey
             );
             const questionText = questionEntry
               ? String(questionEntry["question"] ?? key)
               : key;
+            const questionId = questionEntry
+              ? String(questionEntry["id"] ?? "").trim()
+              : "";
+            const providerQuestionId = questionId.length > 0 ? questionId : key;
             const questionHeader = questionEntry
               ? String(questionEntry["header"] ?? "")
               : "";
@@ -326,13 +335,16 @@ export async function* parseClaudeEvents(
                 ...makeBase("decision", decisionIndex),
                 kind: "decision",
                 decisionId: makeEventId(turnId, "decision", decisionIndex),
-                decisionKey: normalizeDecisionKey(key, decisionIndex),
+                decisionKey: normalizeDecisionKey(
+                  providerQuestionId,
+                  decisionIndex,
+                ),
                 summary: `${questionText} -> ${String(value)}`,
                 status: "accepted",
                 decidedBy: "user",
                 basisEventIds: [...toolResultEventIds],
                 metadata: {
-                  providerQuestionId: key,
+                  providerQuestionId,
                   ...(questionHeader.length > 0
                     ? { header: questionHeader }
                     : {}),
@@ -409,6 +421,10 @@ export async function* parseClaudeEvents(
           for (const question of questions) {
             const questionText = String(question["question"] ?? "").trim();
             if (questionText.length === 0) continue;
+            const questionId = String(question["id"] ?? "").trim();
+            const providerQuestionId = questionId.length > 0
+              ? questionId
+              : questionText;
             const questionHeader = String(question["header"] ?? "").trim();
             const options = asQuestionList(question["options"]).map((
               option,
@@ -422,12 +438,16 @@ export async function* parseClaudeEvents(
                 ...makeBase("decision", decisionIndex),
                 kind: "decision",
                 decisionId: makeEventId(turnId, "decision", decisionIndex),
-                decisionKey: normalizeDecisionKey(questionText, decisionIndex),
+                decisionKey: normalizeDecisionKey(
+                  providerQuestionId,
+                  decisionIndex,
+                ),
                 summary: questionText,
                 status: "proposed",
                 decidedBy: "assistant",
                 basisEventIds: [toolCallEventId],
                 metadata: {
+                  providerQuestionId,
                   ...(questionHeader.length > 0
                     ? { header: questionHeader }
                     : {}),

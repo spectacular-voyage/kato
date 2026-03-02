@@ -224,7 +224,7 @@ Deno.test("renderStatusText: recording workspace alias strips ANSI and controls"
 Deno.test("renderStatusText: recent errors section renders warn/error records", () => {
   const recentErrors: StatusRecentError[] = [{
     timestamp: "2026-02-24T09:59:30.000Z",
-    level: "warn",
+    level: "error",
     channel: "operational",
     event: "provider.ingestion.read_denied",
     message: "permission denied",
@@ -243,10 +243,38 @@ Deno.test("renderStatusText: recent errors section renders warn/error records", 
     terminalWidth: 160,
   });
   assertStringIncludes(out, "Recent Errors (2)");
-  assertStringIncludes(out, "WARN operational provider.ingestion.read_denied");
+  assertStringIncludes(out, "ERROR operational provider.ingestion.read_denied");
   assertStringIncludes(out, "ERROR audit recording.command.failed");
   assertStringIncludes(out, "permission denied");
   assertStringIncludes(out, "capture destination already exists");
+});
+
+Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Errors", () => {
+  const workspaceStatus: WorkspaceStatusSummary = {
+    activeCount: 0,
+    invalidCount: 1,
+    rows: [{
+      workspaceId: "ws-invalid",
+      alias: "Broken.Proj",
+      workspaceRoot: "/workspaces/Broken.Proj",
+      configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+      valid: false,
+      invalidReason: "Unsupported workspace config key 'featureFlags'",
+    }],
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    workspaceStatus,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "Recent Errors (1)");
+  assertStringIncludes(out, "ERROR operational workspace.config.invalid");
+  assertStringIncludes(
+    out,
+    "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+  );
 });
 
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {

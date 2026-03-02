@@ -1,0 +1,1 @@
+{"timestamp":"2026-03-02T19:30:01.601Z","level":"error","channel":"operational","event":"daemon.startup.logging_level_invalid","message":"Daemon startup failed due to invalid logging level override","attributes":{"error":"KATO_LOGGING_OPERATIONAL_LEVEL must be one of: debug, info, warn, error","severity":"critical"}}
