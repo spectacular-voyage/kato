@@ -94,14 +94,16 @@ Orchestrator Daemon (long-lived)
 7. Orchestrator starts provider workers.
 8. Launcher exits.
 
-### `::record` / `::capture` destination change
+### Alias-scoped destination change
 
 1. Provider worker emits user message to orchestrator.
 2. Orchestrator parses command and resolves canonical path.
 3. Orchestrator applies allowlist/policy check.
 4. If denied: emit audit event; no writer change.
-5. If allowed: stop old writer for session, start new writer scoped to new destination.
-6. Persist recording mapping in state.
+5. If allowed: rotate or reuse the active workspace-scoped destination for the
+   targeted alias.
+6. Persist the workspace output binding and recording-cycle state in session
+   metadata.
 
 ### `kato stop`
 
@@ -140,7 +142,8 @@ State model should track:
 
 - Session ingest cursors per provider/session (persisted in `*.meta.json`).
 - SessionTwin canonical events per session (`*.twin.jsonl`).
-- Recording state per session (recording id, desired state, write cursor).
+- Workspace-scoped output state per session (workspace id, current resolved
+  path, desired state, active cycle id, write cursor).
 - Writer worker identity/version metadata (optional but useful for debugging).
 
 Writes must be atomic (temp + rename pattern).

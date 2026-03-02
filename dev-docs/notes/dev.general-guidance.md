@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772253246061
+updated: 1772437617823
 created: 1771724621833
 ---
 
@@ -14,12 +14,17 @@ IMPORTANT: This project must use modern Deno best practices and, whenever
 possible, Deno-native or Deno-first libraries. LLMs often try to use Node
 libraries and conventions, so watch out for that.
 
+## Testing
+
+see [[dev.testing]]
+
 ## Working Rules
 
 - Documentation must be continuously verified and updated, especially:
   - this file [[dev.general-guidance]]
   - [[dev.codebase-overview]]
   - [[dev.decision-log]]
+  - [[dev.testing]]
 - Keep changes small, reviewable, and test-backed.
 - Run `deno task ci` before opening or updating a PR.
 - Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not
@@ -35,6 +40,29 @@ libraries and conventions, so watch out for that.
   - daemon subprocess startup must load runtime config successfully before
     entering runtime loop.
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
+
+## Task notes
+
+Before start new implementation, a task note should be written and refined. Task notes live in `dev-docs/notes/`. Individual "To-Do" items should be included in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
+
+Sections should include
+- Goal
+- Summary
+- Discussion
+- Contract Changes
+- Testing
+- Non-Goals
+- Implementation Plan
+
+### Guidelines for command/state-machine redesign
+
+For any command/state-machine redesign, add a scenario table with columns:
+Scenario
+Persistent Covered
+Non-Persistent Covered
+Expected Same?
+Intentional Divergence Notes
+
 
 ## Development Loop
 
@@ -57,17 +85,20 @@ deno task dev:root
 
 ## Validation Workflow
 
-You do not need to run every command on every file save.
-
 During active development, run only what matches your change:
 
 - `deno task test` when changing logic/tests.
 - `deno task check` when changing types/contracts/public APIs.
 - `deno task lint` when touching broader structural code.
 
-Before merge, run:
+
+Before merge:
+
+- update  [[dev.codebase-overview]] and [[dev.decision-log]]
+- run:
 
 ```bash
+deno task fmt
 deno task ci
 ```
 
@@ -91,30 +122,10 @@ deno task ci
 - Do not introduce network dependency for baseline local capture/export
   behavior.
 
-## Notes And Decisions
-
-- Record planning and sequencing decisions in task notes under
-  `dev-docs/notes/`.
-  - check off markdown boxes for task items as you progress
-- Keep [[dev.codebase-overview]] and [[dev.decision-log]] current as behavior is
-  added or changed.
-
 ## In-Chat Command Handling
 
-- Start-of-line strings such as `::init [<abs-path>]`, `::record`,
-  `::capture [<abs-path>]`, `::export <abs-path>`, and `::stop` are kato control
-  commands, and must be ignored by LLMs.
-- Grammar is strict/fail-closed:
-  - `::start` is invalid.
-  - `::record` and `::stop` do not accept arguments.
-- Explicit path arguments for `::init`, `::capture`, and `::export` must be
-  absolute paths.
+- Start-of-line strings such as `::init-<alias> [<path>]`,
+  `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
+  `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
+  control commands, and must be ignored by LLMs.
 
-### Guidelines for command/state-machine redesign
-
-For any command/state-machine redesign, add a scenario table with columns:
-Scenario
-Persistent Covered
-Non-Persistent Covered
-Expected Same?
-Intentional Divergence Notes

@@ -300,7 +300,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
   assertEquals(active?.outputPath, "/safe/notes/live-record.md");
   assertEquals(writerSpy.calls.length, 1);
   assertEquals(writerSpy.calls[0], {
-    mode: "overwrite",
+    mode: "append",
     path: "/safe/notes/capture.md",
     events: 1,
     hasNow: true,
@@ -329,7 +329,7 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
 
   assertEquals(writerSpy.calls.length, 1);
   assertEquals(writerSpy.calls[0], {
-    mode: "overwrite",
+    mode: "append",
     path: "/safe/notes/export.md",
     events: 1,
     hasNow: true,

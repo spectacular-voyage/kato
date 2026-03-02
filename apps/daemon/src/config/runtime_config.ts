@@ -1,17 +1,18 @@
 import type {
+  DaemonFeatureFlags,
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
   ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
-  RuntimeFeatureFlags,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
-  RuntimeMarkdownFrontmatterConfig,
 } from "@kato/shared";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import {
-  createDefaultRuntimeFeatureFlags,
-  mergeRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
+  mergeDaemonFeatureFlags,
 } from "../feature_flags/mod.ts";
 import {
   expandHomePath,
@@ -32,14 +33,29 @@ const RUNTIME_LOGGING_CONFIG_KEYS: Array<keyof RuntimeLoggingConfig> = [
   "operationalLevel",
   "auditLevel",
 ];
-const RUNTIME_MARKDOWN_FRONTMATTER_KEYS: Array<
-  keyof RuntimeMarkdownFrontmatterConfig
-> = [
+const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
   "includeFrontmatterInMarkdownRecordings",
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
   "defaultParticipantUsername",
   "includeConversationEventKinds",
+];
+const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
+  "schemaVersion",
+  "runtimeDir",
+  "katoDir",
+  "statusPath",
+  "controlPath",
+  "allowedWriteRoots",
+  "providerSessionRoots",
+  "globalAutoGenerateSnapshots",
+  "providerAutoGenerateSnapshots",
+  "cleanSessionStatesOnShutdown",
+  "daemonFeatureFlags",
+  "exportMarkdownFrontmatter",
+  "exportFeatureFlags",
+  "logging",
+  "daemonMaxMemoryMb",
 ];
 
 export interface EnsureRuntimeConfigResult {
@@ -59,13 +75,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const RUNTIME_FEATURE_FLAG_KEYS: Array<keyof RuntimeFeatureFlags> = [
+const DAEMON_FEATURE_FLAG_KEYS: Array<keyof DaemonFeatureFlags> = [
+  "daemonExportEnabled",
+  "captureIncludeSystemEvents",
+];
+const EXPORT_FEATURE_FLAG_KEYS: Array<keyof ExportFeatureFlags> = [
   "writerIncludeCommentary",
   "writerIncludeThinking",
   "writerIncludeToolCalls",
   "writerItalicizeUserMessages",
-  "daemonExportEnabled",
-  "captureIncludeSystemEvents",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "claude",
@@ -87,24 +105,80 @@ function isYamlConfigPath(path: string): boolean {
   return path.trim().toLowerCase().endsWith(".yaml");
 }
 
-function parseRuntimeFeatureFlags(
+function parseDaemonFeatureFlags(
   value: unknown,
-): RuntimeFeatureFlags | undefined {
+): DaemonFeatureFlags | undefined {
   if (value === undefined) {
-    return createDefaultRuntimeFeatureFlags();
+    return createDefaultDaemonFeatureFlags();
   }
   if (!isRecord(value)) {
     return undefined;
   }
 
   for (const key of Object.keys(value)) {
-    if (!RUNTIME_FEATURE_FLAG_KEYS.includes(key as keyof RuntimeFeatureFlags)) {
+    if (!DAEMON_FEATURE_FLAG_KEYS.includes(key as keyof DaemonFeatureFlags)) {
       return undefined;
     }
   }
 
-  const merged = mergeRuntimeFeatureFlags();
-  for (const key of RUNTIME_FEATURE_FLAG_KEYS) {
+  const merged = mergeDaemonFeatureFlags();
+  for (const key of DAEMON_FEATURE_FLAG_KEYS) {
+    const candidate = value[key];
+    if (candidate === undefined) {
+      continue;
+    }
+    if (typeof candidate !== "boolean") {
+      return undefined;
+    }
+    merged[key] = candidate;
+  }
+
+  return merged;
+}
+
+export function createDefaultExportFeatureFlags(
+  overrides?: Partial<ExportFeatureFlags>,
+): ExportFeatureFlags {
+  const defaults: ExportFeatureFlags = {
+    writerIncludeCommentary: true,
+    writerIncludeThinking: false,
+    writerIncludeToolCalls: false,
+    writerItalicizeUserMessages: false,
+  };
+  if (!overrides) {
+    return defaults;
+  }
+
+  return {
+    writerIncludeCommentary: overrides.writerIncludeCommentary ??
+      defaults.writerIncludeCommentary,
+    writerIncludeThinking: overrides.writerIncludeThinking ??
+      defaults.writerIncludeThinking,
+    writerIncludeToolCalls: overrides.writerIncludeToolCalls ??
+      defaults.writerIncludeToolCalls,
+    writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ??
+      defaults.writerItalicizeUserMessages,
+  };
+}
+
+function parseExportFeatureFlags(
+  value: unknown,
+): ExportFeatureFlags | undefined {
+  if (value === undefined) {
+    return createDefaultExportFeatureFlags();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!EXPORT_FEATURE_FLAG_KEYS.includes(key as keyof ExportFeatureFlags)) {
+      return undefined;
+    }
+  }
+
+  const merged = createDefaultExportFeatureFlags();
+  for (const key of EXPORT_FEATURE_FLAG_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
       continue;
@@ -148,9 +222,9 @@ export function createDefaultRuntimeLoggingConfig(
 }
 
 export function createDefaultRuntimeMarkdownFrontmatterConfig(
-  overrides?: Partial<RuntimeMarkdownFrontmatterConfig>,
-): RuntimeMarkdownFrontmatterConfig {
-  const defaults: RuntimeMarkdownFrontmatterConfig = {
+  overrides?: Partial<MarkdownFrontmatterConfig>,
+): MarkdownFrontmatterConfig {
+  const defaults: MarkdownFrontmatterConfig = {
     includeFrontmatterInMarkdownRecordings: true,
     includeUpdatedInFrontmatter: false,
     addParticipantUsernameToFrontmatter: false,
@@ -216,7 +290,7 @@ function parseRuntimeLoggingConfig(
 
 function parseRuntimeMarkdownFrontmatterConfig(
   value: unknown,
-): RuntimeMarkdownFrontmatterConfig | undefined {
+): MarkdownFrontmatterConfig | undefined {
   if (value === undefined) {
     return createDefaultRuntimeMarkdownFrontmatterConfig();
   }
@@ -226,8 +300,8 @@ function parseRuntimeMarkdownFrontmatterConfig(
 
   for (const key of Object.keys(value)) {
     if (
-      !RUNTIME_MARKDOWN_FRONTMATTER_KEYS.includes(
-        key as keyof RuntimeMarkdownFrontmatterConfig,
+      !MARKDOWN_FRONTMATTER_KEYS.includes(
+        key as keyof MarkdownFrontmatterConfig,
       )
     ) {
       return undefined;
@@ -235,7 +309,7 @@ function parseRuntimeMarkdownFrontmatterConfig(
   }
 
   const resolved = createDefaultRuntimeMarkdownFrontmatterConfig();
-  for (const key of RUNTIME_MARKDOWN_FRONTMATTER_KEYS) {
+  for (const key of MARKDOWN_FRONTMATTER_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
       continue;
@@ -439,6 +513,12 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     return undefined;
   }
 
+  for (const key of Object.keys(value)) {
+    if (!RUNTIME_CONFIG_KEYS.includes(key as keyof RuntimeConfig)) {
+      return undefined;
+    }
+  }
+
   if (value["schemaVersion"] !== DEFAULT_CONFIG_SCHEMA_VERSION) {
     return undefined;
   }
@@ -481,18 +561,26 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     return undefined;
   }
 
-  const featureFlags = parseRuntimeFeatureFlags(value["featureFlags"]);
-  if (!featureFlags) {
+  const daemonFeatureFlags = parseDaemonFeatureFlags(
+    value["daemonFeatureFlags"],
+  );
+  if (!daemonFeatureFlags) {
+    return undefined;
+  }
+  const exportFeatureFlags = parseExportFeatureFlags(
+    value["exportFeatureFlags"],
+  );
+  if (!exportFeatureFlags) {
     return undefined;
   }
   const logging = parseRuntimeLoggingConfig(value["logging"]);
   if (!logging) {
     return undefined;
   }
-  const markdownFrontmatter = parseRuntimeMarkdownFrontmatterConfig(
-    value["markdownFrontmatter"],
+  const exportMarkdownFrontmatter = parseRuntimeMarkdownFrontmatterConfig(
+    value["exportMarkdownFrontmatter"],
   );
-  if (!markdownFrontmatter) {
+  if (!exportMarkdownFrontmatter) {
     return undefined;
   }
   const providerSessionRoots = parseProviderSessionRoots(
@@ -542,8 +630,9 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     globalAutoGenerateSnapshots,
     providerAutoGenerateSnapshots,
     cleanSessionStatesOnShutdown,
-    markdownFrontmatter,
-    featureFlags,
+    daemonFeatureFlags,
+    exportMarkdownFrontmatter,
+    exportFeatureFlags,
     logging,
     daemonMaxMemoryMb,
   };
@@ -575,10 +664,13 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
       ...(config.providerAutoGenerateSnapshots ?? {}),
     },
     cleanSessionStatesOnShutdown: config.cleanSessionStatesOnShutdown ?? false,
-    markdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
-      config.markdownFrontmatter,
+    daemonFeatureFlags: mergeDaemonFeatureFlags(config.daemonFeatureFlags),
+    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
+      config.exportMarkdownFrontmatter,
     ),
-    featureFlags: { ...config.featureFlags },
+    exportFeatureFlags: createDefaultExportFeatureFlags(
+      config.exportFeatureFlags,
+    ),
     logging: { ...config.logging },
     daemonMaxMemoryMb: config.daemonMaxMemoryMb,
   };
@@ -599,8 +691,9 @@ export function createDefaultRuntimeConfig(options: {
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
-  markdownFrontmatter?: Partial<RuntimeMarkdownFrontmatterConfig>;
-  featureFlags?: Partial<RuntimeFeatureFlags>;
+  exportMarkdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
+  daemonFeatureFlags?: Partial<DaemonFeatureFlags>;
+  exportFeatureFlags?: Partial<ExportFeatureFlags>;
   logging?: Partial<RuntimeLoggingConfig>;
   daemonMaxMemoryMb?: number;
   useHomeShorthand?: boolean;
@@ -683,10 +776,13 @@ export function createDefaultRuntimeConfig(options: {
       ...(options.providerAutoGenerateSnapshots ?? {}),
     },
     cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,
-    markdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
-      options.markdownFrontmatter,
+    daemonFeatureFlags: mergeDaemonFeatureFlags(options.daemonFeatureFlags),
+    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
+      options.exportMarkdownFrontmatter,
     ),
-    featureFlags: mergeRuntimeFeatureFlags(options.featureFlags),
+    exportFeatureFlags: createDefaultExportFeatureFlags(
+      options.exportFeatureFlags,
+    ),
     logging: resolvedLogging,
     daemonMaxMemoryMb: resolvedDaemonMaxMemoryMb,
   };

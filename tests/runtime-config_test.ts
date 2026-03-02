@@ -2,8 +2,9 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { dirname, join } from "@std/path";
 import { stringify } from "@std/yaml";
 import {
+  createDefaultDaemonFeatureFlags,
+  createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
-  createDefaultRuntimeFeatureFlags,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
   resolveDefaultConfigPath,
@@ -172,14 +173,21 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
     );
 
     const loaded = await store.load();
-    assertEquals(loaded.featureFlags, createDefaultRuntimeFeatureFlags());
+    assertEquals(
+      loaded.daemonFeatureFlags,
+      createDefaultDaemonFeatureFlags(),
+    );
+    assertEquals(
+      loaded.exportFeatureFlags,
+      createDefaultExportFeatureFlags(),
+    );
     assertEquals(
       loaded.providerSessionRoots,
       resolveDefaultProviderSessionRoots(),
     );
     assertEquals(loaded.logging, createDefaultRuntimeLoggingConfig());
     assertEquals(
-      loaded.markdownFrontmatter,
+      loaded.exportMarkdownFrontmatter,
       createDefaultRuntimeMarkdownFrontmatterConfig(),
     );
     assertEquals(loaded.katoDir, dirname(runtimeDir));
@@ -188,7 +196,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
   }
 });
 
-Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", async () => {
+Deno.test("RuntimeConfigFileStore rejects unknown exportMarkdownFrontmatter keys", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
@@ -204,7 +212,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", asy
         statusPath: join(runtimeDir, "status.json"),
         controlPath: join(runtimeDir, "control.json"),
         allowedWriteRoots: [root],
-        markdownFrontmatter: {
+        exportMarkdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: false,
           addParticipantUsernameToFrontmatter: false,
@@ -225,7 +233,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown markdownFrontmatter keys", asy
   }
 });
 
-Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value types", async () => {
+Deno.test("RuntimeConfigFileStore rejects invalid exportMarkdownFrontmatter value types", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
@@ -241,7 +249,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value type
         statusPath: join(runtimeDir, "status.json"),
         controlPath: join(runtimeDir, "control.json"),
         allowedWriteRoots: [root],
-        markdownFrontmatter: {
+        exportMarkdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: "false",
           addParticipantUsernameToFrontmatter: false,
@@ -261,7 +269,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid markdownFrontmatter value type
   }
 });
 
-Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async () => {
+Deno.test("RuntimeConfigFileStore accepts exportMarkdownFrontmatter overrides", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
@@ -277,7 +285,7 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
         statusPath: join(runtimeDir, "status.json"),
         controlPath: join(runtimeDir, "control.json"),
         allowedWriteRoots: [root],
-        markdownFrontmatter: {
+        exportMarkdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: false,
           includeUpdatedInFrontmatter: true,
           addParticipantUsernameToFrontmatter: true,
@@ -288,7 +296,7 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
     );
 
     const loaded = await store.load();
-    assertEquals(loaded.markdownFrontmatter, {
+    assertEquals(loaded.exportMarkdownFrontmatter, {
       includeFrontmatterInMarkdownRecordings: false,
       includeUpdatedInFrontmatter: true,
       addParticipantUsernameToFrontmatter: true,
@@ -300,7 +308,40 @@ Deno.test("RuntimeConfigFileStore accepts markdownFrontmatter overrides", async 
   }
 });
 
-Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () => {
+Deno.test("RuntimeConfigFileStore rejects unknown daemon feature flag keys", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        daemonFeatureFlags: {
+          daemonExportEnabled: true,
+          notARealFlag: true,
+        },
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "unsupported schema",
+    );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore rejects legacy top-level featureFlags", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-config.yaml");
   const runtimeDir = join(root, "runtime");
@@ -317,12 +358,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown feature flag keys", async () =
         controlPath: join(runtimeDir, "control.json"),
         allowedWriteRoots: [root],
         featureFlags: {
-          writerIncludeCommentary: true,
-          writerIncludeThinking: true,
-          writerIncludeToolCalls: true,
-          writerItalicizeUserMessages: false,
           daemonExportEnabled: true,
-          notARealFlag: true,
         },
       }),
     );
@@ -390,7 +426,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async (
           claude: ".kato/not-an-array",
           codex: [],
         },
-        featureFlags: createDefaultRuntimeFeatureFlags(),
+        daemonFeatureFlags: createDefaultDaemonFeatureFlags(),
       }),
     );
 
@@ -425,7 +461,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
         providerSessionRoots: {
           claude: [claudeOverride],
         },
-        featureFlags: createDefaultRuntimeFeatureFlags(),
+        daemonFeatureFlags: createDefaultDaemonFeatureFlags(),
       }),
     );
 

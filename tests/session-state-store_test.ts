@@ -165,3 +165,87 @@ Deno.test(
     });
   },
 );
+
+Deno.test("PersistentSessionStateStore persists workspace outputs", async () => {
+  await withTempDir("session-state-store-workspace-output-", async (dir) => {
+    const katoDir = join(dir, ".kato");
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-02-28T10:00:00.000Z"),
+      makeSessionId: () => "session-uuid-workspace-output-1234",
+    });
+
+    const created = await store.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-workspace-output",
+      sourceFilePath: "/tmp/codex-session-workspace-output.jsonl",
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+
+    const updated = structuredClone(created);
+    updated.workspaceOutputs = [{
+      workspaceId: "workspace-my-proj",
+      workspaceAliasSnapshot: "My.Proj",
+      desiredState: "on",
+      currentDestination: {
+        kind: "workspace-relative",
+        relativePathFromWorkspaceRoot: "notes/session.md",
+      },
+      currentResolvedPath: `${dir}/workspace/notes/session.md`,
+      sourceConfigPath: `${dir}/workspace/kato-workspace-config.yaml`,
+      workspaceRootSnapshot: `${dir}/workspace`,
+      resolvedDefaultOutputDir: `${dir}/workspace/notes`,
+      filenameTemplate: "{provider}-{sessionShortId}.md",
+      writerFeatureFlags: {
+        writerIncludeCommentary: false,
+        writerIncludeThinking: true,
+        writerIncludeToolCalls: false,
+        writerItalicizeUserMessages: true,
+      },
+      activeRecordingCycleId: "cycle-1",
+      writeCursor: 42,
+      createdAt: "2026-02-28T10:00:00.000Z",
+      recordingCycles: [{
+        recordingCycleId: "cycle-1",
+        startedCursor: 5,
+        startedAt: "2026-02-28T10:00:00.000Z",
+        startedBySeq: 3,
+      }],
+    }];
+
+    await store.saveSessionMetadata(updated, { touchUpdatedAt: true });
+
+    const reloadedStore = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-02-28T10:05:00.000Z"),
+    });
+    const reloaded = (await reloadedStore.listSessionMetadata())[0];
+    assertExists(reloaded);
+    assertExists(reloaded.workspaceOutputs);
+    assertEquals(reloaded.workspaceOutputs.length, 1);
+    const output = reloaded.workspaceOutputs[0];
+    assertEquals(
+      output.workspaceRootSnapshot,
+      `${dir}/workspace`,
+    );
+    assertEquals(
+      output.currentDestination.kind,
+      "workspace-relative",
+    );
+    assertEquals(
+      output.currentDestination.relativePathFromWorkspaceRoot,
+      "notes/session.md",
+    );
+    assertEquals(
+      output.writerFeatureFlags.writerIncludeCommentary,
+      false,
+    );
+    assertEquals(
+      output.writerFeatureFlags.writerIncludeThinking,
+      true,
+    );
+    assertEquals(output.activeRecordingCycleId, "cycle-1");
+    assertEquals(output.recordingCycles.length, 1);
+    assertEquals(output.recordingCycles[0]?.startedCursor, 5);
+  });
+});

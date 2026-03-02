@@ -105,6 +105,103 @@ function parseInit(rest: string[]): DaemonCliIntent {
   return { kind: "command", command: { name: "init" } };
 }
 
+function parseWorkspaceInit(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "workspace-init" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length > 1) {
+    throw new CliUsageError(
+      "Command 'workspace init' accepts at most one optional <dir> positional argument",
+    );
+  }
+
+  return {
+    kind: "command",
+    command: {
+      name: "workspace-init",
+      ...(positionals[0] ? { dirPath: positionals[0] } : {}),
+    },
+  };
+}
+
+function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    string: ["alias"],
+    alias: { h: "help", a: "alias" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "workspace-register" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length > 1) {
+    throw new CliUsageError(
+      "Command 'workspace register' accepts at most one optional <dir> positional argument",
+    );
+  }
+
+  const alias = typeof parsed.alias === "string" ? parsed.alias.trim() : "";
+  if (alias.length === 0) {
+    throw new CliUsageError(
+      "Command 'workspace register' requires --alias <alias>",
+    );
+  }
+  return {
+    kind: "command",
+    command: {
+      name: "workspace-register",
+      alias,
+      ...(positionals[0] ? { dirPath: positionals[0] } : {}),
+    },
+  };
+}
+
+function parseWorkspaceList(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "workspace-list" };
+  }
+
+  requireNoPositionals("workspace-list", toPositionals(parsed));
+  return { kind: "command", command: { name: "workspace-list" } };
+}
+
+function parseWorkspaceUnregister(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "workspace-unregister" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length !== 1) {
+    throw new CliUsageError(
+      "Command 'workspace unregister' requires exactly one <alias-or-id> positional argument",
+    );
+  }
+
+  return {
+    kind: "command",
+    command: { name: "workspace-unregister", selector: positionals[0]! },
+  };
+}
+
 function parseStop(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
@@ -253,6 +350,10 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
         topic === "restart" ||
         topic === "stop" ||
         topic === "status" ||
+        topic === "workspace-init" ||
+        topic === "workspace-register" ||
+        topic === "workspace-list" ||
+        topic === "workspace-unregister" ||
         topic === "export" ||
         topic === "clean"
       ) {
@@ -261,7 +362,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     }
 
     throw new CliUsageError(
-      "Usage: kato help [init|start|restart|stop|status|export|clean]",
+      "Usage: kato help [init|start|restart|stop|status|workspace-init|workspace-register|workspace-list|workspace-unregister|export|clean]",
     );
   }
 
@@ -279,6 +380,27 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
   if (commandName === "status") {
     return parseStatus(rest);
+  }
+  if (commandName === "workspace") {
+    const [subcommand, ...subRest] = rest;
+    if (!subcommand) {
+      throw new CliUsageError(
+        "Usage: kato workspace <init|register|list|unregister> [options]",
+      );
+    }
+    if (subcommand === "init") {
+      return parseWorkspaceInit(subRest);
+    }
+    if (subcommand === "register") {
+      return parseWorkspaceRegister(subRest);
+    }
+    if (subcommand === "list") {
+      return parseWorkspaceList(subRest);
+    }
+    if (subcommand === "unregister") {
+      return parseWorkspaceUnregister(subRest);
+    }
+    throw new CliUsageError(`Unknown workspace subcommand: ${subcommand}`);
   }
   if (commandName === "export") {
     return parseExport(rest);

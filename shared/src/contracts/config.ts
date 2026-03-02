@@ -2,13 +2,16 @@ export type ConfigSource = "local-file" | "centralized-service";
 
 export type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
 
-export interface RuntimeFeatureFlags {
+export interface DaemonFeatureFlags {
+  daemonExportEnabled: boolean;
+  captureIncludeSystemEvents: boolean;
+}
+
+export interface ExportFeatureFlags {
   writerIncludeCommentary: boolean;
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
   writerItalicizeUserMessages: boolean;
-  daemonExportEnabled: boolean;
-  captureIncludeSystemEvents: boolean;
 }
 
 export interface RuntimeLoggingConfig {
@@ -16,7 +19,7 @@ export interface RuntimeLoggingConfig {
   auditLevel: RuntimeLogLevel;
 }
 
-export interface RuntimeMarkdownFrontmatterConfig {
+export interface MarkdownFrontmatterConfig {
   includeFrontmatterInMarkdownRecordings: boolean;
   includeUpdatedInFrontmatter: boolean;
   addParticipantUsernameToFrontmatter: boolean;
@@ -47,8 +50,9 @@ export interface RuntimeConfig {
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
-  markdownFrontmatter?: RuntimeMarkdownFrontmatterConfig;
-  featureFlags: RuntimeFeatureFlags;
+  daemonFeatureFlags: DaemonFeatureFlags;
+  exportMarkdownFrontmatter: MarkdownFrontmatterConfig;
+  exportFeatureFlags: ExportFeatureFlags;
   logging: RuntimeLoggingConfig;
   daemonMaxMemoryMb: number;
 }

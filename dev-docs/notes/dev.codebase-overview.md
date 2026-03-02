@@ -67,6 +67,8 @@ graph TD
 
   subgraph FS
     CONFIG[~/.kato/kato-config.yaml]
+    WREG[~/.kato/workspace-registry.json]
+    WCFG[<workspace>/kato-workspace-config.yaml]
     CONTROL[~/.kato/runtime/control.json]
     STATUS[~/.kato/runtime/status.json]
     SESSIONMETA[~/.kato/sessions/*.meta.json]
@@ -82,6 +84,7 @@ graph TD
     ROUTER[CLI Router + Commands]
     LAUNCHER[Detached Launcher]
     RUNTIME[runDaemonRuntimeLoop]
+    WORKSPACE[Workspace Registry + Profile Resolver]
     INGEST[Provider Ingestion Runners]
     PERSIST[PersistentSessionStateStore]
     SNAPSHOT[InMemorySessionSnapshotStore]
@@ -91,13 +94,18 @@ graph TD
 
   CLI --> ROUTER
   ROUTER --> CONFIG
+  ROUTER --> WREG
+  ROUTER --> WCFG
   ROUTER --> LAUNCHER
   ROUTER --> CONTROL
   ROUTER --> STATUS
 
   LAUNCHER --> RUNTIME
   CONFIG --> RUNTIME
+  WREG --> WORKSPACE
+  WCFG --> WORKSPACE
 
+  RUNTIME --> WORKSPACE
   RUNTIME --> INGEST
   INGEST --> LOGS
   INGEST --> PERSIST
@@ -124,7 +132,8 @@ graph TD
 | --------------- | ------------------------------------------------ | ----------------------------- | ------------------------------------ | ---------------------------- | ---------------------------------------------------- |
 | CLI surface     | Parse commands and dispatch behavior             | none                          | argv, config, status/control         | control queue, stdout/stderr | `apps/daemon/src/cli/*`                              |
 | Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
-| Config          | Validate and default runtime config              | config schema rules           | `~/.kato/kato-config.yaml`, env           | `~/.kato/kato-config.yaml`        | `apps/daemon/src/config/runtime_config.ts`           |
+| Config          | Validate and default runtime config              | config schema rules           | `~/.kato/kato-config.yaml`, env      | `~/.kato/kato-config.yaml`  | `apps/daemon/src/config/runtime_config.ts`           |
+| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/kato-workspace-config.yaml` | registry + workspace config files | `apps/daemon/src/workspace/*`                     |
 | Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
 | Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | SessionTwin + snapshots      | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
 | Session state   | Persistent session metadata/twin/index           | per-session durable artifacts | ingestion/runtime updates            | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
@@ -296,17 +305,21 @@ unavailable.
 - in-memory snapshot store: runtime projection/cache while daemon runs.
 - exported markdown: derived artifact, never the runtime source of truth.
 
-## Workspace Status (As Of 2026-02-26)
+## Workspace Status (As Of 2026-03-02)
 
-- Workspace-specific config loading (`<workspace>/.kato/kato-config.yaml`) is
-  not implemented yet; runtime uses global config only (`~/.kato/kato-config.yaml`).
-- `kato workspace register/list/unregister/discover` command surface is planned
-  but not implemented.
-- Workspace-aware relative path resolution for in-chat commands is still
-  follow-up work; current runtime does not yet persist authoritative workspace
-  identity per session.
+- Global runtime config lives at `~/.kato/kato-config.yaml`.
+- Workspace-local output config lives at
+  `<workspace>/kato-workspace-config.yaml`.
+- `kato workspace init/register/list/unregister` is implemented.
+- New workspace registrations, unregistrations, and workspace-config content
+  edits are visible to a running daemon for new alias-scoped commands without a
+  restart.
+- Alias, workspace-root, and config-path edits on an already-registered entry
+  are restart-bound for the running daemon.
+- Session metadata now persists authoritative workspace-scoped output state in
+  `workspaceOutputs`.
 - Tracking task:
-  - `dev-docs/notes/task.2026.2026-02-26-workspace-settings.md`
+  - `dev-docs/notes/task.2026.2026-03-01-alias-finalization.md`
 
 ## Key Interaction Flows
 

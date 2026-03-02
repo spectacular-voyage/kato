@@ -255,6 +255,73 @@ Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch u
   });
 });
 
+Deno.test(
+  "FileProviderIngestionRunner skips stale discovered sessions until they update after runner start",
+  async () => {
+    await withTempDir("provider-ingestion-startup-skip-", async (dir) => {
+      const sessionFile = join(dir, "session-stale.jsonl");
+      await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+      const store = new InMemorySessionSnapshotStore();
+      const parseOffsets: number[] = [];
+      let currentNowMs = Date.parse("2026-02-26T10:00:00.000Z");
+      let discoveredModifiedAtMs = Date.parse("2026-02-26T09:59:59.000Z");
+
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        autoGenerateSnapshots: true,
+        discoveryIntervalMs: 0,
+        now: () => new Date(currentNowMs),
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-stale",
+            filePath: sessionFile,
+            modifiedAtMs: discoveredModifiedAtMs,
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          parseOffsets.push(fromOffset);
+          return (async function* () {
+            if (fromOffset === 0) {
+              yield {
+                event: makeEvent("stale-1", "2026-02-26T10:00:01.000Z"),
+                cursor: { kind: "byte-offset" as const, value: 10 },
+              };
+            }
+          })();
+        },
+      });
+
+      await runner.start();
+
+      const firstPoll = await runner.poll();
+      assertEquals(firstPoll.sessionsUpdated, 0);
+      assertEquals(firstPoll.eventsObserved, 0);
+      assertEquals(parseOffsets, []);
+      assertEquals(store.get("session-stale"), undefined);
+
+      discoveredModifiedAtMs = Date.parse("2026-02-26T10:00:01.000Z");
+      currentNowMs = Date.parse("2026-02-26T10:00:02.000Z");
+
+      const secondPoll = await runner.poll();
+      assertEquals(secondPoll.sessionsUpdated, 1);
+      assertEquals(secondPoll.eventsObserved, 1);
+      assertEquals(parseOffsets, [0]);
+      const snapshot = store.get("session-stale");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.map((event) => event.eventId), ["stale-1"]);
+
+      await runner.stop();
+    });
+  },
+);
+
 Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates snapshot from session twin", async () => {
   await withTempDir("provider-ingestion-persistent-", async (dir) => {
     const sessionFile = join(dir, "session-persist.jsonl");
@@ -320,6 +387,115 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
     assertEquals(parseOffsets, [0, 10]);
   });
 });
+
+Deno.test(
+  "FileProviderIngestionRunner persists session twin when a workspace output is active",
+  async () => {
+    await withTempDir(
+      "provider-ingestion-workspace-output-twin-",
+      async (dir) => {
+        const sessionFile = join(dir, "session-workspace-output.jsonl");
+        await Deno.writeTextFile(sessionFile, "placeholder\n");
+        const stateRoot = join(dir, ".kato");
+        const stateStore = new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-uuid-workspace-output-1234",
+        });
+        const metadata = await stateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-workspace-output",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        metadata.workspaceOutputs = [{
+          workspaceId: "workspace-my-proj",
+          workspaceAliasSnapshot: "My.Proj",
+          desiredState: "on",
+          currentDestination: {
+            kind: "absolute-explicit",
+            absolutePath: join(dir, "notes", "session.md"),
+          },
+          currentResolvedPath: join(dir, "notes", "session.md"),
+          workspaceRootSnapshot: join(dir, "workspace"),
+          resolvedDefaultOutputDir: join(dir, "workspace", "notes"),
+          filenameTemplate: "{provider}-{sessionShortId}.md",
+          writerFeatureFlags: {
+            writerIncludeCommentary: true,
+            writerIncludeThinking: true,
+            writerIncludeToolCalls: true,
+            writerItalicizeUserMessages: false,
+          },
+          activeRecordingCycleId: "cycle-1",
+          writeCursor: 0,
+          createdAt: "2026-02-26T10:00:00.000Z",
+          recordingCycles: [{
+            recordingCycleId: "cycle-1",
+            startedCursor: 0,
+            startedAt: "2026-02-26T10:00:00.000Z",
+          }],
+        }];
+        await stateStore.saveSessionMetadata(metadata);
+
+        const store = new InMemorySessionSnapshotStore();
+        const runner = new FileProviderIngestionRunner({
+          provider: "test-provider",
+          watchRoots: [dir],
+          sessionSnapshotStore: store,
+          sessionStateStore: new PersistentSessionStateStore({
+            katoDir: stateRoot,
+            now: () => new Date("2026-02-26T10:00:00.000Z"),
+            makeSessionId: () => "session-uuid-workspace-output-1234",
+          }),
+          autoGenerateSnapshots: false,
+          discoverSessions() {
+            return Promise.resolve([{
+              sessionId: "session-workspace-output",
+              filePath: sessionFile,
+              modifiedAtMs: Date.now(),
+            }]);
+          },
+          parseEvents(
+            _filePath: string,
+            fromOffset: number,
+            _ctx: { provider: string; sessionId: string },
+          ) {
+            return (async function* () {
+              if (fromOffset === 0) {
+                yield {
+                  event: makeEvent(
+                    "workspace-output-1",
+                    "2026-02-26T10:00:00.000Z",
+                  ),
+                  cursor: { kind: "byte-offset" as const, value: 10 },
+                };
+              }
+            })();
+          },
+        });
+
+        await runner.start();
+        await runner.poll();
+        await runner.stop();
+
+        const reloadedStore = new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-uuid-workspace-output-1234",
+        });
+        const reloaded = await reloadedStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-workspace-output",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        const twinEvents = await reloadedStore.readTwinEvents(reloaded, 1);
+        assertEquals(reloaded.nextTwinSeq, 2);
+        assertEquals(twinEvents.map((event) => event.seq), [1]);
+      },
+    );
+  },
+);
 
 Deno.test("FileProviderIngestionRunner recovers first-user snippet when resuming from persisted cursor", async () => {
   await withTempDir("provider-ingestion-snippet-recover-", async (dir) => {
@@ -1375,6 +1551,83 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
   });
 });
 
+Deno.test(
+  "FileProviderIngestionRunner keeps distinct events when provider ids and timestamps are missing",
+  async () => {
+    await withTempDir("provider-ingestion-missing-id-", async (dir) => {
+      const sessionFile = join(dir, "session-missing-id.jsonl");
+      await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+      const harness = makeWatchHarness();
+      const store = new InMemorySessionSnapshotStore();
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        watchFs: harness.watchFn,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-missing-id",
+            filePath: sessionFile,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          return (async function* () {
+            if (fromOffset !== 0) {
+              return;
+            }
+            yield {
+              event: {
+                eventId: "e1",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                kind: "message.assistant",
+                role: "assistant",
+                content: "same-content",
+                turnId: "turn-1",
+                source: {
+                  providerEventType: "assistant",
+                  rawCursor: { kind: "byte-offset", value: 10 },
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+            yield {
+              event: {
+                eventId: "e2",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                kind: "message.assistant",
+                role: "assistant",
+                content: "same-content",
+                turnId: "turn-2",
+                source: {
+                  providerEventType: "assistant",
+                  rawCursor: { kind: "byte-offset", value: 20 },
+                },
+              } as ConversationEvent,
+              cursor: { kind: "byte-offset" as const, value: 20 },
+            };
+          })();
+        },
+      });
+
+      await runner.start();
+      await runner.poll();
+      await runner.stop();
+
+      const snapshot = store.get("session-missing-id");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.length, 2);
+    });
+  },
+);
+
 Deno.test("FileProviderIngestionRunner logs duplicate session discovery warnings once per duplicate set", async () => {
   await withTempDir("provider-ingestion-duplicate-sessions-", async (dir) => {
     const sessionFileA = join(dir, "session-dup-a.jsonl");
@@ -1482,6 +1735,7 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
     const runner = createClaudeIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-22T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 
@@ -1547,6 +1801,7 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
     const runner = createCodexIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-22T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 
@@ -1612,6 +1867,7 @@ Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", asyn
     const runner = createGeminiIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-24T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 

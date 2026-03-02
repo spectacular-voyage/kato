@@ -6,6 +6,10 @@ export type DaemonCliCommandName =
   | "restart"
   | "stop"
   | "status"
+  | "workspace-init"
+  | "workspace-register"
+  | "workspace-list"
+  | "workspace-unregister"
   | "export"
   | "clean";
 
@@ -15,6 +19,10 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
+  | { name: "workspace-init"; dirPath?: string }
+  | { name: "workspace-register"; alias: string; dirPath?: string }
+  | { name: "workspace-list" }
+  | { name: "workspace-unregister"; selector: string }
   | {
     name: "export";
     sessionId: string;
@@ -39,6 +47,7 @@ export interface DaemonCliRuntime {
   configPath: string;
   statusPath: string;
   controlPath: string;
+  cwdPath?: string;
   allowedWriteRoots?: string[];
   providerSessionRoots?: ProviderSessionRoots;
   now: () => Date;

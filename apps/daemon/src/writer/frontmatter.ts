@@ -105,24 +105,27 @@ export function renderFrontmatter(options: {
   title: string;
   now?: Date;
   makeFrontmatterId?: (title: string) => string;
-  sessionId?: string;
-  recordingIds?: string[];
+  sessionIds?: string[];
+  workspaceIds?: string[];
+  recordingCycleIds?: string[];
   participants?: string[];
   tags?: string[];
   conversationEventKinds?: string[];
   includeUpdated?: boolean;
 }): string {
   const now = options.now ?? new Date();
-  const sessionId = options.sessionId?.trim();
+  const sessionIds = dedupeStrings(options.sessionIds);
+  const workspaceIds = dedupeStrings(options.workspaceIds);
+  const recordingCycleIds = dedupeStrings(options.recordingCycleIds);
+  const frontmatterSessionId = sessionIds[0];
   const frontmatterId = options.makeFrontmatterId
     ? options.makeFrontmatterId(options.title)
-    : sessionId
-    ? makeSessionScopedFrontmatterId(options.title, sessionId)
+    : frontmatterSessionId
+    ? makeSessionScopedFrontmatterId(options.title, frontmatterSessionId)
     : makeCompactFrontmatterId(options.title);
   const timestampMs = now.getTime();
   const includeUpdated = options.includeUpdated ?? true;
   const participants = dedupeStrings(options.participants);
-  const recordingIds = dedupeStrings(options.recordingIds);
   const tags = dedupeStrings(options.tags);
   const conversationEventKinds = dedupeStrings(options.conversationEventKinds);
 
@@ -136,9 +139,14 @@ export function renderFrontmatter(options: {
     ...(participants.length > 0
       ? [`participants: ${renderInlineYamlArray(participants)}`]
       : []),
-    ...(sessionId ? [`sessionId: ${formatInlineYamlScalar(sessionId)}`] : []),
-    ...(recordingIds.length > 0
-      ? [`recordingIds: ${renderInlineYamlArray(recordingIds)}`]
+    ...(sessionIds.length > 0
+      ? [`sessionIds: ${renderInlineYamlArray(sessionIds)}`]
+      : []),
+    ...(workspaceIds.length > 0
+      ? [`workspaceIds: ${renderInlineYamlArray(workspaceIds)}`]
+      : []),
+    ...(recordingCycleIds.length > 0
+      ? [`recordingCycleIds: ${renderInlineYamlArray(recordingCycleIds)}`]
       : []),
     ...(tags.length > 0 ? [`tags: ${renderInlineYamlArray(tags)}`] : []),
     ...(conversationEventKinds.length > 0
@@ -255,19 +263,25 @@ function arraysEqual(a: string[], b: string[]): boolean {
 
 export function mergeAccretiveFrontmatterFields(options: {
   frontmatter: string;
-  recordingIds?: ReadonlyArray<string>;
+  sessionIds?: ReadonlyArray<string>;
+  workspaceIds?: ReadonlyArray<string>;
+  recordingCycleIds?: ReadonlyArray<string>;
   participants?: ReadonlyArray<string>;
   tags?: ReadonlyArray<string>;
   conversationEventKinds?: ReadonlyArray<string>;
 }): string {
-  const incomingRecordingIds = dedupeStrings(options.recordingIds);
+  const incomingSessionIds = dedupeStrings(options.sessionIds);
+  const incomingWorkspaceIds = dedupeStrings(options.workspaceIds);
+  const incomingRecordingCycleIds = dedupeStrings(options.recordingCycleIds);
   const incomingParticipants = dedupeStrings(options.participants);
   const incomingTags = dedupeStrings(options.tags);
   const incomingConversationEventKinds = dedupeStrings(
     options.conversationEventKinds,
   );
   if (
-    incomingRecordingIds.length === 0 &&
+    incomingSessionIds.length === 0 &&
+    incomingWorkspaceIds.length === 0 &&
+    incomingRecordingCycleIds.length === 0 &&
     incomingParticipants.length === 0 &&
     incomingTags.length === 0 &&
     incomingConversationEventKinds.length === 0
@@ -292,15 +306,25 @@ export function mergeAccretiveFrontmatterFields(options: {
     return options.frontmatter;
   }
 
-  const existingRecordingIds = readStringList(parsed["recordingIds"]);
+  const existingSessionIds = readStringList(parsed["sessionIds"]);
+  const existingWorkspaceIds = readStringList(parsed["workspaceIds"]);
+  const existingRecordingCycleIds = readStringList(parsed["recordingCycleIds"]);
   const existingParticipants = readStringList(parsed["participants"]);
   const existingTags = readStringList(parsed["tags"]);
   const existingConversationEventKinds = readStringList(
     parsed["conversationEventKinds"],
   );
-  const mergedRecordingIds = mergeStringLists(
-    existingRecordingIds,
-    incomingRecordingIds,
+  const mergedSessionIds = mergeStringLists(
+    existingSessionIds,
+    incomingSessionIds,
+  );
+  const mergedWorkspaceIds = mergeStringLists(
+    existingWorkspaceIds,
+    incomingWorkspaceIds,
+  );
+  const mergedRecordingCycleIds = mergeStringLists(
+    existingRecordingCycleIds,
+    incomingRecordingCycleIds,
   );
   const mergedParticipants = mergeStringLists(
     existingParticipants,
@@ -312,8 +336,12 @@ export function mergeAccretiveFrontmatterFields(options: {
     incomingConversationEventKinds,
   );
 
-  const recordingIdsChanged = incomingRecordingIds.length > 0 &&
-    !arraysEqual(existingRecordingIds, mergedRecordingIds);
+  const sessionIdsChanged = incomingSessionIds.length > 0 &&
+    !arraysEqual(existingSessionIds, mergedSessionIds);
+  const workspaceIdsChanged = incomingWorkspaceIds.length > 0 &&
+    !arraysEqual(existingWorkspaceIds, mergedWorkspaceIds);
+  const recordingCycleIdsChanged = incomingRecordingCycleIds.length > 0 &&
+    !arraysEqual(existingRecordingCycleIds, mergedRecordingCycleIds);
   const participantsChanged = incomingParticipants.length > 0 &&
     !arraysEqual(existingParticipants, mergedParticipants);
   const tagsChanged = incomingTags.length > 0 &&
@@ -325,7 +353,9 @@ export function mergeAccretiveFrontmatterFields(options: {
       mergedConversationEventKinds,
     );
   if (
-    !recordingIdsChanged &&
+    !sessionIdsChanged &&
+    !workspaceIdsChanged &&
+    !recordingCycleIdsChanged &&
     !participantsChanged &&
     !tagsChanged &&
     !conversationEventKindsChanged
@@ -334,8 +364,14 @@ export function mergeAccretiveFrontmatterFields(options: {
   }
 
   const nextRecord: Record<string, unknown> = { ...parsed };
-  if (recordingIdsChanged) {
-    nextRecord["recordingIds"] = mergedRecordingIds;
+  if (sessionIdsChanged) {
+    nextRecord["sessionIds"] = mergedSessionIds;
+  }
+  if (workspaceIdsChanged) {
+    nextRecord["workspaceIds"] = mergedWorkspaceIds;
+  }
+  if (recordingCycleIdsChanged) {
+    nextRecord["recordingCycleIds"] = mergedRecordingCycleIds;
   }
   if (participantsChanged) {
     nextRecord["participants"] = mergedParticipants;

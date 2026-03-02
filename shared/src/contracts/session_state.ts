@@ -5,7 +5,12 @@ export const SESSION_METADATA_SCHEMA_VERSION = 1 as const;
 
 export type RecordingDesiredState = "on" | "off";
 
-export interface SessionRecordingPeriodV1 {
+export type SessionWorkspaceOutputDestinationKindV1 =
+  | "workspace-relative"
+  | "absolute-explicit";
+
+export interface SessionWorkspaceRecordingCycleV1 {
+  recordingCycleId: string;
   startedCursor: number;
   stoppedCursor?: number;
   startedAt?: string;
@@ -14,18 +19,39 @@ export interface SessionRecordingPeriodV1 {
   stoppedBySeq?: number;
 }
 
-export interface SessionRecordingStateV1 {
-  recordingId: string;
-  destination: string;
+export interface SessionWorkspaceOutputDestinationV1 {
+  kind: SessionWorkspaceOutputDestinationKindV1;
+  relativePathFromWorkspaceRoot?: string;
+  absolutePath?: string;
+}
+
+export interface SessionWorkspaceOutputStateV1 {
+  workspaceId: string;
+  workspaceAliasSnapshot?: string;
   desiredState: RecordingDesiredState;
+  currentDestination: SessionWorkspaceOutputDestinationV1;
+  currentResolvedPath: string;
+  sourceConfigPath?: string;
+  workspaceRootSnapshot: string;
+  resolvedDefaultOutputDir: string;
+  filenameTemplate: string;
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  activeRecordingCycleId?: string;
   writeCursor: number;
   createdAt?: string;
-  periods: SessionRecordingPeriodV1[];
+  recordingCycles: SessionWorkspaceRecordingCycleV1[];
 }
 
 export interface SessionIngestAnchorV1 {
   messageId?: string;
   payloadHash?: string;
+}
+
+export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
+  writerIncludeCommentary: boolean;
+  writerIncludeThinking: boolean;
+  writerIncludeToolCalls: boolean;
+  writerItalicizeUserMessages: boolean;
 }
 
 export interface SessionMetadataV1 {
@@ -44,8 +70,7 @@ export interface SessionMetadataV1 {
   nextTwinSeq: number;
   recentFingerprints: string[];
   commandCursor?: number;
-  primaryRecordingDestination?: string;
-  recordings: SessionRecordingStateV1[];
+  workspaceOutputs?: SessionWorkspaceOutputStateV1[];
 }
 
 export interface DaemonControlSessionIndexEntryV1 {
@@ -89,11 +114,14 @@ function isProviderCursor(value: unknown): value is ProviderCursor {
   return false;
 }
 
-function isRecordingPeriod(value: unknown): value is SessionRecordingPeriodV1 {
+function isWorkspaceRecordingCycle(
+  value: unknown,
+): value is SessionWorkspaceRecordingCycleV1 {
   if (!isRecord(value)) {
     return false;
   }
   if (
+    !isNonEmptyString(value["recordingCycleId"]) ||
     typeof value["startedCursor"] !== "number" ||
     !Number.isSafeInteger(value["startedCursor"]) ||
     value["startedCursor"] < 0
@@ -137,17 +165,68 @@ function isRecordingPeriod(value: unknown): value is SessionRecordingPeriodV1 {
   return true;
 }
 
-function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
+function isWorkspaceOutputDestination(
+  value: unknown,
+): value is SessionWorkspaceOutputDestinationV1 {
   if (!isRecord(value)) {
     return false;
   }
   if (
-    !isNonEmptyString(value["recordingId"]) ||
-    !isNonEmptyString(value["destination"])
+    value["kind"] !== "workspace-relative" &&
+    value["kind"] !== "absolute-explicit"
+  ) {
+    return false;
+  }
+  if (
+    value["relativePathFromWorkspaceRoot"] !== undefined &&
+    !isNonEmptyString(value["relativePathFromWorkspaceRoot"])
+  ) {
+    return false;
+  }
+  if (
+    value["absolutePath"] !== undefined &&
+    !isNonEmptyString(value["absolutePath"])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isWorkspaceOutputState(
+  value: unknown,
+): value is SessionWorkspaceOutputStateV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    !isNonEmptyString(value["workspaceId"]) ||
+    !isWorkspaceOutputDestination(value["currentDestination"]) ||
+    !isNonEmptyString(value["currentResolvedPath"]) ||
+    !isNonEmptyString(value["workspaceRootSnapshot"]) ||
+    !isNonEmptyString(value["resolvedDefaultOutputDir"]) ||
+    !isNonEmptyString(value["filenameTemplate"])
   ) {
     return false;
   }
   if (value["desiredState"] !== "on" && value["desiredState"] !== "off") {
+    return false;
+  }
+  if (
+    value["workspaceAliasSnapshot"] !== undefined &&
+    !isNonEmptyString(value["workspaceAliasSnapshot"])
+  ) {
+    return false;
+  }
+  if (
+    value["sourceConfigPath"] !== undefined &&
+    !isNonEmptyString(value["sourceConfigPath"])
+  ) {
+    return false;
+  }
+  if (
+    value["activeRecordingCycleId"] !== undefined &&
+    !isNonEmptyString(value["activeRecordingCycleId"])
+  ) {
     return false;
   }
   if (
@@ -162,13 +241,28 @@ function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
   ) {
     return false;
   }
+  if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
+    return false;
+  }
   if (
-    !Array.isArray(value["periods"]) ||
-    !value["periods"].every((period) => isRecordingPeriod(period))
+    !Array.isArray(value["recordingCycles"]) ||
+    !value["recordingCycles"].every((cycle) => isWorkspaceRecordingCycle(cycle))
   ) {
     return false;
   }
   return true;
+}
+
+function isWorkspaceAttachmentWriterFeatureFlags(
+  value: unknown,
+): value is SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value["writerIncludeCommentary"] === "boolean" &&
+    typeof value["writerIncludeThinking"] === "boolean" &&
+    typeof value["writerIncludeToolCalls"] === "boolean" &&
+    typeof value["writerItalicizeUserMessages"] === "boolean";
 }
 
 export function isSessionMetadataV1(
@@ -242,18 +336,14 @@ export function isSessionMetadataV1(
     return false;
   }
   if (
-    value["primaryRecordingDestination"] !== undefined &&
-    !isNonEmptyString(value["primaryRecordingDestination"])
+    value["workspaceOutputs"] !== undefined &&
+    (!Array.isArray(value["workspaceOutputs"]) ||
+      !value["workspaceOutputs"].every((entry) =>
+        isWorkspaceOutputState(entry)
+      ))
   ) {
     return false;
   }
-  if (
-    !Array.isArray(value["recordings"]) ||
-    !value["recordings"].every((recording) => isRecordingState(recording))
-  ) {
-    return false;
-  }
-
   return true;
 }
 

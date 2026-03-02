@@ -596,10 +596,28 @@ async function readGeminiMessages(
   );
 }
 
+function serializeCursor(cursor: ProviderCursor | undefined): string {
+  if (!cursor) {
+    return "";
+  }
+  return `${cursor.kind}:${String(cursor.value)}`;
+}
+
+function resolveStableCursorComponent(event: ConversationEvent): string {
+  if (isNonEmptyString(event.turnId)) {
+    return `turn:${event.turnId}`;
+  }
+  if (isNonEmptyString(event.source.providerEventId)) {
+    return "";
+  }
+  return serializeCursor(event.source.rawCursor);
+}
+
 function eventSignature(event: ConversationEvent): string {
+  const stableCursorComponent = resolveStableCursorComponent(event);
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp}`;
+  }\0${event.timestamp ?? ""}\0${stableCursorComponent}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
@@ -643,6 +661,12 @@ function mergeEvents(
   return { mergedEvents, droppedEvents };
 }
 
+function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
+  return (stateMetadata.workspaceOutputs ?? []).some((output) =>
+    output.desiredState === "on"
+  );
+}
+
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   readonly provider: string;
   private readonly now: () => Date;
@@ -675,6 +699,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
+  private startedAtMs = 0;
   private lastDuplicateDiscoveryWarningKey: string | undefined;
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
@@ -701,6 +726,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.startedAtMs = this.now().getTime();
     this.needsDiscovery = true;
 
     await this.operationalLogger.info(
@@ -929,7 +955,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     for (const session of deduped) {
       activeSessionIds.add(session.sessionId);
       const current = this.sessions.get(session.sessionId);
-      if (!current || current.filePath !== session.filePath) {
+      const isNewSession = !current;
+      const filePathChanged = current
+        ? current.filePath !== session.filePath
+        : false;
+      const modifiedAtChanged = current
+        ? current.modifiedAtMs !== session.modifiedAtMs
+        : false;
+      if (isNewSession || filePathChanged || modifiedAtChanged) {
         this.sessions.set(session.sessionId, session);
         this.sessionByFilePath.set(session.filePath, session.sessionId);
         if (current && current.filePath !== session.filePath) {
@@ -938,7 +971,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.cursorSourcePaths.delete(session.sessionId);
           this.sourceSnippetBySessionId.delete(session.sessionId);
         }
-        this.dirtySessions.add(session.sessionId);
+        if (
+          filePathChanged ||
+          modifiedAtChanged ||
+          this.shouldProactivelyIngestDiscoveredSession(session)
+        ) {
+          this.dirtySessions.add(session.sessionId);
+        }
       }
     }
 
@@ -954,6 +993,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     this.needsDiscovery = false;
     this.nextDiscoveryAtMs = this.now().getTime() + this.discoveryIntervalMs;
+  }
+
+  private shouldProactivelyIngestDiscoveredSession(
+    session: ProviderSessionFile,
+  ): boolean {
+    return session.modifiedAtMs >= this.startedAtMs;
   }
 
   private async dedupeDiscoveredSessions(
@@ -1221,11 +1266,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
-        recording.desiredState === "on"
-      );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
-        hasActiveRecordings;
+        hasActiveRecordings(stateMetadata);
       if (shouldAppendTwin) {
         let twinExists = true;
         try {
@@ -1429,11 +1471,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
-        recording.desiredState === "on"
-      );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
-        hasActiveRecordings;
+        hasActiveRecordings(stateMetadata);
       let appendedTwinCount = 0;
       let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
         [];

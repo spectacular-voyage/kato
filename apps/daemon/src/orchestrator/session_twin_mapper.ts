@@ -108,15 +108,18 @@ function toKatoCommandPayloads(
 
   return parsed.commands.map((command) => {
     const payload: Record<string, unknown> = {
-      command: command.name,
+      command: command.verb,
     };
+    if (command.alias) {
+      payload["workspaceAlias"] = command.alias;
+    }
     if (command.argument) {
       payload["rawArgument"] = command.argument;
       payload["target"] = {
         kind: "destination",
         value: command.argument.trim(),
       };
-    } else if (command.name === "stop") {
+    } else if (command.verb === "stop" && !command.alias) {
       payload["target"] = { kind: "all" };
     }
     return payload;
@@ -353,12 +356,20 @@ export function mapTwinEventsToConversation(
           continue;
         }
         const command = normalizeText(event.payload["command"]);
+        const workspaceAlias = normalizeText(event.payload["workspaceAlias"]);
+        const rawArgument = normalizeText(event.payload["rawArgument"]);
         if (command.length === 0) continue;
+        const scopedCommand = workspaceAlias.length > 0
+          ? `${command}-${workspaceAlias}`
+          : command;
+        const content = rawArgument.length > 0
+          ? `::${scopedCommand} ${rawArgument}`
+          : `::${scopedCommand}`;
         output.push({
           ...common,
           kind: "message.user",
           role: "user",
-          content: `::${command}`,
+          content,
         } as ConversationEvent);
         break;
       }

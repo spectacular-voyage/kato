@@ -17,8 +17,9 @@ Unlike `research.2026-02-21-deno-security-baseline.md`, this file is normative: 
 
 In scope:
 - Local session discovery/parsing for supported providers.
-- In-chat command handling (`::init`, `::record`, `::capture`, `::export`,
-  `::stop`).
+- In-chat command handling (`::stop`, `::stop-<alias>`, and alias-scoped
+  `::init-<alias>` / `::record-<alias>` / `::capture-<alias>` /
+  `::export-<alias>`).
 - Controlled Markdown export writes.
 - Daemon lifecycle, state, logging, and release pipeline.
 

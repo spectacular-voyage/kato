@@ -18,14 +18,15 @@ export type {
 } from "./contracts/ipc.ts";
 export type {
   ConfigSource,
+  DaemonFeatureFlags,
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
   ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeConfigMetadata,
-  RuntimeFeatureFlags,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
-  RuntimeMarkdownFrontmatterConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {
@@ -72,6 +73,5 @@ export type {
   RecordingDesiredState,
   SessionIngestAnchorV1,
   SessionMetadataV1,
-  SessionRecordingPeriodV1,
-  SessionRecordingStateV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "./contracts/session_state.ts";

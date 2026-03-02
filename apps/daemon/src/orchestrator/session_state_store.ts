@@ -131,17 +131,45 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.commandCursor !== undefined
       ? { commandCursor: metadata.commandCursor }
       : {}),
-    ...(metadata.primaryRecordingDestination !== undefined
-      ? { primaryRecordingDestination: metadata.primaryRecordingDestination }
+    ...(metadata.workspaceOutputs
+      ? {
+        workspaceOutputs: metadata.workspaceOutputs.map((entry) => ({
+          workspaceId: entry.workspaceId,
+          ...(entry.workspaceAliasSnapshot
+            ? { workspaceAliasSnapshot: entry.workspaceAliasSnapshot }
+            : {}),
+          desiredState: entry.desiredState,
+          currentDestination: {
+            kind: entry.currentDestination.kind,
+            ...(entry.currentDestination.relativePathFromWorkspaceRoot
+              ? {
+                relativePathFromWorkspaceRoot:
+                  entry.currentDestination.relativePathFromWorkspaceRoot,
+              }
+              : {}),
+            ...(entry.currentDestination.absolutePath
+              ? { absolutePath: entry.currentDestination.absolutePath }
+              : {}),
+          },
+          currentResolvedPath: entry.currentResolvedPath,
+          ...(entry.sourceConfigPath
+            ? { sourceConfigPath: entry.sourceConfigPath }
+            : {}),
+          workspaceRootSnapshot: entry.workspaceRootSnapshot,
+          resolvedDefaultOutputDir: entry.resolvedDefaultOutputDir,
+          filenameTemplate: entry.filenameTemplate,
+          writerFeatureFlags: {
+            ...entry.writerFeatureFlags,
+          },
+          ...(entry.activeRecordingCycleId
+            ? { activeRecordingCycleId: entry.activeRecordingCycleId }
+            : {}),
+          writeCursor: entry.writeCursor,
+          ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
+          recordingCycles: entry.recordingCycles.map((cycle) => ({ ...cycle })),
+        })),
+      }
       : {}),
-    recordings: metadata.recordings.map((recording) => ({
-      recordingId: recording.recordingId,
-      destination: recording.destination,
-      desiredState: recording.desiredState,
-      writeCursor: recording.writeCursor,
-      ...(recording.createdAt ? { createdAt: recording.createdAt } : {}),
-      periods: recording.periods.map((period) => ({ ...period })),
-    })),
   };
 }
 
@@ -323,7 +351,6 @@ export class PersistentSessionStateStore {
       nextTwinSeq: 1,
       recentFingerprints: [],
       commandCursor: 0,
-      recordings: [],
     };
 
     await ensureDir(this.sessionsDir);

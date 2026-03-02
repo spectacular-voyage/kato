@@ -49,10 +49,12 @@ export function extractSnippet(
 ): string | undefined {
   for (const ev of events) {
     if (ev.kind === "message.user") {
-      const text = ev.content.replace(/\r?\n|\r/g, " ").trim();
-      if (text.length === 0) continue;
-      if (text.length <= SNIPPET_MAX_CHARS) return text;
-      return text.slice(0, SNIPPET_MAX_CHARS - 1) + "…";
+      const firstLine = ev.content.split(/\r?\n|\r/).find((l) =>
+        l.trim().length > 0
+      )?.trim();
+      if (!firstLine) continue;
+      if (firstLine.length <= SNIPPET_MAX_CHARS) return firstLine;
+      return firstLine.slice(0, SNIPPET_MAX_CHARS - 1) + "…";
     }
   }
   return undefined;
@@ -78,11 +80,11 @@ export function isSessionStale(
  */
 export function projectSessionStatus(opts: {
   session: SessionProjectionInput;
-  recording?: RecordingProjectionInput;
+  recordings?: RecordingProjectionInput[];
   now: Date;
   staleAfterMs?: number;
 }): DaemonSessionStatus {
-  const { session, recording, now, staleAfterMs } = opts;
+  const { session, recordings, now, staleAfterMs } = opts;
   // Staleness is derived strictly from event time.
   // We intentionally do not fallback to mtime/updatedAt so missing lastEventAt
   // remains visible as a data issue.
@@ -105,12 +107,12 @@ export function projectSessionStatus(opts: {
       : {}),
     snippet: session.snippet ?? extractSnippet(session.events ?? []),
     updatedAt: session.updatedAt,
-    ...(session.lastEventAt ? { lastMessageAt: session.lastEventAt } : {}),
+    ...(session.lastEventAt ? { lastEventAt: session.lastEventAt } : {}),
     stale,
   };
 
-  if (recording) {
-    const rec: DaemonRecordingStatus = {
+  if (recordings && recordings.length > 0) {
+    result.recordings = recordings.map((recording): DaemonRecordingStatus => ({
       ...(recording.recordingId ? { recordingId: recording.recordingId } : {}),
       ...(recording.recordingShortId
         ? { recordingShortId: recording.recordingShortId }
@@ -118,8 +120,7 @@ export function projectSessionStatus(opts: {
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
       lastWriteAt: recording.lastWriteAt,
-    };
-    result.recording = rec;
+    }));
   }
 
   return result;
@@ -128,22 +129,20 @@ export function projectSessionStatus(opts: {
 /**
  * Key used for recency sorting.
  *
- * Sort by incoming message recency first. Fallback to updatedAt when message
- * timestamp is unavailable.
+ * Sort by daemon ingest recency (`updatedAt`) only.
  */
 function recencyKey(s: DaemonSessionStatus): number {
-  const ts = s.lastMessageAt ?? s.updatedAt;
-  const parsed = Date.parse(ts);
+  const parsed = Date.parse(s.updatedAt);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 function hasActiveRecording(s: DaemonSessionStatus): boolean {
-  return !s.stale && s.recording !== undefined;
+  return !s.stale && (s.recordings?.length ?? 0) > 0;
 }
 
 /**
- * Sort sessions with active recordings first, then by incoming-message
- * recency descending, then by provider+sessionId as tiebreaker.
+ * Sort sessions with active recordings first, then by `updatedAt`
+ * descending, then by provider+sessionId as tiebreaker.
  */
 export function sortSessionsByRecency(
   sessions: DaemonSessionStatus[],

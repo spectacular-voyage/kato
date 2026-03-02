@@ -32,6 +32,7 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
+  ensureGlobalConfigInitialized,
   runCleanCommand,
   runExportCommand,
   runInitCommand,
@@ -39,6 +40,10 @@ import {
   runStartCommand,
   runStatusCommand,
   runStopCommand,
+  runWorkspaceInitCommand,
+  runWorkspaceListCommand,
+  runWorkspaceRegisterCommand,
+  runWorkspaceUnregisterCommand,
 } from "./commands/mod.ts";
 
 export interface RunDaemonCliOptions {
@@ -64,11 +69,25 @@ function writeToStream(
 
 export function createDefaultCliRuntime(): DaemonCliRuntime {
   const runtimeDir = resolveDefaultRuntimeDir();
+  let cwdPath: string | undefined;
+  try {
+    cwdPath = Deno.cwd();
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      cwdPath = undefined;
+    } else {
+      throw error;
+    }
+  }
   return {
     runtimeDir,
     configPath: resolveDefaultConfigPath(runtimeDir),
     statusPath: resolveDefaultStatusPath(runtimeDir),
     controlPath: resolveDefaultControlPath(runtimeDir),
+    cwdPath,
     now: () => new Date(),
     pid: Deno.pid,
     writeStdout: (text) => writeToStream(Deno.stdout, text),
@@ -183,8 +202,15 @@ export async function runDaemonCli(
   }
 
   let runtimeConfig = defaultRuntimeConfig;
-  let autoInitializedConfigPath: string | undefined;
-  if (intent.command.name !== "init") {
+  let autoInitializedRuntimeConfigPath: string | undefined;
+  let autoInitializedDefaultWorkspaceConfigPath: string | undefined;
+  const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
+    intent.command.name === "workspace-init" ||
+    intent.command.name === "workspace-register" ||
+    intent.command.name === "workspace-list" ||
+    intent.command.name === "workspace-unregister";
+  const commandShouldTryLoadingRuntimeConfig = intent.command.name !== "init";
+  if (commandShouldTryLoadingRuntimeConfig) {
     try {
       runtimeConfig = await configStore.load();
     } catch (error) {
@@ -193,22 +219,22 @@ export async function runDaemonCli(
           (intent.command.name === "start" ||
             intent.command.name === "restart") && autoInitOnStart
         ) {
-          const initialized = await configStore.ensureInitialized(
+          const initialized = await ensureGlobalConfigInitialized({
+            configStore,
             defaultRuntimeConfig,
-          );
-          runtimeConfig = initialized.config;
-          if (initialized.created) {
-            autoInitializedConfigPath = initialized.path;
-            // Reload after init so persisted path shorthands (e.g. "~") are
-            // expanded by the store's own load logic. Fall back to the
-            // just-initialized config if the reload fails.
-            try {
-              runtimeConfig = await configStore.load();
-            } catch {
-              runtimeConfig = initialized.config;
-            }
+            runtimeConfigPath: runtime.configPath,
+          });
+          if (initialized.runtimeConfigCreated) {
+            autoInitializedRuntimeConfigPath = initialized.runtimeConfigPath;
           }
-        } else {
+          if (initialized.defaultWorkspaceConfigCreated) {
+            autoInitializedDefaultWorkspaceConfigPath =
+              initialized.defaultWorkspaceConfigPath;
+          }
+          // Reload after init so persisted path shorthands (e.g. "~") are
+          // expanded by the store's own load logic.
+          runtimeConfig = await configStore.load();
+        } else if (!commandAllowsMissingRuntimeConfig) {
           runtime.writeStderr(
             `Runtime config not found at ${runtime.configPath}. Run \`kato init\` first.\n`,
           );
@@ -261,11 +287,21 @@ export async function runDaemonCli(
 
   if (
     (intent.command.name === "start" || intent.command.name === "restart") &&
-    autoInitializedConfigPath
+    (autoInitializedRuntimeConfigPath ||
+      autoInitializedDefaultWorkspaceConfigPath)
   ) {
-    runtime.writeStdout(
-      `initialized runtime config at ${autoInitializedConfigPath}\n`,
-    );
+    const lines: string[] = [];
+    if (autoInitializedRuntimeConfigPath) {
+      lines.push(
+        `initialized runtime config at ${autoInitializedRuntimeConfigPath}`,
+      );
+    }
+    if (autoInitializedDefaultWorkspaceConfigPath) {
+      lines.push(
+        `initialized default workspace config at ${autoInitializedDefaultWorkspaceConfigPath}`,
+      );
+    }
+    runtime.writeStdout(`${lines.join("\n")}\n`);
   }
 
   try {
@@ -288,6 +324,25 @@ export async function runDaemonCli(
           intent.command.asJson,
           intent.command.all,
           intent.command.live,
+        );
+        return 0;
+      case "workspace-init":
+        await runWorkspaceInitCommand(commandContext, intent.command.dirPath);
+        return 0;
+      case "workspace-register":
+        await runWorkspaceRegisterCommand(
+          commandContext,
+          intent.command.alias,
+          intent.command.dirPath,
+        );
+        return 0;
+      case "workspace-list":
+        await runWorkspaceListCommand(commandContext);
+        return 0;
+      case "workspace-unregister":
+        await runWorkspaceUnregisterCommand(
+          commandContext,
+          intent.command.selector,
         );
         return 0;
       case "export":

@@ -16,7 +16,11 @@ const CONTROL_SCHEMA_VERSION = 1;
 const MAX_CONTROL_QUEUE_LENGTH = 10_000;
 const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 30_000;
 
-export type DaemonControlCommand = "start" | "stop" | "export" | "clean";
+export type DaemonControlCommand =
+  | "start"
+  | "stop"
+  | "export"
+  | "clean";
 
 export interface DaemonControlRequestDraft {
   command: DaemonControlCommand;
@@ -65,8 +69,8 @@ function isProviderStatus(value: unknown): boolean {
     return false;
   }
 
-  const lastMessageAt = value["lastMessageAt"];
-  if (lastMessageAt !== undefined && typeof lastMessageAt !== "string") {
+  const lastEventAt = value["lastEventAt"];
+  if (lastEventAt !== undefined && typeof lastEventAt !== "string") {
     return false;
   }
 

@@ -75,6 +75,13 @@ Deno.test("extractSnippet returns undefined when all user messages are blank", (
   assertEquals(extractSnippet([makeUserEvent("   ")]), undefined);
 });
 
+Deno.test("extractSnippet returns only the first line of a multi-line message", () => {
+  assertEquals(
+    extractSnippet([makeUserEvent("first line\nsecond line\nthird line")]),
+    "first line",
+  );
+});
+
 // ─── isSessionStale ───────────────────────────────────────────────────────────
 
 Deno.test("isSessionStale returns false for recent timestamp", () => {
@@ -121,10 +128,10 @@ Deno.test("projectSessionStatus marks active session as not stale", () => {
   assertEquals(result.snippet, "hello");
   assertEquals(result.provider, "claude");
   assertEquals(result.sessionId, "abc");
-  assertEquals(result.recording, undefined);
+  assertEquals(result.recordings, undefined);
 });
 
-Deno.test("projectSessionStatus attaches recording when provided", () => {
+Deno.test("projectSessionStatus attaches recordings when provided", () => {
   const now = new Date("2026-02-24T10:00:00.000Z");
   const updatedAt = new Date(now.getTime() - 60_000).toISOString();
   const result = projectSessionStatus({
@@ -134,16 +141,25 @@ Deno.test("projectSessionStatus attaches recording when provided", () => {
       updatedAt,
       events: [],
     },
-    recording: {
+    recordings: [{
       provider: "codex",
       sessionId: "xyz",
       outputPath: "/out/notes.md",
       startedAt: updatedAt,
       lastWriteAt: updatedAt,
-    },
+    }, {
+      provider: "codex",
+      sessionId: "xyz",
+      outputPath: "/out/other.md",
+      startedAt: updatedAt,
+      lastWriteAt: updatedAt,
+    }],
     now,
   });
-  assertEquals(result.recording?.outputPath, "/out/notes.md");
+  assertEquals(
+    result.recordings?.map((recording) => recording.outputPath),
+    ["/out/notes.md", "/out/other.md"],
+  );
 });
 
 Deno.test("projectSessionStatus marks session stale when lastEventAt absent", () => {
@@ -162,7 +178,7 @@ Deno.test("projectSessionStatus marks session stale when lastEventAt absent", ()
   assertEquals(result.stale, true);
 });
 
-Deno.test("projectSessionStatus does not fall back lastMessageAt to fileModifiedAtMs", () => {
+Deno.test("projectSessionStatus does not fall back lastEventAt to fileModifiedAtMs", () => {
   const now = new Date("2026-02-24T10:00:00.000Z");
   const updatedAt = new Date(now.getTime() - 60_000).toISOString();
   const fileModifiedAtMs = Date.parse("2026-02-24T08:30:00.000Z");
@@ -176,7 +192,7 @@ Deno.test("projectSessionStatus does not fall back lastMessageAt to fileModified
     },
     now,
   });
-  assertEquals(result.lastMessageAt, undefined);
+  assertEquals(result.lastEventAt, undefined);
   assertEquals(result.stale, true);
 });
 
@@ -247,14 +263,14 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
       sessionId: "older",
       stale: false,
       updatedAt: "2026-02-24T09:00:00.000Z",
-      lastMessageAt: "2026-02-24T09:00:00.000Z",
+      lastEventAt: "2026-02-24T11:00:00.000Z",
     },
     {
       provider: "claude",
       sessionId: "newer",
       stale: false,
       updatedAt: "2026-02-24T10:00:00.000Z",
-      lastMessageAt: "2026-02-24T10:00:00.000Z",
+      lastEventAt: "2026-02-24T08:00:00.000Z",
     },
   ];
   const result = filterSessionsForDisplay(sessions, {
@@ -266,32 +282,32 @@ Deno.test("filterSessionsForDisplay sorts by recency descending", () => {
 
 // ─── sortSessionsByRecency ────────────────────────────────────────────────────
 
-Deno.test("sortSessionsByRecency for active recordings uses lastMessageAt over lastWriteAt", () => {
+Deno.test("sortSessionsByRecency for active recordings uses updatedAt over lastWriteAt", () => {
   const sessions: DaemonSessionStatus[] = [
     {
       provider: "claude",
       sessionId: "older-message",
       stale: false,
       updatedAt: "2026-02-24T10:00:00.000Z",
-      lastMessageAt: "2026-02-24T10:00:00.000Z",
-      recording: {
+      lastEventAt: "2026-02-24T12:30:00.000Z",
+      recordings: [{
         outputPath: "/out-older.md",
         startedAt: "2026-02-24T09:00:00.000Z",
         // Intentionally newer than newer-message session. Should be ignored.
         lastWriteAt: "2026-02-24T12:00:00.000Z",
-      },
+      }],
     },
     {
       provider: "claude",
       sessionId: "newer-message",
       stale: false,
       updatedAt: "2026-02-24T11:00:00.000Z",
-      lastMessageAt: "2026-02-24T11:00:00.000Z",
-      recording: {
+      lastEventAt: "2026-02-24T09:00:00.000Z",
+      recordings: [{
         outputPath: "/out-newer.md",
         startedAt: "2026-02-24T10:00:00.000Z",
         lastWriteAt: "2026-02-24T11:00:00.000Z",
-      },
+      }],
     },
   ];
   const result = sortSessionsByRecency(sessions);
@@ -299,7 +315,7 @@ Deno.test("sortSessionsByRecency for active recordings uses lastMessageAt over l
 });
 
 Deno.test(
-  "sortSessionsByRecency for stale sessions uses lastMessageAt over recording lastWriteAt",
+  "sortSessionsByRecency for stale sessions uses updatedAt over recording lastWriteAt",
   () => {
     const sessions: DaemonSessionStatus[] = [
       {
@@ -307,31 +323,56 @@ Deno.test(
         sessionId: "stale-older-message",
         stale: true,
         updatedAt: "2026-02-24T09:00:00.000Z",
-        lastMessageAt: "2026-02-24T09:00:00.000Z",
-        recording: {
+        lastEventAt: "2026-02-24T12:30:00.000Z",
+        recordings: [{
           outputPath: "/out-old.md",
           startedAt: "2026-02-24T09:00:00.000Z",
           // Intentionally newer than the other stale session. Should be ignored.
           lastWriteAt: "2026-02-24T12:00:00.000Z",
-        },
+        }],
       },
       {
         provider: "claude",
         sessionId: "stale-newer-message",
         stale: true,
         updatedAt: "2026-02-24T10:00:00.000Z",
-        lastMessageAt: "2026-02-24T10:00:00.000Z",
-        recording: {
+        lastEventAt: "2026-02-24T08:30:00.000Z",
+        recordings: [{
           outputPath: "/out-new.md",
           startedAt: "2026-02-24T10:00:00.000Z",
           lastWriteAt: "2026-02-24T11:00:00.000Z",
-        },
+        }],
       },
     ];
 
     const result = sortSessionsByRecency(sessions);
     assertEquals(result[0].sessionId, "stale-newer-message");
     assertEquals(result[1].sessionId, "stale-older-message");
+  },
+);
+
+Deno.test(
+  "sortSessionsByRecency uses updatedAt even when lastEventAt is absent",
+  () => {
+    const sessions: DaemonSessionStatus[] = [
+      {
+        provider: "claude",
+        sessionId: "missing-last-event",
+        stale: false,
+        updatedAt: "2026-02-24T09:00:00.000Z",
+      },
+      {
+        provider: "claude",
+        sessionId: "newer-updated",
+        stale: false,
+        updatedAt: "2026-02-24T10:00:00.000Z",
+        lastEventAt: "2026-02-24T08:00:00.000Z",
+      },
+    ];
+
+    const result = sortSessionsByRecency(sessions);
+    assertEquals(result[0].sessionId, "newer-updated");
+    assertEquals(result[1].sessionId, "missing-last-event");
   },
 );
 
@@ -350,11 +391,11 @@ Deno.test(
         sessionId: "recording-older",
         stale: false,
         updatedAt: "2026-02-24T11:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/out.md",
           startedAt: "2026-02-24T10:00:00.000Z",
           lastWriteAt: "2026-02-24T11:00:00.000Z",
-        },
+        }],
       },
     ];
 
@@ -373,24 +414,24 @@ Deno.test(
         sessionId: "active-recording",
         stale: false,
         updatedAt: "2026-02-24T09:00:00.000Z",
-        lastMessageAt: "2026-02-24T09:00:00.000Z",
-        recording: {
+        lastEventAt: "2026-02-24T09:00:00.000Z",
+        recordings: [{
           outputPath: "/active.md",
           startedAt: "2026-02-24T08:00:00.000Z",
           lastWriteAt: "2026-02-24T09:00:00.000Z",
-        },
+        }],
       },
       {
         provider: "claude",
         sessionId: "stale-recording",
         stale: true,
         updatedAt: "2026-02-24T11:00:00.000Z",
-        lastMessageAt: "2026-02-24T11:00:00.000Z",
-        recording: {
+        lastEventAt: "2026-02-24T11:00:00.000Z",
+        recordings: [{
           outputPath: "/stale.md",
           startedAt: "2026-02-24T08:30:00.000Z",
           lastWriteAt: "2026-02-24T11:30:00.000Z",
-        },
+        }],
       },
     ];
 

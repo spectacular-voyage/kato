@@ -75,6 +75,7 @@ export type {
   RuntimeConfigStoreLike,
 } from "./config/mod.ts";
 export {
+  createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
@@ -112,17 +113,17 @@ export {
   watchFsDebounced,
 } from "./core/watcher.ts";
 export type {
+  DaemonFeatureFlagKey,
   DaemonFeatureSettings,
   OpenFeatureBooleanProviderLike,
   OpenFeatureEvaluationContext,
-  RuntimeFeatureFlagKey,
 } from "./feature_flags/mod.ts";
 export {
   bootstrapOpenFeature,
-  createDefaultRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
   evaluateDaemonFeatureSettings,
   InMemoryOpenFeatureProvider,
-  mergeRuntimeFeatureFlags,
+  mergeDaemonFeatureFlags,
   OpenFeatureClient,
 } from "./feature_flags/mod.ts";
 export type {
@@ -136,6 +137,7 @@ export type {
   MarkdownRenderOptions,
   MarkdownSpeakerNames,
   MarkdownWriteResult,
+  RecordingOutputOverrides,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,
@@ -149,3 +151,35 @@ export {
   renderEventsToMarkdown,
   slugifyForFrontmatterId,
 } from "./writer/mod.ts";
+export type {
+  EnsureDefaultWorkspaceConfigResult,
+  RegisteredWorkspace,
+  ResolvedWorkspaceProfile,
+  WorkspaceCatalogLike,
+  WorkspaceConfigOverrides,
+  WorkspaceProfileResolverLike,
+  WorkspaceRegistryStoreLike,
+} from "./workspace/mod.ts";
+export {
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
+  createWorkspaceConfigScaffold,
+  DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
+  DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+  DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+  DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME,
+  DefaultWorkspaceConfigFileStore,
+  ensureWorkspaceConfigWorkspaceId,
+  findNearestWorkspaceConfig,
+  isPathWithinRoots,
+  loadDefaultWorkspaceConfigOverrides,
+  loadWorkspaceConfigOverrides,
+  readWorkspaceConfigWorkspaceId,
+  resolveDefaultWorkspaceRegistryPath,
+  resolveDefaultWorkspaceTemplateConfigPath,
+  resolveWorkspaceConfigPath,
+  WorkspaceCatalog,
+  WorkspaceProfileResolver,
+  WorkspaceRegistryFileStore,
+} from "./workspace/mod.ts";

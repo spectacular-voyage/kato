@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   bootstrapOpenFeature,
-  createDefaultRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
   evaluateDaemonFeatureSettings,
 } from "../apps/daemon/src/mod.ts";
 
@@ -13,24 +13,15 @@ Deno.test("OpenFeature bootstrap uses deterministic local defaults", () => {
   });
 
   assertEquals(settings.exportEnabled, true);
-  assertEquals(settings.writerRenderOptions, {
-    includeCommentary: true,
-    includeThinking: false,
-    includeToolCalls: false,
-    italicizeUserMessages: false,
-    includeSystemEvents: false,
-  });
+  assertEquals(settings.captureIncludeSystemEvents, false);
 });
 
 Deno.test("OpenFeature bootstrap applies local overrides", () => {
-  const defaults = createDefaultRuntimeFeatureFlags();
+  const defaults = createDefaultDaemonFeatureFlags();
   const client = bootstrapOpenFeature({
     ...defaults,
     daemonExportEnabled: false,
-    writerIncludeCommentary: false,
-    writerIncludeThinking: false,
-    writerIncludeToolCalls: false,
-    writerItalicizeUserMessages: true,
+    captureIncludeSystemEvents: true,
   });
   const settings = evaluateDaemonFeatureSettings(client, {
     provider: "claude",
@@ -38,11 +29,5 @@ Deno.test("OpenFeature bootstrap applies local overrides", () => {
   });
 
   assertEquals(settings.exportEnabled, false);
-  assertEquals(settings.writerRenderOptions, {
-    includeCommentary: false,
-    includeThinking: false,
-    includeToolCalls: false,
-    italicizeUserMessages: true,
-    includeSystemEvents: false,
-  });
+  assertEquals(settings.captureIncludeSystemEvents, true);
 });

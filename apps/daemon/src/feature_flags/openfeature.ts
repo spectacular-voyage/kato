@@ -1,16 +1,11 @@
-import type { RuntimeFeatureFlags } from "@kato/shared";
-import type { MarkdownRenderOptions } from "../writer/mod.ts";
+import type { DaemonFeatureFlags } from "@kato/shared";
 
-const DEFAULT_RUNTIME_FEATURE_FLAGS: RuntimeFeatureFlags = {
-  writerIncludeCommentary: true,
-  writerIncludeThinking: false,
-  writerIncludeToolCalls: false,
-  writerItalicizeUserMessages: false,
+const DEFAULT_DAEMON_FEATURE_FLAGS: DaemonFeatureFlags = {
   daemonExportEnabled: true,
   captureIncludeSystemEvents: false,
 };
 
-export type RuntimeFeatureFlagKey = keyof RuntimeFeatureFlags;
+export type DaemonFeatureFlagKey = keyof DaemonFeatureFlags;
 
 export interface OpenFeatureEvaluationContext {
   provider?: string;
@@ -20,48 +15,44 @@ export interface OpenFeatureEvaluationContext {
 
 export interface OpenFeatureBooleanProviderLike {
   resolveBooleanValue(
-    flagKey: RuntimeFeatureFlagKey,
+    flagKey: DaemonFeatureFlagKey,
     defaultValue: boolean,
     context?: OpenFeatureEvaluationContext,
   ): boolean;
 }
 
 function cloneRuntimeFeatureFlags(
-  value: RuntimeFeatureFlags,
-): RuntimeFeatureFlags {
+  value: DaemonFeatureFlags,
+): DaemonFeatureFlags {
   return {
-    writerIncludeCommentary: value.writerIncludeCommentary,
-    writerIncludeThinking: value.writerIncludeThinking,
-    writerIncludeToolCalls: value.writerIncludeToolCalls,
-    writerItalicizeUserMessages: value.writerItalicizeUserMessages,
     daemonExportEnabled: value.daemonExportEnabled,
     captureIncludeSystemEvents: value.captureIncludeSystemEvents,
   };
 }
 
-export function createDefaultRuntimeFeatureFlags(): RuntimeFeatureFlags {
-  return cloneRuntimeFeatureFlags(DEFAULT_RUNTIME_FEATURE_FLAGS);
+export function createDefaultDaemonFeatureFlags(): DaemonFeatureFlags {
+  return cloneRuntimeFeatureFlags(DEFAULT_DAEMON_FEATURE_FLAGS);
 }
 
-export function mergeRuntimeFeatureFlags(
-  overrides: Partial<RuntimeFeatureFlags> = {},
-): RuntimeFeatureFlags {
+export function mergeDaemonFeatureFlags(
+  overrides: Partial<DaemonFeatureFlags> = {},
+): DaemonFeatureFlags {
   return {
-    ...createDefaultRuntimeFeatureFlags(),
+    ...createDefaultDaemonFeatureFlags(),
     ...overrides,
   };
 }
 
 export class InMemoryOpenFeatureProvider
   implements OpenFeatureBooleanProviderLike {
-  private readonly values: RuntimeFeatureFlags;
+  private readonly values: DaemonFeatureFlags;
 
-  constructor(values: RuntimeFeatureFlags) {
+  constructor(values: DaemonFeatureFlags) {
     this.values = cloneRuntimeFeatureFlags(values);
   }
 
   resolveBooleanValue(
-    flagKey: RuntimeFeatureFlagKey,
+    flagKey: DaemonFeatureFlagKey,
     defaultValue: boolean,
     _context?: OpenFeatureEvaluationContext,
   ): boolean {
@@ -74,7 +65,7 @@ export class OpenFeatureClient {
   constructor(private readonly provider: OpenFeatureBooleanProviderLike) {}
 
   getBooleanValue(
-    flagKey: RuntimeFeatureFlagKey,
+    flagKey: DaemonFeatureFlagKey,
     defaultValue: boolean,
     context?: OpenFeatureEvaluationContext,
   ): boolean {
@@ -85,21 +76,12 @@ export class OpenFeatureClient {
 export interface DaemonFeatureSettings {
   exportEnabled: boolean;
   captureIncludeSystemEvents: boolean;
-  writerRenderOptions:
-    & Pick<
-      MarkdownRenderOptions,
-      | "includeCommentary"
-      | "includeThinking"
-      | "includeToolCalls"
-      | "italicizeUserMessages"
-    >
-    & { includeSystemEvents: boolean };
 }
 
 export function bootstrapOpenFeature(
-  overrides: Partial<RuntimeFeatureFlags> = {},
+  overrides: Partial<DaemonFeatureFlags> = {},
 ): OpenFeatureClient {
-  const values = mergeRuntimeFeatureFlags(overrides);
+  const values = mergeDaemonFeatureFlags(overrides);
   return new OpenFeatureClient(new InMemoryOpenFeatureProvider(values));
 }
 
@@ -107,7 +89,7 @@ export function evaluateDaemonFeatureSettings(
   client: OpenFeatureClient,
   context: OpenFeatureEvaluationContext = {},
 ): DaemonFeatureSettings {
-  const defaults = createDefaultRuntimeFeatureFlags();
+  const defaults = createDefaultDaemonFeatureFlags();
   const captureIncludeSystemEvents = client.getBooleanValue(
     "captureIncludeSystemEvents",
     defaults.captureIncludeSystemEvents,
@@ -120,28 +102,5 @@ export function evaluateDaemonFeatureSettings(
       { ...context, command: "export" },
     ),
     captureIncludeSystemEvents,
-    writerRenderOptions: {
-      includeCommentary: client.getBooleanValue(
-        "writerIncludeCommentary",
-        defaults.writerIncludeCommentary,
-        context,
-      ),
-      includeThinking: client.getBooleanValue(
-        "writerIncludeThinking",
-        defaults.writerIncludeThinking,
-        context,
-      ),
-      includeToolCalls: client.getBooleanValue(
-        "writerIncludeToolCalls",
-        defaults.writerIncludeToolCalls,
-        context,
-      ),
-      italicizeUserMessages: client.getBooleanValue(
-        "writerItalicizeUserMessages",
-        defaults.writerItalicizeUserMessages,
-        context,
-      ),
-      includeSystemEvents: captureIncludeSystemEvents,
-    },
   };
 }

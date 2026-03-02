@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ''
-updated: 1772258142220
+updated: 1772401876014
 created: 1771812869620
 ---
 
@@ -72,3 +72,4 @@ created: 1771812869620
 - [ ] resolveConversationTitle call dedup/memoization in daemon runtime is still an optimization opportunity.
 - [ ] remove all compatibility-layer cruft
 - [ ] Supporting relative paths for in-chat command arguments and config allowedWriteRoots
+- [ ] add codex "plan" documents (and other documents?) to ConversationEventKinds and add corresponding config switches.
