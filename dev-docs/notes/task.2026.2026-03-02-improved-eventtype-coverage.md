@@ -2,11 +2,11 @@
 id: p4w97s9wnrwnyvimlwhre6k
 title: 2026 03 02 Improved Eventtype Coverage
 desc: ''
-updated: 1772483147269
+updated: 1772488099471
 created: 1772483142383
 ---
 
-# Plan: Clean Questionnaire Rendering in Captured Markdown
+# Plan: Clean Questionnaire Rendering in Captured Markdown and User Response Capture Completeness
 
 ## Summary
 Adjust markdown rendering so questionnaire-style decisions are concise and non-duplicative:
@@ -114,3 +114,49 @@ We want to guarantee that all user responses are captured reliably, including pl
 - No plain user message is silently dropped in capture output under normal polling cadence.
 - Questionnaire selections are always represented in captured markdown.
 - Timing-sensitive capture flows (message arrives just before capture) have deterministic passing tests.
+
+---
+
+# Expansion: Plan Snapshot Capture and Dedupe
+
+## Why this is added
+Plan-mode interactions should be fully auditable without repeating identical plan payloads on every cycle.
+
+## Policy
+1. Always capture plan content whenever a plan is produced, regardless of whether the user chooses implementation.
+2. Always capture the user's follow-up choice as its own event (implement/not now/custom response).
+3. Re-render full plan content only when the normalized plan content has changed.
+4. When unchanged, emit a compact marker instead of repeating plan body:
+- Example: `Plan unchanged (hash: <hash>)`
+
+## Implementation scope
+1. Add normalized plan hashing at markdown-render level for plan events.
+- Normalize whitespace and stable markdown structure before hashing.
+- Store latest hash in render-pass context keyed by plan identity.
+
+2. Add render behavior for unchanged plan snapshots.
+- First instance in a render pass: render full plan section.
+- Subsequent identical instances: render compact unchanged marker and preserve linkage to prior plan id/hash.
+
+3. Ensure custom "Other" / free-form responses are preserved verbatim in the decision/user-response section.
+
+## Test scenarios
+1. Same plan emitted twice in sequence.
+- First render contains full plan body.
+- Second render contains `Plan unchanged (hash: ...)` only.
+
+2. Same plan with content change.
+- Changed plan emits full body again with a different hash.
+
+3. User chooses non-implementation path.
+- Plan still captured.
+- User choice captured separately.
+
+4. User enters free-form custom response.
+- Response appears verbatim in captured markdown.
+
+## Acceptance criteria (plan dedupe)
+- Repeated identical plans do not duplicate full markdown bodies.
+- Changed plans re-render fully.
+- User choices are always retained as separate captured events.
+- Free-form custom responses are captured verbatim.

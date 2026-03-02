@@ -1975,3 +1975,98 @@ Warn only meaningful unmapped (Recommended)
 # Assistant_2026-03-02_1329_50_Tool-exec_command
 
 rg -n "for await \(const \{ event, cursor \} of this.parseEvents|this.parseEvents\(" apps/daemon/src/orchestrator/provider_ingestion.ts -n -S && sed -n '1470,1665p' apps/daemon/src/orchestrator/provider_ingestion.ts
+
+**Planning parser diagnostic integration**
+
+# Assistant_2026-03-02_1329_59_Tool-exec_command
+
+ls -R apps/daemon/src/providers | sed -n '1,200p'
+
+**Inspecting provider exports**
+
+# Assistant_2026-03-02_1330_02_Tool-exec_command
+
+sed -n '1,200p' apps/daemon/src/providers/mod.ts
+
+**Crafting comprehensive replacement plan**
+
+# User_2026-03-02_1331_19
+
+I'm just doing a custom reply, because we finally got a plan pop-up to test with.
+
+**Formulating concise custom reply**
+
+# gpt-5.3-codex_2026-03-02_1331_23
+
+Noted. This custom reply should be a good validation point for free-form “Other”/custom response capture in the next `::capture-k` snapshot.
+
+# User_2026-03-02_1333_12
+
+Yeah, looks like the plan get translated into output. Probably it's worth capturing the plan whether or not I choose the option to implement it? But then don't re-output it unless it has changed?
+
+**Recommending plan capture rules**
+
+# gpt-5.3-codex_2026-03-02_1333_27
+
+Yes, that’s a good policy.
+
+Recommended behavior:
+
+1. Always capture plan events, even if user does **not** choose implementation.
+2. Compute a normalized plan hash.
+3. Render full plan content only when hash changes.
+4. If unchanged, render a short line like `Plan unchanged (hash: abc123)` instead of repeating full text.
+5. Still always record the user’s choice (`implement`, `not now`, custom response) as its own event.
+
+That gives you full auditability without bloating notes with repeated identical plans.
+
+# User_2026-03-02_1336_53
+
+ok, please update the task.
+
+**Acknowledging task file update**
+
+# gpt-5.3-codex_2026-03-02_1336_58
+
+I’ll update the task note to include this new policy: always capture plans, only re-render full plan content when the normalized plan hash changes, and always capture the user’s selection separately.
+
+# gpt-5.3-codex_2026-03-02_1336_58_Tool-exec_command
+
+sed -n '1,260p' dev-docs/notes/task.2026.2026-03-02-improved-eventtype-coverage.md
+
+**Planning patch for content snapshot**
+
+# gpt-5.3-codex_2026-03-02_1337_04
+
+I’ve got the right file open. Next I’ll append a new section covering plan capture policy (`always capture`, `hash-based dedupe`, `always capture user choice`) and update acceptance criteria accordingly.
+
+**Updating frontmatter with timestamp**
+
+# Assistant_2026-03-02_1337_05_Tool-exec_command
+
+date +%s%3N
+
+# gpt-5.3-codex_2026-03-02_1337_18
+
+I’ve applied the task update with a new “Plan Snapshot Capture and Dedupe” section and updated frontmatter timestamp. I’ll quickly verify the inserted section boundaries and wording.
+
+# Assistant_2026-03-02_1337_21_Tool-exec_command
+
+nl -ba dev-docs/notes/task.2026.2026-03-02-improved-eventtype-coverage.md | sed -n '1,320p'
+
+**Preparing concise final response**
+
+# gpt-5.3-codex_2026-03-02_1337_26
+
+Updated [task.2026.2026-03-02-improved-eventtype-coverage.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-02-improved-eventtype-coverage.md:120) with a new section:
+
+- `Expansion: Plan Snapshot Capture and Dedupe`
+- Policy now explicitly includes:
+  - always capture plan content (even if not implementing),
+  - always capture user choice separately,
+  - full plan body only when normalized plan hash changes,
+  - compact `Plan unchanged (hash: ...)` marker when unchanged.
+- Added implementation scope, test scenarios, and acceptance criteria for this behavior.
+- Frontmatter `updated` timestamp was refreshed.
+
+No code/tests were run since this was a task-doc update only.
