@@ -3,6 +3,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 const DEFAULT_MAX_SLUG_LENGTH = 24;
 const DEFAULT_RANDOM_SUFFIX_LENGTH = 6;
 const RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+const KATO_SESSION_IDS_KEY = "kato-sessionIds";
+const KATO_WORKSPACE_IDS_KEY = "kato-workspaceIds";
+const KATO_RECORDING_IDS_KEY = "kato-recordingIds";
 
 export function slugifyForFrontmatterId(
   value: string,
@@ -140,13 +143,17 @@ export function renderFrontmatter(options: {
       ? [`participants: ${renderInlineYamlArray(participants)}`]
       : []),
     ...(sessionIds.length > 0
-      ? [`sessionIds: ${renderInlineYamlArray(sessionIds)}`]
+      ? [`${KATO_SESSION_IDS_KEY}: ${renderInlineYamlArray(sessionIds)}`]
       : []),
     ...(workspaceIds.length > 0
-      ? [`workspaceIds: ${renderInlineYamlArray(workspaceIds)}`]
+      ? [`${KATO_WORKSPACE_IDS_KEY}: ${renderInlineYamlArray(workspaceIds)}`]
       : []),
     ...(recordingCycleIds.length > 0
-      ? [`recordingCycleIds: ${renderInlineYamlArray(recordingCycleIds)}`]
+      ? [
+        `${KATO_RECORDING_IDS_KEY}: ${
+          renderInlineYamlArray(recordingCycleIds)
+        }`,
+      ]
       : []),
     ...(tags.length > 0 ? [`tags: ${renderInlineYamlArray(tags)}`] : []),
     ...(conversationEventKinds.length > 0
@@ -306,9 +313,11 @@ export function mergeAccretiveFrontmatterFields(options: {
     return options.frontmatter;
   }
 
-  const existingSessionIds = readStringList(parsed["sessionIds"]);
-  const existingWorkspaceIds = readStringList(parsed["workspaceIds"]);
-  const existingRecordingCycleIds = readStringList(parsed["recordingCycleIds"]);
+  const existingSessionIds = readStringList(parsed[KATO_SESSION_IDS_KEY]);
+  const existingWorkspaceIds = readStringList(parsed[KATO_WORKSPACE_IDS_KEY]);
+  const existingRecordingCycleIds = readStringList(
+    parsed[KATO_RECORDING_IDS_KEY],
+  );
   const existingParticipants = readStringList(parsed["participants"]);
   const existingTags = readStringList(parsed["tags"]);
   const existingConversationEventKinds = readStringList(
@@ -365,13 +374,13 @@ export function mergeAccretiveFrontmatterFields(options: {
 
   const nextRecord: Record<string, unknown> = { ...parsed };
   if (sessionIdsChanged) {
-    nextRecord["sessionIds"] = mergedSessionIds;
+    nextRecord[KATO_SESSION_IDS_KEY] = mergedSessionIds;
   }
   if (workspaceIdsChanged) {
-    nextRecord["workspaceIds"] = mergedWorkspaceIds;
+    nextRecord[KATO_WORKSPACE_IDS_KEY] = mergedWorkspaceIds;
   }
   if (recordingCycleIdsChanged) {
-    nextRecord["recordingCycleIds"] = mergedRecordingCycleIds;
+    nextRecord[KATO_RECORDING_IDS_KEY] = mergedRecordingCycleIds;
   }
   if (participantsChanged) {
     nextRecord["participants"] = mergedParticipants;

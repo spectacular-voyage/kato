@@ -155,8 +155,7 @@ schemaVersion: 1
 runtimeDir: ~/.kato/runtime
 statusPath: ~/.kato/runtime/status.json
 controlPath: ~/.kato/runtime/control.json
-allowedWriteRoots:
-  - .
+allowedWriteRoots: []
 providerSessionRoots:
   claude:
     - ~/.claude/projects
@@ -175,11 +174,15 @@ exportMarkdownFrontmatter:
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
   includeConversationEventKinds: false
 exportFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: false
   writerIncludeToolCalls: false
+  writerIncludeToolResults: false
   writerItalicizeUserMessages: false
 logging:
   operationalLevel: info
@@ -213,12 +216,16 @@ Notes:
   - `defaultParticipantUsername` preferred username when username inclusion is
     enabled. Fallback order is: `defaultParticipantUsername` ->
     `USER`/`USERNAME` env vars -> home-directory basename.
+  - `includeSessionIds` to include `kato-sessionIds` (default `true`)
+  - `includeWorkspaceIds` to include `kato-workspaceIds` (default `true`)
+  - `includeRecordingIds` to include `kato-recordingIds` (default `true`)
   - `includeConversationEventKinds` to add `conversationEventKinds` from all
     observed `ConversationEvent.kind` values (default `false`)
 - `exportFeatureFlags` currently controls:
   - `writerIncludeCommentary`
   - `writerIncludeThinking`
   - `writerIncludeToolCalls`
+  - `writerIncludeToolResults`
   - `writerItalicizeUserMessages`
 - Workspace runtime formatting lives only in workspace config
   (`markdownFrontmatter` and `workspaceFeatureFlags`).
@@ -255,11 +262,15 @@ markdownFrontmatter:
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
   includeConversationEventKinds: false
 workspaceFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: true
   writerIncludeToolCalls: true
+  writerIncludeToolResults: false
   writerItalicizeUserMessages: false
 ```
 

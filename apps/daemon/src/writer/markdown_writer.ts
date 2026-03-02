@@ -34,6 +34,7 @@ export interface MarkdownRenderOptions {
   frontmatterConversationEventKinds?: string[];
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
+  includeToolResults?: boolean;
   includeThinking?: boolean;
   italicizeUserMessages?: boolean;
   includeSystemEvents?: boolean;
@@ -163,6 +164,7 @@ export function renderEventsToMarkdown(
   const includeFrontmatter = options.includeFrontmatter !== false;
   const includeCommentary = options.includeCommentary ?? true;
   const includeToolCalls = options.includeToolCalls ?? true;
+  const includeToolResults = options.includeToolResults ?? includeToolCalls;
   const includeThinking = options.includeThinking ?? true;
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
@@ -288,7 +290,9 @@ export function renderEventsToMarkdown(
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
 
-      const result = nextToolResult(event.toolCallId);
+      const result = includeToolResults
+        ? nextToolResult(event.toolCallId)
+        : undefined;
       const callParts: string[] = [
         "",
         "<details>",
@@ -316,7 +320,31 @@ export function renderEventsToMarkdown(
       parts.push(callParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "tool.result") {
-      // Skip: rendered inline with its tool.call above.
+      if (!includeToolResults) {
+        continue;
+      }
+      if (includeToolCalls) {
+        // When both calls and results are enabled, tool results are rendered
+        // inline under their matching tool.call.
+        continue;
+      }
+
+      const resultContent = event.result.trim();
+      if (resultContent.length === 0) {
+        continue;
+      }
+      const resultParts = [
+        "",
+        "<details>",
+        `<summary>Tool result: ${event.toolCallId}</summary>`,
+        "",
+        "```",
+        truncate(event.result, truncateToolResults),
+        "```",
+        "",
+        "</details>",
+      ];
+      parts.push(resultParts.join("\n"), "");
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;

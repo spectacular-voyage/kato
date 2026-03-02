@@ -148,8 +148,8 @@ Deno.test(
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "id: conversation-session-12345678");
-      assertStringIncludes(content, "sessionIds: [12345678-abcdef]");
-      assertStringIncludes(content, "recordingCycleIds: [rec-seed]");
+      assertStringIncludes(content, "kato-sessionIds: [12345678-abcdef]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-seed]");
       assertStringIncludes(
         content,
         "participants: [user.djradon, codex.gpt-5.3-codex]",
@@ -192,7 +192,7 @@ Deno.test(
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(
         content,
-        "recordingCycleIds: ['123', 'true', 'null', '~', rec-safe]",
+        "kato-recordingIds: ['123', 'true', 'null', '~', rec-safe]",
       );
     } finally {
       await removePathIfPresent(root);
@@ -218,7 +218,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -245,7 +245,7 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.frontmatter]",
@@ -342,7 +342,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -367,7 +367,7 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.extra]",
@@ -402,7 +402,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "messageEventKinds: [message.user]",
           "---",
           "",
@@ -477,7 +477,7 @@ Deno.test(
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "customPadded: '  keep me padded  '");
-      assertStringIncludes(content, "recordingCycleIds: [rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-new]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await removePathIfPresent(root);
@@ -659,6 +659,106 @@ Deno.test(
     assertStringIncludes(rendered, "Done.");
     assertEquals(rendered.includes("first-result"), false);
     assertEquals(rendered.includes("second-result"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can show tool calls without tool results",
+  () => {
+    const assistant = makeEvent(
+      "assistant-tool-no-results",
+      "message.assistant",
+      "Done.",
+      "2026-02-22T10:00:00.000Z",
+    );
+    const toolCall: ConversationEvent = {
+      eventId: "tc-no-results",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-no-results",
+      name: "search",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-no-results",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-no-results",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-no-results",
+      result: "result-content",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-no-results",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall, toolResult], {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeToolResults: false,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(rendered, "<summary>Tool: search</summary>");
+    assertEquals(rendered.includes("result-content"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can show standalone tool results when tool calls are hidden",
+  () => {
+    const assistant = makeEvent(
+      "assistant-tool-results-only",
+      "message.assistant",
+      "Done.",
+      "2026-02-22T10:00:00.000Z",
+    );
+    const toolCall: ConversationEvent = {
+      eventId: "tc-results-only",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-results-only",
+      name: "search",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-results-only",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-results-only",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-results-only",
+      result: "result-content",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-results-only",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall, toolResult], {
+      includeFrontmatter: false,
+      includeToolCalls: false,
+      includeToolResults: true,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "<summary>Tool result: tool-results-only</summary>",
+    );
+    assertStringIncludes(rendered, "result-content");
+    assertEquals(rendered.includes("<summary>Tool: search</summary>"), false);
   },
 );
 

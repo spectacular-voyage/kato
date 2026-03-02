@@ -840,6 +840,7 @@ function createOutputOverrides(options: {
     writerIncludeCommentary: boolean;
     writerIncludeThinking: boolean;
     writerIncludeToolCalls: boolean;
+    writerIncludeToolResults?: boolean;
     writerItalicizeUserMessages: boolean;
   };
   captureIncludeSystemEvents: boolean;
@@ -849,6 +850,9 @@ function createOutputOverrides(options: {
       options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
     includeUpdatedInFrontmatter:
       options.markdownFrontmatter.includeUpdatedInFrontmatter,
+    includeSessionIds: options.markdownFrontmatter.includeSessionIds,
+    includeWorkspaceIds: options.markdownFrontmatter.includeWorkspaceIds,
+    includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
     participantUsername: resolveConfiguredParticipantUsername(
@@ -858,6 +862,8 @@ function createOutputOverrides(options: {
       includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
       includeThinking: options.writerFeatureFlags.writerIncludeThinking,
       includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
+      includeToolResults: options.writerFeatureFlags.writerIncludeToolResults ??
+        false,
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,

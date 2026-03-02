@@ -46,6 +46,7 @@ const WRITER_FEATURE_FLAG_KEYS = [
   "writerIncludeCommentary",
   "writerIncludeThinking",
   "writerIncludeToolCalls",
+  "writerIncludeToolResults",
   "writerItalicizeUserMessages",
 ] as const;
 const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
@@ -53,6 +54,9 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
   "defaultParticipantUsername",
+  "includeSessionIds",
+  "includeWorkspaceIds",
+  "includeRecordingIds",
   "includeConversationEventKinds",
 ] as const;
 const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
@@ -442,6 +446,7 @@ export function createDefaultWorkspaceWriterFeatureFlags(
     writerIncludeCommentary: overrides.writerIncludeCommentary ?? true,
     writerIncludeThinking: overrides.writerIncludeThinking ?? true,
     writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? true,
+    writerIncludeToolResults: overrides.writerIncludeToolResults ?? false,
     writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ?? false,
   };
 }
@@ -456,6 +461,9 @@ export function createDefaultWorkspaceMarkdownFrontmatterConfig(
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ?? false,
     defaultParticipantUsername: overrides.defaultParticipantUsername ?? "",
+    includeSessionIds: overrides.includeSessionIds ?? true,
+    includeWorkspaceIds: overrides.includeWorkspaceIds ?? true,
+    includeRecordingIds: overrides.includeRecordingIds ?? true,
     includeConversationEventKinds: overrides.includeConversationEventKinds ??
       false,
   };
@@ -891,11 +899,15 @@ export function createWorkspaceConfigScaffold(): string {
     "  includeUpdatedInFrontmatter: false",
     "  addParticipantUsernameToFrontmatter: false",
     '  defaultParticipantUsername: ""',
+    "  includeSessionIds: true",
+    "  includeWorkspaceIds: true",
+    "  includeRecordingIds: true",
     "  includeConversationEventKinds: false",
     "workspaceFeatureFlags:",
     "  writerIncludeCommentary: true",
     "  writerIncludeThinking: true",
     "  writerIncludeToolCalls: true",
+    "  writerIncludeToolResults: false",
     "  writerItalicizeUserMessages: false",
     "",
   ].join("\n");

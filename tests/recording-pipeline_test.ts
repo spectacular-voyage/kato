@@ -84,10 +84,14 @@ function makeWriterSpy(callOrder: string[]): {
       includeCommentary?: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
+      includeToolResults?: boolean;
       italicizeUserMessages?: boolean;
     }
   >;
   renderOptionsByCall: Array<{
+    frontmatterSessionIds?: string[];
+    frontmatterWorkspaceIds?: string[];
+    frontmatterRecordingCycleIds?: string[];
     frontmatterConversationEventKinds?: string[];
     frontmatterParticipants?: string[];
   }>;
@@ -104,10 +108,14 @@ function makeWriterSpy(callOrder: string[]): {
       includeCommentary?: boolean;
       includeThinking?: boolean;
       includeToolCalls?: boolean;
+      includeToolResults?: boolean;
       italicizeUserMessages?: boolean;
     }
   > = [];
   const renderOptionsByCall: Array<{
+    frontmatterSessionIds?: string[];
+    frontmatterWorkspaceIds?: string[];
+    frontmatterRecordingCycleIds?: string[];
     frontmatterConversationEventKinds?: string[];
     frontmatterParticipants?: string[];
   }> = [];
@@ -123,6 +131,15 @@ function makeWriterSpy(callOrder: string[]): {
       appendEvents(path, events, options) {
         callOrder.push("writer.append");
         renderOptionsByCall.push({
+          frontmatterSessionIds: options?.frontmatterSessionIds
+            ? [...options.frontmatterSessionIds]
+            : undefined,
+          frontmatterWorkspaceIds: options?.frontmatterWorkspaceIds
+            ? [...options.frontmatterWorkspaceIds]
+            : undefined,
+          frontmatterRecordingCycleIds: options?.frontmatterRecordingCycleIds
+            ? [...options.frontmatterRecordingCycleIds]
+            : undefined,
           frontmatterConversationEventKinds:
             options?.frontmatterConversationEventKinds
               ? [...options.frontmatterConversationEventKinds]
@@ -139,6 +156,7 @@ function makeWriterSpy(callOrder: string[]): {
           includeCommentary: options?.includeCommentary,
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
+          includeToolResults: options?.includeToolResults,
           italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = appendOutcomes.shift() ??
@@ -153,6 +171,15 @@ function makeWriterSpy(callOrder: string[]): {
       overwriteEvents(path, events, options) {
         callOrder.push("writer.overwrite");
         renderOptionsByCall.push({
+          frontmatterSessionIds: options?.frontmatterSessionIds
+            ? [...options.frontmatterSessionIds]
+            : undefined,
+          frontmatterWorkspaceIds: options?.frontmatterWorkspaceIds
+            ? [...options.frontmatterWorkspaceIds]
+            : undefined,
+          frontmatterRecordingCycleIds: options?.frontmatterRecordingCycleIds
+            ? [...options.frontmatterRecordingCycleIds]
+            : undefined,
           frontmatterConversationEventKinds:
             options?.frontmatterConversationEventKinds
               ? [...options.frontmatterConversationEventKinds]
@@ -169,6 +196,7 @@ function makeWriterSpy(callOrder: string[]): {
           includeCommentary: options?.includeCommentary,
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
+          includeToolResults: options?.includeToolResults,
           italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = overwriteOutcomes.shift() ??
@@ -307,6 +335,7 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     includeCommentary: undefined,
     includeThinking: undefined,
     includeToolCalls: undefined,
+    includeToolResults: undefined,
     italicizeUserMessages: undefined,
   });
 });
@@ -336,6 +365,7 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
     includeCommentary: undefined,
     includeThinking: undefined,
     includeToolCalls: undefined,
+    includeToolResults: undefined,
     italicizeUserMessages: undefined,
   });
 });
@@ -438,6 +468,7 @@ Deno.test(
         includeCommentary: true,
         includeThinking: false,
         includeToolCalls: false,
+        includeToolResults: false,
         italicizeUserMessages: true,
       },
       now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -465,6 +496,7 @@ Deno.test(
       includeCommentary: true,
       includeThinking: false,
       includeToolCalls: false,
+      includeToolResults: false,
       italicizeUserMessages: true,
     });
     assertEquals(writerSpy.calls[1], {
@@ -475,6 +507,7 @@ Deno.test(
       includeCommentary: true,
       includeThinking: false,
       includeToolCalls: false,
+      includeToolResults: false,
       italicizeUserMessages: true,
     });
   },
@@ -564,5 +597,44 @@ Deno.test(
       "user.djradon",
       "codex.gpt-5.3-codex",
     ]);
+  },
+);
+
+Deno.test(
+  "RecordingPipeline can exclude frontmatter kato id fields via settings",
+  async () => {
+    const order: string[] = [];
+    const writerSpy = makeWriterSpy(order);
+    const pipeline = new RecordingPipeline({
+      pathPolicyGate: makeSequencedPathPolicyGate(["allow"], order),
+      writer: writerSpy.writer,
+      includeSessionIdsInFrontmatter: false,
+      includeWorkspaceIdsInFrontmatter: false,
+      includeRecordingIdsInFrontmatter: false,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+
+    await pipeline.activateRecording({
+      provider: "codex",
+      sessionId: "session-no-frontmatter-ids",
+      targetPath: "notes/no-frontmatter-ids.md",
+      seedEvents: [makeEvent("seed")],
+      recordingId: "rec-no-frontmatter-ids",
+      recordingCycleIds: ["cycle-extra"],
+      workspaceIds: ["workspace-my-proj"],
+    });
+
+    assertEquals(
+      writerSpy.renderOptionsByCall[0]?.frontmatterSessionIds,
+      undefined,
+    );
+    assertEquals(
+      writerSpy.renderOptionsByCall[0]?.frontmatterWorkspaceIds,
+      undefined,
+    );
+    assertEquals(
+      writerSpy.renderOptionsByCall[0]?.frontmatterRecordingCycleIds,
+      undefined,
+    );
   },
 );

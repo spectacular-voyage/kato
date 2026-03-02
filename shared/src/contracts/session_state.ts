@@ -51,6 +51,7 @@ export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   writerIncludeCommentary: boolean;
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
+  writerIncludeToolResults?: boolean;
   writerItalicizeUserMessages: boolean;
 }
 
@@ -262,6 +263,8 @@ function isWorkspaceAttachmentWriterFeatureFlags(
   return typeof value["writerIncludeCommentary"] === "boolean" &&
     typeof value["writerIncludeThinking"] === "boolean" &&
     typeof value["writerIncludeToolCalls"] === "boolean" &&
+    (value["writerIncludeToolResults"] === undefined ||
+      typeof value["writerIncludeToolResults"] === "boolean") &&
     typeof value["writerItalicizeUserMessages"] === "boolean";
 }
 

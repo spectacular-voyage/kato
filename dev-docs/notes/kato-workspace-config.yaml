@@ -7,9 +7,13 @@ markdownFrontmatter:
   includeUpdatedInFrontmatter: true
   addParticipantUsernameToFrontmatter: true
   defaultParticipantUsername: "djradon"
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
   includeConversationEventKinds: true
 workspaceFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: true
   writerIncludeToolCalls: true
+  writerIncludeToolResults: false
   writerItalicizeUserMessages: false

@@ -153,10 +153,12 @@ Deno.test(
       );
       assertEquals(first.filenameTemplate, "{provider}-{sessionShortId}.md");
       assertEquals(first.writerFeatureFlags.writerIncludeCommentary, true);
+      assertEquals(first.writerFeatureFlags.writerIncludeToolResults, false);
       assertEquals(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
       );
+      assertEquals(first.markdownFrontmatter.includeSessionIds, true);
 
       const firstStat = await Deno.stat(configPath);
       const firstMtimeMs = firstStat.mtime?.getTime() ?? Date.now();
@@ -167,6 +169,7 @@ Deno.test(
           'filenameTemplate: "{provider}.md"',
           "workspaceFeatureFlags:",
           "  writerIncludeCommentary: false",
+          "  writerIncludeToolResults: true",
         ].join("\n") + "\n",
       );
       await Deno.utime(
@@ -182,6 +185,7 @@ Deno.test(
       );
       assertEquals(second.filenameTemplate, "{provider}.md");
       assertEquals(second.writerFeatureFlags.writerIncludeCommentary, false);
+      assertEquals(second.writerFeatureFlags.writerIncludeToolResults, true);
     });
   },
 );

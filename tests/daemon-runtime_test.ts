@@ -2347,9 +2347,9 @@ Deno.test(
       stateDir = result.stateDir;
 
       const content = await Deno.readTextFile(destination);
-      assert(content.includes("sessionIds: [session-1]"));
-      assert(content.includes(`workspaceIds: [${TEST_WORKSPACE_ID}]`));
-      assert(content.includes("recordingCycleIds: [cycle-capture-e2e]"));
+      assert(content.includes("kato-sessionIds: [session-1]"));
+      assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+      assert(content.includes("kato-recordingIds: [cycle-capture-e2e]"));
       assert(content.includes("Before capture"));
       assert(content.includes("After capture"));
       assert(
@@ -2389,9 +2389,9 @@ Deno.test(
       stateDir = result.stateDir;
 
       const content = await Deno.readTextFile(destination);
-      assert(content.includes("sessionIds: [session-1]"));
-      assert(content.includes(`workspaceIds: [${TEST_WORKSPACE_ID}]`));
-      assertEquals(content.includes("recordingCycleIds:"), false);
+      assert(content.includes("kato-sessionIds: [session-1]"));
+      assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+      assertEquals(content.includes("kato-recordingIds:"), false);
       assert(content.includes("Before export"));
       assert(content.includes("After export"));
       assert(

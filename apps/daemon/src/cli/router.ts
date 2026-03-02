@@ -22,7 +22,6 @@ import {
   type RuntimeConfigStoreLike,
 } from "../config/mod.ts";
 import {
-  resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
   type WritePathPolicyGateLike,
 } from "../policy/mod.ts";
@@ -157,7 +156,7 @@ export async function runDaemonCli(
       runtimeDir: runtime.runtimeDir,
       statusPath: runtime.statusPath,
       controlPath: runtime.controlPath,
-      allowedWriteRoots: resolveDefaultAllowedWriteRoots(),
+      allowedWriteRoots: [],
       useHomeShorthand: true,
     });
   const configStore = options.configStore ??

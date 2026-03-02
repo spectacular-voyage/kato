@@ -565,6 +565,26 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
 });
 
 Deno.test(
+  "runDaemonCli init defaults allowedWriteRoots to an empty list",
+  async () => {
+    const runtimeDir = await makeTestTempDir("daemon-cli-init-empty-roots-");
+    try {
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["init"], {
+        runtime: harness.runtime,
+      });
+      assertEquals(code, 0);
+      const runtimeConfig = await Deno.readTextFile(
+        join(runtimeDir, "kato-config.yaml"),
+      );
+      assertStringIncludes(runtimeConfig, "allowedWriteRoots: []");
+    } finally {
+      await removePathIfPresent(runtimeDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonCli workspace commands manage registry without loading runtime config",
   async () => {
     const tempDir = await makeTestTempDir("daemon-cli-workspace-");
@@ -599,6 +619,14 @@ Deno.test(
       assertStringIncludes(
         await Deno.readTextFile(configPath),
         'defaultOutputDir: "."',
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "writerIncludeToolResults: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeSessionIds: true",
       );
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
