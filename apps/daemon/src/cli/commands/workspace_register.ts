@@ -5,7 +5,6 @@ import {
   type RegisteredWorkspace,
 } from "../../workspace/mod.ts";
 import {
-  deriveDefaultAlias,
   findWorkspaceByRoot,
   formatWorkspaceEntry,
   resolveRegisterTarget,
@@ -27,9 +26,10 @@ function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
 
 export async function runWorkspaceRegisterCommand(
   ctx: DaemonCliCommandContext,
-  alias?: string,
+  alias: string,
+  dirPath?: string,
 ): Promise<void> {
-  const target = await resolveRegisterTarget(ctx);
+  const target = await resolveRegisterTarget(ctx, dirPath);
   const store = resolveWorkspaceRegistryStore(ctx);
   const entries = await store.load();
   const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
@@ -37,9 +37,7 @@ export async function runWorkspaceRegisterCommand(
     { allowMissing: true },
   );
 
-  const requestedAlias = alias
-    ? validateWorkspaceAlias(alias)
-    : deriveDefaultAlias(target.workspaceRoot);
+  const requestedAlias = validateWorkspaceAlias(alias);
 
   const existingByAlias = entries.find((entry) =>
     entry.alias === requestedAlias

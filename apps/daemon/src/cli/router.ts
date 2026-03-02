@@ -33,6 +33,7 @@ import {
 } from "../observability/mod.ts";
 import {
   runCleanCommand,
+  ensureGlobalConfigInitialized,
   runExportCommand,
   runInitCommand,
   runRestartCommand,
@@ -194,7 +195,8 @@ export async function runDaemonCli(
   }
 
   let runtimeConfig = defaultRuntimeConfig;
-  let autoInitializedConfigPath: string | undefined;
+  let autoInitializedRuntimeConfigPath: string | undefined;
+  let autoInitializedDefaultWorkspaceConfigPath: string | undefined;
   const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
     intent.command.name === "workspace-init" ||
     intent.command.name === "workspace-register" ||
@@ -210,21 +212,21 @@ export async function runDaemonCli(
           (intent.command.name === "start" ||
             intent.command.name === "restart") && autoInitOnStart
         ) {
-          const initialized = await configStore.ensureInitialized(
+          const initialized = await ensureGlobalConfigInitialized({
+            configStore,
             defaultRuntimeConfig,
-          );
-          runtimeConfig = initialized.config;
-          if (initialized.created) {
-            autoInitializedConfigPath = initialized.path;
-            // Reload after init so persisted path shorthands (e.g. "~") are
-            // expanded by the store's own load logic. Fall back to the
-            // just-initialized config if the reload fails.
-            try {
-              runtimeConfig = await configStore.load();
-            } catch {
-              runtimeConfig = initialized.config;
-            }
+            runtimeConfigPath: runtime.configPath,
+          });
+          if (initialized.runtimeConfigCreated) {
+            autoInitializedRuntimeConfigPath = initialized.runtimeConfigPath;
           }
+          if (initialized.defaultWorkspaceConfigCreated) {
+            autoInitializedDefaultWorkspaceConfigPath =
+              initialized.defaultWorkspaceConfigPath;
+          }
+          // Reload after init so persisted path shorthands (e.g. "~") are
+          // expanded by the store's own load logic.
+          runtimeConfig = await configStore.load();
         } else if (!commandAllowsMissingRuntimeConfig) {
           runtime.writeStderr(
             `Runtime config not found at ${runtime.configPath}. Run \`kato init\` first.\n`,
@@ -278,11 +280,20 @@ export async function runDaemonCli(
 
   if (
     (intent.command.name === "start" || intent.command.name === "restart") &&
-    autoInitializedConfigPath
+    (autoInitializedRuntimeConfigPath || autoInitializedDefaultWorkspaceConfigPath)
   ) {
-    runtime.writeStdout(
-      `initialized runtime config at ${autoInitializedConfigPath}\n`,
-    );
+    const lines: string[] = [];
+    if (autoInitializedRuntimeConfigPath) {
+      lines.push(
+        `initialized runtime config at ${autoInitializedRuntimeConfigPath}`,
+      );
+    }
+    if (autoInitializedDefaultWorkspaceConfigPath) {
+      lines.push(
+        `initialized default workspace config at ${autoInitializedDefaultWorkspaceConfigPath}`,
+      );
+    }
+    runtime.writeStdout(`${lines.join("\n")}\n`);
   }
 
   try {
@@ -311,7 +322,11 @@ export async function runDaemonCli(
         await runWorkspaceInitCommand(commandContext, intent.command.dirPath);
         return 0;
       case "workspace-register":
-        await runWorkspaceRegisterCommand(commandContext, intent.command.alias);
+        await runWorkspaceRegisterCommand(
+          commandContext,
+          intent.command.alias,
+          intent.command.dirPath,
+        );
         return 0;
       case "workspace-list":
         await runWorkspaceListCommand(commandContext);

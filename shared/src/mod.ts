@@ -18,14 +18,15 @@ export type {
 } from "./contracts/ipc.ts";
 export type {
   ConfigSource,
+  DaemonFeatureFlags,
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
   ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeConfigMetadata,
-  RuntimeFeatureFlags,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
-  RuntimeMarkdownFrontmatterConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {

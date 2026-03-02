@@ -21,6 +21,8 @@ export type {
   AppendToActiveRecordingResult,
   AppendToDestinationInput,
   ExportFormat,
+  RecordingOutputOverrides,
+  RecordingRenderOptionOverrides,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,

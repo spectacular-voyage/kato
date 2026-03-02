@@ -20,7 +20,7 @@ export type DaemonCliCommand =
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
   | { name: "workspace-init"; dirPath?: string }
-  | { name: "workspace-register"; alias?: string }
+  | { name: "workspace-register"; alias: string; dirPath?: string }
   | { name: "workspace-list" }
   | { name: "workspace-unregister"; selector: string }
   | {

@@ -1,6 +1,7 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
   ensureWorkspaceConfigInitialized,
+  loadWorkspaceTemplateScaffold,
   resolveWorkspaceInitPath,
 } from "./workspace_shared.ts";
 
@@ -9,7 +10,11 @@ export async function runWorkspaceInitCommand(
   dirPath?: string,
 ): Promise<void> {
   const target = await resolveWorkspaceInitPath(ctx, dirPath);
-  const created = await ensureWorkspaceConfigInitialized(target.configPath);
+  const scaffold = await loadWorkspaceTemplateScaffold(ctx);
+  const created = await ensureWorkspaceConfigInitialized(
+    target.configPath,
+    scaffold,
+  );
 
   await ctx.operationalLogger.info(
     "workspace.init",

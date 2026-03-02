@@ -1,14 +1,14 @@
 export type {
   DaemonFeatureSettings,
+  DaemonFeatureFlagKey,
   OpenFeatureBooleanProviderLike,
   OpenFeatureEvaluationContext,
-  RuntimeFeatureFlagKey,
 } from "./openfeature.ts";
 export {
   bootstrapOpenFeature,
-  createDefaultRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
   evaluateDaemonFeatureSettings,
   InMemoryOpenFeatureProvider,
-  mergeRuntimeFeatureFlags,
+  mergeDaemonFeatureFlags,
   OpenFeatureClient,
 } from "./openfeature.ts";

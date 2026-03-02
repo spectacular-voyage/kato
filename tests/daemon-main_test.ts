@@ -2,6 +2,8 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import type { RuntimeConfig } from "@kato/shared";
 import {
+  createDefaultExportFeatureFlags,
+  createDefaultRuntimeMarkdownFrontmatterConfig,
   runDaemonSubprocess,
   type RunDaemonSubprocessOptions,
   type RuntimeConfigStoreLike,
@@ -20,14 +22,14 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
       codex: ["/sessions/codex"],
       gemini: ["/sessions/gemini"],
     },
-    featureFlags: {
-      writerIncludeCommentary: true,
-      writerIncludeThinking: false,
-      writerIncludeToolCalls: false,
-      writerItalicizeUserMessages: true,
+    daemonFeatureFlags: {
       daemonExportEnabled: false,
       captureIncludeSystemEvents: false,
     },
+    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(),
+    exportFeatureFlags: createDefaultExportFeatureFlags({
+      writerItalicizeUserMessages: true,
+    }),
     logging: {
       operationalLevel: "info",
       auditLevel: "info",

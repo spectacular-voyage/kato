@@ -7,6 +7,7 @@ import type {
 } from "@kato/shared";
 import {
   AuditLogger,
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
   type DaemonControlRequestStoreLike,
   type DaemonStatusSnapshotStoreLike,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
@@ -128,6 +129,7 @@ function cloneWorkspaceProfile(
     configPath: profile.configPath,
     resolvedDefaultOutputDir: profile.resolvedDefaultOutputDir,
     filenameTemplate: profile.filenameTemplate,
+    markdownFrontmatter: { ...profile.markdownFrontmatter },
     writerFeatureFlags: { ...profile.writerFeatureFlags },
   };
 }
@@ -235,6 +237,7 @@ async function createTestWorkspaceFixture(
     configPath: entry.configPath,
     resolvedDefaultOutputDir,
     filenameTemplate: "{provider}-{sessionShortId}.md",
+    markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: {
       writerIncludeCommentary: true,
       writerIncludeThinking: true,

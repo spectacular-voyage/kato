@@ -1,8 +1,8 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
-  createDefaultRuntimeFeatureFlags,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  loadWorkspaceConfigOverrides,
   type RegisteredWorkspace,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
@@ -132,7 +132,7 @@ Deno.test(
         [
           "defaultOutputDir: notes-one",
           'filenameTemplate: "{provider}-{sessionShortId}.md"',
-          "featureFlags:",
+          "workspaceFeatureFlags:",
           "  writerIncludeCommentary: true",
         ].join("\n") + "\n",
       );
@@ -144,18 +144,18 @@ Deno.test(
         configPath,
       });
       const resolver = new WorkspaceProfileResolver();
-      const runtimeFeatureFlags = createDefaultRuntimeFeatureFlags();
 
-      const first = await resolver.resolveForCommand(
-        workspace,
-        runtimeFeatureFlags,
-      );
+      const first = await resolver.resolveForCommand(workspace);
       assertEquals(
         first.resolvedDefaultOutputDir,
         join(workspaceRoot, "notes-one"),
       );
       assertEquals(first.filenameTemplate, "{provider}-{sessionShortId}.md");
       assertEquals(first.writerFeatureFlags.writerIncludeCommentary, true);
+      assertEquals(
+        first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
+        true,
+      );
 
       await new Promise((resolve) => setTimeout(resolve, 5));
       await Deno.writeTextFile(
@@ -163,15 +163,12 @@ Deno.test(
         [
           "defaultOutputDir: notes-two",
           'filenameTemplate: "{provider}.md"',
-          "featureFlags:",
+          "workspaceFeatureFlags:",
           "  writerIncludeCommentary: false",
         ].join("\n") + "\n",
       );
 
-      const second = await resolver.resolveForCommand(
-        workspace,
-        runtimeFeatureFlags,
-      );
+      const second = await resolver.resolveForCommand(workspace);
       assertEquals(
         second.resolvedDefaultOutputDir,
         join(workspaceRoot, "notes-two"),
@@ -181,3 +178,28 @@ Deno.test(
     });
   },
 );
+
+Deno.test("loadWorkspaceConfigOverrides rejects legacy featureFlags", async () => {
+  await withTestTempDir("workspace-profile-legacy-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Legacy.Proj");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "featureFlags:",
+        "  writerIncludeCommentary: true",
+      ].join("\n") + "\n",
+    );
+
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "Unsupported workspace config key 'featureFlags'",
+    );
+  });
+});

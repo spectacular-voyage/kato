@@ -1,4 +1,9 @@
-import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
+import type {
+  DaemonStatusSnapshot,
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
+  RuntimeConfig,
+} from "@kato/shared";
 import { basename, dirname, join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
@@ -33,9 +38,11 @@ import { readOptionalEnv, resolveHomeDir } from "./utils/env.ts";
 import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import {
   resolveDefaultWorkspaceRegistryPath,
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
   WorkspaceRegistryFileStore,
 } from "./workspace/mod.ts";
-import { RecordingPipeline } from "./writer/mod.ts";
+import { type RecordingOutputOverrides, RecordingPipeline } from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
   runtimeDir?: string;
@@ -94,10 +101,9 @@ function normalizeFrontmatterParticipantUsername(
 }
 
 function resolveFrontmatterParticipantUsername(
-  runtimeConfig: RuntimeConfig,
+  markdownFrontmatter: MarkdownFrontmatterConfig,
 ): string | undefined {
-  const markdownFrontmatter = runtimeConfig.markdownFrontmatter;
-  if (!markdownFrontmatter?.addParticipantUsernameToFrontmatter) {
+  if (!markdownFrontmatter.addParticipantUsernameToFrontmatter) {
     return undefined;
   }
   const configured = normalizeFrontmatterParticipantUsername(
@@ -116,6 +122,31 @@ function resolveFrontmatterParticipantUsername(
   return normalizeFrontmatterParticipantUsername(
     home ? basename(home) : undefined,
   );
+}
+
+function buildOutputOverrides(options: {
+  markdownFrontmatter: MarkdownFrontmatterConfig;
+  featureFlags: ExportFeatureFlags;
+  includeSystemEvents: boolean;
+}): RecordingOutputOverrides {
+  return {
+    includeFrontmatter:
+      options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
+    includeUpdatedInFrontmatter:
+      options.markdownFrontmatter.includeUpdatedInFrontmatter,
+    includeConversationEventKinds:
+      options.markdownFrontmatter.includeConversationEventKinds,
+    participantUsername: resolveFrontmatterParticipantUsername(
+      options.markdownFrontmatter,
+    ),
+    renderOptions: {
+      includeCommentary: options.featureFlags.writerIncludeCommentary,
+      includeThinking: options.featureFlags.writerIncludeThinking,
+      includeToolCalls: options.featureFlags.writerIncludeToolCalls,
+      italicizeUserMessages: options.featureFlags.writerItalicizeUserMessages,
+      includeSystemEvents: options.includeSystemEvents,
+    },
+  };
 }
 
 export function createBootstrapStatusSnapshot(): DaemonStatusSnapshot {
@@ -149,7 +180,7 @@ export async function runDaemonSubprocess(
     return 1;
   }
 
-  const featureClient = bootstrapOpenFeature(runtimeConfig.featureFlags);
+  const featureClient = bootstrapOpenFeature(runtimeConfig.daemonFeatureFlags);
   const featureSettings = evaluateDaemonFeatureSettings(featureClient);
   let logLevels: { operationalLevel: LogLevel; auditLevel: LogLevel };
   try {
@@ -217,22 +248,31 @@ export async function runDaemonSubprocess(
     operationalLogger,
     auditLogger,
   });
+  const workspaceFrontmatterDefaults =
+    createDefaultWorkspaceMarkdownFrontmatterConfig();
+  const workspaceWriterDefaults = createDefaultWorkspaceWriterFeatureFlags();
   const recordingPipeline = new RecordingPipeline({
     pathPolicyGate: new WritePathPolicyGate({
       allowedRoots: runtimeConfig.allowedWriteRoots,
     }),
     now,
-    includeFrontmatterInMarkdownRecordings: runtimeConfig.markdownFrontmatter
-      ?.includeFrontmatterInMarkdownRecordings ??
-      true,
+    includeFrontmatterInMarkdownRecordings:
+      workspaceFrontmatterDefaults.includeFrontmatterInMarkdownRecordings,
     includeUpdatedInFrontmatter:
-      runtimeConfig.markdownFrontmatter?.includeUpdatedInFrontmatter ?? false,
+      workspaceFrontmatterDefaults.includeUpdatedInFrontmatter,
     includeConversationEventKindsInFrontmatter:
-      runtimeConfig.markdownFrontmatter?.includeConversationEventKinds ?? false,
+      workspaceFrontmatterDefaults.includeConversationEventKinds,
     frontmatterParticipantUsername: resolveFrontmatterParticipantUsername(
-      runtimeConfig,
+      workspaceFrontmatterDefaults,
     ),
-    defaultRenderOptions: featureSettings.writerRenderOptions,
+    defaultRenderOptions: {
+      includeCommentary: workspaceWriterDefaults.writerIncludeCommentary,
+      includeThinking: workspaceWriterDefaults.writerIncludeThinking,
+      includeToolCalls: workspaceWriterDefaults.writerIncludeToolCalls,
+      italicizeUserMessages:
+        workspaceWriterDefaults.writerItalicizeUserMessages,
+      includeSystemEvents: featureSettings.captureIncludeSystemEvents,
+    },
     operationalLogger,
     auditLogger,
   });
@@ -266,7 +306,12 @@ export async function runDaemonSubprocess(
       exportEnabled: featureSettings.exportEnabled,
       exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
-      runtimeFeatureFlags: runtimeConfig.featureFlags,
+      daemonFeatureFlags: runtimeConfig.daemonFeatureFlags,
+      defaultCliExportOutputOverrides: buildOutputOverrides({
+        markdownFrontmatter: runtimeConfig.exportMarkdownFrontmatter,
+        featureFlags: runtimeConfig.exportFeatureFlags,
+        includeSystemEvents: featureSettings.captureIncludeSystemEvents,
+      }),
       workspaceRegistryStore: new WorkspaceRegistryFileStore(
         resolveDefaultWorkspaceRegistryPath(
           runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir),

@@ -17,7 +17,7 @@ const GLOBAL_USAGE_BODY = [
   "       kato [--version|-V]",
   "",
   "Commands:",
-  "  init                  Create default runtime config if missing",
+  "  init                  Create default global config files if missing",
   "  start                 Start daemon in detached background mode",
   "  restart               Stop then start daemon (start only if not running)",
   "  stop                  Queue daemon stop request (or reset stale status)",
@@ -37,7 +37,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates a default local runtime config at ~/.kato/kato-config.yaml when missing.",
+    "Creates ~/.kato/kato-config.yaml and ~/.kato/default-kato-workspace-config.yaml when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",
@@ -71,10 +71,11 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "If <dir> is omitted, uses the current working directory.",
   ].join("\n"),
   "workspace-register": [
-    "Usage: kato workspace register [--alias <alias>]",
+    "Usage: kato workspace register [<dir>] --alias <alias>",
     "",
-    "Registers the nearest ancestor workspace config under a workspace alias.",
-    "If --alias is omitted, uses the workspace folder name.",
+    "Registers a workspace config under an explicit workspace alias.",
+    "If <dir> is provided, registers exactly <dir>/kato-workspace-config.yaml.",
+    "If <dir> is omitted, uses the nearest ancestor workspace config from the current directory.",
   ].join("\n"),
   "workspace-list": [
     "Usage: kato workspace list",

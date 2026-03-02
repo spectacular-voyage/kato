@@ -9,7 +9,9 @@ import { dirname, join } from "@std/path";
 import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
 import {
   CliUsageError,
-  createDefaultRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
+  createDefaultExportFeatureFlags,
+  createDefaultRuntimeMarkdownFrontmatterConfig,
   DAEMON_APP_VERSION,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
@@ -62,7 +64,9 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
       codex: ["/sessions/codex"],
       gemini: ["/sessions/gemini"],
     },
-    featureFlags: createDefaultRuntimeFeatureFlags(),
+    daemonFeatureFlags: createDefaultDaemonFeatureFlags(),
+    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(),
+    exportFeatureFlags: createDefaultExportFeatureFlags(),
     logging: {
       operationalLevel: "info",
       auditLevel: "info",
@@ -84,7 +88,9 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
         codex: [...initial.providerSessionRoots.codex],
         gemini: [...initial.providerSessionRoots.gemini],
       },
-      featureFlags: { ...initial.featureFlags },
+      daemonFeatureFlags: { ...initial.daemonFeatureFlags },
+      exportMarkdownFrontmatter: { ...initial.exportMarkdownFrontmatter },
+      exportFeatureFlags: { ...initial.exportFeatureFlags },
       logging: { ...initial.logging },
     }
     : undefined;
@@ -105,7 +111,9 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             codex: [...state.providerSessionRoots.codex],
             gemini: [...state.providerSessionRoots.gemini],
           },
-          featureFlags: { ...state.featureFlags },
+          daemonFeatureFlags: { ...state.daemonFeatureFlags },
+          exportMarkdownFrontmatter: { ...state.exportMarkdownFrontmatter },
+          exportFeatureFlags: { ...state.exportFeatureFlags },
           logging: { ...state.logging },
         });
       },
@@ -120,7 +128,11 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               codex: [...defaultConfig.providerSessionRoots.codex],
               gemini: [...defaultConfig.providerSessionRoots.gemini],
             },
-            featureFlags: { ...defaultConfig.featureFlags },
+            daemonFeatureFlags: { ...defaultConfig.daemonFeatureFlags },
+            exportMarkdownFrontmatter: {
+              ...defaultConfig.exportMarkdownFrontmatter,
+            },
+            exportFeatureFlags: { ...defaultConfig.exportFeatureFlags },
             logging: { ...defaultConfig.logging },
           };
           return Promise.resolve({
@@ -133,7 +145,9 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
                 codex: [...state.providerSessionRoots.codex],
                 gemini: [...state.providerSessionRoots.gemini],
               },
-              featureFlags: { ...state.featureFlags },
+              daemonFeatureFlags: { ...state.daemonFeatureFlags },
+              exportMarkdownFrontmatter: { ...state.exportMarkdownFrontmatter },
+              exportFeatureFlags: { ...state.exportFeatureFlags },
               logging: { ...state.logging },
             },
             path: `${state.runtimeDir}/kato-config.yaml`,
@@ -150,7 +164,9 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               codex: [...state.providerSessionRoots.codex],
               gemini: [...state.providerSessionRoots.gemini],
             },
-            featureFlags: { ...state.featureFlags },
+            daemonFeatureFlags: { ...state.daemonFeatureFlags },
+            exportMarkdownFrontmatter: { ...state.exportMarkdownFrontmatter },
+            exportFeatureFlags: { ...state.exportFeatureFlags },
             logging: { ...state.logging },
           },
           path: `${state.runtimeDir}/kato-config.yaml`,
@@ -407,6 +423,22 @@ Deno.test("cli parser accepts workspace commands", () => {
     throw new Error("expected workspace-register command");
   }
   assertEquals(register.command.alias, "My.Proj");
+  const registerWithDir = parseDaemonCliArgs([
+    "workspace",
+    "register",
+    "nested/project",
+    "--alias",
+    "Nested.Proj",
+  ]);
+  assertEquals(registerWithDir.kind, "command");
+  if (
+    registerWithDir.kind !== "command" ||
+    registerWithDir.command.name !== "workspace-register"
+  ) {
+    throw new Error("expected workspace-register command with explicit dir");
+  }
+  assertEquals(registerWithDir.command.alias, "Nested.Proj");
+  assertEquals(registerWithDir.command.dirPath, "nested/project");
 
   const list = parseDaemonCliArgs(["workspace", "list"]);
   assertEquals(list.kind, "command");
@@ -427,6 +459,23 @@ Deno.test("cli parser accepts workspace commands", () => {
     throw new Error("expected workspace-unregister command");
   }
   assertEquals(unregister.command.selector, "My.Proj");
+});
+
+Deno.test("cli parser requires non-empty workspace register alias", () => {
+  assertThrows(
+    () => parseDaemonCliArgs(["workspace", "register"]),
+    CliUsageError,
+  );
+  assertThrows(
+    () =>
+      parseDaemonCliArgs([
+        "workspace",
+        "register",
+        "--alias",
+        "   ",
+      ]),
+    CliUsageError,
+  );
 });
 
 Deno.test("runDaemonCli prints version without loading config", async () => {
@@ -472,39 +521,47 @@ Deno.test("runDaemonCli help topic includes version and tagline", async () => {
   assertStringIncludes(harness.stdout.join(""), "Usage: kato start");
 });
 
-Deno.test("runDaemonCli init creates runtime config when missing", async () => {
-  const runtimeDir = ".kato/test-runtime";
-  const harness = makeRuntimeHarness(runtimeDir);
-  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-  const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
-  const statusStore = makeInMemoryStatusStore();
-  const controlStore = makeInMemoryControlStore();
+Deno.test("runDaemonCli init creates both global config files when missing", async () => {
+  const runtimeDir = await makeTestTempDir("daemon-cli-init-");
+  try {
+    const harness = makeRuntimeHarness(runtimeDir);
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
 
-  const firstCode = await runDaemonCli(["init"], {
-    runtime: harness.runtime,
-    defaultRuntimeConfig,
-    configStore,
-    statusStore,
-    controlStore: controlStore.store,
-  });
-  assertEquals(firstCode, 0);
-  assertStringIncludes(
-    harness.stdout.join(""),
-    `created runtime config at ${runtimeDir}/kato-config.yaml`,
-  );
-  assertEquals(ensureCalls.value, 1);
+    const firstCode = await runDaemonCli(["init"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+    assertEquals(firstCode, 0);
+    assertStringIncludes(
+      harness.stdout.join(""),
+      `created runtime config at ${runtimeDir}/kato-config.yaml`,
+    );
+    assertStringIncludes(
+      harness.stdout.join(""),
+      `created default workspace config at ${runtimeDir}/default-kato-workspace-config.yaml`,
+    );
+    assertEquals(ensureCalls.value, 1);
 
-  const secondHarness = makeRuntimeHarness(runtimeDir);
-  const secondCode = await runDaemonCli(["init"], {
-    runtime: secondHarness.runtime,
-    defaultRuntimeConfig,
-    configStore,
-    statusStore,
-    controlStore: controlStore.store,
-  });
-  assertEquals(secondCode, 0);
-  assertStringIncludes(secondHarness.stdout.join(""), "already exists");
-  assertEquals(ensureCalls.value, 2);
+    const secondHarness = makeRuntimeHarness(runtimeDir);
+    const secondCode = await runDaemonCli(["init"], {
+      runtime: secondHarness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+    assertEquals(secondCode, 0);
+    assertStringIncludes(secondHarness.stdout.join(""), "already exists");
+    assertEquals(ensureCalls.value, 2);
+  } finally {
+    await removePathIfPresent(runtimeDir);
+  }
 });
 
 Deno.test(
@@ -546,7 +603,12 @@ Deno.test(
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
       registerHarness.runtime.cwdPath = workspaceDir;
-      const registerCode = await runDaemonCli(["workspace", "register"], {
+      const registerCode = await runDaemonCli([
+        "workspace",
+        "register",
+        "--alias",
+        "My.Proj",
+      ], {
         runtime: registerHarness.runtime,
         defaultRuntimeConfig,
       });
@@ -658,6 +720,63 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli workspace register accepts an explicit target directory",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-workspace-explicit-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const workspaceDir = join(tempDir, "explicit-target");
+      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      await Deno.mkdir(workspaceDir, { recursive: true });
+
+      const defaultRuntimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+
+      const initHarness = makeRuntimeHarness(runtimeDir);
+      initHarness.runtime.cwdPath = tempDir;
+      assertEquals(
+        await runDaemonCli(["workspace", "init", "explicit-target"], {
+          runtime: initHarness.runtime,
+          defaultRuntimeConfig,
+        }),
+        0,
+      );
+
+      const registerHarness = makeRuntimeHarness(runtimeDir);
+      registerHarness.runtime.cwdPath = tempDir;
+      assertEquals(
+        await runDaemonCli([
+          "workspace",
+          "register",
+          "explicit-target",
+          "--alias",
+          "Explicit.Target",
+        ], {
+          runtime: registerHarness.runtime,
+          defaultRuntimeConfig,
+        }),
+        0,
+      );
+
+      assertStringIncludes(
+        await Deno.readTextFile(registryPath),
+        `"alias": "Explicit.Target"`,
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(registryPath),
+        `"workspaceRoot": "${workspaceDir}"`,
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonCli workspace register ignores legacy .kato workspace config paths",
   async () => {
     const tempDir = await makeTestTempDir("daemon-cli-workspace-missing-");
@@ -682,7 +801,12 @@ Deno.test(
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
       registerHarness.runtime.cwdPath = workspaceDir;
-      const exitCode = await runDaemonCli(["workspace", "register"], {
+      const exitCode = await runDaemonCli([
+        "workspace",
+        "register",
+        "--alias",
+        "missing-config",
+      ], {
         runtime: registerHarness.runtime,
         defaultRuntimeConfig,
       });
@@ -726,7 +850,12 @@ Deno.test(
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
       registerHarness.runtime.cwdPath = workspaceDir;
-      const registerCode = await runDaemonCli(["workspace", "register"], {
+      const registerCode = await runDaemonCli([
+        "workspace",
+        "register",
+        "--alias",
+        "warn-me",
+      ], {
         runtime: registerHarness.runtime,
         defaultRuntimeConfig,
       });
@@ -779,7 +908,12 @@ Deno.test(
       const registerHarness = makeRuntimeHarness(runtimeDir);
       registerHarness.runtime.cwdPath = workspaceDir;
       assertEquals(
-        await runDaemonCli(["workspace", "register"], {
+        await runDaemonCli([
+          "workspace",
+          "register",
+          "--alias",
+          "config-backed",
+        ], {
           runtime: registerHarness.runtime,
           defaultRuntimeConfig,
           configStore,

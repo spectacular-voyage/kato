@@ -75,6 +75,7 @@ export type {
   RuntimeConfigStoreLike,
 } from "./config/mod.ts";
 export {
+  createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
@@ -113,16 +114,16 @@ export {
 } from "./core/watcher.ts";
 export type {
   DaemonFeatureSettings,
+  DaemonFeatureFlagKey,
   OpenFeatureBooleanProviderLike,
   OpenFeatureEvaluationContext,
-  RuntimeFeatureFlagKey,
 } from "./feature_flags/mod.ts";
 export {
   bootstrapOpenFeature,
-  createDefaultRuntimeFeatureFlags,
+  createDefaultDaemonFeatureFlags,
   evaluateDaemonFeatureSettings,
   InMemoryOpenFeatureProvider,
-  mergeRuntimeFeatureFlags,
+  mergeDaemonFeatureFlags,
   OpenFeatureClient,
 } from "./feature_flags/mod.ts";
 export type {
@@ -136,6 +137,7 @@ export type {
   MarkdownRenderOptions,
   MarkdownSpeakerNames,
   MarkdownWriteResult,
+  RecordingOutputOverrides,
   RecordingPipelineLike,
   RecordingPipelineOptions,
   RecordingSummary,
@@ -150,6 +152,7 @@ export {
   slugifyForFrontmatterId,
 } from "./writer/mod.ts";
 export type {
+  EnsureDefaultWorkspaceConfigResult,
   RegisteredWorkspace,
   ResolvedWorkspaceProfile,
   WorkspaceCatalogLike,
@@ -158,15 +161,21 @@ export type {
   WorkspaceRegistryStoreLike,
 } from "./workspace/mod.ts";
 export {
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
   createWorkspaceConfigScaffold,
+  DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
   DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
   DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+  DefaultWorkspaceConfigFileStore,
   ensureWorkspaceConfigWorkspaceId,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
+  loadDefaultWorkspaceConfigOverrides,
   loadWorkspaceConfigOverrides,
+  resolveDefaultWorkspaceTemplateConfigPath,
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   resolveWorkspaceConfigPath,

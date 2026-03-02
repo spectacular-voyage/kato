@@ -3,6 +3,7 @@ export type {
   RuntimeConfigStoreLike,
 } from "./runtime_config.ts";
 export {
+  createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,

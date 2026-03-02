@@ -1,8 +1,9 @@
 import type {
   ConversationEvent,
   DaemonSessionStatus,
+  DaemonFeatureFlags,
+  MarkdownFrontmatterConfig,
   ProviderStatus,
-  RuntimeFeatureFlags,
   SessionMetadataV1,
 } from "@kato/shared";
 import {
@@ -10,7 +11,7 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -26,6 +27,7 @@ import { renderFrontmatter } from "../writer/frontmatter.ts";
 import {
   type ActiveRecording,
   RecordingPipeline,
+  type RecordingOutputOverrides,
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
 import { appendExportsLogEntry } from "../utils/exports_log.ts";
@@ -53,6 +55,9 @@ import {
 } from "./session_state_store.ts";
 import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
 import {
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
+  loadWorkspaceConfigOverrides,
   resolveDefaultWorkspaceRegistryPath,
   type ResolvedWorkspaceProfile,
   WorkspaceCatalog,
@@ -61,6 +66,7 @@ import {
   type WorkspaceProfileResolverLike,
   WorkspaceRegistryFileStore,
 } from "../workspace/mod.ts";
+import { readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -87,7 +93,8 @@ export interface DaemonRuntimeLoopOptions {
   daemonMaxMemoryMb?: number;
   exportsLogPath?: string;
   cleanSessionStatesOnShutdown?: boolean;
-  runtimeFeatureFlags?: RuntimeFeatureFlags;
+  daemonFeatureFlags?: DaemonFeatureFlags;
+  defaultCliExportOutputOverrides?: RecordingOutputOverrides;
   workspaceRegistryStore?: WorkspaceRegistryFileStore;
   workspaceCatalog?: WorkspaceCatalogLike;
   workspaceProfileResolver?: WorkspaceProfileResolverLike;
@@ -143,6 +150,7 @@ interface SessionEventProcessingState {
       currentResolvedPath: string;
       desiredState: boolean;
       recordingCycleId?: string;
+      outputOverrides: RecordingOutputOverrides;
     }
   >;
 }
@@ -155,7 +163,7 @@ interface ProcessInChatRecordingUpdatesOptions {
   auditLogger: AuditLogger;
   processEventsFromMs: number;
   now: () => Date;
-  runtimeFeatureFlags: RuntimeFeatureFlags;
+  captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
@@ -167,7 +175,7 @@ interface ProcessPersistentRecordingUpdatesOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
-  runtimeFeatureFlags: RuntimeFeatureFlags;
+  captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
@@ -183,7 +191,7 @@ interface ApplyControlCommandsForEventOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
-  runtimeFeatureFlags: RuntimeFeatureFlags;
+  captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
@@ -273,7 +281,7 @@ interface PersistentRecordingCommandContext {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
-  runtimeFeatureFlags: RuntimeFeatureFlags;
+  captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
@@ -289,10 +297,6 @@ interface InitFrontmatterSettings {
   includeUpdatedInFrontmatter: boolean;
   includeConversationEventKinds: boolean;
   participantUsername?: string;
-}
-
-interface RecordingPipelineFrontmatterSettingsProvider {
-  getMarkdownFrontmatterSettings?(): InitFrontmatterSettings;
 }
 
 function sanitizeFilenamePart(value: string): string {
@@ -662,18 +666,146 @@ async function validateDestinationPathForCommand(
 }
 
 function resolveFrontmatterSettings(
-  recordingPipeline: RecordingPipelineLike,
+  outputOverrides: RecordingOutputOverrides,
 ): InitFrontmatterSettings {
-  const provider =
-    recordingPipeline as RecordingPipelineFrontmatterSettingsProvider;
-  if (provider.getMarkdownFrontmatterSettings) {
-    return provider.getMarkdownFrontmatterSettings();
-  }
   return {
-    includeFrontmatter: true,
-    includeUpdatedInFrontmatter: true,
-    includeConversationEventKinds: true,
+    includeFrontmatter: outputOverrides.includeFrontmatter !== false,
+    includeUpdatedInFrontmatter:
+      outputOverrides.includeUpdatedInFrontmatter ?? false,
+    includeConversationEventKinds:
+      outputOverrides.includeConversationEventKinds ?? false,
+    participantUsername: outputOverrides.participantUsername,
   };
+}
+
+function normalizeFrontmatterParticipantUsername(
+  value: string | undefined,
+): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "");
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function resolveConfiguredParticipantUsername(
+  markdownFrontmatter: MarkdownFrontmatterConfig,
+): string | undefined {
+  if (!markdownFrontmatter.addParticipantUsernameToFrontmatter) {
+    return undefined;
+  }
+  const configured = normalizeFrontmatterParticipantUsername(
+    markdownFrontmatter.defaultParticipantUsername,
+  );
+  if (configured) {
+    return configured;
+  }
+  const envUser = normalizeFrontmatterParticipantUsername(
+    readOptionalEnv("USER") ?? readOptionalEnv("USERNAME"),
+  );
+  if (envUser) {
+    return envUser;
+  }
+  const home = resolveHomeDir();
+  return normalizeFrontmatterParticipantUsername(
+    home ? basename(home) : undefined,
+  );
+}
+
+function createOutputOverridesFromWorkspaceProfile(
+  profile: ResolvedWorkspaceProfile,
+  captureIncludeSystemEvents: boolean,
+): RecordingOutputOverrides {
+  return createOutputOverrides({
+    markdownFrontmatter: profile.markdownFrontmatter,
+    writerFeatureFlags: profile.writerFeatureFlags,
+    captureIncludeSystemEvents,
+  });
+}
+
+function createOutputOverrides(options: {
+  markdownFrontmatter: MarkdownFrontmatterConfig;
+  writerFeatureFlags: {
+    writerIncludeCommentary: boolean;
+    writerIncludeThinking: boolean;
+    writerIncludeToolCalls: boolean;
+    writerItalicizeUserMessages: boolean;
+  };
+  captureIncludeSystemEvents: boolean;
+}): RecordingOutputOverrides {
+  return {
+    includeFrontmatter:
+      options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
+    includeUpdatedInFrontmatter:
+      options.markdownFrontmatter.includeUpdatedInFrontmatter,
+    includeConversationEventKinds:
+      options.markdownFrontmatter.includeConversationEventKinds,
+    participantUsername: resolveConfiguredParticipantUsername(
+      options.markdownFrontmatter,
+    ),
+    renderOptions: {
+      includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
+      includeThinking: options.writerFeatureFlags.writerIncludeThinking,
+      includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
+      italicizeUserMessages:
+        options.writerFeatureFlags.writerItalicizeUserMessages,
+      includeSystemEvents: options.captureIncludeSystemEvents,
+    },
+  };
+}
+
+async function resolvePersistedWorkspaceOutputOverrides(options: {
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number];
+  captureIncludeSystemEvents: boolean;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
+}): Promise<RecordingOutputOverrides> {
+  const registered = await options.workspaceCatalog.getByWorkspaceId(
+    options.output.workspaceId,
+  );
+  if (registered) {
+    const profile = await options.workspaceProfileResolver.resolveForCommand(
+      registered,
+    );
+    return createOutputOverridesFromWorkspaceProfile(
+      profile,
+      options.captureIncludeSystemEvents,
+    );
+  }
+
+  if (options.output.sourceConfigPath) {
+    try {
+      const stat = await Deno.stat(options.output.sourceConfigPath);
+      if (stat.isFile) {
+        const overrides = await loadWorkspaceConfigOverrides(
+          options.output.sourceConfigPath,
+        );
+        return createOutputOverrides({
+          markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(
+            overrides.markdownFrontmatter,
+          ),
+          writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
+            overrides.writerFeatureFlags,
+          ),
+          captureIncludeSystemEvents: options.captureIncludeSystemEvents,
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
+
+  return createOutputOverrides({
+    markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
+    writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
+      options.output.writerFeatureFlags,
+    ),
+    captureIncludeSystemEvents: options.captureIncludeSystemEvents,
+  });
 }
 
 function buildFrontmatterParticipants(
@@ -722,8 +854,8 @@ async function prepareInitDestination(
   providerSessionId: string,
   boundaryEvents: ConversationEvent[],
   recordingCycleId: string,
-  recordingPipeline: RecordingPipelineLike,
   now: () => Date,
+  frontmatterSettings: InitFrontmatterSettings,
   workspaceId?: string,
 ): Promise<void> {
   await Deno.mkdir(dirname(destination), { recursive: true });
@@ -743,7 +875,6 @@ async function prepareInitDestination(
     return;
   }
 
-  const frontmatterSettings = resolveFrontmatterSettings(recordingPipeline);
   if (!frontmatterSettings.includeFrontmatter) {
     await Deno.writeTextFile(destination, "");
     return;
@@ -920,7 +1051,7 @@ async function applyPersistentControlCommandsForEvent(
     operationalLogger,
     auditLogger,
     now,
-    runtimeFeatureFlags,
+    captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
   } = ctx;
@@ -1010,7 +1141,10 @@ async function applyPersistentControlCommandsForEvent(
 
         const profile = await workspaceProfileResolver.resolveForCommand(
           workspace,
-          runtimeFeatureFlags,
+        );
+        const outputOverrides = createOutputOverridesFromWorkspaceProfile(
+          profile,
+          captureIncludeSystemEvents,
         );
         let output = findWorkspaceOutput(metadata, workspace.workspaceId);
 
@@ -1082,8 +1216,8 @@ async function applyPersistentControlCommandsForEvent(
               providerSessionId,
               boundaryEvents,
               initMarkerId,
-              recordingPipeline,
               now,
+              resolveFrontmatterSettings(outputOverrides),
               workspace.workspaceId,
             );
             metadataChanged = true;
@@ -1167,6 +1301,7 @@ async function applyPersistentControlCommandsForEvent(
                 recordingId: cycleId,
                 recordingCycleIds: [cycleId],
                 workspaceIds: [workspace.workspaceId],
+                outputOverrides,
               });
             }
             output.writeCursor = writeCursor;
@@ -1226,6 +1361,7 @@ async function applyPersistentControlCommandsForEvent(
             title: captureTitle,
             recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
             workspaceIds: [workspace.workspaceId],
+            outputOverrides,
           });
           const continuationEvents = buildCommandSeedEvents(
             event,
@@ -1247,6 +1383,7 @@ async function applyPersistentControlCommandsForEvent(
               ...(currentCycleId ? { recordingId: currentCycleId } : {}),
               recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
+              outputOverrides,
             });
           }
           metadataChanged = metadataChanged || stateChanged;
@@ -1284,6 +1421,7 @@ async function applyPersistentControlCommandsForEvent(
             events: exportEvents,
             title: snapshotTitle,
             workspaceIds: [workspace.workspaceId],
+            outputOverrides,
           });
           const continuationEvents = buildCommandSeedEvents(
             event,
@@ -1303,6 +1441,7 @@ async function applyPersistentControlCommandsForEvent(
               events: continuationEvents,
               title: snapshotTitle,
               workspaceIds: [workspace.workspaceId],
+              outputOverrides,
             });
           }
         }
@@ -1365,7 +1504,7 @@ async function applyControlCommandsForEvent(
     operationalLogger,
     auditLogger,
     now,
-    runtimeFeatureFlags,
+    captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
   } = options;
@@ -1455,7 +1594,10 @@ async function applyControlCommandsForEvent(
         }
         const profile = await workspaceProfileResolver.resolveForCommand(
           workspace,
-          runtimeFeatureFlags,
+        );
+        const outputOverrides = createOutputOverridesFromWorkspaceProfile(
+          profile,
+          captureIncludeSystemEvents,
         );
         const existingState = sessionEventState.workspaceOutputs.get(
           workspace.workspaceId,
@@ -1501,8 +1643,8 @@ async function applyControlCommandsForEvent(
               sessionId,
               boundarySnapshot,
               recordingCycleId,
-              recordingPipeline,
               now,
+              resolveFrontmatterSettings(outputOverrides),
               workspace.workspaceId,
             );
             if (existingState?.desiredState) {
@@ -1516,6 +1658,7 @@ async function applyControlCommandsForEvent(
               workspaceId: workspace.workspaceId,
               currentResolvedPath: resolvedDestination,
               desiredState: false,
+              outputOverrides,
             });
           }
         } else if (command.verb === "record") {
@@ -1546,6 +1689,7 @@ async function applyControlCommandsForEvent(
             workspaceId: workspace.workspaceId,
             currentResolvedPath: resolvedDestination,
             desiredState: false,
+            outputOverrides,
           };
           const activeSameDestination = state.desiredState &&
             state.currentResolvedPath === resolvedDestination;
@@ -1574,10 +1718,12 @@ async function applyControlCommandsForEvent(
               title: recordingTitle,
               recordingId: recordingCycleId,
               workspaceIds: [workspace.workspaceId],
+              outputOverrides,
             });
             state.currentResolvedPath = resolvedDestination;
             state.desiredState = true;
             state.recordingCycleId = recordingCycleId;
+            state.outputOverrides = outputOverrides;
             sessionEventState.workspaceOutputs.set(
               workspace.workspaceId,
               state,
@@ -1615,6 +1761,7 @@ async function applyControlCommandsForEvent(
               ? [existingState.recordingCycleId]
               : undefined,
             workspaceIds: [workspace.workspaceId],
+            outputOverrides,
           });
           const continuationEvents = buildCommandSeedEvents(
             event,
@@ -1640,6 +1787,7 @@ async function applyControlCommandsForEvent(
                 ? [existingState.recordingCycleId]
                 : undefined,
               workspaceIds: [workspace.workspaceId],
+              outputOverrides,
             });
           }
           if (!command.argument && !existingState) {
@@ -1647,6 +1795,7 @@ async function applyControlCommandsForEvent(
               workspaceId: workspace.workspaceId,
               currentResolvedPath: resolvedDestination,
               desiredState: false,
+              outputOverrides,
             });
           }
         } else if (command.verb === "export") {
@@ -1672,6 +1821,7 @@ async function applyControlCommandsForEvent(
             events: boundarySnapshot,
             title: recordingTitle,
             workspaceIds: [workspace.workspaceId],
+            outputOverrides,
           });
           const continuationEvents = buildCommandSeedEvents(
             event,
@@ -1691,6 +1841,7 @@ async function applyControlCommandsForEvent(
               events: continuationEvents,
               title: recordingTitle,
               workspaceIds: [workspace.workspaceId],
+              outputOverrides,
             });
           }
         }
@@ -1760,7 +1911,7 @@ async function processInChatRecordingUpdates(
     auditLogger,
     processEventsFromMs,
     now,
-    runtimeFeatureFlags,
+    captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
   } = options;
@@ -1813,6 +1964,7 @@ async function processInChatRecordingUpdates(
         currentResolvedPath: string;
         desiredState: boolean;
         recordingCycleId?: string;
+        outputOverrides: RecordingOutputOverrides;
       }>(),
     };
     if (!existingState) {
@@ -1856,7 +2008,7 @@ async function processInChatRecordingUpdates(
           operationalLogger,
           auditLogger,
           now,
-          runtimeFeatureFlags,
+          captureIncludeSystemEvents,
           workspaceCatalog,
           workspaceProfileResolver,
         });
@@ -1883,6 +2035,7 @@ async function processInChatRecordingUpdates(
               ? [outputState.recordingCycleId]
               : undefined,
             workspaceIds: [outputState.workspaceId],
+            outputOverrides: outputState.outputOverrides,
           });
         }
       } catch (error) {
@@ -1941,7 +2094,7 @@ async function processPersistentRecordingUpdates(
     operationalLogger,
     auditLogger,
     now,
-    runtimeFeatureFlags,
+    captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
   } = options;
@@ -2007,7 +2160,7 @@ async function processPersistentRecordingUpdates(
         operationalLogger,
         auditLogger,
         now,
-        runtimeFeatureFlags,
+        captureIncludeSystemEvents,
         workspaceCatalog,
         workspaceProfileResolver,
       });
@@ -2044,6 +2197,12 @@ async function processPersistentRecordingUpdates(
             "Recording pipeline does not support appendToDestination",
           );
         }
+        const outputOverrides = await resolvePersistedWorkspaceOutputOverrides({
+          output,
+          captureIncludeSystemEvents,
+          workspaceCatalog,
+          workspaceProfileResolver,
+        });
         await recordingPipeline.appendToDestination({
           provider,
           sessionId: providerSessionId,
@@ -2057,6 +2216,7 @@ async function processPersistentRecordingUpdates(
             ? [output.activeRecordingCycleId]
             : undefined,
           workspaceIds: [output.workspaceId],
+          outputOverrides,
         });
         output.writeCursor = snapshot.events.length;
         metadataChanged = true;
@@ -2419,11 +2579,7 @@ export async function runDaemonRuntimeLoop(
   const exportsLogPath = options.exportsLogPath;
   const cleanSessionStatesOnShutdown = options.cleanSessionStatesOnShutdown ??
     false;
-  const runtimeFeatureFlags = options.runtimeFeatureFlags ?? {
-    writerIncludeCommentary: true,
-    writerIncludeThinking: true,
-    writerIncludeToolCalls: true,
-    writerItalicizeUserMessages: false,
+  const daemonFeatureFlags = options.daemonFeatureFlags ?? {
     daemonExportEnabled: true,
     captureIncludeSystemEvents: false,
   };
@@ -2597,7 +2753,8 @@ export async function runDaemonRuntimeLoop(
               operationalLogger,
               auditLogger,
               now,
-              runtimeFeatureFlags,
+              captureIncludeSystemEvents:
+                daemonFeatureFlags.captureIncludeSystemEvents,
               workspaceCatalog,
               workspaceProfileResolver,
             });
@@ -2612,7 +2769,8 @@ export async function runDaemonRuntimeLoop(
             auditLogger,
             processEventsFromMs,
             now,
-            runtimeFeatureFlags,
+            captureIncludeSystemEvents:
+              daemonFeatureFlags.captureIncludeSystemEvents,
             workspaceCatalog,
             workspaceProfileResolver,
           });
@@ -2643,6 +2801,7 @@ export async function runDaemonRuntimeLoop(
         sessionStateStore,
         loadSessionSnapshot,
         exportEnabled,
+        defaultCliExportOutputOverrides: options.defaultCliExportOutputOverrides,
         exportsLogPath,
         now,
         operationalLogger,
@@ -2859,6 +3018,7 @@ interface HandleControlRequestOptions {
     sessionId: string,
   ) => Promise<SessionExportSnapshot | undefined>;
   exportEnabled: boolean;
+  defaultCliExportOutputOverrides?: RecordingOutputOverrides;
   exportsLogPath?: string;
   now: () => Date;
   operationalLogger: StructuredLogger;
@@ -3036,6 +3196,7 @@ async function handleControlRequest(
     sessionStateStore,
     loadSessionSnapshot,
     exportEnabled,
+    defaultCliExportOutputOverrides,
     exportsLogPath,
     now,
     operationalLogger,
@@ -3237,6 +3398,9 @@ async function handleControlRequest(
           events: snapshotData.events,
           title: resolveConversationTitle(snapshotData.events, sessionId),
           ...(format ? { format } : {}),
+          ...(defaultCliExportOutputOverrides
+            ? { outputOverrides: defaultCliExportOutputOverrides }
+            : {}),
         });
         await recordExportSucceeded(
           snapshotProvider,

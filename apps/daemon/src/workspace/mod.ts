@@ -1,4 +1,5 @@
 export type {
+  EnsureDefaultWorkspaceConfigResult,
   RegisteredWorkspace,
   ResolvedWorkspaceProfile,
   WorkspaceCatalogLike,
@@ -7,16 +8,22 @@ export type {
   WorkspaceRegistryStoreLike,
 } from "./registry.ts";
 export {
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
   createWorkspaceConfigScaffold,
+  DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
   DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
   DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+  DefaultWorkspaceConfigFileStore,
   defaultAliasForWorkspaceRoot,
   ensureWorkspaceConfigWorkspaceId,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
+  loadDefaultWorkspaceConfigOverrides,
   loadWorkspaceConfigOverrides,
+  resolveDefaultWorkspaceTemplateConfigPath,
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   resolveWorkspaceConfigPath,

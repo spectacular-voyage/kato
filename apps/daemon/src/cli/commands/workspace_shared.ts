@@ -2,11 +2,12 @@ import { dirname, join, resolve } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
   createWorkspaceConfigScaffold,
+  DefaultWorkspaceConfigFileStore,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
-  defaultAliasForWorkspaceRoot,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
   type RegisteredWorkspace,
+  resolveDefaultWorkspaceTemplateConfigPath,
   resolveDefaultWorkspaceRegistryPath,
   resolveWorkspaceConfigPath,
   WorkspaceRegistryFileStore,
@@ -43,9 +44,20 @@ export function validateWorkspaceAlias(alias: string): string {
 
 export async function resolveRegisterTarget(
   ctx: DaemonCliCommandContext,
+  dirPath?: string,
 ): Promise<{ workspaceRoot: string; configPath: string }> {
-  const cwd = requireCliCwd(ctx);
-  const located = await findNearestWorkspaceConfig(cwd);
+  if (dirPath) {
+    const workspaceRoot = resolve(requireCliCwd(ctx), dirPath);
+    const configPath = await resolveWorkspaceConfigPath(workspaceRoot);
+    if (!configPath) {
+      throw new Error(
+        `No workspace config found at ${join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)}. Run \`kato workspace init ${dirPath}\` first.`,
+      );
+    }
+    return { workspaceRoot, configPath };
+  }
+
+  const located = await findNearestWorkspaceConfig(requireCliCwd(ctx));
   if (!located) {
     throw new Error(
       `No workspace config found. Run \`kato workspace init\` to create ./${DEFAULT_WORKSPACE_CONFIG_FILENAME} from the default template first.`,
@@ -74,6 +86,7 @@ export async function resolveWorkspaceInitPath(
 
 export async function ensureWorkspaceConfigInitialized(
   configPath: string,
+  content: string = createWorkspaceConfigScaffold(),
 ): Promise<boolean> {
   try {
     const stat = await Deno.stat(configPath);
@@ -86,7 +99,7 @@ export async function ensureWorkspaceConfigInitialized(
     }
   }
   await Deno.mkdir(dirname(configPath), { recursive: true });
-  await Deno.writeTextFile(configPath, createWorkspaceConfigScaffold());
+  await Deno.writeTextFile(configPath, content);
   return true;
 }
 
@@ -118,6 +131,17 @@ export function shouldWarnWriteRootCoverage(
   return !isPathWithinRoots(workspaceRoot, roots);
 }
 
-export function deriveDefaultAlias(workspaceRoot: string): string {
-  return validateWorkspaceAlias(defaultAliasForWorkspaceRoot(workspaceRoot));
+export async function loadWorkspaceTemplateScaffold(
+  ctx: DaemonCliCommandContext,
+): Promise<string> {
+  const templatePath = resolveDefaultWorkspaceTemplateConfigPath(
+    ctx.runtime.configPath,
+  );
+  const store = new DefaultWorkspaceConfigFileStore(templatePath);
+  const loaded = await store.load({ allowMissing: true });
+  if (!loaded) {
+    return createWorkspaceConfigScaffold();
+  }
+  const raw = await Deno.readTextFile(templatePath);
+  return raw.endsWith("\n") ? raw : `${raw}\n`;
 }

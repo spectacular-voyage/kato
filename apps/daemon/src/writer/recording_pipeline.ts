@@ -17,6 +17,22 @@ import {
 import type { JsonlConversationWriter } from "./jsonl_writer.ts";
 
 export type ExportFormat = "markdown" | "jsonl";
+export type RecordingRenderOptionOverrides = Pick<
+  MarkdownRenderOptions,
+  | "includeCommentary"
+  | "includeThinking"
+  | "includeToolCalls"
+  | "italicizeUserMessages"
+  | "includeSystemEvents"
+>;
+
+export interface RecordingOutputOverrides {
+  includeFrontmatter?: boolean;
+  includeUpdatedInFrontmatter?: boolean;
+  includeConversationEventKinds?: boolean;
+  participantUsername?: string;
+  renderOptions?: Partial<RecordingRenderOptionOverrides>;
+}
 
 export interface RecordingSummary {
   activeRecordings: number;
@@ -42,6 +58,7 @@ export interface ActivateRecordingInput {
   recordingId?: string;
   recordingCycleIds?: string[];
   workspaceIds?: string[];
+  outputOverrides?: RecordingOutputOverrides;
 }
 
 export interface SnapshotExportInput {
@@ -53,6 +70,7 @@ export interface SnapshotExportInput {
   recordingCycleIds?: string[];
   workspaceIds?: string[];
   format?: ExportFormat;
+  outputOverrides?: RecordingOutputOverrides;
 }
 
 export interface SnapshotExportResult {
@@ -69,6 +87,7 @@ export interface AppendToActiveRecordingInput {
   title?: string;
   recordingCycleIds?: string[];
   workspaceIds?: string[];
+  outputOverrides?: RecordingOutputOverrides;
 }
 
 export interface AppendToDestinationInput {
@@ -80,6 +99,7 @@ export interface AppendToDestinationInput {
   recordingId?: string;
   recordingCycleIds?: string[];
   workspaceIds?: string[];
+  outputOverrides?: RecordingOutputOverrides;
 }
 
 export interface ValidateDestinationPathInput {
@@ -204,11 +224,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private readonly jsonlWriter: JsonlConversationWriter | undefined;
   private readonly defaultRenderOptions: Pick<
     MarkdownRenderOptions,
-    | "includeCommentary"
-    | "includeThinking"
-    | "includeToolCalls"
-    | "italicizeUserMessages"
-    | "includeSystemEvents"
+    keyof RecordingRenderOptionOverrides
   >;
   private readonly makeRecordingId: () => string;
   private readonly recordings = new Map<string, ActiveRecording>();
@@ -291,6 +307,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
           workspaceIds: input.workspaceIds,
           recordingKey: input.recordingKey,
           trackActiveRecordingKinds: true,
+          outputOverrides: input.outputOverrides,
         }),
       );
       if (result.wrote) {
@@ -336,6 +353,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         title: input.title,
         recordingCycleIds: input.recordingCycleIds,
         workspaceIds: input.workspaceIds,
+        outputOverrides: input.outputOverrides,
       }),
       format,
     );
@@ -376,6 +394,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         title: input.title,
         recordingCycleIds: input.recordingCycleIds,
         workspaceIds: input.workspaceIds,
+        outputOverrides: input.outputOverrides,
       }),
       format,
     );
@@ -423,6 +442,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         workspaceIds: input.workspaceIds,
         recordingKey: input.recordingKey,
         trackActiveRecordingKinds: true,
+        outputOverrides: input.outputOverrides,
       }),
     );
     if (writeResult.wrote) {
@@ -459,6 +479,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
           ...(input.recordingCycleIds ?? []),
         ],
         workspaceIds: input.workspaceIds,
+        outputOverrides: input.outputOverrides,
       }),
     );
   }
@@ -597,7 +618,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
     workspaceIds?: string[];
     recordingKey?: string;
     trackActiveRecordingKinds?: boolean;
+    outputOverrides?: RecordingOutputOverrides;
   }): MarkdownRenderOptions {
+    const includeConversationEventKinds =
+      options.outputOverrides?.includeConversationEventKinds ??
+        this.includeConversationEventKindsInFrontmatter;
     const frontmatterConversationEventKinds = this
       .buildFrontmatterConversationEventKinds(
         options.provider,
@@ -605,20 +630,32 @@ export class RecordingPipeline implements RecordingPipelineLike {
         options.recordingKey,
         options.events,
         options.trackActiveRecordingKinds ?? false,
+        includeConversationEventKinds,
       );
     const frontmatterParticipants = this.buildFrontmatterParticipants(
       options.provider,
       options.events,
+      options.outputOverrides?.participantUsername ??
+        this.frontmatterParticipantUsername,
     );
+    const renderOptions = {
+      ...this.defaultRenderOptions,
+      ...(options.outputOverrides?.renderOptions ?? {}),
+    };
     const frontmatterRecordingCycleIds = this.resolveRecordingCycleIds(
       options.recordingCycleIds,
     );
+    const includeFrontmatter = options.outputOverrides?.includeFrontmatter ??
+      this.includeFrontmatterInMarkdownRecordings;
+    const includeUpdatedInFrontmatter =
+      options.outputOverrides?.includeUpdatedInFrontmatter ??
+        this.includeUpdatedInFrontmatter;
     return {
-      ...this.defaultRenderOptions,
+      ...renderOptions,
       title: options.title,
       now: this.now,
-      includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
-      includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
+      includeFrontmatter,
+      includeUpdatedInFrontmatter,
       frontmatterSessionIds: [options.sessionId],
       ...(options.workspaceIds
         ? { frontmatterWorkspaceIds: options.workspaceIds }
@@ -652,8 +689,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
     recordingKey: string | undefined,
     events: ConversationEvent[],
     trackActiveRecordingKinds: boolean,
+    includeConversationEventKinds: boolean,
   ): string[] | undefined {
-    if (!this.includeConversationEventKindsInFrontmatter) {
+    if (!includeConversationEventKinds) {
       return undefined;
     }
     const eventKinds = trackActiveRecordingKinds
@@ -688,10 +726,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private buildFrontmatterParticipants(
     provider: string,
     events: ConversationEvent[],
+    participantUsername: string | undefined,
   ): string[] | undefined {
     const participants: string[] = [];
-    if (this.frontmatterParticipantUsername) {
-      participants.push(`user.${this.frontmatterParticipantUsername}`);
+    if (participantUsername) {
+      participants.push(`user.${participantUsername}`);
     }
 
     const assistantParticipants = new Set<string>();
@@ -710,7 +749,6 @@ export class RecordingPipeline implements RecordingPipelineLike {
     participants.push(
       ...Array.from(assistantParticipants).sort((a, b) => a.localeCompare(b)),
     );
-
     return participants.length > 0 ? participants : undefined;
   }
 }

@@ -1,5 +1,5 @@
 import type {
-  RuntimeFeatureFlags,
+  MarkdownFrontmatterConfig,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
 import {
@@ -15,6 +15,8 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
 export const DEFAULT_WORKSPACE_CONFIG_FILENAME = "kato-workspace-config.yaml";
+export const DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME =
+  "default-kato-workspace-config.yaml";
 export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
   "{provider}-{sessionShortId}-{timestampUtc}.md";
@@ -26,8 +28,33 @@ const WRITER_FEATURE_FLAG_KEYS = [
   "writerIncludeToolCalls",
   "writerItalicizeUserMessages",
 ] as const;
+const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
+  "includeFrontmatterInMarkdownRecordings",
+  "includeUpdatedInFrontmatter",
+  "addParticipantUsernameToFrontmatter",
+  "defaultParticipantUsername",
+  "includeConversationEventKinds",
+] as const;
+const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
+  "workspaceId",
+  "defaultOutputDir",
+  "filenameTemplate",
+  "markdownFrontmatter",
+  "workspaceFeatureFlags",
+] as const;
+const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
+  "defaultOutputDir",
+  "filenameTemplate",
+  "markdownFrontmatter",
+  "workspaceFeatureFlags",
+] as const;
 
 type WriterFeatureFlagKey = typeof WRITER_FEATURE_FLAG_KEYS[number];
+type WorkspaceConfigTopLevelKey = typeof WORKSPACE_CONFIG_TOP_LEVEL_KEYS[number];
+type WorkspaceTemplateTopLevelKey =
+  typeof WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS[number];
+type WorkspaceMarkdownFrontmatterKey =
+  typeof WORKSPACE_MARKDOWN_FRONTMATTER_KEYS[number];
 
 export interface RegisteredWorkspace {
   workspaceId: string;
@@ -62,6 +89,7 @@ export interface WorkspaceCatalogLike {
 export interface WorkspaceConfigOverrides {
   defaultOutputDir?: string;
   filenameTemplate?: string;
+  markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
 
@@ -72,14 +100,20 @@ export interface ResolvedWorkspaceProfile {
   configPath: string;
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
+  markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
 
 export interface WorkspaceProfileResolverLike {
   resolveForCommand(
     workspace: RegisteredWorkspace,
-    runtimeFeatureFlags: RuntimeFeatureFlags,
   ): Promise<ResolvedWorkspaceProfile>;
+}
+
+export interface EnsureDefaultWorkspaceConfigResult {
+  created: boolean;
+  path: string;
+  config: WorkspaceConfigOverrides;
 }
 
 interface WorkspaceCatalogSnapshot {
@@ -150,6 +184,12 @@ export function resolveDefaultWorkspaceRegistryPath(
   katoDir: string = resolveDefaultKatoDir(),
 ): string {
   return join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+}
+
+export function resolveDefaultWorkspaceTemplateConfigPath(
+  runtimeConfigPath: string,
+): string {
+  return join(dirname(resolve(runtimeConfigPath)), DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME);
 }
 
 export class WorkspaceRegistryFileStore implements WorkspaceRegistryStoreLike {
@@ -293,23 +333,45 @@ function trimOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function resolveWriterFeatureFlags(
-  runtimeFeatureFlags: RuntimeFeatureFlags,
-  overrides: WorkspaceConfigOverrides,
+export function createDefaultWorkspaceWriterFeatureFlags(
+  overrides: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1> = {},
 ): SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   return {
-    writerIncludeCommentary:
-      overrides.writerFeatureFlags.writerIncludeCommentary ??
-        runtimeFeatureFlags.writerIncludeCommentary,
-    writerIncludeThinking: overrides.writerFeatureFlags.writerIncludeThinking ??
-      runtimeFeatureFlags.writerIncludeThinking,
-    writerIncludeToolCalls:
-      overrides.writerFeatureFlags.writerIncludeToolCalls ??
-        runtimeFeatureFlags.writerIncludeToolCalls,
+    writerIncludeCommentary: overrides.writerIncludeCommentary ?? true,
+    writerIncludeThinking: overrides.writerIncludeThinking ?? true,
+    writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? true,
     writerItalicizeUserMessages:
-      overrides.writerFeatureFlags.writerItalicizeUserMessages ??
-        runtimeFeatureFlags.writerItalicizeUserMessages,
+      overrides.writerItalicizeUserMessages ?? false,
   };
+}
+
+export function createDefaultWorkspaceMarkdownFrontmatterConfig(
+  overrides: Partial<MarkdownFrontmatterConfig> = {},
+): MarkdownFrontmatterConfig {
+  return {
+    includeFrontmatterInMarkdownRecordings:
+      overrides.includeFrontmatterInMarkdownRecordings ?? true,
+    includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ?? false,
+    addParticipantUsernameToFrontmatter:
+      overrides.addParticipantUsernameToFrontmatter ?? false,
+    defaultParticipantUsername: overrides.defaultParticipantUsername ?? "",
+    includeConversationEventKinds:
+      overrides.includeConversationEventKinds ?? false,
+  };
+}
+
+function resolveWriterFeatureFlags(
+  overrides: WorkspaceConfigOverrides,
+): SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
+  return createDefaultWorkspaceWriterFeatureFlags(overrides.writerFeatureFlags);
+}
+
+function resolveWorkspaceMarkdownFrontmatter(
+  overrides: WorkspaceConfigOverrides,
+): MarkdownFrontmatterConfig {
+  return createDefaultWorkspaceMarkdownFrontmatterConfig(
+    overrides.markdownFrontmatter,
+  );
 }
 
 async function readWorkspaceConfigDocument(
@@ -374,9 +436,56 @@ export async function loadWorkspaceConfigOverrides(
   configPath: string,
   options: { allowMissing?: boolean } = {},
 ): Promise<WorkspaceConfigOverrides> {
+  return await loadWorkspaceConfigLikeOverrides(configPath, {
+    ...options,
+    allowWorkspaceId: true,
+  });
+}
+
+export async function loadDefaultWorkspaceConfigOverrides(
+  configPath: string,
+  options: { allowMissing?: boolean } = {},
+): Promise<WorkspaceConfigOverrides> {
+  return await loadWorkspaceConfigLikeOverrides(configPath, {
+    ...options,
+    allowWorkspaceId: false,
+  });
+}
+
+async function loadWorkspaceConfigLikeOverrides(
+  configPath: string,
+  options: { allowMissing?: boolean; allowWorkspaceId: boolean },
+): Promise<WorkspaceConfigOverrides> {
   const parsed = await readWorkspaceConfigDocument(configPath, options);
   if (!parsed) {
     return { writerFeatureFlags: {} };
+  }
+
+  const allowedKeys = options.allowWorkspaceId
+    ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS
+    : WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS;
+  for (const key of Object.keys(parsed)) {
+    const isAllowed = options.allowWorkspaceId
+      ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS.includes(key as WorkspaceConfigTopLevelKey)
+      : WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS.includes(
+        key as WorkspaceTemplateTopLevelKey,
+      );
+    if (!isAllowed) {
+      throw new Error(`Unsupported workspace config key '${key}': ${configPath}`);
+    }
+  }
+
+  if (!options.allowWorkspaceId && parsed["workspaceId"] !== undefined) {
+    throw new Error(
+      `workspaceId is not allowed in default workspace config: ${configPath}`,
+    );
+  }
+  if (
+    options.allowWorkspaceId &&
+    parsed["workspaceId"] !== undefined &&
+    trimOptionalString(parsed["workspaceId"]) === undefined
+  ) {
+    throw new Error(`workspaceId must be a non-empty string: ${configPath}`);
   }
 
   const defaultOutputDirRaw = parsed["defaultOutputDir"];
@@ -399,27 +508,14 @@ export async function loadWorkspaceConfigOverrides(
     );
   }
 
-  const writerFeatureFlags: Partial<
-    SessionWorkspaceAttachmentWriterFeatureFlagsV1
-  > = {};
-  const rawFeatureFlags = parsed["featureFlags"];
-  if (rawFeatureFlags !== undefined) {
-    if (!isRecord(rawFeatureFlags)) {
-      throw new Error(
-        `featureFlags must be an object when present: ${configPath}`,
-      );
-    }
-    for (const key of WRITER_FEATURE_FLAG_KEYS) {
-      const rawValue = rawFeatureFlags[key];
-      if (rawValue === undefined) {
-        continue;
-      }
-      if (typeof rawValue !== "boolean") {
-        throw new Error(`featureFlags.${key} must be a boolean: ${configPath}`);
-      }
-      writerFeatureFlags[key] = rawValue;
-    }
-  }
+  const markdownFrontmatter = parseWorkspaceMarkdownFrontmatter(
+    parsed["markdownFrontmatter"],
+    configPath,
+  );
+  const writerFeatureFlags = parseWorkspaceWriterFeatureFlags(
+    parsed["workspaceFeatureFlags"],
+    configPath,
+  );
 
   return {
     ...(trimOptionalString(defaultOutputDirRaw)
@@ -428,8 +524,98 @@ export async function loadWorkspaceConfigOverrides(
     ...(trimOptionalString(filenameTemplateRaw)
       ? { filenameTemplate: trimOptionalString(filenameTemplateRaw) }
       : {}),
+    ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
     writerFeatureFlags,
   };
+}
+
+function parseWorkspaceMarkdownFrontmatter(
+  value: unknown,
+  configPath: string,
+): Partial<MarkdownFrontmatterConfig> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(
+      `markdownFrontmatter must be an object when present: ${configPath}`,
+    );
+  }
+
+  for (const key of Object.keys(value)) {
+    if (
+      !WORKSPACE_MARKDOWN_FRONTMATTER_KEYS.includes(
+        key as WorkspaceMarkdownFrontmatterKey,
+      )
+    ) {
+      throw new Error(
+        `Unsupported markdownFrontmatter key '${key}': ${configPath}`,
+      );
+    }
+  }
+
+  const overrides: Partial<MarkdownFrontmatterConfig> = {};
+  for (const key of WORKSPACE_MARKDOWN_FRONTMATTER_KEYS) {
+    const rawValue = value[key];
+    if (rawValue === undefined) {
+      continue;
+    }
+    if (key === "defaultParticipantUsername") {
+      if (typeof rawValue !== "string") {
+        throw new Error(
+          `markdownFrontmatter.${key} must be a string: ${configPath}`,
+        );
+      }
+      overrides.defaultParticipantUsername = rawValue;
+      continue;
+    }
+    if (typeof rawValue !== "boolean") {
+      throw new Error(
+        `markdownFrontmatter.${key} must be a boolean: ${configPath}`,
+      );
+    }
+    overrides[key] = rawValue;
+  }
+  return overrides;
+}
+
+function parseWorkspaceWriterFeatureFlags(
+  value: unknown,
+  configPath: string,
+): Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1> {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new Error(
+      `workspaceFeatureFlags must be an object when present: ${configPath}`,
+    );
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!WRITER_FEATURE_FLAG_KEYS.includes(key as WriterFeatureFlagKey)) {
+      throw new Error(
+        `Unsupported workspaceFeatureFlags key '${key}': ${configPath}`,
+      );
+    }
+  }
+
+  const writerFeatureFlags: Partial<
+    SessionWorkspaceAttachmentWriterFeatureFlagsV1
+  > = {};
+  for (const key of WRITER_FEATURE_FLAG_KEYS) {
+    const rawValue = value[key];
+    if (rawValue === undefined) {
+      continue;
+    }
+    if (typeof rawValue !== "boolean") {
+      throw new Error(
+        `workspaceFeatureFlags.${key} must be a boolean: ${configPath}`,
+      );
+    }
+    writerFeatureFlags[key] = rawValue;
+  }
+  return writerFeatureFlags;
 }
 
 export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
@@ -437,7 +623,6 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
 
   async resolveForCommand(
     workspace: RegisteredWorkspace,
-    runtimeFeatureFlags: RuntimeFeatureFlags,
   ): Promise<ResolvedWorkspaceProfile> {
     const sourceMtimeMs = await this.readMtime(workspace.configPath);
     const cached = this.cache.get(workspace.workspaceId);
@@ -448,6 +633,7 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
     ) {
       return {
         ...cached.profile,
+        markdownFrontmatter: { ...cached.profile.markdownFrontmatter },
         writerFeatureFlags: { ...cached.profile.writerFeatureFlags },
       };
     }
@@ -466,10 +652,8 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       resolvedDefaultOutputDir,
       filenameTemplate: overrides.filenameTemplate ??
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
-      writerFeatureFlags: resolveWriterFeatureFlags(
-        runtimeFeatureFlags,
-        overrides,
-      ),
+      markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
+      writerFeatureFlags: resolveWriterFeatureFlags(overrides),
     };
     this.cache.set(workspace.workspaceId, {
       workspaceId: workspace.workspaceId,
@@ -478,6 +662,7 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       loadedAt: new Date().toISOString(),
       profile: {
         ...profile,
+        markdownFrontmatter: { ...profile.markdownFrontmatter },
         writerFeatureFlags: { ...profile.writerFeatureFlags },
       },
     });
@@ -494,6 +679,58 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       }
       throw error;
     }
+  }
+}
+
+export class DefaultWorkspaceConfigFileStore {
+  constructor(private readonly configPath: string) {}
+
+  async load(
+    options: { allowMissing?: boolean } = {},
+  ): Promise<WorkspaceConfigOverrides | undefined> {
+    const loaded = await loadDefaultWorkspaceConfigOverrides(
+      this.configPath,
+      options,
+    );
+    if (
+      options.allowMissing &&
+      loaded.defaultOutputDir === undefined &&
+      loaded.filenameTemplate === undefined &&
+      loaded.markdownFrontmatter === undefined &&
+      Object.keys(loaded.writerFeatureFlags).length === 0
+    ) {
+      try {
+        await Deno.stat(this.configPath);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          return undefined;
+        }
+        throw error;
+      }
+    }
+    return loaded;
+  }
+
+  async ensureInitialized(): Promise<EnsureDefaultWorkspaceConfigResult> {
+    try {
+      const loaded = await loadDefaultWorkspaceConfigOverrides(this.configPath);
+      return {
+        created: false,
+        path: this.configPath,
+        config: loaded,
+      };
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+
+    await writeTextAtomically(this.configPath, createWorkspaceConfigScaffold());
+    return {
+      created: true,
+      path: this.configPath,
+      config: await loadDefaultWorkspaceConfigOverrides(this.configPath),
+    };
   }
 }
 
@@ -535,7 +772,13 @@ export function createWorkspaceConfigScaffold(): string {
   return [
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
-    "featureFlags:",
+    "markdownFrontmatter:",
+    "  includeFrontmatterInMarkdownRecordings: true",
+    "  includeUpdatedInFrontmatter: false",
+    "  addParticipantUsernameToFrontmatter: false",
+    '  defaultParticipantUsername: ""',
+    "  includeConversationEventKinds: false",
+    "workspaceFeatureFlags:",
     "  writerIncludeCommentary: true",
     "  writerIncludeThinking: true",
     "  writerIncludeToolCalls: true",

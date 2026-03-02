@@ -64,9 +64,11 @@ Supported commands:
 - `workspace init [<dir>]`
   - Create `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
-- `workspace register [--alias <alias>]`
-  - Register the nearest ancestor workspace config under a workspace alias.
-  - If `--alias` is omitted, uses the workspace folder name.
+- `workspace register [<dir>] --alias <alias>`
+  - Register a workspace config under an explicit workspace alias.
+  - If `<dir>` is provided, Kato uses exactly `<dir>/kato-workspace-config.yaml`.
+  - If `<dir>` is omitted, Kato searches nearest ancestors from the current
+    working directory.
 - `workspace list`
   - Show registered workspace aliases.
 - `workspace unregister <alias-or-id>`
@@ -126,6 +128,7 @@ Rules:
 Default paths:
 
 - Global runtime config: `~/.kato/kato-config.yaml`
+- Default workspace template: `~/.kato/default-kato-workspace-config.yaml`
 - Workspace registry: `~/.kato/workspace-registry.json`
 - Status: `~/.kato/runtime/status.json`
 - Control queue: `~/.kato/runtime/control.json`
@@ -135,12 +138,14 @@ Default paths:
 - Workspace-local config: `<workspace>/kato-workspace-config.yaml`
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
-`~/.kato/kato-config.yaml` is the daemon/global config. Workspace-local output
-settings belong in `kato-workspace-config.yaml`.
+`~/.kato/kato-config.yaml` is the daemon/global config plus plain CLI
+non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml`
+is only the template used by `kato workspace init`. Workspace-local runtime
+output settings belong in `<workspace>/kato-workspace-config.yaml`.
 
 ## Runtime Config
 
-Default config shape:
+Default `~/.kato/kato-config.yaml` shape:
 
 ```yaml
 schemaVersion: 1
@@ -159,19 +164,20 @@ providerSessionRoots:
 globalAutoGenerateSnapshots: false
 providerAutoGenerateSnapshots: {}
 cleanSessionStatesOnShutdown: false
-markdownFrontmatter:
+daemonFeatureFlags:
+  daemonExportEnabled: true
+  captureIncludeSystemEvents: false
+exportMarkdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
   includeConversationEventKinds: false
-featureFlags:
+exportFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: false
   writerIncludeToolCalls: false
   writerItalicizeUserMessages: false
-  daemonExportEnabled: true
-  captureIncludeSystemEvents: false
 logging:
   operationalLevel: info
   auditLevel: info
@@ -181,6 +187,8 @@ daemonMaxMemoryMb: 500
 Notes:
 
 - Runtime config is validated fail-closed at startup.
+- `kato init` creates both `~/.kato/kato-config.yaml` and
+  `~/.kato/default-kato-workspace-config.yaml`.
 - `providerSessionRoots` controls provider ingestion discovery roots and daemon
   read-scope narrowing.
 - `globalAutoGenerateSnapshots` controls default SessionTwin generation
@@ -190,7 +198,12 @@ Notes:
   provider (`claude`, `codex`, `gemini`).
 - `cleanSessionStatesOnShutdown=true` deletes persisted `*.twin.jsonl` files at
   daemon shutdown while retaining session metadata/index.
-- `markdownFrontmatter` controls markdown frontmatter behavior:
+- `exportMarkdownFrontmatter` and `exportFeatureFlags` apply only to plain
+  `kato export ...` requests that are not scoped to a registered workspace.
+- `daemonFeatureFlags` currently controls:
+  - `daemonExportEnabled`
+  - `captureIncludeSystemEvents`
+- `exportMarkdownFrontmatter` controls plain CLI export markdown frontmatter:
   - `includeFrontmatterInMarkdownRecordings` (default `true`)
   - `includeUpdatedInFrontmatter` (default `false`)
   - `addParticipantUsernameToFrontmatter` (default `false`)
@@ -199,6 +212,13 @@ Notes:
     `USER`/`USERNAME` env vars -> home-directory basename.
   - `includeConversationEventKinds` to add `conversationEventKinds` from all
     observed `ConversationEvent.kind` values (default `false`)
+- `exportFeatureFlags` currently controls:
+  - `writerIncludeCommentary`
+  - `writerIncludeThinking`
+  - `writerIncludeToolCalls`
+  - `writerItalicizeUserMessages`
+- Workspace runtime formatting lives only in workspace config (`markdownFrontmatter`
+  and `workspaceFeatureFlags`).
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:
@@ -214,9 +234,30 @@ Notes:
 - `allowedWriteRoots` gates user-requested output paths (`record`, `capture`,
   `export`), not daemon-owned runtime artifacts (`status.json`, `control.json`,
   runtime logs).
-- Unknown `featureFlags` keys are rejected.
+- Unknown `daemonFeatureFlags`, `exportFeatureFlags`, and
+  `exportMarkdownFrontmatter` keys are rejected.
 - Older daemon builds may fail to start with newer config files containing
   additional flags.
+
+Default `~/.kato/default-kato-workspace-config.yaml` and
+`<workspace>/kato-workspace-config.yaml` share the same runtime output shape,
+except only the workspace-local file may include `workspaceId`:
+
+```yaml
+defaultOutputDir: "."
+filenameTemplate: "{provider}-{sessionShortId}-{timestampUtc}.md"
+markdownFrontmatter:
+  includeFrontmatterInMarkdownRecordings: true
+  includeUpdatedInFrontmatter: false
+  addParticipantUsernameToFrontmatter: false
+  defaultParticipantUsername: ""
+  includeConversationEventKinds: false
+workspaceFeatureFlags:
+  writerIncludeCommentary: true
+  writerIncludeThinking: true
+  writerIncludeToolCalls: true
+  writerItalicizeUserMessages: false
+```
 
 ## Current MVP Status
 
