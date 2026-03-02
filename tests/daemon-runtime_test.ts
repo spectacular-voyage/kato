@@ -1046,14 +1046,85 @@ Deno.test(
         "codex-session.md",
       );
       assertEquals(captureTargets, [expectedTargetPath]);
-      assertEquals(captureRecordingCycleIds, [[]]);
 
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
+      assertEquals(captureRecordingCycleIds.length, 1);
+      assertEquals(captureRecordingCycleIds[0]?.length, 1);
       assertEquals(output.currentResolvedPath, expectedTargetPath);
       assertEquals(output.desiredState, "on");
       assertExists(output.activeRecordingCycleId);
+      assertEquals(
+        captureRecordingCycleIds[0]?.[0],
+        output.activeRecordingCycleId,
+      );
       assert(output.activeRecordingCycleId !== "cycle-pointer");
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> without an argument resolves a unique default destination on collisions",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-no-arg-collision-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const captureTargets: string[] = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-1",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+          makeEvent(
+            "u-capture-2",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          async captureSnapshot(input) {
+            captureTargets.push(input.targetPath);
+            await Deno.writeTextFile(
+              input.targetPath,
+              `capture #${captureTargets.length}`,
+            );
+            return {
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            };
+          },
+        }),
+      });
+      stateDir = result.stateDir;
+
+      const firstTarget = join(
+        result.workspace.profile.resolvedDefaultOutputDir,
+        "codex-session.md",
+      );
+      const secondTarget = join(
+        result.workspace.profile.resolvedDefaultOutputDir,
+        "codex-session-2.md",
+      );
+      assertEquals(captureTargets, [firstTarget, secondTarget]);
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(output.currentResolvedPath, secondTarget);
+      assertEquals(output.desiredState, "on");
     } finally {
       await removeDirIfPresent(stateDir);
       await removeDirIfPresent(scenarioDir);
@@ -1187,16 +1258,23 @@ Deno.test(
       });
       stateDir = result.stateDir;
 
-      assertEquals(captureRecordingCycleIds, [undefined]);
-
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
+      assertEquals(captureRecordingCycleIds.length, 1);
+      assertEquals(captureRecordingCycleIds[0]?.length, 1);
       assertEquals(
         output.currentResolvedPath,
-        join(result.workspace.profile.resolvedDefaultOutputDir, "codex-session.md"),
+        join(
+          result.workspace.profile.resolvedDefaultOutputDir,
+          "codex-session.md",
+        ),
       );
       assertEquals(output.desiredState, "on");
       assertExists(output.activeRecordingCycleId);
+      assertEquals(
+        captureRecordingCycleIds[0]?.[0],
+        output.activeRecordingCycleId,
+      );
       assert(output.activeRecordingCycleId !== "cycle-stale");
     } finally {
       await removeDirIfPresent(stateDir);
@@ -2763,8 +2841,19 @@ Deno.test(
       assert(content.includes("kato-sessionIds: [session-1]"));
       assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
       assertExists(output.activeRecordingCycleId);
+      const recordingShortId = output.activeRecordingCycleId
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 8);
+      const idLine = content.split("\n").find((line) =>
+        line.startsWith("id: ")
+      );
+      assertExists(idLine);
+      assert(idLine.endsWith(`-${recordingShortId}`));
       assert(
-        content.includes(`kato-recordingIds: [${output.activeRecordingCycleId}]`),
+        content.includes(
+          `kato-recordingIds: [${output.activeRecordingCycleId}]`,
+        ),
       );
       assert(content.includes("Before capture"));
       assert(content.includes("After capture"));
@@ -4988,7 +5077,9 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
 
   const callOrder: string[] = [];
   const captureTargets: string[] = [];
+  const captureRecordingCycleIds: string[][] = [];
   const activatedTargets: string[] = [];
+  const activatedRecordingIds: Array<string | undefined> = [];
   const appendedMessageIds: string[] = [];
   let activeRecording = false;
   let activeRecordingKey: string | undefined;
@@ -4998,6 +5089,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
       activeRecording = true;
       activeRecordingKey = input.recordingKey;
       activatedTargets.push(input.targetPath);
+      activatedRecordingIds.push(input.recordingId);
       const nowIso = "2026-02-22T10:00:01.000Z";
       return Promise.resolve({
         recordingId: "rec-capture",
@@ -5011,6 +5103,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
     captureSnapshot(input) {
       callOrder.push("capture");
       captureTargets.push(input.targetPath);
+      captureRecordingCycleIds.push(input.recordingCycleIds ?? []);
       return Promise.resolve({
         outputPath: input.targetPath,
         writeResult: {
@@ -5079,7 +5172,11 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
 
   assertEquals(callOrder, ["capture", "record"]);
   assertEquals(captureTargets, ["/tmp/captured.md"]);
+  assertEquals(captureRecordingCycleIds.length, 1);
+  assertEquals(captureRecordingCycleIds[0]?.length, 1);
   assertEquals(activatedTargets, ["/tmp/captured.md"]);
+  assertEquals(activatedRecordingIds.length, 1);
+  assertEquals(activatedRecordingIds[0], captureRecordingCycleIds[0]?.[0]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 

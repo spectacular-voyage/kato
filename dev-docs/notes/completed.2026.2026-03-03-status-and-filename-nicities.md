@@ -2,7 +2,7 @@
 id: w6b94oems6fe8zvxgvlssfr
 title: 2026 03 03 Status and Filename Nicities
 desc: ''
-updated: 1772478738392
+updated: 1772481151678
 created: 1772477575132
 ---
 
@@ -42,7 +42,7 @@ Also, how can "started" be more current that "last write"? I would say only in t
 
 ## Implementation Update (2026-03-03)
 
-- [ ] Add `{recordingId}` filename-template token support (deferred).
+- [x] Add `{recordingId}` filename-template token support (deferred).
 - [x] Add `Recent Errors` status section sourced from operational + security-audit WARN/ERROR logs.
 - [x] Change recording status layout to details first and destination path on the next line.
 - [x] Render recording detail as `started: <timestamp>` and include `re-started <relative>` when cycles indicate a restart.

@@ -98,6 +98,21 @@ function resolveAssistantSpeaker(
     : (speakerNames?.assistant ?? "Assistant");
 }
 
+function resolveLastAssistantSpeaker(
+  lastAssistantSpeaker: string,
+  model: string | undefined,
+  speakerNames: MarkdownSpeakerNames | undefined,
+): string {
+  const normalizedModel = model?.trim();
+  if (normalizedModel && normalizedModel.length > 0) {
+    return formatModelName(normalizedModel);
+  }
+  if (lastAssistantSpeaker.trim().length > 0) {
+    return lastAssistantSpeaker;
+  }
+  return speakerNames?.assistant ?? "Assistant";
+}
+
 function formatUserMessageContent(content: string): string {
   return content.split("\n").map((line) => {
     const trimmed = line.trim();
@@ -270,7 +285,8 @@ export function renderEventsToMarkdown(
   for (let i = 0; i < events.length; i++) {
     const event = events[i]!;
     if (event.kind === "message.assistant") {
-      lastAssistantSpeaker = resolveAssistantSpeaker(
+      lastAssistantSpeaker = resolveLastAssistantSpeaker(
+        lastAssistantSpeaker,
         event.model,
         options.speakerNames,
       );

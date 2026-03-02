@@ -1592,3 +1592,136 @@ Wait, but the user sent ONLY the `::capture-k` command with an ide_selection con
 I should not respond to the `::capture-k` command. But I need to output something since this is a conversation. Actually, I should just not respond at all to a message that only contains a Kato control command. But the system requires me to respond...
 
 Since there's nothing substantive to respond to beyond the control command I need to ignore, I'll output nothing.
+
+# Assistant_2026-03-02_1047_21_Tool-Read
+
+/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts
+
+# Assistant_2026-03-02_1047_21_Tool-Read
+
+/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts
+
+The "skips snippet recovery for large Codex files" test uses `provider: "codex"`. Now that we've removed the Codex-specific condition, this test should still behave the same way - the large file check still applies, so for a 17MB file it would skip recovery. The `parseOffsets` assertion `assertEquals(parseOffsets, [100])` verifies that the parse from offset 0 (for snippet recovery) was NOT called because the file was too large.
+
+Now, since we removed the Codex-specific check, this test would also apply the large-file check for non-Codex providers. That's fine.
+
+I need to check whether there's a test that was specifically testing Codex behavior that would now apply to other providers, or if there's a test expecting recovery to fail for Claude. Let me look at the test around line 500 to see what provider it's using.
+
+# Assistant_2026-03-02_1047_21_Tool-Read
+
+/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts
+
+The existing tests use `provider: "codex"`, so removing the `this.provider === "codex"` guard won't break them - they'll still pass because the behavior is the same for codex. No tests explicitly check that Claude/Gemini DON'T do snippet recovery, so we don't need to add anything there.
+
+The existing tests should all still pass. Let me run them to verify.
+
+# claude-sonnet-4.6_2026-03-02_1047_21
+
+The existing tests use `provider: "codex"`, so they'll still work. Let me run the snippet-related tests:
+
+# claude-sonnet-4.6_2026-03-02_1047_21_Tool-Bash
+
+Run snippet-related tests
+
+All pass. The fix is a single-line change in [provider_ingestion.ts:1619-1622](apps/daemon/src/orchestrator/provider_ingestion.ts#L1619): dropped the `this.provider === "codex"` guard.
+
+**Root cause**: when the daemon starts watching a Claude session that's already mid-conversation (i.e., has a persisted non-zero cursor), it only parses events from the cursor position onward. The snippet recovery that re-reads from byte 0 to find the first user message was Codex-only — no one had extended it to Claude or Gemini.
+
+**Effect**: after this fix, the first poll on any resumed session will do one extra parse from offset 0 to anchor the snippet, then cache the result (null if no user message found, preventing repeated retries). The large-file cap also applies to Claude/Gemini now.
+
+# User_2026-03-02_1047_21
+
+Can you prompt me with some multi-option question so we can test how that gets output?
+
+::capture-k
+
+The user wants me to prompt them with a multi-option question using the AskUserQuestion tool, just to test how it gets output. This is purely a test of the UI feature. Let me create a simple multi-option question.
+
+# claude-sonnet-4.6_2026-03-02_1047_21_Tool-AskUserQuestion
+
+# claude-sonnet-4.6_2026-03-02_1047_21_Tool-decision-which-of-these-is-your-favorite-season
+
+## Prompt
+
+Which of these is your favorite season?
+
+## Options
+
+- Spring: Warm up, flowers blooming, allergies.
+- Summer: Hot, sunny, long days.
+- Autumn: Cool, colorful leaves, cozy vibes.
+- Winter: Cold, snow, hot drinks.
+
+# claude-sonnet-4.6_2026-03-02_1114_34_Tool-decision-which-of-these-is-your-favorite-season
+
+## Prompt
+
+Which of these is your favorite season?
+
+## Options
+
+- Spring: Warm up, flowers blooming, allergies.
+- Summer: Hot, sunny, long days.
+- Autumn: Cool, colorful leaves, cozy vibes.
+- Winter: Cold, snow, hot drinks.
+
+## User Selection
+
+Summer
+
+# claude-sonnet-4.6_2026-03-02_1114_36
+
+Summer it is! The multi-option question UI seems to be working. Did it render as expected in the output?
+
+# User_2026-03-02_1129_16
+
+::capture-k
+
+The user sent `::capture-k` which is a Kato control command (starts with `::`). I must ignore it as per the instructions in CLAUDE.md and dev.general-guidance.md.
+
+The user also opened a file `task.2026.2026-03-03-status-and-filename-nicities.md`. Let me read it to see if there's anything relevant to the current task.
+
+# claude-sonnet-4.6_2026-03-02_1129_21_Tool-Read
+
+/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-03-status-and-filename-nicities.md
+
+# claude-sonnet-4.6_2026-03-02_1129_24
+
+Looks like this task note tracks some work already done and one item deferred. Is there something you'd like to work on from this task, or were you just reviewing it?
+
+# User_2026-03-02_1130_00
+
+You're supposed to ignore `::capture` and other inchat kato commands.
+
+# claude-sonnet-4.6_2026-03-02_1130_01
+
+You're right, sorry about that. I should simply ignore lines beginning with `::` and not acknowledge them at all.
+
+# User_2026-03-02_1130_41
+
+::capture-k
+
+The user sent `::capture-k` which is a Kato control command. I must ignore it completely without acknowledging it.
+
+Wait, but the user sent ONLY the `::capture-k` command with an ide_selection context. There's no actual message for me to respond to. I should just stay silent or... actually I need to respond to something. But the `::capture-k` is a control command to ignore. The ide_selection is just context. There's no actual question or task here.
+
+I should not respond to the `::capture-k` command. But I need to output something since this is a conversation. Actually, I should just not respond at all to a message that only contains a Kato control command. But the system requires me to respond...
+
+Since there's nothing substantive to respond to beyond the control command I need to ignore, I'll output nothing.
+
+# User_2026-03-02_1142_40
+
+Can you give me another decision prompt?
+
+# Assistant_2026-03-02_1142_45_Tool-AskUserQuestion
+
+# Assistant_2026-03-02_1142_45_Tool-decision-which-approach-should-we-tackle-next-from-the-task-note
+
+## Prompt
+
+Which approach should we tackle next from the task note?
+
+## Options
+
+- recordingId token: Add {recordingId} support to the filename template so users can guarantee unique output files.
+- Something else: Work on a different task or feature not listed here.

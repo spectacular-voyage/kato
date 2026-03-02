@@ -1103,3 +1103,196 @@ I’ll trace `::capture-<alias>` destination resolution in runtime and reproduce
 ```
 
 </details>
+
+<details>
+<summary>Tool: exec_command — sed -n '350,430p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '350,430p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+**Assessing filename collision handling**
+
+# gpt-5.3-codex_2026-03-02_1132_19
+
+I found a likely root cause: generated filenames use minute precision (`timestampHumane` = `YYYY-MM-DD_HHmm`), and `::capture-<alias>` explicitly rejects existing targets. So a second capture in the same minute can resolve to the same path and fail. I’m checking existing task/docs/tests for the intended collision behavior before patching.
+
+<details>
+<summary>Tool: exec_command — sed -n '1,260p' dev-docs/notes/task.2026.2026-03-03-status-and-filename-nicities.md</summary>
+
+```json
+{
+  "cmd": "sed -n '1,260p' dev-docs/notes/task.2026.2026-03-03-status-and-filename-nicities.md"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — rg -n "timestampHumane|same minute|collision|already exists|capture destination already exists|unique filename|suffix" dev-docs/notes tests apps -S</summary>
+
+```json
+{
+  "cmd": "rg -n \"timestampHumane|same minute|collision|already exists|capture destination already exists|unique filename|suffix\" dev-docs/notes tests apps -S"
+}
+```
+
+</details>
+
+**Planning unique capture filenames**
+
+<details>
+<summary>Tool: exec_command — sed -n '1,80p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1,80p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+**Identifying path utilities to add**
+
+<details>
+<summary>Tool: exec_command — sed -n '900,980p' apps/daemon/src/orchestrator/daemon_runtime.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '900,980p' apps/daemon/src/orchestrator/daemon_runtime.ts"
+}
+```
+
+</details>
+
+**Analyzing test helper and filename template**
+
+<details>
+<summary>Tool: exec_command — rg -n "runPersistentInChatScenario|TEST_WORKSPACE_ALIAS|filenameTemplate|resolvedDefaultOutputDir|makeWritableScenarioDir" tests/daemon-runtime_test.ts -S</summary>
+
+```json
+{
+  "cmd": "rg -n \"runPersistentInChatScenario|TEST_WORKSPACE_ALIAS|filenameTemplate|resolvedDefaultOutputDir|makeWritableScenarioDir\" tests/daemon-runtime_test.ts -S"
+}
+```
+
+</details>
+
+**Analyzing fixture collision risk**
+
+<details>
+<summary>Tool: exec_command — sed -n '200,420p' tests/daemon-runtime_test.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '200,420p' tests/daemon-runtime_test.ts"
+}
+```
+
+</details>
+
+**Planning deterministic path collision test**
+
+<details>
+<summary>Tool: exec_command — sed -n '420,620p' tests/daemon-runtime_test.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '420,620p' tests/daemon-runtime_test.ts"
+}
+```
+
+</details>
+
+**Designing unique path resolution for captures**
+
+# Assistant_2026-03-02_1133_26_Tool-exec_command
+
+sed -n '1,40p' tests/daemon-runtime_test.ts
+
+**Refining test file writing and async handling**
+
+# gpt-5.3-codex_2026-03-02_1133_33
+
+I’m patching runtime to auto-resolve a unique filename suffix for template-generated capture destinations (`...-2`, `...-3`, etc.) when a collision occurs, while keeping explicit file paths fail-closed. Then I’ll add a regression test with two pathless captures in one session.
+
+**Adding persistent capture test**
+
+# gpt-5.3-codex_2026-03-02_1133_53
+
+I’m adding a regression test that performs two pathless `::capture-<alias>` commands back-to-back and verifies the second one lands in `...-2.md` instead of failing on an existing target.
+
+**Running filtered daemon tests**
+
+# Assistant_2026-03-02_1134_07_Tool-exec_command
+
+deno test --allow-read --allow-write tests/daemon-runtime_test.ts --filter "::capture-<alias> without an argument resolves"
+
+# Assistant_2026-03-02_1134_13_Tool-write_stdin
+
+**Selecting targeted capture tests**
+
+# gpt-5.3-codex_2026-03-02_1134_18
+
+The new collision test passed. I’m running a broader `daemon-runtime` capture-focused subset to make sure this uniqueness change didn’t regress other `::capture-<alias>` behaviors.
+
+# gpt-5.3-codex_2026-03-02_1134_18_Tool-exec_command
+
+deno test --allow-read --allow-write tests/daemon-runtime_test.ts --filter "::capture-<alias>"
+
+# Assistant_2026-03-02_1134_22_Tool-write_stdin
+
+**Planning detailed diff inspection**
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+git diff -- apps/daemon/src/orchestrator/daemon_runtime.ts tests/daemon-runtime_test.ts
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+nl -ba apps/daemon/src/orchestrator/daemon_runtime.ts | sed -n '12,120p'
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+nl -ba apps/daemon/src/orchestrator/daemon_runtime.ts | sed -n '610,760p'
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+nl -ba apps/daemon/src/orchestrator/daemon_runtime.ts | sed -n '1450,1515p'
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+nl -ba apps/daemon/src/orchestrator/daemon_runtime.ts | sed -n '1870,1935p'
+
+# Assistant_2026-03-02_1134_31_Tool-exec_command
+
+nl -ba tests/daemon-runtime_test.ts | sed -n '980,1105p'
+
+**Summarizing final patch and next steps**
+
+# gpt-5.3-codex_2026-03-02_1134_46
+
+Root cause was a filename collision: pathless `::capture-k` uses template-generated filenames, and your template includes `{timestampHumane}` (minute precision). Multiple captures in the same minute were resolving to the same file, and capture rejects existing targets.
+
+I patched runtime so capture commands now auto-pick a unique suffix for generated paths (for example `.../conv....md`, then `.../conv....-2.md`) while keeping explicit file-path captures fail-closed if the file already exists.
+
+Changes:
+- Unique non-existing path resolver added and used for generated destinations:
+  - [daemon_runtime.ts:616](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:616)
+  - [daemon_runtime.ts:656](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:656)
+- Enabled for `capture` in both persistent and in-memory command paths:
+  - [daemon_runtime.ts:1494](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1494)
+  - [daemon_runtime.ts:1912](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1912)
+- Regression test for back-to-back pathless captures:
+  - [daemon-runtime_test.ts:1065](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:1065)
+
+Validation:
+- `deno test --allow-read --allow-write tests/daemon-runtime_test.ts --filter "::capture-<alias> without an argument resolves"` passed.
+- `deno test --allow-read --allow-write tests/daemon-runtime_test.ts --filter "::capture-<alias>"` passed (10 tests).
+
+Next step:
+1. Restart daemon and run `::capture-k` twice in that Claude conversation; you should now get a new file on the second capture (`...-2.md`).
