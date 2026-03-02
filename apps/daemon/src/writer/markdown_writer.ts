@@ -42,6 +42,7 @@ export interface MarkdownRenderOptions {
   italicizeUserMessages?: boolean;
   includeSystemEvents?: boolean;
   truncateToolResults?: number;
+  requireCreateNew?: boolean;
   speakerNames?: MarkdownSpeakerNames;
 }
 
@@ -188,7 +189,10 @@ function splitAcceptedDecisionSummary(
 
 function normalizeDecisionContextKey(value: string | undefined): string | null {
   if (!value) return null;
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalized = value.trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -612,6 +616,21 @@ async function readExistingFile(
   }
 }
 
+async function writeTextFileCreateNew(
+  filePath: string,
+  content: string,
+): Promise<void> {
+  const file = await Deno.open(filePath, {
+    write: true,
+    createNew: true,
+  });
+  try {
+    await file.write(new TextEncoder().encode(content));
+  } finally {
+    file.close();
+  }
+}
+
 export class MarkdownConversationWriter implements ConversationWriterLike {
   async appendEvents(
     outputPath: string,
@@ -620,7 +639,12 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
   ): Promise<MarkdownWriteResult> {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
 
-    const existing = await readExistingFile(outputPath);
+    let existing = await readExistingFile(outputPath);
+    if (options.requireCreateNew && existing.exists) {
+      throw new Deno.errors.AlreadyExists(
+        `Capture destination already exists: ${outputPath}`,
+      );
+    }
     const includeFrontmatter = options.includeFrontmatter !== false;
     if (!existing.exists) {
       const title = options.title ?? basename(outputPath, ".md");
@@ -630,13 +654,23 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         title,
       });
       const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
-      await Deno.writeTextFile(outputPath, content);
-      return {
-        mode: "create",
-        outputPath,
-        wrote: true,
-        deduped: false,
-      };
+      try {
+        await writeTextFileCreateNew(outputPath, content);
+        return {
+          mode: "create",
+          outputPath,
+          wrote: true,
+          deduped: false,
+        };
+      } catch (error) {
+        if (
+          !(error instanceof Deno.errors.AlreadyExists) ||
+          options.requireCreateNew
+        ) {
+          throw error;
+        }
+        existing = await readExistingFile(outputPath);
+      }
     }
 
     const existingFrontmatterView = splitExistingFrontmatter(existing.content);

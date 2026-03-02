@@ -319,10 +319,16 @@ export async function* parseClaudeEvents(
             const questionId = questionEntry
               ? String(questionEntry["id"] ?? "").trim()
               : "";
-            const providerQuestionId = questionId.length > 0 ? questionId : key;
             const questionHeader = questionEntry
-              ? String(questionEntry["header"] ?? "")
+              ? String(questionEntry["header"] ?? "").trim()
               : "";
+            const providerQuestionId = questionId.length > 0
+              ? questionId
+              : questionEntry
+              ? (questionText.trim().length > 0
+                ? questionText.trim()
+                : (questionHeader.length > 0 ? questionHeader : key))
+              : key;
             const options = questionEntry
               ? asQuestionList(questionEntry["options"]).map((option) => ({
                 label: String(option["label"] ?? ""),

@@ -379,15 +379,18 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const writeResult = await this.writeEventsForExport(
       outputPath,
       input.events,
-      this.makeWriterOptions({
-        provider: input.provider,
-        sessionId: input.sessionId,
-        events: input.events,
-        title: input.title,
-        recordingCycleIds: input.recordingCycleIds,
-        workspaceIds: input.workspaceIds,
-        outputOverrides: input.outputOverrides,
-      }),
+      {
+        ...this.makeWriterOptions({
+          provider: input.provider,
+          sessionId: input.sessionId,
+          events: input.events,
+          title: input.title,
+          recordingCycleIds: input.recordingCycleIds,
+          workspaceIds: input.workspaceIds,
+          outputOverrides: input.outputOverrides,
+        }),
+        requireCreateNew: true,
+      },
       format,
     );
 

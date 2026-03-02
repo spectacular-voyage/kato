@@ -17,6 +17,7 @@ const MIN_TERMINAL_WIDTH = 48;
 const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
 const MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH = 80;
+const REDACTED_WORKSPACE_ALIAS = "<redacted-alias>";
 const RECENT_ERRORS_LIMIT = 8;
 const RECENT_ERRORS_TAIL_BYTES = 2 * 1024 * 1024;
 const OPERATIONAL_LOG_FILENAME = "operational.jsonl";
@@ -113,6 +114,10 @@ function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
   const normalized = sanitizeInlineText(withoutControl);
   if (normalized.length === 0) return undefined;
   return normalized.slice(0, MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH);
+}
+
+function resolveDisplayWorkspaceAlias(alias: string | undefined): string {
+  return sanitizeWorkspaceAlias(alias) ?? REDACTED_WORKSPACE_ALIAS;
 }
 
 function truncate(text: string, width: number): string {
@@ -407,7 +412,7 @@ function deriveWorkspaceStatusErrors(
     const reason = sanitizeInlineText(
       row.invalidReason ?? "invalid workspace configuration",
     );
-    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const alias = resolveDisplayWorkspaceAlias(row.alias);
     const reasonLower = reason.toLowerCase();
     const event = reasonLower.includes("permission denied")
       ? "workspace.config.permission_denied"
@@ -646,7 +651,7 @@ function renderWorkspaceSection(
 
   for (const row of workspaceStatus.rows) {
     const marker = row.valid ? "●" : "○";
-    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const alias = resolveDisplayWorkspaceAlias(row.alias);
     const statusLabel = row.valid
       ? "valid"
       : `invalid: ${row.invalidReason ?? "unknown error"}`;
@@ -701,10 +706,20 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
-  const recentErrors = [
-    ...(opts.recentErrors ?? []),
+  const logRecentErrors = [...(opts.recentErrors ?? [])]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const reservedLogSlots = Math.min(
+    logRecentErrors.length,
+    Math.max(1, Math.floor(RECENT_ERRORS_LIMIT * 0.3)),
+  );
+  const reservedLogErrors = logRecentErrors.slice(0, reservedLogSlots);
+  const remainingErrors = [
     ...deriveWorkspaceStatusErrors(opts.workspaceStatus, now),
+    ...logRecentErrors.slice(reservedLogSlots),
   ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
+  const recentErrors = [...reservedLogErrors, ...remainingErrors]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
 
   const daemonText = snapshot.daemonRunning

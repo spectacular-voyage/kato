@@ -1133,6 +1133,71 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> retries with next suffix when capture writer reports AlreadyExists",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-race-retry-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const captureTargets: string[] = [];
+      let attempts = 0;
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-race",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          async captureSnapshot(input) {
+            attempts += 1;
+            captureTargets.push(input.targetPath);
+            if (attempts === 1) {
+              await Deno.writeTextFile(input.targetPath, "occupied by race");
+              throw new Deno.errors.AlreadyExists("capture destination exists");
+            }
+            await Deno.writeTextFile(input.targetPath, "capture #2");
+            return {
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            };
+          },
+        }),
+      });
+      stateDir = result.stateDir;
+
+      const firstTarget = join(
+        result.workspace.profile.resolvedDefaultOutputDir,
+        "codex-session.md",
+      );
+      const secondTarget = join(
+        result.workspace.profile.resolvedDefaultOutputDir,
+        "codex-session-2.md",
+      );
+      assertEquals(captureTargets, [firstTarget, secondTarget]);
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(output.currentResolvedPath, secondTarget);
+      assertEquals(output.desiredState, "on");
+      assertExists(output.activeRecordingCycleId);
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> prefers stored snapshot snippet for title",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(

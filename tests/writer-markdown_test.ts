@@ -1292,6 +1292,68 @@ Deno.test(
 );
 
 Deno.test(
+  "renderEventsToMarkdown reuses questionnaire context across dash/underscore key variants",
+  () => {
+    const proposedDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-proposed-separator-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-proposed-separator-1",
+      decisionKey: "decision-line-policy",
+      summary: "Which output format should we use?",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-1"],
+      metadata: {
+        options: [{
+          label: "Markdown",
+          description: "Use markdown output.",
+        }],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-proposed-separator-1",
+      },
+    } as unknown as ConversationEvent;
+    const acceptedDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-accepted-separator-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:01:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-accepted-separator-1",
+      decisionKey: "decision_line_policy",
+      summary: "Markdown",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_line_policy",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-accepted-separator-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [proposedDecision, acceptedDecision],
+      { includeFrontmatter: false },
+    );
+
+    assertStringIncludes(rendered, "## Prompt");
+    assertStringIncludes(rendered, "Which output format should we use?");
+    assertStringIncludes(rendered, "## Options");
+    assertStringIncludes(rendered, "- Markdown: Use markdown output.");
+    assertStringIncludes(rendered, "## User Selection");
+    assertStringIncludes(rendered, "Markdown");
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown can hide questionnaire decision options while keeping prompt",
   () => {
     const questionnairePrompt: ConversationEvent = {

@@ -240,3 +240,85 @@ Deno.test("claude parser synthesizes decision events for AskUserQuestion prompts
     );
   }
 });
+
+Deno.test(
+  "claude parser uses matched question text as providerQuestionId when answer key is a normalized variant",
+  async () => {
+    const tempPath = await Deno.makeTempFile({
+      prefix: "claude-ask-user-question-",
+      suffix: ".jsonl",
+    });
+    const questionText = "Which output format should we use?";
+    const questionHeader = "Output format";
+    try {
+      const assistantEntry = {
+        type: "assistant",
+        uuid: "ask-a-variant",
+        parentUuid: "ask-u-variant",
+        isSidechain: false,
+        sessionId: "sess-ask-variant",
+        timestamp: "2026-02-25T06:08:12.597Z",
+        message: {
+          role: "assistant",
+          model: "claude-sonnet-4-6",
+          content: [{
+            type: "tool_use",
+            id: "toolu_ask_variant",
+            name: "AskUserQuestion",
+            input: {
+              questions: [{
+                question: questionText,
+                header: questionHeader,
+                options: [{ label: "Markdown", description: "Write markdown." }],
+              }],
+            },
+          }],
+        },
+      };
+      const userEntry = {
+        type: "user",
+        uuid: "ask-u-variant",
+        parentUuid: "ask-a-variant",
+        isSidechain: false,
+        sessionId: "sess-ask-variant",
+        timestamp: "2026-02-25T06:08:32.075Z",
+        message: {
+          role: "user",
+          content: [{
+            type: "tool_result",
+            tool_use_id: "toolu_ask_variant",
+            content: "User has answered your questions.",
+          }],
+        },
+        toolUseResult: {
+          questions: [{
+            question: questionText,
+            header: questionHeader,
+            options: [{ label: "Markdown", description: "Write markdown." }],
+          }],
+          answers: {
+            "which output format should we use": "Markdown",
+          },
+        },
+      };
+      await Deno.writeTextFile(
+        tempPath,
+        `${JSON.stringify(assistantEntry)}\n${JSON.stringify(userEntry)}\n`,
+      );
+      const results = await collectEvents(tempPath);
+      const acceptedDecision = results.find((result) =>
+        result.event.kind === "decision" &&
+        result.event.status === "accepted"
+      );
+      assert(acceptedDecision !== undefined);
+      if (acceptedDecision.event.kind !== "decision") {
+        throw new Error("expected accepted decision event");
+      }
+      const metadata = acceptedDecision.event.metadata as Record<string, unknown>;
+      assertEquals(metadata["providerQuestionId"], questionText);
+      assertEquals(metadata["header"], questionHeader);
+    } finally {
+      await Deno.remove(tempPath).catch(() => undefined);
+    }
+  },
+);

@@ -664,6 +664,7 @@ async function resolveWorkspaceCommandDestination(options: {
   now: Date;
 }): Promise<{
   resolvedPath: string;
+  usesGeneratedFilename: boolean;
   binding: NonNullable<
     SessionMetadataV1["workspaceOutputs"]
   >[number]["currentDestination"];
@@ -688,6 +689,7 @@ async function resolveWorkspaceCommandDestination(options: {
       : generatedPath;
     return {
       resolvedPath: generated,
+      usesGeneratedFilename: true,
       binding: toWorkspaceDestinationBinding(options.profile, generated),
     };
   }
@@ -721,6 +723,7 @@ async function resolveWorkspaceCommandDestination(options: {
       : resolvedPathBase;
   return {
     resolvedPath,
+    usesGeneratedFilename: generatedFromDirectory,
     binding: isAbsolute(normalized)
       ? {
         kind: "absolute-explicit",
@@ -997,7 +1000,46 @@ async function assertCaptureDestinationDoesNotExist(
     }
     throw error;
   }
-  throw new Error(`Capture destination already exists: ${targetPath}`);
+  throw new Deno.errors.AlreadyExists(
+    `Capture destination already exists: ${targetPath}`,
+  );
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  if (error instanceof Deno.errors.AlreadyExists) {
+    return true;
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    code?: unknown;
+    name?: unknown;
+    message?: unknown;
+  };
+  if (candidate.code === "EEXIST" || candidate.name === "AlreadyExists") {
+    return true;
+  }
+  return typeof candidate.message === "string" &&
+    candidate.message.toLowerCase().includes("already exists");
+}
+
+function resolveBindingForRetargetedWorkspacePath(options: {
+  profile: ResolvedWorkspaceProfile;
+  currentBinding: NonNullable<
+    SessionMetadataV1["workspaceOutputs"]
+  >[number]["currentDestination"];
+  resolvedPath: string;
+}): NonNullable<
+  SessionMetadataV1["workspaceOutputs"]
+>[number]["currentDestination"] {
+  if (options.currentBinding.kind === "absolute-explicit") {
+    return {
+      kind: "absolute-explicit",
+      absolutePath: resolve(options.resolvedPath),
+    };
+  }
+  return toWorkspaceDestinationBinding(options.profile, options.resolvedPath);
 }
 
 function normalizeFrontmatterParticipantUsername(
@@ -1502,17 +1544,13 @@ async function applyPersistentControlCommandsForEvent(
             ensureGeneratedPathUnique: true,
             now: now(),
           });
-          const targetPath = await validateDestinationPathForCommand(
+          let targetPath = await validateDestinationPathForCommand(
             recordingPipeline,
             provider,
             providerSessionId,
             resolved.resolvedPath,
             "capture",
           );
-          await assertCaptureDestinationDoesNotExist(targetPath);
-          loggedTargetPath = targetPath;
-          const destinationChanged = !output ||
-            output.currentResolvedPath !== targetPath;
           const captureEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
             boundarySnapshot,
@@ -1525,28 +1563,61 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
             { snapshotSnippet },
           );
-          const currentCycleId = output?.activeRecordingCycleId;
-          const reuseActiveCycleId = !destinationChanged &&
-            output?.desiredState === "on" &&
-            !!currentCycleId;
-          const captureCycleId = reuseActiveCycleId && currentCycleId
-            ? currentCycleId
-            : crypto.randomUUID();
-          await recordingPipeline.captureSnapshot({
-            provider,
-            sessionId: providerSessionId,
-            targetPath,
-            events: captureEvents,
-            title: captureTitle,
-            recordingCycleIds: [captureCycleId],
-            workspaceIds: [workspace.workspaceId],
-            outputOverrides,
+          let captureCycleId: string | undefined;
+          while (true) {
+            const destinationChangedForAttempt = !output ||
+              output.currentResolvedPath !== targetPath;
+            const currentCycleId = output?.activeRecordingCycleId;
+            const reuseActiveCycleId = !destinationChangedForAttempt &&
+              output?.desiredState === "on" &&
+              !!currentCycleId;
+            const cycleIdForAttempt = reuseActiveCycleId && currentCycleId
+              ? currentCycleId
+              : crypto.randomUUID();
+            try {
+              await assertCaptureDestinationDoesNotExist(targetPath);
+              await recordingPipeline.captureSnapshot({
+                provider,
+                sessionId: providerSessionId,
+                targetPath,
+                events: captureEvents,
+                title: captureTitle,
+                recordingCycleIds: [cycleIdForAttempt],
+                workspaceIds: [workspace.workspaceId],
+                outputOverrides,
+              });
+              captureCycleId = cycleIdForAttempt;
+              break;
+            } catch (error) {
+              if (!resolved.usesGeneratedFilename || !isAlreadyExistsError(error)) {
+                throw error;
+              }
+              const nextTargetPath = await resolveUniqueNonExistingPath(targetPath);
+              targetPath = await validateDestinationPathForCommand(
+                recordingPipeline,
+                provider,
+                providerSessionId,
+                nextTargetPath,
+                "capture",
+              );
+            }
+          }
+          if (!captureCycleId) {
+            throw new Error("Unable to allocate capture recording cycle id");
+          }
+          loggedTargetPath = targetPath;
+          const destinationChanged = !output ||
+            output.currentResolvedPath !== targetPath;
+          const targetBinding = resolveBindingForRetargetedWorkspacePath({
+            profile,
+            currentBinding: resolved.binding,
+            resolvedPath: targetPath,
           });
           let stateChanged = false;
           if (!output) {
             output = createWorkspaceOutputState({
               profile,
-              binding: resolved.binding,
+              binding: targetBinding,
               resolvedPath: targetPath,
               desiredState: "off",
               writeCursor,
@@ -1566,7 +1637,7 @@ async function applyPersistentControlCommandsForEvent(
             throw new Error("Workspace output state was not created");
           }
           applyWorkspaceProfileSnapshot(output, profile);
-          output.currentDestination = resolved.binding;
+          output.currentDestination = targetBinding;
           output.currentResolvedPath = targetPath;
           let activeCycleId = output.activeRecordingCycleId;
           if (!activeCycleId || output.desiredState !== "on") {
@@ -1922,14 +1993,57 @@ async function applyControlCommandsForEvent(
             ensureGeneratedPathUnique: true,
             now: now(),
           });
-          const resolvedDestination = await validateDestinationPathForCommand(
+          let resolvedDestination = await validateDestinationPathForCommand(
             recordingPipeline,
             provider,
             sessionId,
             resolved.resolvedPath,
             "capture",
           );
-          await assertCaptureDestinationDoesNotExist(resolvedDestination);
+          let captureCycleId: string | undefined;
+          while (true) {
+            const destinationChangedForAttempt = !existingState ||
+              existingState.currentResolvedPath !== resolvedDestination;
+            const activeCycleIdForAttempt = existingState?.desiredState &&
+                existingState.recordingCycleId &&
+                !destinationChangedForAttempt
+              ? existingState.recordingCycleId
+              : undefined;
+            const cycleIdForAttempt = activeCycleIdForAttempt ??
+              crypto.randomUUID();
+            try {
+              await assertCaptureDestinationDoesNotExist(resolvedDestination);
+              await recordingPipeline.captureSnapshot({
+                provider,
+                sessionId,
+                targetPath: resolvedDestination,
+                events: boundarySnapshot,
+                title: recordingTitle,
+                recordingCycleIds: [cycleIdForAttempt],
+                workspaceIds: [workspace.workspaceId],
+                outputOverrides,
+              });
+              captureCycleId = cycleIdForAttempt;
+              break;
+            } catch (error) {
+              if (!resolved.usesGeneratedFilename || !isAlreadyExistsError(error)) {
+                throw error;
+              }
+              const nextTargetPath = await resolveUniqueNonExistingPath(
+                resolvedDestination,
+              );
+              resolvedDestination = await validateDestinationPathForCommand(
+                recordingPipeline,
+                provider,
+                sessionId,
+                nextTargetPath,
+                "capture",
+              );
+            }
+          }
+          if (!captureCycleId) {
+            throw new Error("Unable to allocate capture recording cycle id");
+          }
           loggedTargetPath = resolvedDestination;
           const state = existingState ?? {
             workspaceId: workspace.workspaceId,
@@ -1944,17 +2058,6 @@ async function applyControlCommandsForEvent(
               !destinationChanged
             ? state.recordingCycleId
             : undefined;
-          const captureCycleId = activeCycleId ?? crypto.randomUUID();
-          await recordingPipeline.captureSnapshot({
-            provider,
-            sessionId,
-            targetPath: resolvedDestination,
-            events: boundarySnapshot,
-            title: recordingTitle,
-            recordingCycleIds: [captureCycleId],
-            workspaceIds: [workspace.workspaceId],
-            outputOverrides,
-          });
           const continuationEvents = buildCommandSeedEvents(
             event,
             command.line + 1,

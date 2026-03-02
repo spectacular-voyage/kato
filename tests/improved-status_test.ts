@@ -277,6 +277,69 @@ Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Err
   );
 });
 
+Deno.test(
+  "renderStatusText: invalid workspace aliases in derived errors use a safe placeholder",
+  () => {
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 1,
+      rows: [{
+        workspaceId: "ws-invalid",
+        alias: " \u001b[31m\u0007\u001b[0m ",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "invalid workspace alias",
+      }],
+    };
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      workspaceStatus,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "<redacted-alias> (ws-invalid): invalid workspace alias");
+    assertEquals(out.includes("\u001b["), false);
+  },
+);
+
+Deno.test(
+  "renderStatusText: keeps at least one log-backed recent error when derived errors are newer",
+  () => {
+    const recentErrors: StatusRecentError[] = [{
+      timestamp: "2026-02-24T09:59:30.000Z",
+      level: "error",
+      channel: "operational",
+      event: "provider.ingestion.read_denied",
+      message: "permission denied",
+    }];
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 12,
+      rows: Array.from({ length: 12 }, (_, index) => ({
+        workspaceId: `ws-invalid-${index + 1}`,
+        alias: `Broken-${index + 1}`,
+        workspaceRoot: `/workspaces/Broken-${index + 1}`,
+        configPath:
+          `/workspaces/Broken-${index + 1}/kato-workspace-config.yaml`,
+        valid: false,
+        invalidReason: `invalid workspace ${index + 1}`,
+      })),
+    };
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      recentErrors,
+      workspaceStatus,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "ERROR operational provider.ingestion.read_denied");
+    assertStringIncludes(out, "permission denied");
+  },
+);
+
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {
   const sessions: DaemonSessionStatus[] = [{
     provider: "claude",
