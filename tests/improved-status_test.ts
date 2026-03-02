@@ -9,6 +9,7 @@ import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import {
   isLiveExitKey,
   renderStatusText,
+  type WorkspaceStatusSummary,
 } from "../apps/daemon/src/cli/commands/status.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
@@ -329,6 +330,67 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     out.split("\n").some((line) =>
       line.includes("daemon: running") && line.includes("memory:")
     ),
+  );
+});
+
+Deno.test("renderStatusText: workspace summary line renders for live mode", () => {
+  const workspaceStatus: WorkspaceStatusSummary = {
+    activeCount: 1,
+    invalidCount: 1,
+    rows: [],
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    workspaceStatus,
+  });
+  assertStringIncludes(out, "workspaces: 1 active, 1 invalid");
+  assertEquals(out.includes("Workspaces ("), false);
+});
+
+Deno.test("renderStatusText: workspace detail section renders in non-live mode", () => {
+  const workspaceStatus: WorkspaceStatusSummary = {
+    activeCount: 1,
+    invalidCount: 1,
+    rows: [
+      {
+        workspaceId: "ws-valid",
+        alias: "My.Proj",
+        workspaceRoot: "/workspaces/My.Proj",
+        configPath: "/workspaces/My.Proj/kato-workspace-config.yaml",
+        valid: true,
+      },
+      {
+        workspaceId: "ws-invalid",
+        alias: "Broken.Proj",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "Unsupported workspace config key 'featureFlags'",
+      },
+    ],
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    workspaceStatus,
+    showWorkspaceDetails: true,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "workspaces: 1 active, 1 invalid");
+  assertStringIncludes(out, "Workspaces (1 active, 1 invalid)");
+  assertStringIncludes(out, "● My.Proj -> ws-valid (valid)");
+  assertStringIncludes(out, "○ Broken.Proj -> ws-invalid (invalid:");
+  assertStringIncludes(
+    out,
+    "Unsupported workspace config key 'featureFlags'",
+  );
+  assertStringIncludes(out, "root: /workspaces/My.Proj");
+  assertStringIncludes(
+    out,
+    "config: /workspaces/Broken.Proj/kato-workspace-config.yaml",
   );
 });
 

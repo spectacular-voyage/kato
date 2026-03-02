@@ -736,7 +736,7 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(rendered, "<summary>Tool: search</summary>");
+    assertStringIncludes(rendered, "**Tool: search**");
     assertEquals(rendered.includes("result-content"), false);
   },
 );

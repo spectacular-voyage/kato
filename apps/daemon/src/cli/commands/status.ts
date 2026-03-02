@@ -2,6 +2,12 @@ import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import type { RegisteredWorkspace } from "../../workspace/mod.ts";
+import {
+  loadWorkspaceConfigOverrides,
+  readWorkspaceConfigWorkspaceId,
+} from "../../workspace/mod.ts";
+import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -22,6 +28,22 @@ const ANSI_CSI_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
   "g",
 );
+
+export interface WorkspaceStatusRow {
+  workspaceId: string;
+  alias: string;
+  workspaceRoot: string;
+  configPath: string;
+  valid: boolean;
+  invalidReason?: string;
+}
+
+export interface WorkspaceStatusSummary {
+  activeCount: number;
+  invalidCount: number;
+  rows: WorkspaceStatusRow[];
+  unavailableReason?: string;
+}
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -120,6 +142,92 @@ function resolveTerminalWidth(): number {
   } catch {
     return DEFAULT_TERMINAL_WIDTH;
   }
+}
+
+function formatWorkspaceValidationError(error: unknown): string {
+  if (error instanceof Deno.errors.NotFound) {
+    return "config file not found";
+  }
+  if (error instanceof Deno.errors.PermissionDenied) {
+    return "permission denied while reading config";
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return sanitizeInlineText(error.message);
+  }
+  return sanitizeInlineText(String(error));
+}
+
+function toWorkspaceStatusRow(
+  entry: RegisteredWorkspace,
+  opts: { valid: boolean; invalidReason?: string },
+): WorkspaceStatusRow {
+  return {
+    workspaceId: entry.workspaceId,
+    alias: entry.alias,
+    workspaceRoot: entry.workspaceRoot,
+    configPath: entry.configPath,
+    valid: opts.valid,
+    ...(opts.invalidReason ? { invalidReason: opts.invalidReason } : {}),
+  };
+}
+
+async function validateWorkspaceEntry(
+  entry: RegisteredWorkspace,
+): Promise<WorkspaceStatusRow> {
+  try {
+    await loadWorkspaceConfigOverrides(entry.configPath);
+    const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
+      entry.configPath,
+      { allowMissing: true },
+    );
+    if (
+      configuredWorkspaceId &&
+      configuredWorkspaceId !== entry.workspaceId
+    ) {
+      return toWorkspaceStatusRow(entry, {
+        valid: false,
+        invalidReason:
+          `workspaceId mismatch (registry=${entry.workspaceId}, config=${configuredWorkspaceId})`,
+      });
+    }
+    return toWorkspaceStatusRow(entry, { valid: true });
+  } catch (error) {
+    return toWorkspaceStatusRow(entry, {
+      valid: false,
+      invalidReason: formatWorkspaceValidationError(error),
+    });
+  }
+}
+
+async function loadWorkspaceStatusSummary(
+  ctx: DaemonCliCommandContext,
+): Promise<WorkspaceStatusSummary> {
+  let entries: RegisteredWorkspace[];
+  try {
+    entries = await resolveWorkspaceRegistryStore(ctx).load();
+  } catch (error) {
+    return {
+      activeCount: 0,
+      invalidCount: 0,
+      rows: [],
+      unavailableReason: formatWorkspaceValidationError(error),
+    };
+  }
+
+  const rows = await Promise.all(
+    entries.map((entry) => validateWorkspaceEntry(entry)),
+  );
+  rows.sort((a, b) =>
+    a.alias.localeCompare(b.alias) ||
+    a.workspaceId.localeCompare(b.workspaceId)
+  );
+
+  const activeCount = rows.filter((row) => row.valid).length;
+  return {
+    activeCount,
+    invalidCount: rows.length - activeCount,
+    rows,
+  };
 }
 
 export function isLiveExitKey(keyByte: number): boolean {
@@ -255,11 +363,9 @@ function renderSessionRow(
     : "(no user message)";
   const identity = s.sessionShortId ?? s.sessionId;
   const updatedAt = formatLocalTimestamp(s.updatedAt);
-  const modified = formatRelativeTime(s.updatedAt, now);
   const headerParts = [
     `${marker} ${s.provider}: ${label} (${identity})`,
     `updated ${updatedAt}`,
-    `modified ${modified}`,
   ];
   if (s.lastEventAt) {
     headerParts.push(`last event ${formatRelativeTime(s.lastEventAt, now)}`);
@@ -306,6 +412,80 @@ function renderSessionRow(
   return lines;
 }
 
+function renderWorkspaceSummaryLine(
+  workspaceStatus: WorkspaceStatusSummary | undefined,
+): string | undefined {
+  if (!workspaceStatus) {
+    return undefined;
+  }
+  if (workspaceStatus.unavailableReason) {
+    return `workspaces: unavailable (${workspaceStatus.unavailableReason})`;
+  }
+  return `workspaces: ${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid`;
+}
+
+function renderWorkspaceSection(
+  workspaceStatus: WorkspaceStatusSummary,
+  width: number,
+): string[] {
+  if (workspaceStatus.unavailableReason) {
+    return [
+      "Workspaces",
+      "",
+      formatPrefixedLine(
+        "  ",
+        `unavailable: ${workspaceStatus.unavailableReason}`,
+        width,
+      ),
+    ];
+  }
+
+  const lines: string[] = [
+    `Workspaces (${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid)`,
+    "",
+  ];
+
+  if (workspaceStatus.rows.length === 0) {
+    lines.push("  (none registered)");
+    return lines;
+  }
+
+  for (const row of workspaceStatus.rows) {
+    const marker = row.valid ? "●" : "○";
+    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const statusLabel = row.valid
+      ? "valid"
+      : `invalid: ${row.invalidReason ?? "unknown error"}`;
+    lines.push(
+      formatPrefixedLine(
+        `  ${marker} `,
+        `${alias} -> ${row.workspaceId} (${statusLabel})`,
+        width,
+      ),
+    );
+    lines.push(
+      formatPrefixedLine(
+        "     ",
+        `root: ${sanitizeInlineText(row.workspaceRoot)}`,
+        width,
+      ),
+    );
+    lines.push(
+      formatPrefixedLine(
+        "     ",
+        `config: ${sanitizeInlineText(row.configPath)}`,
+        width,
+      ),
+    );
+    lines.push("");
+  }
+
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
 /**
  * Render the full status block as a string. Pure — no I/O.
  */
@@ -317,12 +497,15 @@ export function renderStatusText(
     now: Date;
     stale: boolean;
     terminalWidth?: number;
+    workspaceStatus?: WorkspaceStatusSummary;
+    showWorkspaceDetails?: boolean;
   },
 ): string {
   const { showAll, now, stale } = opts;
   const sessionCap = opts.sessionCap ?? Infinity;
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
+  const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
 
   const daemonText = snapshot.daemonRunning
     ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
@@ -365,7 +548,14 @@ export function renderStatusText(
       recordingSummary,
     }),
   );
+  if (workspaceSummary) {
+    lines.push(truncate(workspaceSummary, width));
+  }
   lines.push(divider);
+  if (opts.showWorkspaceDetails && opts.workspaceStatus) {
+    lines.push(...renderWorkspaceSection(opts.workspaceStatus, width));
+    lines.push(divider);
+  }
 
   lines.push(`Sessions${sessionSummary}`);
   lines.push("");
@@ -442,6 +632,7 @@ async function runLiveMode(
         await ctx.statusStore.load(),
         now,
       );
+      const workspaceStatus = await loadWorkspaceStatusSummary(ctx);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
 
@@ -451,6 +642,7 @@ async function runLiveMode(
         now,
         stale,
         terminalWidth,
+        workspaceStatus,
       });
 
       // Clear screen and draw
@@ -492,6 +684,9 @@ export async function runStatusCommand(
     await ctx.statusStore.load(),
     now,
   );
+  const workspaceStatus = asJson
+    ? undefined
+    : await loadWorkspaceStatusSummary(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
 
   await ctx.operationalLogger.info(
@@ -504,6 +699,10 @@ export async function runStatusCommand(
       daemonPid: snapshot.daemonPid,
       stale,
       statusPath: ctx.runtime.statusPath,
+      workspaceActiveCount: workspaceStatus?.activeCount,
+      workspaceInvalidCount: workspaceStatus?.invalidCount,
+      workspaceStatusUnavailable:
+        workspaceStatus?.unavailableReason !== undefined,
     },
   );
   await ctx.auditLogger.command("status", { asJson, showAll });
@@ -516,6 +715,13 @@ export async function runStatusCommand(
 
   const terminalWidth = resolveTerminalWidth();
   ctx.runtime.writeStdout(
-    renderStatusText(snapshot, { showAll, now, stale, terminalWidth }) + "\n",
+    renderStatusText(snapshot, {
+      showAll,
+      now,
+      stale,
+      terminalWidth,
+      workspaceStatus,
+      showWorkspaceDetails: true,
+    }) + "\n",
   );
 }

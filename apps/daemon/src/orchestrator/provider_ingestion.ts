@@ -1618,7 +1618,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let snippetOverride = cachedSnippet ?? undefined;
     if (
       cachedSnippet === undefined &&
-      this.provider === "codex" &&
       fromOffset > 0
     ) {
       if ((fileStat.size ?? 0) > MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES) {

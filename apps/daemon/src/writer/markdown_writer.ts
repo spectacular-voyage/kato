@@ -176,30 +176,6 @@ export function renderEventsToMarkdown(
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
 
-  // Pass 1: Build tool result queue per toolCallId (preserves order for revisions).
-  const toolResultQueues = new Map<
-    string,
-    Array<ConversationEvent & { kind: "tool.result" }>
-  >();
-  for (const event of events) {
-    if (event.kind === "tool.result") {
-      const queue = toolResultQueues.get(event.toolCallId) ?? [];
-      queue.push(event);
-      toolResultQueues.set(event.toolCallId, queue);
-    }
-  }
-  // Mutable pointer per toolCallId to consume results in order.
-  const toolResultPointers = new Map<string, number>();
-  function nextToolResult(
-    toolCallId: string,
-  ): (ConversationEvent & { kind: "tool.result" }) | undefined {
-    const queue = toolResultQueues.get(toolCallId);
-    if (!queue) return undefined;
-    const idx = toolResultPointers.get(toolCallId) ?? 0;
-    toolResultPointers.set(toolCallId, idx + 1);
-    return queue[idx];
-  }
-
   const parts: string[] = [];
 
   if (includeFrontmatter) {
@@ -296,42 +272,13 @@ export function renderEventsToMarkdown(
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
 
-      const result = includeToolResults
-        ? nextToolResult(event.toolCallId)
-        : undefined;
-      const callParts: string[] = [
-        "",
-        "<details>",
-        `<summary>Tool: ${event.name}${
-          event.description ? ` — ${event.description}` : ""
-        }</summary>`,
-        "",
-      ];
-      if (event.input && Object.keys(event.input).length > 0) {
-        callParts.push(
-          "```json",
-          JSON.stringify(event.input, null, 2),
-          "```",
-        );
-      }
-      if (result && result.result.length > 0) {
-        callParts.push(
-          "",
-          "```",
-          truncate(result.result, truncateToolResults),
-          "```",
-        );
-      }
-      callParts.push("", "</details>");
-      parts.push(callParts.join("\n"), "");
+      const callSummary = `Tool: ${event.name}${
+        event.description ? ` — ${event.description}` : ""
+      }`;
+      parts.push(`**${callSummary}**`, "");
       lastSignature = undefined;
     } else if (event.kind === "tool.result") {
       if (!includeToolResults) {
-        continue;
-      }
-      if (includeToolCalls) {
-        // When both calls and results are enabled, tool results are rendered
-        // inline under their matching tool.call.
         continue;
       }
 

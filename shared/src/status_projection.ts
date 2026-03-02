@@ -137,7 +137,9 @@ export function projectSessionStatus(opts: {
  */
 function recencyKey(s: DaemonSessionStatus): number {
   const parsed = Date.parse(s.updatedAt);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  if (Number.isNaN(parsed)) return 0;
+  // Floor to minute granularity to prevent active sessions from flapping
+  return Math.floor(parsed / 60_000) * 60_000;
 }
 
 function hasActiveRecording(s: DaemonSessionStatus): boolean {

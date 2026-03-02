@@ -47,6 +47,13 @@ export interface SessionIngestAnchorV1 {
   payloadHash?: string;
 }
 
+export interface SessionCommandCursorAnchorV1 {
+  eventId?: string;
+  providerEventType?: string;
+  providerEventId?: string;
+  timestamp?: string;
+}
+
 export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   writerIncludeCommentary: boolean;
   writerIncludeThinking: boolean;
@@ -74,6 +81,7 @@ export interface SessionMetadataV1 {
   nextTwinSeq: number;
   recentFingerprints: string[];
   commandCursor?: number;
+  commandCursorAnchor?: SessionCommandCursorAnchorV1;
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
 }
 
@@ -346,6 +354,35 @@ export function isSessionMetadataV1(
       value["commandCursor"] < 0)
   ) {
     return false;
+  }
+  if (value["commandCursorAnchor"] !== undefined) {
+    if (!isRecord(value["commandCursorAnchor"])) {
+      return false;
+    }
+    if (
+      value["commandCursorAnchor"]["eventId"] !== undefined &&
+      !isNonEmptyString(value["commandCursorAnchor"]["eventId"])
+    ) {
+      return false;
+    }
+    if (
+      value["commandCursorAnchor"]["providerEventType"] !== undefined &&
+      !isNonEmptyString(value["commandCursorAnchor"]["providerEventType"])
+    ) {
+      return false;
+    }
+    if (
+      value["commandCursorAnchor"]["providerEventId"] !== undefined &&
+      !isNonEmptyString(value["commandCursorAnchor"]["providerEventId"])
+    ) {
+      return false;
+    }
+    if (
+      value["commandCursorAnchor"]["timestamp"] !== undefined &&
+      !isNonEmptyString(value["commandCursorAnchor"]["timestamp"])
+    ) {
+      return false;
+    }
   }
   if (
     value["workspaceOutputs"] !== undefined &&

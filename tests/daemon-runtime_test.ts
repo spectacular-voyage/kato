@@ -329,6 +329,7 @@ function findWorkspaceOutputState(
 interface PersistentInChatScenarioOptions {
   events: ConversationEvent[];
   recordingPipeline: RecordingPipelineLike;
+  snapshotSnippetOverride?: string;
   prepopulate?: (
     sessionStateStore: PersistentSessionStateStore,
     workspace: TestWorkspaceFixture,
@@ -403,6 +404,9 @@ async function runPersistentInChatScenario(
           sessionId: "session-1",
           cursor: { kind: "byte-offset", value: 1 },
           events: options.events,
+          ...(options.snapshotSnippetOverride
+            ? { snippetOverride: options.snapshotSnippetOverride }
+            : {}),
         });
         return Promise.resolve({
           provider: "codex",
@@ -1053,6 +1057,75 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> prefers stored snapshot snippet for title",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-title-snippet-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const destination = join(scenarioDir, "pointer.md");
+      const captureTitles: string[] = [];
+      const storedSnippet =
+        "Can we add workspaces alias to status? In the live display,…";
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-title",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+        ],
+        snapshotSnippetOverride: storedSnippet,
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            assertExists(input.title);
+            captureTitles.push(input.title);
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: destination,
+                  desiredState: "on",
+                  writeCursor: 1,
+                  activeRecordingCycleId: "cycle-pointer",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-pointer",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      assertEquals(captureTitles, [storedSnippet]);
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> ignores stale active cycle ids when workspace output is off",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(
@@ -1546,6 +1619,163 @@ Deno.test(
 
       assertEquals(seedContents.length, 1);
       assert(seedContents[0]?.startsWith(`::record-${TEST_WORKSPACE_ALIAS}`));
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat resumes after the cursor anchor when snapshot is truncated",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-command-cursor-anchor-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const oldDestination = join(scenarioDir, "old.md");
+      const newDestination = join(scenarioDir, "new.md");
+      const captureTargets: string[] = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-before-anchor",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${oldDestination}`,
+            "2026-02-22T19:00:00.000Z",
+          ),
+          makeEvent(
+            "a-after-anchor",
+            "message.assistant",
+            "already processed",
+            "2026-02-22T19:00:01.000Z",
+          ),
+          makeEvent(
+            "u-capture-after-anchor",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${newDestination}`,
+            "2026-02-22T19:00:02.000Z",
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureTargets.push(input.targetPath);
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 99;
+              metadata.commandCursorAnchor = {
+                eventId: "u-capture-before-anchor",
+                providerEventType: "user",
+                providerEventId: "u-capture-before-anchor",
+                timestamp: "2026-02-22T19:00:00.000Z",
+              };
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(captureTargets, [newDestination]);
+      assertEquals(session.commandCursor, 3);
+      assertEquals(
+        session.commandCursorAnchor?.eventId,
+        "u-capture-after-anchor",
+      );
+      assertEquals(output.currentResolvedPath, newDestination);
+      assertEquals(output.recordingCycles.length, 1);
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat uses cursor anchor when snapshot length is unchanged",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-command-cursor-anchor-same-length-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const destination = join(scenarioDir, "same-length.md");
+      const captureTargets: string[] = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-anchor-same-length",
+            "message.user",
+            "already processed message",
+            "2026-02-22T19:00:00.000Z",
+          ),
+          makeEvent(
+            "u-capture-same-length",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${destination}`,
+            "2026-02-22T19:00:01.000Z",
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureTargets.push(input.targetPath);
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 2;
+              metadata.commandCursorAnchor = {
+                eventId: "u-anchor-same-length",
+                providerEventType: "user",
+                providerEventId: "u-anchor-same-length",
+                timestamp: "2026-02-22T19:00:00.000Z",
+              };
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(captureTargets, [destination]);
+      assertEquals(session.commandCursor, 2);
+      assertEquals(
+        session.commandCursorAnchor?.eventId,
+        "u-capture-same-length",
+      );
+      assertEquals(output.currentResolvedPath, destination);
+      assertEquals(output.recordingCycles.length, 1);
     } finally {
       await removeDirIfPresent(stateDir);
       await removeDirIfPresent(scenarioDir);

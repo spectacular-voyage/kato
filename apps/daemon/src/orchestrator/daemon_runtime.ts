@@ -285,7 +285,15 @@ function normalizeRawCommandTargetPath(
 function resolveConversationTitle(
   events: ConversationEvent[],
   fallback: string,
+  options: { snapshotSnippet?: string } = {},
 ): string {
+  const snapshotFirstLine = options.snapshotSnippet
+    ?.split(/\r\n?|\n/)
+    .find((line) => line.trim().length > 0)
+    ?.trim();
+  if (snapshotFirstLine && snapshotFirstLine.length > 0) {
+    return snapshotFirstLine;
+  }
   const snippet = extractSnippet(events);
   if (snippet && snippet.trim().length > 0) {
     return snippet;
@@ -687,8 +695,156 @@ function readCommandCursor(metadata: SessionMetadataV1): number {
   return raw;
 }
 
-function writeCommandCursor(metadata: SessionMetadataV1, cursor: number): void {
-  metadata.commandCursor = Math.max(0, Math.floor(cursor));
+function normalizeCommandCursorAnchor(
+  value: SessionMetadataV1["commandCursorAnchor"] | undefined,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const eventId = readString(value.eventId);
+  const providerEventType = readString(value.providerEventType);
+  const providerEventId = readString(value.providerEventId);
+  const timestamp = readString(value.timestamp);
+  if (!eventId && !(providerEventType && providerEventId) && !timestamp) {
+    return undefined;
+  }
+  return {
+    ...(eventId ? { eventId } : {}),
+    ...(providerEventType ? { providerEventType } : {}),
+    ...(providerEventId ? { providerEventId } : {}),
+    ...(timestamp ? { timestamp } : {}),
+  };
+}
+
+function readCommandCursorAnchor(
+  metadata: SessionMetadataV1,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  return normalizeCommandCursorAnchor(metadata.commandCursorAnchor);
+}
+
+function buildCommandCursorAnchor(
+  event: ConversationEvent | undefined,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  if (!event) {
+    return undefined;
+  }
+  return normalizeCommandCursorAnchor({
+    eventId: event.eventId,
+    providerEventType: event.source.providerEventType,
+    providerEventId: event.source.providerEventId,
+    timestamp: event.timestamp,
+  });
+}
+
+function commandCursorAnchorMatchesEvent(
+  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
+  event: ConversationEvent,
+): boolean {
+  if (anchor.eventId && event.eventId === anchor.eventId) {
+    return true;
+  }
+  if (
+    anchor.providerEventType &&
+    anchor.providerEventId &&
+    event.source.providerEventType === anchor.providerEventType &&
+    event.source.providerEventId === anchor.providerEventId
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function findCommandCursorAnchorIndex(
+  events: ConversationEvent[],
+  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
+): number {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event) {
+      continue;
+    }
+    if (commandCursorAnchorMatchesEvent(anchor, event)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function findFirstEventAfterTimestamp(
+  events: ConversationEvent[],
+  timestamp: string,
+): number {
+  const anchorTimeMs = readTimeMs(timestamp);
+  if (anchorTimeMs === undefined) {
+    return events.length;
+  }
+  for (let i = 0; i < events.length; i += 1) {
+    const event = events[i];
+    if (!event) {
+      continue;
+    }
+    const eventTimeMs = readTimeMs(event.timestamp);
+    if (eventTimeMs !== undefined && eventTimeMs > anchorTimeMs) {
+      return i;
+    }
+  }
+  return events.length;
+}
+
+function resolveCommandStartCursor(
+  metadata: SessionMetadataV1,
+  events: ConversationEvent[],
+): number {
+  const anchor = readCommandCursorAnchor(metadata);
+  if (anchor) {
+    const anchorIndex = findCommandCursorAnchorIndex(events, anchor);
+    if (anchorIndex >= 0) {
+      return anchorIndex + 1;
+    }
+    if (anchor.timestamp) {
+      return findFirstEventAfterTimestamp(events, anchor.timestamp);
+    }
+  }
+  const persisted = readCommandCursor(metadata);
+  if (persisted <= events.length) {
+    return persisted;
+  }
+  return events.length;
+}
+
+function commandCursorAnchorEquals(
+  left: SessionMetadataV1["commandCursorAnchor"] | undefined,
+  right: SessionMetadataV1["commandCursorAnchor"] | undefined,
+): boolean {
+  const leftNormalized = normalizeCommandCursorAnchor(left);
+  const rightNormalized = normalizeCommandCursorAnchor(right);
+  if (!leftNormalized && !rightNormalized) {
+    return true;
+  }
+  if (!leftNormalized || !rightNormalized) {
+    return false;
+  }
+  return leftNormalized.eventId === rightNormalized.eventId &&
+    leftNormalized.providerEventType === rightNormalized.providerEventType &&
+    leftNormalized.providerEventId === rightNormalized.providerEventId &&
+    leftNormalized.timestamp === rightNormalized.timestamp;
+}
+
+function writeCommandCursor(
+  metadata: SessionMetadataV1,
+  cursor: number,
+  events: ConversationEvent[],
+): void {
+  const normalizedCursor = Math.max(0, Math.floor(cursor));
+  metadata.commandCursor = normalizedCursor;
+  const anchor = normalizedCursor > 0
+    ? buildCommandCursorAnchor(events[normalizedCursor - 1])
+    : undefined;
+  if (anchor) {
+    metadata.commandCursorAnchor = anchor;
+  } else {
+    delete metadata.commandCursorAnchor;
+  }
 }
 
 function resolveCommandBoundaries(
@@ -1137,6 +1293,7 @@ async function applyPersistentControlCommandsForEvent(
     const boundarySnapshotTitle = resolveConversationTitle(
       boundarySnapshot,
       providerSessionId,
+      { snapshotSnippet },
     );
     let commandNoop = false;
     let loggedTargetPath: string | undefined;
@@ -1347,6 +1504,7 @@ async function applyPersistentControlCommandsForEvent(
           const captureTitle = resolveConversationTitle(
             captureEvents,
             providerSessionId,
+            { snapshotSnippet },
           );
           const currentCycleId = output.activeRecordingCycleId;
           const captureRecordingCycleIds = output.desiredState === "on" &&
@@ -1426,6 +1584,7 @@ async function applyPersistentControlCommandsForEvent(
           const snapshotTitle = resolveConversationTitle(
             exportEvents,
             providerSessionId,
+            { snapshotSnippet },
           );
           await recordingPipeline.exportSnapshot({
             provider,
@@ -1572,6 +1731,7 @@ async function applyControlCommandsForEvent(
     const recordingTitle = resolveConversationTitle(
       boundarySnapshot,
       sessionId,
+      { snapshotSnippet },
     );
     let loggedTargetPath: string | undefined;
     let commandNoop = false;
@@ -1990,7 +2150,13 @@ async function processInChatRecordingUpdates(
       }
     }
 
-    const recordingTitle = resolveConversationTitle(snapshot.events, sessionId);
+    const recordingTitle = resolveConversationTitle(
+      snapshot.events,
+      sessionId,
+      {
+        snapshotSnippet: snapshot.metadata.snippet,
+      },
+    );
     for (let i = 0; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event) continue;
@@ -2147,7 +2313,9 @@ async function processPersistentRecordingUpdates(
     }
 
     let metadataChanged = false;
-    const commandCursor = readCommandCursor(metadata);
+    const persistedCommandCursor = readCommandCursor(metadata);
+    const persistedCommandCursorAnchor = readCommandCursorAnchor(metadata);
+    const commandCursor = resolveCommandStartCursor(metadata, snapshot.events);
     for (let i = commandCursor; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event || event.kind !== "message.user") {
@@ -2172,14 +2340,24 @@ async function processPersistentRecordingUpdates(
       });
       metadataChanged = metadataChanged || changed;
     }
-    if (commandCursor !== snapshot.events.length) {
-      writeCommandCursor(metadata, snapshot.events.length);
+    const nextCommandCursorAnchor = buildCommandCursorAnchor(
+      snapshot.events[snapshot.events.length - 1],
+    );
+    if (
+      persistedCommandCursor !== snapshot.events.length ||
+      !commandCursorAnchorEquals(
+        persistedCommandCursorAnchor,
+        nextCommandCursorAnchor,
+      )
+    ) {
+      writeCommandCursor(metadata, snapshot.events.length, snapshot.events);
       metadataChanged = true;
     }
 
     const recordingTitle = resolveConversationTitle(
       snapshot.events,
       providerSessionId,
+      { snapshotSnippet: snapshot.metadata.snippet },
     );
     const activeOutputs = activeWorkspaceOutputs(metadata);
     for (const output of activeOutputs) {
