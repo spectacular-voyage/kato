@@ -6,7 +6,9 @@ export type InChatControlCommandName =
   | "stop";
 
 export interface InChatControlCommand {
+  verb: InChatControlCommandName;
   name: InChatControlCommandName;
+  alias?: string;
   argument?: string;
   line: number;
   raw: string;
@@ -28,7 +30,7 @@ interface FenceState {
   length: number;
 }
 
-const COMMAND_LINE_PATTERN = /^\s*::([a-z][a-z0-9-]*)(?:\s+(.+))?\s*$/i;
+const COMMAND_LINE_PATTERN = /^\s*::([^\s]+)(?:\s+(.+))?\s*$/;
 const FENCE_PATTERN = /^\s*([`~]{3,})/;
 
 function parseFenceToken(line: string): FenceState | undefined {
@@ -79,24 +81,15 @@ function parseCommandLine(
     return {};
   }
 
-  const name = match[1]?.toLowerCase();
+  const rawName = match[1];
+  const name = rawName?.toLowerCase();
   const argument = match[2]?.trim();
   const commandBase = {
     line,
     raw: rawLine,
   };
 
-  if (name === "init" || name === "capture") {
-    return {
-      command: {
-        ...commandBase,
-        name,
-        ...(argument && argument.length > 0 ? { argument } : {}),
-      },
-    };
-  }
-
-  if (name === "record" || name === "stop") {
+  if (name === "stop") {
     if (argument && argument.length > 0) {
       return {
         error: {
@@ -108,28 +101,72 @@ function parseCommandLine(
     return {
       command: {
         ...commandBase,
-        name,
+        verb: "stop",
+        name: "stop",
       },
     };
   }
 
-  if (name === "export") {
-    if (!argument || argument.length === 0) {
+  const verbPrefixes: Array<{
+    prefix: string;
+    verb: InChatControlCommandName;
+    allowArgument: boolean;
+  }> = [
+    { prefix: "init-", verb: "init", allowArgument: true },
+    { prefix: "record-", verb: "record", allowArgument: true },
+    { prefix: "capture-", verb: "capture", allowArgument: true },
+    { prefix: "export-", verb: "export", allowArgument: true },
+    { prefix: "stop-", verb: "stop", allowArgument: false },
+  ];
+  for (const prefixEntry of verbPrefixes) {
+    if (!name?.startsWith(prefixEntry.prefix) || !rawName) {
+      continue;
+    }
+    const alias = rawName.slice(prefixEntry.prefix.length).trim();
+    if (alias.length === 0) {
       return {
         error: {
           ...commandBase,
-          reason: `Command '::${name}' requires a path argument`,
+          reason: `Command '::${rawName}' is missing an alias suffix`,
         },
       };
     }
+    if (!prefixEntry.allowArgument && argument && argument.length > 0) {
+      return {
+        error: {
+          ...commandBase,
+          reason: `Command '::${rawName}' does not accept arguments`,
+        },
+      };
+    }
+    return {
+      command: {
+        ...commandBase,
+        verb: prefixEntry.verb,
+        name: prefixEntry.verb,
+        alias,
+        ...(argument && argument.length > 0 ? { argument } : {}),
+      },
+    };
+  }
 
-    return { command: { ...commandBase, name, argument } };
+  if (
+    name === "init" || name === "record" || name === "capture" ||
+    name === "export"
+  ) {
+    return {
+      error: {
+        ...commandBase,
+        reason:
+          `Command '::${name}' requires a workspace alias suffix (for example ::${name}-default)`,
+      },
+    };
   }
 
   return {
     error: {
       ...commandBase,
-      reason: `Unknown control command '::${name ?? ""}'`,
+      reason: `Unknown control command '::${rawName ?? ""}'`,
     },
   };
 }

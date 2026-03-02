@@ -108,15 +108,18 @@ function toKatoCommandPayloads(
 
   return parsed.commands.map((command) => {
     const payload: Record<string, unknown> = {
-      command: command.name,
+      command: command.verb,
     };
+    if (command.alias) {
+      payload["workspaceAlias"] = command.alias;
+    }
     if (command.argument) {
       payload["rawArgument"] = command.argument;
       payload["target"] = {
         kind: "destination",
         value: command.argument.trim(),
       };
-    } else if (command.name === "stop") {
+    } else if (command.verb === "stop" && !command.alias) {
       payload["target"] = { kind: "all" };
     }
     return payload;

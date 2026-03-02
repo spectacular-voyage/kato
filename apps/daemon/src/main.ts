@@ -31,6 +31,10 @@ import {
 import { WritePathPolicyGate } from "./policy/mod.ts";
 import { readOptionalEnv, resolveHomeDir } from "./utils/env.ts";
 import { resolveExportsLogPath } from "./utils/exports_log.ts";
+import {
+  resolveDefaultWorkspaceRegistryPath,
+  WorkspaceRegistryFileStore,
+} from "./workspace/mod.ts";
 import { RecordingPipeline } from "./writer/mod.ts";
 
 export interface RunDaemonSubprocessOptions {
@@ -262,6 +266,12 @@ export async function runDaemonSubprocess(
       exportEnabled: featureSettings.exportEnabled,
       exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
+      runtimeFeatureFlags: runtimeConfig.featureFlags,
+      workspaceRegistryStore: new WorkspaceRegistryFileStore(
+        resolveDefaultWorkspaceRegistryPath(
+          runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir),
+        ),
+      ),
       operationalLogger,
       auditLogger,
       daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,

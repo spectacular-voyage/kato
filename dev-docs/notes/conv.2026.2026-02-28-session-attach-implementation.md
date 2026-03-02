@@ -3,7 +3,7 @@ id: session-attach-implement-019ca570
 title: 'session attach implementation  Make sure you''ve read [CODEX…'
 desc: ''
 created: 1772302314910
-updated: 1772302314910
+updated: 1772401981348
 participants: [user.djradon, codex.gpt-5.3-codex]
 sessionId: 019ca570-81af-7ea1-93f2-c59c1fcce4c8
 recordingIds: [cddc7ab8-d2e6-4b00-94c1-a3aaac676199]
@@ -1055,3 +1055,972 @@ Can you make your next pass on the task?
 **Clarifying export and session bindings**
 **Drafting detailed revision plan**
 **Planning comprehensive implementation steps**
+
+# User_2026-03-01_1323_28
+
+Do we still have watchers on workspace config, so that a change there doesn't require daemon restart?
+
+**Searching for config watchers**
+
+# gpt-5.3-codex_2026-03-01_1323_34
+
+I’m checking the current runtime for any actual file-watch path on workspace or runtime config before answering. The question is whether this exists in code today, not what the task note says.
+
+**Inspecting startup config and watchers**
+
+# gpt-5.3-codex_2026-03-01_1323_40
+
+I found filesystem watching, but so far only in the provider-ingestion path. I’m confirming the watch targets and whether runtime/workspace config is reloaded anywhere after startup.
+
+**Confirming no workspace config watcher**
+
+# gpt-5.3-codex_2026-03-01_1323_54
+
+No.
+
+The current code has filesystem watchers, but they are for provider session roots, not workspace config files. The only active `watchFs` loop is in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L701), where it watches the provider session directories passed as `watchRoots` ([provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L727)).
+
+Runtime config is loaded once at daemon startup in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts#L136), and the write-path policy / frontmatter settings are constructed from that one loaded snapshot in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts#L216). There is no watcher that reloads `kato-config.yaml` after startup.
+
+For the old attach-era workspace config path, the workspace file is only read on demand by the CLI helper when `attach` runs in [attachments_shared.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/attachments_shared.ts#L223). That means:
+- changing a workspace `.kato/kato-config.yaml` does not live-update the daemon
+- existing attached session metadata keeps the resolved snapshot it already stored
+- the new values are only picked up if you explicitly re-run the attach flow, or restart and rebuild state under a new design
+
+So as of March 1, 2026: no workspace-config watcher, and yes, daemon restart is required for live daemon-owned config changes unless a command explicitly re-reads that file on demand.
+
+# User_2026-03-01_1337_23
+
+So when we register a workspace do we have to restart the daemon?
+
+I think workspace config, although it shares vocabulary, is significantly different from global config that maybe we should have different filenames? e.g. kato-config.yaml vs kato-workspace.config.yaml
+
+Go ahead an implement your update plan.
+
+**Confirming daemon restart and filename strategy**
+**Exploring config filename constants**
+
+# gpt-5.3-codex_2026-03-01_1337_45
+
+I’m grounding the filename question in the current code first. Then I’ll lock whether `workspace register` stays restart-bound and turn that into a revised plan rather than doing file edits in Plan Mode.
+
+**Finalizing workspace registration plan**
+**Requesting workspace config filename**
+
+# gpt-5.3-codex_2026-03-01_1338_01
+
+I can lock the restart rule now: under the new design, `workspace register` updates the registry immediately, but the daemon does not use the new alias/root/config mapping until restart. The remaining material decision is the exact workspace-local filename, since that affects CLI UX, discovery, and migration.
+
+**Decision [workspace-config-filename]:** Which filename should the new workspace-local config use?
+- kato-workspace-config.yaml (Recommended): Keeps the existing hyphenated style and clearly distinguishes workspace-local config from the global runtime config.
+- kato-workspace.config.yaml: Uses the dotted style you suggested while still separating workspace-local from global config.
+- Keep kato-config.yaml: Avoids a rename, but keeps the current ambiguity between global and workspace-local config files.
+
+**Decision [workspace-config-filename]:** Which filename should the new workspace-local config use? -> kato-workspace-config.yaml (Recommended)
+
+**Completing restart-bound workspace config plan**
+**Finalizing workspace alias plan structure**
+**Defining append behavior and frontmatter merging**
+**Clarifying write concurrency and implementation plan**
+
+# User_2026-03-01_1341_30
+
+I think workspace register should be picked up without a daemon restart.
+
+**Requesting clarification on live registry scope**
+
+# gpt-5.3-codex_2026-03-01_1341_38
+
+That’s a real architectural change from the last pass. The important boundary now is whether you want only new registrations to become usable immediately, or the whole workspace catalog to live-reconcile while the daemon is running.
+
+**Decision [live-registry-scope]:** How far should live pickup go for workspace registry changes while the daemon is running?
+- Add-only (Recommended): New `workspace register` entries become usable immediately, but alias changes, root changes, unregister, and config-file changes still require restart.
+- All registry changes: Register, unregister, alias changes, and root/config-path changes all live-apply to the daemon.
+- Register + unregister: New registrations and removals live-apply, but alias/root/config-path changes still require restart.
+
+**Decision [live-registry-scope]:** How far should live pickup go for workspace registry changes while the daemon is running? -> I think register/unregister and workspace-config changes should have live pickup. root config changes should only be picked up on daemon restart, so if your newly-registered allowedWriteRoot is not already covered, we should display a warning message suggesting a restart. Probably config changes should only apply to new recording-cycles, not in-progress ones.
+
+**Clarifying unregister and restart semantics**
+
+# gpt-5.3-codex_2026-03-01_1347_14
+
+That gives us a workable split: live workspace catalog updates, but permissions and in-progress cycle bindings stay conservative.
+
+One material edge is still open: if a workspace is unregistered while it still has active or paused output bindings in existing sessions, should the daemon preserve those existing bindings and only block new alias-targeted commands, or should unregister immediately invalidate them?
+
+**Decision [unregister-behavior]:** What should live `workspace unregister` do to existing session state that already points at that workspace?
+- Preserve existing (Recommended): Existing output bindings and active cycles keep working, but new alias-targeted commands fail because the alias is gone.
+- Stop and preserve path: Immediately stop any active cycles for that workspace, keep the output file paths in session state, and block future alias-targeted commands.
+- Invalidate immediately: Drop existing bindings and stop active cycles right away; the workspace becomes unusable everywhere as soon as it is unregistered.
+
+**Decision [unregister-behavior]:** What should live `workspace unregister` do to existing session state that already points at that workspace? -> Preserve existing (Recommended)
+
+**Finalizing live update assumptions**
+**Defining lazy reload behavior**
+**Refining config change handling**
+**Defining live vs restart workspace updates**
+**Clarifying final plan format**
+
+# User_2026-03-01_1352_02
+
+PLEASE IMPLEMENT THIS PLAN:
+# Workspace Aliases: Live Registration Revision
+
+## Summary
+
+Revise the workspace-alias design so that a running daemon can pick up **new registrations, unregistrations, and workspace-config content changes** without a restart, while keeping **workspace-root / config-path / alias mutations on existing entries** restart-bound.
+
+This gives the desired UX:
+
+- `workspace register` is usable immediately in the common case.
+- `workspace unregister` removes the alias immediately for new commands.
+- Editing `<workspaceRoot>/.kato/kato-workspace-config.yaml` affects future commands without restarting.
+- Existing in-progress recording cycles do not change mid-stream.
+- If a newly registered workspace root is not already covered by the daemon’s current `allowedWriteRoots`, registration still succeeds, but the user gets a clear warning that writes will require `kato restart`.
+
+This revision does **not** require filesystem watchers. A lazy reload on command boundaries is simpler and sufficient.
+
+## Core Behavior Changes
+
+### Live pickup scope
+
+Live, without restart:
+
+- `workspace register` for a **new** workspace
+- `workspace unregister`
+- Workspace-local config file **content** changes
+
+Still restart-bound:
+
+- Changing `workspaceRoot` on an existing registry entry
+- Changing `configPath` on an existing registry entry
+- Changing `alias` on an existing registry entry
+- Any change that requires expanding or shrinking the daemon’s active `allowedWriteRoots` set
+- Existing active recording-cycle bindings and their writer behavior
+
+### What “picked up live” means
+
+For new alias-scoped commands, the daemon uses the latest available workspace catalog and workspace config snapshot at command time.
+
+It does **not** mean:
+
+- retroactively changing active recording cycles
+- rewriting existing current output bindings
+- hot-swapping write-policy roots already baked into the running daemon
+
+## Config Files And Discovery
+
+### Global runtime config
+
+Keep:
+
+- `~/.kato/kato-config.yaml`
+
+It remains the daemon bootstrap config.
+
+### Workspace-local config
+
+Canonical new path:
+
+- `<workspaceRoot>/.kato/kato-workspace-config.yaml`
+
+Compatibility lookup order:
+
+1. `.kato/kato-workspace-config.yaml`
+2. `.kato/kato-config.yaml` (legacy fallback only)
+
+Rules:
+
+- `workspace init` always writes the new filename.
+- `workspace register` may discover either filename.
+- Docs should only teach the new workspace-local filename.
+
+## Live Workspace Catalog Design
+
+### Registry store
+
+Persist the registry immediately on every `workspace register` / `workspace unregister`.
+
+Recommended persistent shape:
+
+```ts
+interface RegisteredWorkspace {
+  workspaceId: string;
+  alias: string;
+  workspaceRoot: string;
+  configPath: string;
+  registeredAt: string;
+  updatedAt?: string;
+}
+```
+
+### In-memory catalog
+
+The daemon keeps an in-memory `WorkspaceCatalog` cache, but refreshes it lazily.
+
+Recommended runtime shape:
+
+```ts
+interface WorkspaceCatalogSnapshot {
+  loadedAt: string;
+  sourceMtimeMs?: number;
+  byAlias: Map<string, RegisteredWorkspace>;
+  byWorkspaceId: Map<string, RegisteredWorkspace>;
+}
+```
+
+### Refresh policy
+
+On every alias-scoped in-chat command:
+
+- Check the workspace-registry file mtime.
+- If unchanged, keep the current catalog snapshot.
+- If changed, reload the registry and rebuild the alias maps.
+
+This is the live pickup mechanism for register/unregister.
+
+No long-running `watchFs` loop is required for the registry.
+
+## Registration And Unregistration Semantics
+
+### `workspace register`
+
+For a **new** workspace entry:
+
+- Persist the registry entry immediately.
+- The next alias-scoped command sees the new alias after the catalog mtime check.
+- No daemon restart is required to resolve the alias.
+
+However:
+
+- If the new `workspaceRoot` is already inside one of the daemon’s current `allowedWriteRoots`, writes can proceed immediately.
+- If the new `workspaceRoot` is **not** inside current `allowedWriteRoots`, registration succeeds but returns a warning:
+  - workspace registered
+  - alias is visible immediately
+  - writes targeting paths under that workspace may still be denied until `kato restart`
+
+This preserves the current write-policy model while making registration itself live.
+
+### Re-registering an existing workspace
+
+If `workspace register` targets an already-known `workspaceId` and changes any of these:
+
+- `alias`
+- `workspaceRoot`
+- `configPath`
+
+Then:
+
+- Persist the change immediately in the registry
+- Return a clear message that the change is saved but requires `kato restart`
+- Keep the running daemon’s current catalog entry unchanged until restart
+
+This avoids partial live mutation of identity and path semantics.
+
+### `workspace unregister`
+
+- Persist removal immediately
+- The next alias-scoped command sees that the alias is gone
+- New alias-targeted commands fail immediately
+
+Existing session state is preserved:
+
+- Existing current output bindings for that `workspaceId` remain valid
+- Existing active recording cycles continue running
+- Those existing bindings/cycles can still append using their stored resolved path and stored profile snapshot
+- Only new alias-based lookup is blocked because the alias no longer exists in the live catalog
+
+This matches the chosen “preserve existing” behavior.
+
+## Live Workspace Config Content Reload
+
+### Scope
+
+A change to the contents of:
+
+- `<workspaceRoot>/.kato/kato-workspace-config.yaml`
+
+should be picked up without restart.
+
+This includes fields such as:
+
+- `defaultOutputDir`
+- `filenameTemplate`
+- writer feature flags / render settings carried in the workspace-local profile
+
+### Mechanism
+
+Use lazy reload on command boundaries, not a watcher.
+
+Recommended design:
+
+```ts
+interface WorkspaceProfileCacheEntry {
+  workspaceId: string;
+  configPath: string;
+  sourceMtimeMs?: number;
+  loadedAt: string;
+  profile: ResolvedWorkspaceProfile;
+}
+```
+
+On commands that need a workspace profile:
+
+- Check the config file mtime
+- Reload only if the file changed
+- Recompute the resolved workspace profile
+
+### Application rule
+
+Workspace-config content changes apply to:
+
+- `::init-<alias>`
+- `::capture-<alias>`
+- `::export-<alias>`
+- `::record-<alias>` when starting a new recording cycle
+- `::record-<alias>` when retargeting to a different destination
+
+Workspace-config content changes do **not** apply to:
+
+- an already-active recording cycle that keeps writing to its current output file
+
+In-progress cycles continue using their stored snapshot until they stop.
+
+## Command Semantics
+
+### `::init-<alias> [<path>]`
+
+- Creates or retargets the current output binding
+- Creates the file if missing
+- Leaves `desiredState = off`
+- Uses the latest live workspace profile at command time
+
+### `::record-<alias> [<path>]`
+
+- If starting a new cycle, uses the latest live workspace profile
+- If retargeting to a different destination, ends the old cycle and starts a new one using the latest live profile
+- If resuming the same destination while a cycle is already active, keep the existing cycle snapshot unchanged
+- If resuming after `stop`, start a new recording cycle using the latest live profile, while keeping the current output binding unless a new path is specified
+
+### `::capture-<alias> [<path>]`
+
+- Append-only
+- Never truncates
+- Uses the latest live workspace profile when resolving a generated or directory target
+- Does not start or stop live recording
+
+### `::export-<alias> [<path>]`
+
+- Append-only
+- Never truncates
+- Uses the latest live workspace profile when resolving a generated or directory target
+- Does not modify the current output binding
+
+### `::stop-<alias>` / `::stop`
+
+No change:
+
+- stop active recording cycles
+- preserve current output bindings
+
+## Runtime State Model
+
+Keep the earlier shift to “one current output binding per `sessionId + workspaceId`” and “at most one active recording cycle per `sessionId + workspaceId`”.
+
+Recommended durable shape:
+
+```ts
+interface SessionWorkspaceOutputState {
+  workspaceId: string;
+  workspaceAliasSnapshot?: string;
+  desiredState: "on" | "off";
+  currentDestination: OutputDestinationBinding;
+  currentResolvedPath: string;
+  sourceConfigPath?: string;
+  workspaceRootSnapshot: string;
+  resolvedDefaultOutputDir: string;
+  filenameTemplate: string;
+  writerFeatureFlags: {
+    writerIncludeCommentary: boolean;
+    writerIncludeThinking: boolean;
+    writerIncludeToolCalls: boolean;
+    writerItalicizeUserMessages: boolean;
+  };
+  activeRecordingCycleId?: string;
+  recordingCycles: RecordingCycleState[];
+}
+```
+
+```ts
+interface RecordingCycleState {
+  recordingCycleId: string;
+  startedAt: string;
+  stoppedAt?: string;
+  startedCursor: number;
+  stoppedCursor?: number;
+}
+```
+
+Important rule:
+
+- `workspaceRootSnapshot`, `filenameTemplate`, and writer flags stored on the active state remain authoritative for an already-running cycle
+- A fresh command may refresh the profile snapshot only when establishing a new cycle or new target
+
+## Write Policy And `allowedWriteRoots`
+
+### Startup model remains
+
+The running daemon’s `allowedWriteRoots` still comes from its startup-loaded runtime policy.
+
+Do not hot-mutate the active path-policy gate in this task.
+
+### Consequence for live registration
+
+A newly registered workspace may fall into one of two states:
+
+1. Already covered by current `allowedWriteRoots`
+   - usable immediately
+2. Not covered
+   - alias resolves immediately
+   - write commands may still be denied
+   - `workspace register` should emit a warning suggesting `kato restart`
+
+### Warning criteria
+
+On `workspace register`, compare the new `workspaceRoot` against the daemon’s current `allowedWriteRoots` snapshot.
+
+If not covered, print a clear warning:
+
+- the workspace was registered successfully
+- the running daemon has not yet expanded its write roots
+- restart is recommended before writing to that workspace
+
+Per-workspace narrowing of write roots stays deferred.
+
+## Frontmatter Policy
+
+No change to the prior direction:
+
+- Frontmatter remains optional
+- It never gates writes
+- All in-chat commands are append-only
+
+When frontmatter is enabled, use plural provenance fields:
+
+- `sessionIds`
+- `workspaceIds`
+- `recordingCycleIds`
+
+These remain accretive and deduped.
+
+## Public API / Type Changes
+
+### Parser contract
+
+Keep the earlier explicit form:
+
+```ts
+interface InChatControlCommand {
+  verb: "init" | "record" | "capture" | "export" | "stop";
+  alias?: string;
+  argument?: string;
+  line: number;
+  raw: string;
+}
+```
+
+### New daemon-side components
+
+Add explicit interfaces for live-refresh infrastructure:
+
+```ts
+interface WorkspaceRegistryStoreLike {
+  load(): Promise<RegisteredWorkspace[]>;
+  save(entries: RegisteredWorkspace[]): Promise<void>;
+  statMtimeMs?(): Promise<number | undefined>;
+}
+```
+
+```ts
+interface WorkspaceCatalogLike {
+  getByAlias(alias: string): Promise<RegisteredWorkspace | undefined>;
+  getByWorkspaceId(workspaceId: string): Promise<RegisteredWorkspace | undefined>;
+  list(): Promise<RegisteredWorkspace[]>;
+  refreshIfChanged(): Promise<void>;
+}
+```
+
+```ts
+interface WorkspaceProfileResolverLike {
+  resolveForCommand(workspace: RegisteredWorkspace): Promise<ResolvedWorkspaceProfile>;
+}
+```
+
+These make the live-refresh boundary explicit and testable.
+
+## Implementation Sequence
+
+1. Introduce the new workspace-local config filename and legacy fallback lookup.
+2. Add the persistent workspace registry keyed by `workspaceId`.
+3. Add `WorkspaceCatalog` with lazy `refreshIfChanged()` based on registry file mtime.
+4. Route alias lookup through the live-refreshing catalog on every alias-scoped command.
+5. Implement `workspace register` live-add behavior for new entries.
+6. Implement `workspace unregister` live-remove behavior while preserving existing session bindings/cycles.
+7. Make re-registering an existing entry with alias/root/configPath changes persist immediately but return “restart required,” without changing the live catalog.
+8. Add `WorkspaceProfileResolver` with lazy config-file mtime reload.
+9. Apply refreshed workspace config only when starting a new cycle, retargeting, or running one-off `init`/`capture`/`export`.
+10. Keep active cycles pinned to their stored snapshot until stopped.
+11. Keep `allowedWriteRoots` startup-bound; add registration-time coverage warnings.
+12. Preserve the append-only, frontmatter-optional semantics from the prior plan.
+13. Update docs to explain the split:
+    - live register/unregister/config-content
+    - restart-bound alias/root/configPath edits and write-root expansion
+
+## Test Cases
+
+### Live registration
+
+- Registering a brand-new workspace makes `::record-<alias>` resolvable without restart.
+- If the new workspace root is already inside current `allowedWriteRoots`, `::record-<alias>` can write immediately.
+- If the new workspace root is not covered, registration succeeds and emits a restart warning.
+- In that uncovered case, alias lookup succeeds but write commands are denied by path policy until restart.
+
+### Live unregistration
+
+- Unregistering a workspace removes its alias immediately for new commands.
+- Existing active cycles for that `workspaceId` continue appending successfully.
+- Existing paused/current output bindings for that `workspaceId` remain in session state.
+- New `::record-<alias>` / `::capture-<alias>` / `::export-<alias>` fail because the alias is gone.
+
+### Restart-bound updates on existing entries
+
+- Re-registering an existing workspace with a changed alias persists the update but the old alias remains live until restart.
+- Re-registering an existing workspace with a changed `workspaceRoot` persists the update but path resolution stays on the old root until restart.
+- Re-registering an existing workspace with a changed `configPath` persists the update but the old config path remains live until restart.
+
+### Live workspace-config changes
+
+- Editing `defaultOutputDir` in a workspace-local config changes the next generated destination for `init`, `capture`, `export`, or a newly started `record` cycle without restart.
+- Editing `filenameTemplate` changes the next generated filename without restart.
+- Editing writer flags changes the next new recording cycle’s render behavior without restart.
+- An already-active recording cycle keeps using its existing stored writer flags and destination behavior until stopped.
+
+### Command behavior
+
+- `::record-<alias>` starting a fresh cycle after a config edit uses the latest config snapshot.
+- `::record-<alias>` continuing an already-active cycle does not change behavior mid-stream.
+- `::init-<alias>` after a config edit uses the latest config snapshot.
+- `::capture-<alias>` and `::export-<alias>` remain append-only and never truncate.
+
+## Explicit Assumptions And Defaults
+
+- No `watchFs` watcher is added for the workspace registry or workspace-local config files.
+- Live pickup is implemented by lazy mtime checks on command boundaries.
+- New registrations and unregistrations are live.
+- Workspace-config content changes are live.
+- Alias changes, root changes, and config-path changes on existing entries remain restart-bound.
+- `allowedWriteRoots` remains startup-bound in this task.
+- If registration succeeds but the new root is outside current write roots, the CLI warns and recommends restart.
+- Existing session bindings/cycles survive unregistration.
+- In-progress recording cycles keep their stored profile snapshot until stopped.
+
+**Planning initial code inspection**
+
+# gpt-5.3-codex_2026-03-01_1352_12
+
+I’m checking the current implementation surface first so I can land this in the existing codebase instead of layering a second design on top of stale attach-era paths. Then I’ll rework the state/CLI/runtime in the smallest coherent sequence.
+
+**Scoping implementation plan**
+
+# gpt-5.3-codex_2026-03-01_1352_25
+
+I have the current surface: there’s no workspace registry yet, and the runtime still centers on `primaryRecordingDestination` plus attach-era fields. I’m reading the command and session-state paths now so I can replace them with the new alias model rather than fighting hidden assumptions.
+
+**Planning command handling**
+
+**Scoping implementation plan**
+
+**Inspecting CLI parser types**
+
+**Assessing control plane usage**
+
+**Planning workspace registry and append exports**
+**Planning runtime config integration**
+
+**Prioritizing persistent path while reviewing fallback**
+
+**Scoping command enhancement**
+
+**Designing workspace helpers and caching**
+**Planning workspace init implementation**
+
+**Clarifying workspace config and alias handling**
+**Scoping frontmatter changes later**
+**Scoping workspace registry and alias commands**
+**Designing workspace output state**
+**Planning workspace catalog injection**
+
+**Designing workspace registry module**
+**Designing workspace profile resolver**
+**Designing workspace registration logic**
+**Designing workspace ID storage**
+**Evaluating workspace output data model**
+**Planning workspace outputs support**
+**Proposing optional recording keys**
+**Planning plural frontmatter support**
+**Outlining workspace module integration**
+
+**Planning workspace module implementation**
+
+# gpt-5.3-codex_2026-03-01_1355_49
+
+I’m adding the shared workspace-registry/config primitives first. That gives the CLI and daemon a single place to handle the new filename, live catalog refresh, and workspace profile reload instead of duplicating attach-era helpers again.
+
+**Planning CLI workspace commands**
+**Planning registry integration**
+
+**Designing workspace subcommands**
+
+# gpt-5.3-codex_2026-03-01_1357_09
+
+I’m wiring the new workspace CLI surface now. I’m keeping the existing attach commands in place for compatibility, but adding `workspace init/register/list/unregister` as the supported path and pointing them at the new registry/config helpers.
+
+**Implementing patch parser**
+
+**Planning usage patch**
+
+**Creating workspace command utilities**
+
+**Noting workspace init message fix and import updates**
+
+**Correcting workspace initialization output**
+
+**Planning command type refactor**
+**Planning gradual verb patch**
+
+# gpt-5.3-codex_2026-03-01_1358_50
+
+I’m switching the in-chat parser to the alias-suffixed grammar now. I’m keeping a compatibility `name` field on the parsed command objects so I can refactor runtime incrementally without breaking every existing call site at once.
+
+**Extending session state with workspace outputs**
+
+# gpt-5.3-codex_2026-03-01_1359_07
+
+I’m adding the new persistent workspace-output state alongside the old attach-era fields instead of ripping the old schema out immediately. That lets the daemon start using the alias model without breaking existing session metadata loads.
+
+**Patching session state cloning**
+
+**Extending frontmatter with plural IDs**
+
+# gpt-5.3-codex_2026-03-01_1359_53
+
+I’m updating frontmatter to the plural provenance shape in a backward-compatible way: old callers can still pass single `sessionId` / `recordingIds`, but new writes emit `sessionIds` and `recordingCycleIds`, and appends can accrete `workspaceIds` too.
+
+**Planning options interface patch**
+
+**Inspecting options and merge logic**
+
+**Planning recording pipeline patch**
+**Patching snapshot export overwrite**
+
+# gpt-5.3-codex_2026-03-01_1400_52
+
+I’m making `capture` and `export` append-only in the shared recording pipeline now, so the in-chat behavior becomes non-destructive regardless of whether the call comes from the persistent or in-memory path. I’m also adding workspace metadata hooks there so alias-scoped writes can stamp `workspaceIds` into frontmatter when enabled.
+
+**Extending session key handling**
+
+**Planning module exports**
+
+**Planning runtime option integration**
+**Designing workspace output helpers**
+**Defining workspace command output resolution**
+**Clarifying output binding update logic**
+**Clarifying capture and cycle start behavior**
+**Refining recording ID handling**
+**Updating daemon runtime imports**
+
+# gpt-5.3-codex_2026-03-01_1402_16
+
+I’m moving the daemon runtime over to a lazily reloaded workspace catalog/profile resolver now. I’m keeping the old attach control path intact for compatibility, but alias-scoped in-chat commands will stop relying on `workspaceAttachment` and `primaryRecordingDestination`.
+
+**Extending options interfaces**
+
+**Adding path helper imports**
+
+**Planning helper functions addition**
+
+**Extending function signature with workspaceId**
+
+**Patching metadata handling functions**
+
+**Patching persistent recording append loop**
+
+**Planning persistent command handling**
+
+**Planning missing workspace log**
+
+**Planning alias logic insertion**
+
+**Drafting alias command handling**
+**Preserving initial cycle ID for init**
+**Clarifying snapshot refresh and path handling**
+**Aligning stop command behavior**
+
+**Inspecting initialization command context**
+
+**Planning large conditional patch**
+
+**Scoping minimal alias command support**
+**Designing ephemeral multi-output recording**
+**Defining recording control command flows**
+**Patching event processing state**
+
+**Initializing patch and search state**
+
+**Planning function refactor**
+
+**Refactoring destructure and try block**
+
+**Refactoring error handling**
+
+**Preparing option destructure integration**
+
+**Fixing variable scope error**
+
+**Preparing persistent recording patch**
+
+**Identifying daemon runtime loop setup**
+
+**Locating function definition**
+
+**Adding runtime feature flags and workspace initialization**
+
+**Refactoring daemon subprocess imports**
+
+**Expanding snippet around runtime call**
+
+**Fixing imports and runtime call**
+
+**Searching unresolved variable usage**
+
+**Reviewing CLI module exports and imports**
+
+**Adjusting runtime config loading for workspace commands**
+
+# gpt-5.3-codex_2026-03-01_1409_06
+
+I noticed the new workspace commands shouldn’t be blocked by a missing global runtime config. I’m loosening the CLI bootstrap so `workspace init/register/list/unregister` can work using the default runtime paths even before `kato init` has been run.
+
+**Assessing command resolution logic**
+
+**Reviewing interface and method signature updates**
+**Preparing targeted compile checks**
+
+# gpt-5.3-codex_2026-03-01_1409_35
+
+I’ve landed the core code changes. I’m running a compile pass now against the parser, CLI, pipeline, and runtime tests to catch integration errors before I start tightening behavior or updating failing tests.
+
+# gpt-5.3-codex_2026-03-01_1409_40
+
+The compile pass is still running. I’m polling it and will fix the first concrete type or import errors before touching the test expectations.
+
+**Planning default alias export**
+
+**Re-running checks**
+
+**Planning targeted test runs**
+
+**Planning test updates**
+
+**Updating grammar for alias forms**
+
+**Updating plan and inspecting repo**
+
+# gpt-5.3-codex_2026-03-01_1411_18
+
+I’m continuing from the partial implementation and will tighten the changed surface by updating the failing tests first, then run targeted suites to expose any remaining runtime gaps.
+
+# gpt-5.3-codex_2026-03-01_1411_27
+
+I’m reading the parser and the affected test files together so the new expectations match the code that’s already landed, not the cancelled session-attach behavior.
+
+**Searching legacy command tests**
+
+**Verifying current test and code status**
+
+# gpt-5.3-codex_2026-03-01_1411_42
+
+I have enough context to start the real validation loop now. I’m running the focused suites that cover the changed parser, CLI, and append semantics before I touch the larger daemon runtime file again.
+
+**Reviewing CLI parser and tests**
+
+# gpt-5.3-codex_2026-03-01_1412_00
+
+The first concrete mismatch is simple: the recording pipeline tests still assert overwrite mode for `capture` and `export`. I’m patching those, then I’ll add CLI coverage for the new workspace commands before rerunning with the right Deno permissions.
+
+**Inspecting shared workspace defaults**
+
+**Inspecting daemon CLI test coverage and runtime config dependencies**
+
+**Continuing router exploration**
+
+**Planning test patching and additions**
+
+**Planning targeted workspace tests**
+
+**Planning case-preserving alias parsing**
+**Assessing workspace ID persistence gap**
+**Designing workspace ID handling**
+**Refining alias parsing and workspace init**
+**Planning workspace and CLI tests**
+
+# gpt-5.3-codex_2026-03-01_1413_26
+
+I found one real implementation gap: the in-chat parser still lowercases and restricts alias tokens, which conflicts with the agreed “any non-space alias” rule and folder-name-as-is default. I’m fixing that now, then I’ll add test coverage around live workspace registration and config reload.
+
+**Patching command parsing and tests**
+**Designing workspace command tests**
+**Designing live registry tests**
+**Planning workspace command tests**
+
+# gpt-5.3-codex_2026-03-01_1414_01
+
+I’m editing the parser now. This change is small but important: aliases will no longer be silently lowercased or restricted to slug-like tokens.
+
+**Planning patch tests**
+
+**Adding workspace CLI imports and parser tests**
+**Assessing workspace command tests and warnings**
+**Clarifying alias update effects and test placement**
+
+# gpt-5.3-codex_2026-03-01_1414_38
+
+I’m adding CLI coverage now. This validates the new user-facing workspace flow directly, without depending on the giant legacy runtime test file.
+
+**Investigating test context mismatch**
+
+**Focusing on import and location extraction**
+
+**Applying initial patches**
+
+**Inserting tests after init block**
+
+**Designing workspace catalog tests**
+**Creating in-memory workspace store**
+
+# gpt-5.3-codex_2026-03-01_1415_51
+
+I’m adding a focused test file for the new live-refresh infrastructure. That gives us coverage for the actual plan behavior without rewriting the old monolithic runtime suite in one pass.
+
+**Planning optional runtime config loading**
+**Refining runtime config loading logic**
+**Designing workspaceId persistence**
+**Planning workspace ID reconciliation**
+**Planning workspace ID persistence**
+
+**Designing workspace config helpers**
+**Implementing workspace ID resolution**
+
+# gpt-5.3-codex_2026-03-01_1417_11
+
+I’m closing one bigger design gap next: preserving `workspaceId` across re-registration when a workspace moves. Without that, “restart-bound root changes” only works for the same path, which is weaker than the plan.
+
+**Considering optional test helper exports**
+
+**Extending workspace CLI tests**
+**Adjusting alias and write root handling**
+
+# gpt-5.3-codex_2026-03-01_1417_51
+
+I’ve added `workspaceId` persistence in the workspace config so moved workspaces can re-register onto the same identity. I’m extending the CLI test to cover that path now.
+
+**Adding file existence assertion**
+
+**Assessing test and export adjustments**
+
+# gpt-5.3-codex_2026-03-01_1418_21
+
+The code changes are in place. I’m running the targeted suites again with filesystem permissions so we can catch the next layer of real failures instead of the sandbox noise.
+
+**Improving runtime config loading**
+**Refining runtime config loading logic**
+**Patching runtime config paths**
+
+# gpt-5.3-codex_2026-03-01_1418_47
+
+I’m fixing one CLI routing bug now: workspace commands should opportunistically load the existing runtime config when it’s present, so they use the real `katoDir` and write-root policy instead of a guessed default.
+
+**Inspecting syntax formatting**
+
+**Planning CLI workspace config test**
+
+**Cleaning router formatting**
+
+**Adding exports to top-level module**
+
+**Planning targeted test runs**
+
+# gpt-5.3-codex_2026-03-01_1419_29
+
+I’ve made one more CLI fix and added coverage for it. I’m rerunning the focused suites plus a compile-only pass for the large daemon runtime test file so we at least catch any type drift there.
+
+**Verifying clean compile with git status**
+
+# gpt-5.3-codex_2026-03-01_1419_40
+
+The focused suites are green, and the big daemon-runtime test file still compiles after these changes. I’m doing a quick diff sweep now to make sure the final summary only claims what actually changed.
+
+**Planning formatting on changed files**
+
+# gpt-5.3-codex_2026-03-01_1419_46
+
+I’m formatting the touched TypeScript files once before the final pass. That keeps the new parser and workspace changes consistent with the rest of the repo.
+
+**Rerunning tests to verify formatting**
+
+**Gathering code modification details**
+
+**Summarizing implemented plan and test coverage**
+
+# gpt-5.3-codex_2026-03-01_1420_32
+
+Implemented the remaining core pieces around live workspace registration.
+
+The parser now accepts alias suffixes as any non-space token and preserves alias case instead of lowercasing it, so folder-name aliases like `My.Proj` work as typed in chat commands such as `::record-My.Proj` ([command_detection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/command_detection.ts#L33), [command_detection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/policy/command_detection.ts#L72)). Workspace registration now persists a `workspaceId` into the workspace config and reuses it on later registration, which means moving a workspace and re-registering it updates the same registry entry instead of creating a new one ([workspace_register.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/workspace_register.ts#L28), [workspace_register.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/workspace_register.ts#L35), [registry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/workspace/registry.ts#L344), [registry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/workspace/registry.ts#L355)). I also fixed the CLI so `workspace init/register/list/unregister` opportunistically load the persisted runtime config when it exists, while still working without one; that makes them use the real `katoDir` and current write-root policy instead of guessed defaults ([router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/router.ts#L201), [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/router.ts#L313)).
+
+I added coverage for the new behavior in [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts#L538) and [workspace-registry_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-registry_test.ts#L72), and updated the parser / append-mode expectations in [command-detection_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/command-detection_test.ts) and [recording-pipeline_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/recording-pipeline_test.ts). I ran:
+`deno test --allow-read=. --allow-write=. tests/command-detection_test.ts tests/recording-pipeline_test.ts`
+`deno test --allow-read=. --allow-write=. tests/daemon-cli_test.ts tests/workspace-registry_test.ts`
+`deno test --allow-read=. --allow-write=. --no-run tests/daemon-runtime_test.ts`
+
+What is still not finished: the legacy `attach` / `attachments` / `detach` commands and old attach-era metadata fields are still present for compatibility, and I did not rewrite the old monolithic `daemon-runtime_test.ts` behavior cases to the new alias model yet; I only verified that file still compiles. The unrelated edits in [cancelled.2026.2026-02-28-session-attach.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/cancelled.2026.2026-02-28-session-attach.md), [conv.2026.2026-02-28-session-attach-implementation.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-02-28-session-attach-implementation.md), and [dev.todo.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.todo.md) were left untouched.
+
+1. Rewrite the targeted `daemon-runtime_test.ts` cases from `::init` / `::record` bare-command semantics to `::init-<alias>` / `::record-<alias>`.
+2. Remove or explicitly deprecate the old attach-era CLI once you’re ready to drop compatibility.
+
+# User_2026-03-01_1611_04
+
+Could you write the remaining work and any open questions to task.2026.2026-03-01-alias-finalization with checkboxes for to-do items, and an "open questions" section if there are any.
+
+**Inspecting current doc file**
+
+# gpt-5.3-codex_2026-03-01_1611_14
+
+I’m checking the new task note and the current workspace-alias note first so the follow-up list reflects what is still actually unfinished, not the earlier superseded plan.
+
+**Summarizing remaining work and open questions**
+**Planning alias metadata patch**
+
+# gpt-5.3-codex_2026-03-01_1611_38
+
+I have the current state. I’m writing a focused finalization note now: concrete remaining work with checkboxes, plus only the open questions that are still materially unresolved.
+
+**Confirming file update without tests**
+
+# gpt-5.3-codex_2026-03-01_1612_07
+
+Updated [task.2026.2026-03-01-alias-finalization.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-01-alias-finalization.md).
+
+It now includes a concrete **Remaining Work** section with checkbox to-dos for runtime-test rewrites, legacy attach cleanup, session-state migration, docs alignment, frontmatter coverage, and parity testing between persistent/non-persistent command paths, plus an **Open Questions** section covering `::init-<alias>`, attach-era compatibility, legacy format support, and the built-in default workspace alias.
+
+I did not run tests, since this was a note-only update.

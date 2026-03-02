@@ -42,6 +42,10 @@ import {
   runStartCommand,
   runStatusCommand,
   runStopCommand,
+  runWorkspaceInitCommand,
+  runWorkspaceListCommand,
+  runWorkspaceRegisterCommand,
+  runWorkspaceUnregisterCommand,
 } from "./commands/mod.ts";
 
 export interface RunDaemonCliOptions {
@@ -194,7 +198,13 @@ export async function runDaemonCli(
 
   let runtimeConfig = defaultRuntimeConfig;
   let autoInitializedConfigPath: string | undefined;
-  if (intent.command.name !== "init") {
+  const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
+    intent.command.name === "workspace-init" ||
+    intent.command.name === "workspace-register" ||
+    intent.command.name === "workspace-list" ||
+    intent.command.name === "workspace-unregister";
+  const commandShouldTryLoadingRuntimeConfig = intent.command.name !== "init";
+  if (commandShouldTryLoadingRuntimeConfig) {
     try {
       runtimeConfig = await configStore.load();
     } catch (error) {
@@ -218,7 +228,7 @@ export async function runDaemonCli(
               runtimeConfig = initialized.config;
             }
           }
-        } else {
+        } else if (!commandAllowsMissingRuntimeConfig) {
           runtime.writeStderr(
             `Runtime config not found at ${runtime.configPath}. Run \`kato init\` first.\n`,
           );
@@ -298,6 +308,21 @@ export async function runDaemonCli(
           intent.command.asJson,
           intent.command.all,
           intent.command.live,
+        );
+        return 0;
+      case "workspace-init":
+        await runWorkspaceInitCommand(commandContext, intent.command.dirPath);
+        return 0;
+      case "workspace-register":
+        await runWorkspaceRegisterCommand(commandContext, intent.command.alias);
+        return 0;
+      case "workspace-list":
+        await runWorkspaceListCommand(commandContext);
+        return 0;
+      case "workspace-unregister":
+        await runWorkspaceUnregisterCommand(
+          commandContext,
+          intent.command.selector,
         );
         return 0;
       case "attach":

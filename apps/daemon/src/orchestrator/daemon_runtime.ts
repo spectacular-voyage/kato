@@ -2,6 +2,7 @@ import type {
   ConversationEvent,
   DaemonSessionStatus,
   ProviderStatus,
+  RuntimeFeatureFlags,
   SessionMetadataV1,
   SessionWorkspaceAttachmentV1,
 } from "@kato/shared";
@@ -11,7 +12,7 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import { dirname, isAbsolute, join } from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -54,6 +55,15 @@ import {
   type PersistentSessionStateStore,
 } from "./session_state_store.ts";
 import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
+import {
+  type ResolvedWorkspaceProfile,
+  WorkspaceCatalog,
+  type WorkspaceCatalogLike,
+  WorkspaceProfileResolver,
+  type WorkspaceProfileResolverLike,
+  WorkspaceRegistryFileStore,
+  resolveDefaultWorkspaceRegistryPath,
+} from "../workspace/mod.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -80,6 +90,10 @@ export interface DaemonRuntimeLoopOptions {
   daemonMaxMemoryMb?: number;
   exportsLogPath?: string;
   cleanSessionStatesOnShutdown?: boolean;
+  runtimeFeatureFlags?: RuntimeFeatureFlags;
+  workspaceRegistryStore?: WorkspaceRegistryFileStore;
+  workspaceCatalog?: WorkspaceCatalogLike;
+  workspaceProfileResolver?: WorkspaceProfileResolverLike;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
 }
@@ -126,6 +140,15 @@ interface SessionEventProcessingState {
   lastSeenFileModifiedAtMs?: number;
   primaryRecordingDestination?: string;
   destinationRecordingIds: Map<string, string>;
+  workspaceOutputs: Map<
+    string,
+    {
+      workspaceId: string;
+      currentResolvedPath: string;
+      desiredState: boolean;
+      recordingCycleId?: string;
+    }
+  >;
 }
 
 interface ProcessInChatRecordingUpdatesOptions {
@@ -136,6 +159,9 @@ interface ProcessInChatRecordingUpdatesOptions {
   auditLogger: AuditLogger;
   processEventsFromMs: number;
   now: () => Date;
+  runtimeFeatureFlags: RuntimeFeatureFlags;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
 
 interface ProcessPersistentRecordingUpdatesOptions {
@@ -145,6 +171,9 @@ interface ProcessPersistentRecordingUpdatesOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
+  runtimeFeatureFlags: RuntimeFeatureFlags;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -158,6 +187,9 @@ interface ApplyControlCommandsForEventOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
+  runtimeFeatureFlags: RuntimeFeatureFlags;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
 
 function makeSessionProcessingKey(provider: string, sessionId: string): string {
@@ -287,6 +319,9 @@ interface PersistentRecordingCommandContext {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
+  runtimeFeatureFlags: RuntimeFeatureFlags;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
 }
 
 interface InChatCommandBoundary {
@@ -333,6 +368,238 @@ function makeDefaultRecordingDestinationPath(
     sanitizeFilenamePart(provider)
   }-${shortSession}-${iso}.md`;
   return join(resolveDefaultRecordingRootDir(), fileName);
+}
+
+function readWorkspaceOutputs(
+  metadata: SessionMetadataV1,
+): NonNullable<SessionMetadataV1["workspaceOutputs"]> {
+  if (!metadata.workspaceOutputs) {
+    metadata.workspaceOutputs = [];
+  }
+  return metadata.workspaceOutputs;
+}
+
+function findWorkspaceOutput(
+  metadata: SessionMetadataV1,
+  workspaceId: string,
+): NonNullable<SessionMetadataV1["workspaceOutputs"]>[number] | undefined {
+  return readWorkspaceOutputs(metadata).find((entry) => entry.workspaceId === workspaceId);
+}
+
+function activeWorkspaceOutputs(
+  metadata: SessionMetadataV1,
+): NonNullable<SessionMetadataV1["workspaceOutputs"]> {
+  return readWorkspaceOutputs(metadata).filter((entry) => entry.desiredState === "on");
+}
+
+function closeWorkspaceOutputCycle(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+  stopCursor: number,
+  nowIso: string,
+): boolean {
+  const cycleId = output.activeRecordingCycleId;
+  if (!cycleId) {
+    return false;
+  }
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (!cycle || cycle.recordingCycleId !== cycleId || cycle.stoppedCursor !== undefined) {
+      continue;
+    }
+    cycle.stoppedCursor = stopCursor;
+    cycle.stoppedAt = nowIso;
+    cycle.stoppedBySeq = stopCursor;
+    break;
+  }
+  delete output.activeRecordingCycleId;
+  output.desiredState = "off";
+  return true;
+}
+
+function stopAllWorkspaceOutputs(
+  metadata: SessionMetadataV1,
+  stopCursor: number,
+  nowIso: string,
+): string[] {
+  const changed: string[] = [];
+  for (const output of readWorkspaceOutputs(metadata)) {
+    if (closeWorkspaceOutputCycle(output, stopCursor, nowIso)) {
+      changed.push(output.workspaceId);
+    }
+  }
+  return changed;
+}
+
+function openWorkspaceOutputCycle(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+  startCursor: number,
+  nowIso: string,
+): string {
+  const recordingCycleId = crypto.randomUUID();
+  output.recordingCycles.push({
+    recordingCycleId,
+    startedCursor: startCursor,
+    startedAt: nowIso,
+    startedBySeq: startCursor,
+  });
+  output.activeRecordingCycleId = recordingCycleId;
+  output.desiredState = "on";
+  return recordingCycleId;
+}
+
+function applyWorkspaceProfileSnapshot(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+  profile: ResolvedWorkspaceProfile,
+): void {
+  output.workspaceAliasSnapshot = profile.alias;
+  output.sourceConfigPath = profile.configPath;
+  output.workspaceRootSnapshot = profile.workspaceRoot;
+  output.resolvedDefaultOutputDir = profile.resolvedDefaultOutputDir;
+  output.filenameTemplate = profile.filenameTemplate;
+  output.writerFeatureFlags = { ...profile.writerFeatureFlags };
+}
+
+function createWorkspaceOutputState(options: {
+  profile: ResolvedWorkspaceProfile;
+  binding: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number]["currentDestination"];
+  resolvedPath: string;
+  desiredState: "on" | "off";
+  writeCursor: number;
+  nowIso: string;
+}): NonNullable<SessionMetadataV1["workspaceOutputs"]>[number] {
+  return {
+    workspaceId: options.profile.workspaceId,
+    workspaceAliasSnapshot: options.profile.alias,
+    desiredState: options.desiredState,
+    currentDestination: options.binding,
+    currentResolvedPath: options.resolvedPath,
+    sourceConfigPath: options.profile.configPath,
+    workspaceRootSnapshot: options.profile.workspaceRoot,
+    resolvedDefaultOutputDir: options.profile.resolvedDefaultOutputDir,
+    filenameTemplate: options.profile.filenameTemplate,
+    writerFeatureFlags: { ...options.profile.writerFeatureFlags },
+    writeCursor: options.writeCursor,
+    createdAt: options.nowIso,
+    recordingCycles: [],
+  };
+}
+
+function renderWorkspaceFilename(
+  profile: ResolvedWorkspaceProfile,
+  provider: string,
+  sessionId: string,
+  now: Date,
+): string {
+  const tokens: Record<string, string> = {
+    provider: sanitizeFilenamePart(provider),
+    sessionId: sanitizeFilenamePart(sessionId),
+    sessionShortId: sanitizeFilenamePart(sessionId.slice(0, 8)),
+    timestampUtc: now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"),
+  };
+  let rendered = profile.filenameTemplate;
+  for (const [token, replacement] of Object.entries(tokens)) {
+    rendered = rendered.replaceAll(`{${token}}`, replacement);
+  }
+  const normalized = rendered
+    .replace(/[\\/]+/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized.length > 0
+    ? normalized
+    : `${tokens.provider}-${tokens.sessionShortId}-${tokens.timestampUtc}.md`;
+}
+
+async function isDirectoryTargetPath(path: string): Promise<boolean> {
+  if (path.endsWith("/") || path.endsWith("\\")) {
+    return true;
+  }
+  try {
+    const stat = await Deno.stat(path);
+    return stat.isDirectory;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function toWorkspaceDestinationBinding(
+  profile: ResolvedWorkspaceProfile,
+  resolvedPath: string,
+): NonNullable<SessionMetadataV1["workspaceOutputs"]>[number]["currentDestination"] {
+  const rel = relative(resolve(profile.workspaceRoot), resolve(resolvedPath));
+  if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
+    return {
+      kind: "workspace-relative",
+      relativePathFromWorkspaceRoot: rel,
+    };
+  }
+  if (rel === "") {
+    return {
+      kind: "workspace-relative",
+      relativePathFromWorkspaceRoot: ".",
+    };
+  }
+  return {
+    kind: "absolute-explicit",
+    absolutePath: resolve(resolvedPath),
+  };
+}
+
+async function resolveWorkspaceCommandDestination(options: {
+  profile: ResolvedWorkspaceProfile;
+  provider: string;
+  sessionId: string;
+  rawArgument?: string;
+  now: Date;
+}): Promise<{
+  resolvedPath: string;
+  binding: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number]["currentDestination"];
+}> {
+  const normalized = normalizeRawCommandTargetPath(options.rawArgument);
+  if (!normalized) {
+    const generated = join(
+      options.profile.resolvedDefaultOutputDir,
+      renderWorkspaceFilename(
+        options.profile,
+        options.provider,
+        options.sessionId,
+        options.now,
+      ),
+    );
+    return {
+      resolvedPath: generated,
+      binding: toWorkspaceDestinationBinding(options.profile, generated),
+    };
+  }
+  if (normalized.startsWith("@")) {
+    throw new Error("Path argument must be a filesystem path (mentions are not allowed)");
+  }
+  const resolvedBase = isAbsolute(normalized)
+    ? resolve(normalized)
+    : resolve(options.profile.workspaceRoot, normalized);
+  const resolvedPath = await isDirectoryTargetPath(resolvedBase)
+    ? join(
+      resolvedBase,
+      renderWorkspaceFilename(
+        options.profile,
+        options.provider,
+        options.sessionId,
+        options.now,
+      ),
+    )
+    : resolvedBase;
+  return {
+    resolvedPath,
+    binding: isAbsolute(normalized)
+      ? {
+        kind: "absolute-explicit",
+        absolutePath: resolvedPath,
+      }
+      : toWorkspaceDestinationBinding(options.profile, resolvedPath),
+  };
 }
 
 function readCommandCursor(metadata: SessionMetadataV1): number {
@@ -624,9 +891,10 @@ async function prepareInitDestination(
   provider: string,
   providerSessionId: string,
   boundaryEvents: ConversationEvent[],
-  recordingId: string,
+  recordingCycleId: string,
   recordingPipeline: RecordingPipelineLike,
   now: () => Date,
+  workspaceId?: string,
 ): Promise<void> {
   await Deno.mkdir(dirname(destination), { recursive: true });
   try {
@@ -664,8 +932,9 @@ async function prepareInitDestination(
   const frontmatter = renderFrontmatter({
     title,
     now: now(),
-    sessionId: providerSessionId,
-    recordingIds: [recordingId],
+    sessionIds: [providerSessionId],
+    ...(workspaceId ? { workspaceIds: [workspaceId] } : {}),
+    recordingCycleIds: [recordingCycleId],
     participants,
     conversationEventKinds,
     includeUpdated: frontmatterSettings.includeUpdatedInFrontmatter,
@@ -810,6 +1079,41 @@ async function logInvalidTargetForCommand(options: {
   );
 }
 
+async function logMissingWorkspaceForCommand(options: {
+  provider: string;
+  sessionId: string;
+  eventId: string;
+  command: string;
+  alias: string;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+}): Promise<void> {
+  const { provider, sessionId, eventId, command, alias, operationalLogger, auditLogger } =
+    options;
+  await operationalLogger.warn(
+    "recording.command.workspace_missing",
+    "Skipping in-chat control command because workspace alias is not registered",
+    {
+      provider,
+      sessionId,
+      eventId,
+      command,
+      alias,
+    },
+  );
+  await auditLogger.record(
+    "recording.command.workspace_missing",
+    "In-chat control command workspace alias not registered",
+    {
+      provider,
+      sessionId,
+      eventId,
+      command,
+      alias,
+    },
+  );
+}
+
 async function applyPersistentControlCommandsForEvent(
   ctx: PersistentRecordingCommandContext,
 ): Promise<boolean> {
@@ -825,6 +1129,9 @@ async function applyPersistentControlCommandsForEvent(
     operationalLogger,
     auditLogger,
     now,
+    runtimeFeatureFlags,
+    workspaceCatalog,
+    workspaceProfileResolver,
   } = ctx;
 
   const detection = detectInChatControlCommands(event.content);
@@ -883,122 +1190,255 @@ async function applyPersistentControlCommandsForEvent(
     let loggedTargetPath: string | undefined;
 
     try {
-      if (command.name === "init") {
-        const explicit = command.argument
-          ? resolveExplicitAbsolutePathArgument(command.argument)
-          : undefined;
-        if (command.argument && !explicit?.path) {
-          await logInvalidTargetForCommand({
+      if (!command.alias) {
+        const nowIso = now().toISOString();
+        const stoppedOutputs = stopAllWorkspaceOutputs(
+          metadata,
+          writeCursor,
+          nowIso,
+        );
+        const stoppedLegacy = deactivateActiveRecordings(
+          metadata,
+          writeCursor,
+          nowIso,
+        );
+        if (stoppedOutputs.length === 0 && stoppedLegacy.length === 0) {
+          commandNoop = true;
+        } else {
+          metadataChanged = true;
+        }
+      } else {
+        const workspace = await workspaceCatalog.getByAlias(command.alias);
+        if (!workspace) {
+          await logMissingWorkspaceForCommand({
             provider,
             sessionId: providerSessionId,
             eventId: event.eventId,
-            command: command.name,
-            rawArgument: command.argument,
-            reason: explicit?.reason ?? "Path argument is invalid",
+            command: command.verb,
+            alias: command.alias,
             operationalLogger,
             auditLogger,
           });
           continue;
         }
-        const destination = explicit?.path ??
-          resolvePrimaryDestination(
+
+        const profile = await workspaceProfileResolver.resolveForCommand(
+          workspace,
+          runtimeFeatureFlags,
+        );
+        let output = findWorkspaceOutput(metadata, workspace.workspaceId);
+
+        if (command.verb === "stop") {
+          if (!output) {
+            commandNoop = true;
+          } else {
+            const stopped = closeWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            commandNoop = !stopped;
+            metadataChanged = stopped;
+          }
+        } else if (command.verb === "init") {
+          if (!command.argument && output) {
+            commandNoop = true;
+          } else {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId: providerSessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            const resolvedDestination = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              providerSessionId,
+              resolved.resolvedPath,
+              "init",
+            );
+            loggedTargetPath = resolvedDestination;
+            const initMarkerId = output?.activeRecordingCycleId ??
+              crypto.randomUUID();
+            if (!output) {
+              output = createWorkspaceOutputState({
+                profile,
+                binding: resolved.binding,
+                resolvedPath: resolvedDestination,
+                desiredState: "off",
+                writeCursor,
+                nowIso: now().toISOString(),
+              });
+              readWorkspaceOutputs(metadata).push(output);
+            } else {
+              closeWorkspaceOutputCycle(output, writeCursor, now().toISOString());
+              applyWorkspaceProfileSnapshot(output, profile);
+              output.currentDestination = resolved.binding;
+              output.currentResolvedPath = resolvedDestination;
+              output.writeCursor = writeCursor;
+              output.desiredState = "off";
+            }
+            const boundaryEvents = await resolveBoundaryEventsFromTwinStart(
+              metadata,
+              boundarySnapshot,
+              event,
+              command.line,
+              sessionStateStore,
+            );
+            await prepareInitDestination(
+              resolvedDestination,
+              provider,
+              providerSessionId,
+              boundaryEvents,
+              initMarkerId,
+              recordingPipeline,
+              now,
+              workspace.workspaceId,
+            );
+            metadataChanged = true;
+          }
+        } else if (command.verb === "record") {
+          let retargeted = false;
+          if (!output || command.argument) {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId: providerSessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            const resolvedDestination = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              providerSessionId,
+              resolved.resolvedPath,
+              "record",
+            );
+            loggedTargetPath = resolvedDestination;
+            if (!output) {
+              output = createWorkspaceOutputState({
+                profile,
+                binding: resolved.binding,
+                resolvedPath: resolvedDestination,
+                desiredState: "off",
+                writeCursor,
+                nowIso: now().toISOString(),
+              });
+              readWorkspaceOutputs(metadata).push(output);
+              metadataChanged = true;
+            } else if (output.currentResolvedPath !== resolvedDestination) {
+              closeWorkspaceOutputCycle(output, writeCursor, now().toISOString());
+              applyWorkspaceProfileSnapshot(output, profile);
+              output.currentDestination = resolved.binding;
+              output.currentResolvedPath = resolvedDestination;
+              output.writeCursor = writeCursor;
+              output.desiredState = "off";
+              retargeted = true;
+              metadataChanged = true;
+            }
+          }
+          if (!output) {
+            throw new Error("Workspace output state was not created");
+          }
+          if (!loggedTargetPath) {
+            loggedTargetPath = output.currentResolvedPath;
+          }
+          if (output.desiredState === "on" && !retargeted) {
+            commandNoop = true;
+          } else {
+            applyWorkspaceProfileSnapshot(output, profile);
+            const cycleId = openWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            const seedEvents = buildCommandSeedEvents(
+              event,
+              command.line,
+              boundary.lastLineInSegment,
+            );
+            if (seedEvents.length > 0) {
+              if (!recordingPipeline.appendToDestination) {
+                throw new Error(
+                  "Recording pipeline does not support appendToDestination",
+                );
+              }
+              await recordingPipeline.appendToDestination({
+                provider,
+                sessionId: providerSessionId,
+                targetPath: output.currentResolvedPath,
+                events: seedEvents,
+                title: boundarySnapshotTitle,
+                recordingId: cycleId,
+                recordingIds: [cycleId],
+                workspaceIds: [workspace.workspaceId],
+              });
+            }
+            output.writeCursor = writeCursor;
+            metadataChanged = true;
+          }
+        } else if (command.verb === "capture") {
+          let targetPath: string;
+          let stateChanged = false;
+          if (!command.argument && output) {
+            targetPath = output.currentResolvedPath;
+          } else {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId: providerSessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            targetPath = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              providerSessionId,
+              resolved.resolvedPath,
+              "capture",
+            );
+            if (!command.argument && !output) {
+              output = createWorkspaceOutputState({
+                profile,
+                binding: resolved.binding,
+                resolvedPath: targetPath,
+                desiredState: "off",
+                writeCursor,
+                nowIso: now().toISOString(),
+              });
+              readWorkspaceOutputs(metadata).push(output);
+              stateChanged = true;
+            }
+          }
+          loggedTargetPath = targetPath;
+          const captureEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
-            provider,
-            metadata.sessionId,
-            now,
-          );
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          providerSessionId,
-          destination,
-          "init",
-        );
-        loggedTargetPath = resolvedDestination;
-        const nowIso = now().toISOString();
-        const existing = findRecordingByDestination(
-          metadata,
-          resolvedDestination,
-        );
-        const pending = existing ?? createDestinationRecording(
-          resolvedDestination,
-          writeCursor,
-          nowIso,
-        );
-        const boundaryEvents = await resolveBoundaryEventsFromTwinStart(
-          metadata,
-          boundarySnapshot,
-          event,
-          command.line,
-          sessionStateStore,
-        );
-        await prepareInitDestination(
-          resolvedDestination,
-          provider,
-          providerSessionId,
-          boundaryEvents,
-          pending.recordingId,
-          recordingPipeline,
-          now,
-        );
-        const deactivated = deactivateActiveRecordings(
-          metadata,
-          writeCursor,
-          nowIso,
-        );
-        const previousPointer = normalizePrimaryDestination(metadata);
-        if (!existing) {
-          metadata.recordings.push(pending);
-        }
-        pending.desiredState = "off";
-        pending.writeCursor = writeCursor;
-        setPrimaryDestination(metadata, resolvedDestination);
-        if (
-          deactivated.length > 0 ||
-          !existing ||
-          previousPointer !== resolvedDestination
-        ) {
-          metadataChanged = true;
-        }
-      } else if (command.name === "record") {
-        const destination = resolvePrimaryDestination(
-          metadata,
-          provider,
-          metadata.sessionId,
-          now,
-        );
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          providerSessionId,
-          destination,
-          "record",
-        );
-        loggedTargetPath = resolvedDestination;
-        const existing = findRecordingByDestination(
-          metadata,
-          resolvedDestination,
-        );
-        const active = activeSessionRecordings(metadata);
-        const activeOnResolvedDestination = active.some((entry) =>
-          entry.destination === resolvedDestination
-        );
-        if (activeOnResolvedDestination) {
-          setPrimaryDestination(metadata, resolvedDestination);
-          commandNoop = true;
-        } else {
-          const nowIso = now().toISOString();
-          const pending = existing ?? createDestinationRecording(
-            resolvedDestination,
-            writeCursor,
-            nowIso,
-          );
-          const seedEvents = buildCommandSeedEvents(
+            boundarySnapshot,
             event,
             command.line,
+            sessionStateStore,
+          );
+          const captureTitle = resolveConversationTitle(
+            captureEvents,
+            providerSessionId,
+          );
+          const currentCycleId = output?.activeRecordingCycleId;
+          await recordingPipeline.captureSnapshot({
+            provider,
+            sessionId: providerSessionId,
+            targetPath,
+            events: captureEvents,
+            title: captureTitle,
+            recordingIds: currentCycleId ? [currentCycleId] : undefined,
+            workspaceIds: [workspace.workspaceId],
+          });
+          const continuationEvents = buildCommandSeedEvents(
+            event,
+            command.line + 1,
             boundary.lastLineInSegment,
           );
-          if (seedEvents.length > 0) {
+          if (continuationEvents.length > 0) {
             if (!recordingPipeline.appendToDestination) {
               throw new Error(
                 "Recording pipeline does not support appendToDestination",
@@ -1007,189 +1447,50 @@ async function applyPersistentControlCommandsForEvent(
             await recordingPipeline.appendToDestination({
               provider,
               sessionId: providerSessionId,
-              targetPath: resolvedDestination,
-              events: seedEvents,
-              title: boundarySnapshotTitle,
-              recordingId: pending.recordingId,
-              recordingIds: listRecordingIdsForDestination(
-                metadata,
-                resolvedDestination,
-                pending,
-              ),
+              targetPath,
+              events: continuationEvents,
+              title: captureTitle,
+              ...(currentCycleId ? { recordingId: currentCycleId } : {}),
+              recordingIds: currentCycleId ? [currentCycleId] : undefined,
+              workspaceIds: [workspace.workspaceId],
             });
           }
-          deactivateActiveRecordings(metadata, writeCursor, nowIso);
-          if (!existing) {
-            metadata.recordings.push(pending);
-          }
-          pending.desiredState = "on";
-          pending.writeCursor = writeCursor;
-          setPrimaryDestination(metadata, resolvedDestination);
-          openRecordingPeriod(
-            metadata,
-            pending.recordingId,
-            writeCursor,
-            nowIso,
-            writeCursor,
-          );
-          metadataChanged = true;
-        }
-      } else if (command.name === "capture") {
-        const explicit = command.argument
-          ? resolveExplicitAbsolutePathArgument(command.argument)
-          : undefined;
-        if (command.argument && !explicit?.path) {
-          await logInvalidTargetForCommand({
+          metadataChanged = metadataChanged || stateChanged;
+        } else if (command.verb === "export") {
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
             provider,
             sessionId: providerSessionId,
-            eventId: event.eventId,
-            command: command.name,
             rawArgument: command.argument,
-            reason: explicit?.reason ?? "Path argument is invalid",
-            operationalLogger,
-            auditLogger,
+            now: now(),
           });
-          continue;
-        }
-        const destination = explicit?.path ??
-          resolvePrimaryDestination(
+          const targetPath = await validateDestinationPathForCommand(
+            recordingPipeline,
+            provider,
+            providerSessionId,
+            resolved.resolvedPath,
+            "export",
+          );
+          loggedTargetPath = targetPath;
+          const exportEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
-            provider,
-            metadata.sessionId,
-            now,
+            boundarySnapshot,
+            event,
+            command.line,
+            sessionStateStore,
           );
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          providerSessionId,
-          destination,
-          "capture",
-        );
-        loggedTargetPath = resolvedDestination;
-        const nowIso = now().toISOString();
-        const existing = findRecordingByDestination(
-          metadata,
-          resolvedDestination,
-        );
-        const pending = existing ?? createDestinationRecording(
-          resolvedDestination,
-          writeCursor,
-          nowIso,
-        );
-        const captureEvents = await resolveBoundaryEventsFromTwinStart(
-          metadata,
-          boundarySnapshot,
-          event,
-          command.line,
-          sessionStateStore,
-        );
-        const captureTitle = resolveConversationTitle(
-          captureEvents,
-          providerSessionId,
-        );
-        await recordingPipeline.captureSnapshot({
-          provider,
-          sessionId: providerSessionId,
-          targetPath: resolvedDestination,
-          events: captureEvents,
-          title: captureTitle,
-          recordingIds: [pending.recordingId],
-        });
-        const continuationEvents = buildCommandSeedEvents(
-          event,
-          command.line + 1,
-          boundary.lastLineInSegment,
-        );
-        if (continuationEvents.length > 0) {
-          if (!recordingPipeline.appendToDestination) {
-            throw new Error(
-              "Recording pipeline does not support appendToDestination",
-            );
-          }
-          await recordingPipeline.appendToDestination({
+          const snapshotTitle = resolveConversationTitle(
+            exportEvents,
+            providerSessionId,
+          );
+          await recordingPipeline.exportSnapshot({
             provider,
             sessionId: providerSessionId,
-            targetPath: resolvedDestination,
-            events: continuationEvents,
-            title: captureTitle,
-            recordingId: pending.recordingId,
-            recordingIds: listRecordingIdsForDestination(
-              metadata,
-              resolvedDestination,
-              pending,
-            ),
+            targetPath,
+            events: exportEvents,
+            title: snapshotTitle,
+            workspaceIds: [workspace.workspaceId],
           });
-        }
-        deactivateActiveRecordings(metadata, writeCursor, nowIso);
-        if (!existing) {
-          metadata.recordings.push(pending);
-        }
-        pending.desiredState = "on";
-        pending.writeCursor = writeCursor;
-        setPrimaryDestination(metadata, resolvedDestination);
-        openRecordingPeriod(
-          metadata,
-          pending.recordingId,
-          writeCursor,
-          nowIso,
-          writeCursor,
-        );
-        metadataChanged = true;
-      } else if (command.name === "export") {
-        const explicit = resolveExplicitAbsolutePathArgument(command.argument);
-        if (!explicit.path) {
-          await logInvalidTargetForCommand({
-            provider,
-            sessionId: providerSessionId,
-            eventId: event.eventId,
-            command: command.name,
-            rawArgument: command.argument,
-            reason: explicit.reason ?? "Path argument is invalid",
-            operationalLogger,
-            auditLogger,
-          });
-          continue;
-        }
-        loggedTargetPath = explicit.path;
-        const exportEvents = await resolveBoundaryEventsFromTwinStart(
-          metadata,
-          boundarySnapshot,
-          event,
-          command.line,
-          sessionStateStore,
-        );
-        const snapshotTitle = resolveConversationTitle(
-          exportEvents,
-          providerSessionId,
-        );
-        await recordingPipeline.exportSnapshot({
-          provider,
-          sessionId: providerSessionId,
-          targetPath: explicit.path,
-          events: exportEvents,
-          title: snapshotTitle,
-        });
-      } else if (command.name === "stop") {
-        const nowIso = now().toISOString();
-        const deactivated = deactivateActiveRecordings(
-          metadata,
-          writeCursor,
-          nowIso,
-        );
-        if (deactivated.length === 0) {
-          commandNoop = true;
-        } else {
-          metadataChanged = true;
-          await auditLogger.record(
-            "recording.command.stop.applied",
-            "Stopped active recording targets",
-            {
-              provider,
-              sessionId: providerSessionId,
-              eventId: event.eventId,
-              targets: deactivated,
-            },
-          );
         }
       }
 
@@ -1250,6 +1551,9 @@ async function applyControlCommandsForEvent(
     operationalLogger,
     auditLogger,
     now,
+    runtimeFeatureFlags,
+    workspaceCatalog,
+    workspaceProfileResolver,
   } = options;
 
   const detection = detectInChatControlCommands(event.content);
@@ -1306,185 +1610,242 @@ async function applyControlCommandsForEvent(
     let commandNoop = false;
 
     try {
-      if (command.name === "init") {
-        const explicit = command.argument
-          ? resolveExplicitAbsolutePathArgument(command.argument)
-          : undefined;
-        if (command.argument && !explicit?.path) {
-          await logInvalidTargetForCommand({
+      if (!command.alias) {
+        const stoppedLegacy = recordingPipeline.stopRecording(provider, sessionId);
+        let stoppedWorkspace = false;
+        for (const [workspaceId, state] of sessionEventState.workspaceOutputs) {
+          if (!state.desiredState) {
+            continue;
+          }
+          if (recordingPipeline.stopRecording(provider, sessionId, workspaceId)) {
+            stoppedWorkspace = true;
+          }
+          state.desiredState = false;
+          delete state.recordingCycleId;
+        }
+        commandNoop = !stoppedLegacy && !stoppedWorkspace;
+      } else {
+        const workspace = await workspaceCatalog.getByAlias(command.alias);
+        if (!workspace) {
+          await logMissingWorkspaceForCommand({
             provider,
             sessionId,
             eventId: event.eventId,
-            command: command.name,
-            rawArgument: command.argument,
-            reason: explicit?.reason ?? "Path argument is invalid",
+            command: command.verb,
+            alias: command.alias,
             operationalLogger,
             auditLogger,
           });
           continue;
         }
-        const destination = explicit?.path ??
-          sessionEventState.primaryRecordingDestination ??
-          makeDefaultRecordingDestinationPath(provider, sessionId, now());
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          sessionId,
-          destination,
-          "init",
+        const profile = await workspaceProfileResolver.resolveForCommand(
+          workspace,
+          runtimeFeatureFlags,
         );
-        let recordingId = sessionEventState.destinationRecordingIds.get(
-          resolvedDestination,
+        const existingState = sessionEventState.workspaceOutputs.get(
+          workspace.workspaceId,
         );
-        if (!recordingId) {
-          recordingId = crypto.randomUUID();
-          sessionEventState.destinationRecordingIds.set(
-            resolvedDestination,
-            recordingId,
-          );
-        }
-        await prepareInitDestination(
-          resolvedDestination,
-          provider,
-          sessionId,
-          boundarySnapshot,
-          recordingId,
-          recordingPipeline,
-          now,
-        );
-        sessionEventState.primaryRecordingDestination = resolvedDestination;
-        loggedTargetPath = resolvedDestination;
-        recordingPipeline.stopRecording(provider, sessionId);
-      } else if (command.name === "record") {
-        const destination = sessionEventState.primaryRecordingDestination ??
-          makeDefaultRecordingDestinationPath(provider, sessionId, now());
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          sessionId,
-          destination,
-          "record",
-        );
-        loggedTargetPath = resolvedDestination;
-        const active = recordingPipeline.getActiveRecording(
-          provider,
-          sessionId,
-        );
-        const activeOnResolvedDestination = active &&
-          active.outputPath === resolvedDestination;
-        const existingRecordingId = sessionEventState.destinationRecordingIds
-          .get(
-            resolvedDestination,
-          );
-        const recordingIdToUse = existingRecordingId ??
-          (activeOnResolvedDestination ? active.recordingId : undefined) ??
-          crypto.randomUUID();
-        if (!existingRecordingId) {
-          sessionEventState.destinationRecordingIds.set(
-            resolvedDestination,
-            recordingIdToUse,
-          );
-        }
-        if (activeOnResolvedDestination) {
-          commandNoop = true;
-        } else {
-          const seedEvents = buildCommandSeedEvents(
-            event,
-            command.line,
-            boundary.lastLineInSegment,
-          );
-          await recordingPipeline.activateRecording({
+
+        if (command.verb === "stop") {
+          const stopped = existingState?.desiredState
+            ? recordingPipeline.stopRecording(
+              provider,
+              sessionId,
+              workspace.workspaceId,
+            )
+            : false;
+          if (existingState) {
+            existingState.desiredState = false;
+            delete existingState.recordingCycleId;
+          }
+          commandNoop = !stopped;
+        } else if (command.verb === "init") {
+          if (!command.argument && existingState) {
+            commandNoop = true;
+          } else {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            const resolvedDestination = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              sessionId,
+              resolved.resolvedPath,
+              "init",
+            );
+            loggedTargetPath = resolvedDestination;
+            const recordingCycleId = existingState?.recordingCycleId ??
+              crypto.randomUUID();
+            await prepareInitDestination(
+              resolvedDestination,
+              provider,
+              sessionId,
+              boundarySnapshot,
+              recordingCycleId,
+              recordingPipeline,
+              now,
+              workspace.workspaceId,
+            );
+            if (existingState?.desiredState) {
+              recordingPipeline.stopRecording(provider, sessionId, workspace.workspaceId);
+            }
+            sessionEventState.workspaceOutputs.set(workspace.workspaceId, {
+              workspaceId: workspace.workspaceId,
+              currentResolvedPath: resolvedDestination,
+              desiredState: false,
+            });
+          }
+        } else if (command.verb === "record") {
+          let resolvedDestination = existingState?.currentResolvedPath;
+          if (!existingState || command.argument) {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            resolvedDestination = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              sessionId,
+              resolved.resolvedPath,
+              "record",
+            );
+          }
+          if (!resolvedDestination) {
+            throw new Error("Unable to resolve workspace recording destination");
+          }
+          loggedTargetPath = resolvedDestination;
+          const state = existingState ?? {
+            workspaceId: workspace.workspaceId,
+            currentResolvedPath: resolvedDestination,
+            desiredState: false,
+          };
+          const activeSameDestination = state.desiredState &&
+            state.currentResolvedPath === resolvedDestination;
+          if (activeSameDestination) {
+            commandNoop = true;
+          } else {
+            if (state.desiredState) {
+              recordingPipeline.stopRecording(provider, sessionId, workspace.workspaceId);
+            }
+            const recordingCycleId = crypto.randomUUID();
+            const seedEvents = buildCommandSeedEvents(
+              event,
+              command.line,
+              boundary.lastLineInSegment,
+            );
+            await recordingPipeline.activateRecording({
+              provider,
+              sessionId,
+              recordingKey: workspace.workspaceId,
+              targetPath: resolvedDestination,
+              seedEvents,
+              title: recordingTitle,
+              recordingId: recordingCycleId,
+              workspaceIds: [workspace.workspaceId],
+            });
+            state.currentResolvedPath = resolvedDestination;
+            state.desiredState = true;
+            state.recordingCycleId = recordingCycleId;
+            sessionEventState.workspaceOutputs.set(workspace.workspaceId, state);
+          }
+        } else if (command.verb === "capture") {
+          let resolvedDestination = existingState?.currentResolvedPath;
+          if (!existingState || command.argument) {
+            const resolved = await resolveWorkspaceCommandDestination({
+              profile,
+              provider,
+              sessionId,
+              rawArgument: command.argument,
+              now: now(),
+            });
+            resolvedDestination = await validateDestinationPathForCommand(
+              recordingPipeline,
+              provider,
+              sessionId,
+              resolved.resolvedPath,
+              "capture",
+            );
+          }
+          if (!resolvedDestination) {
+            throw new Error("Unable to resolve workspace capture destination");
+          }
+          loggedTargetPath = resolvedDestination;
+          await recordingPipeline.captureSnapshot({
             provider,
             sessionId,
             targetPath: resolvedDestination,
-            seedEvents,
+            events: boundarySnapshot,
             title: recordingTitle,
-            recordingId: recordingIdToUse,
+            recordingIds: existingState?.recordingCycleId
+              ? [existingState.recordingCycleId]
+              : undefined,
+            workspaceIds: [workspace.workspaceId],
           });
-        }
-        sessionEventState.primaryRecordingDestination = resolvedDestination;
-      } else if (command.name === "capture") {
-        const explicit = command.argument
-          ? resolveExplicitAbsolutePathArgument(command.argument)
-          : undefined;
-        if (command.argument && !explicit?.path) {
-          await logInvalidTargetForCommand({
+          const continuationEvents = buildCommandSeedEvents(
+            event,
+            command.line + 1,
+            boundary.lastLineInSegment,
+          );
+          if (continuationEvents.length > 0) {
+            if (!recordingPipeline.appendToDestination) {
+              throw new Error(
+                "Recording pipeline does not support appendToDestination",
+              );
+            }
+            await recordingPipeline.appendToDestination({
+              provider,
+              sessionId,
+              targetPath: resolvedDestination,
+              events: continuationEvents,
+              title: recordingTitle,
+              ...(existingState?.recordingCycleId
+                ? { recordingId: existingState.recordingCycleId }
+                : {}),
+              recordingIds: existingState?.recordingCycleId
+                ? [existingState.recordingCycleId]
+                : undefined,
+              workspaceIds: [workspace.workspaceId],
+            });
+          }
+          if (!command.argument && !existingState) {
+            sessionEventState.workspaceOutputs.set(workspace.workspaceId, {
+              workspaceId: workspace.workspaceId,
+              currentResolvedPath: resolvedDestination,
+              desiredState: false,
+            });
+          }
+        } else if (command.verb === "export") {
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
             provider,
             sessionId,
-            eventId: event.eventId,
-            command: command.name,
             rawArgument: command.argument,
-            reason: explicit?.reason ?? "Path argument is invalid",
-            operationalLogger,
-            auditLogger,
+            now: now(),
           });
-          continue;
-        }
-        const destination = explicit?.path ??
-          sessionEventState.primaryRecordingDestination ??
-          makeDefaultRecordingDestinationPath(provider, sessionId, now());
-        const resolvedDestination = await validateDestinationPathForCommand(
-          recordingPipeline,
-          provider,
-          sessionId,
-          destination,
-          "capture",
-        );
-        loggedTargetPath = resolvedDestination;
-        const recordingId = crypto.randomUUID();
-        const existingRecordingId = sessionEventState.destinationRecordingIds
-          .get(
-            resolvedDestination,
-          );
-        const recordingIdToUse = existingRecordingId ?? recordingId;
-        if (!existingRecordingId) {
-          sessionEventState.destinationRecordingIds.set(
-            resolvedDestination,
-            recordingIdToUse,
-          );
-        }
-        await recordingPipeline.captureSnapshot({
-          provider,
-          sessionId,
-          targetPath: resolvedDestination,
-          events: boundarySnapshot,
-          title: recordingTitle,
-          recordingIds: [recordingIdToUse],
-        });
-        await recordingPipeline.activateRecording({
-          provider,
-          sessionId,
-          targetPath: resolvedDestination,
-          title: recordingTitle,
-          recordingId: recordingIdToUse,
-        });
-        sessionEventState.primaryRecordingDestination = resolvedDestination;
-      } else if (command.name === "export") {
-        const explicit = resolveExplicitAbsolutePathArgument(command.argument);
-        if (!explicit.path) {
-          await logInvalidTargetForCommand({
+          const targetPath = await validateDestinationPathForCommand(
+            recordingPipeline,
             provider,
             sessionId,
-            eventId: event.eventId,
-            command: command.name,
-            rawArgument: command.argument,
-            reason: explicit.reason ?? "Path argument is invalid",
-            operationalLogger,
-            auditLogger,
+            resolved.resolvedPath,
+            "export",
+          );
+          loggedTargetPath = targetPath;
+          await recordingPipeline.exportSnapshot({
+            provider,
+            sessionId,
+            targetPath,
+            events: boundarySnapshot,
+            title: recordingTitle,
+            workspaceIds: [workspace.workspaceId],
           });
-          continue;
         }
-        loggedTargetPath = explicit.path;
-        await recordingPipeline.exportSnapshot({
-          provider,
-          sessionId,
-          targetPath: explicit.path,
-          events: boundarySnapshot,
-          title: recordingTitle,
-        });
-      } else {
-        const stopped = recordingPipeline.stopRecording(provider, sessionId);
-        commandNoop = !stopped;
       }
 
       await operationalLogger.info(
@@ -1551,6 +1912,9 @@ async function processInChatRecordingUpdates(
     auditLogger,
     processEventsFromMs,
     now,
+    runtimeFeatureFlags,
+    workspaceCatalog,
+    workspaceProfileResolver,
   } = options;
 
   // Use metadata-only listing to avoid deep-cloning events for every session
@@ -1596,6 +1960,12 @@ async function processInChatRecordingUpdates(
       seenEventSignatures: new Set<string>(),
       lastSeenFileModifiedAtMs: currentFileModifiedAtMs,
       destinationRecordingIds: new Map<string, string>(),
+      workspaceOutputs: new Map<string, {
+        workspaceId: string;
+        currentResolvedPath: string;
+        desiredState: boolean;
+        recordingCycleId?: string;
+      }>(),
     };
     if (!existingState) {
       for (let i = 0; i < snapshot.events.length; i += 1) {
@@ -1638,6 +2008,9 @@ async function processInChatRecordingUpdates(
           operationalLogger,
           auditLogger,
           now,
+          runtimeFeatureFlags,
+          workspaceCatalog,
+          workspaceProfileResolver,
         });
       }
 
@@ -1648,6 +2021,22 @@ async function processInChatRecordingUpdates(
           events: [event],
           title: recordingTitle,
         });
+        for (const outputState of state.workspaceOutputs.values()) {
+          if (!outputState.desiredState) {
+            continue;
+          }
+          await recordingPipeline.appendToActiveRecording({
+            provider,
+            sessionId,
+            recordingKey: outputState.workspaceId,
+            events: [event],
+            title: recordingTitle,
+            recordingIds: outputState.recordingCycleId
+              ? [outputState.recordingCycleId]
+              : undefined,
+            workspaceIds: [outputState.workspaceId],
+          });
+        }
       } catch (error) {
         await operationalLogger.error(
           "recording.append.failed",
@@ -1694,6 +2083,18 @@ function readRecordingStartedAt(
   return recording.createdAt ?? "";
 }
 
+function readWorkspaceOutputStartedAt(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string {
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (cycle?.startedAt) {
+      return cycle.startedAt;
+    }
+  }
+  return output.createdAt ?? "";
+}
+
 async function processPersistentRecordingUpdates(
   options: ProcessPersistentRecordingUpdatesOptions,
 ): Promise<boolean> {
@@ -1704,6 +2105,9 @@ async function processPersistentRecordingUpdates(
     operationalLogger,
     auditLogger,
     now,
+    runtimeFeatureFlags,
+    workspaceCatalog,
+    workspaceProfileResolver,
   } = options;
 
   const snapshots = sessionSnapshotStore.listMetadataOnly
@@ -1767,6 +2171,9 @@ async function processPersistentRecordingUpdates(
         operationalLogger,
         auditLogger,
         now,
+        runtimeFeatureFlags,
+        workspaceCatalog,
+        workspaceProfileResolver,
       });
       metadataChanged = metadataChanged || changed;
     }
@@ -1840,6 +2247,70 @@ async function processPersistentRecordingUpdates(
       }
     }
 
+    const activeOutputs = activeWorkspaceOutputs(metadata);
+    for (const output of activeOutputs) {
+      const clampedCursor = Math.max(
+        0,
+        Math.min(output.writeCursor, snapshot.events.length),
+      );
+      if (clampedCursor !== output.writeCursor) {
+        output.writeCursor = clampedCursor;
+        metadataChanged = true;
+      }
+
+      const pendingEvents = snapshot.events.slice(clampedCursor);
+      if (pendingEvents.length === 0) {
+        continue;
+      }
+
+      try {
+        if (!recordingPipeline.appendToDestination) {
+          throw new Error(
+            "Recording pipeline does not support appendToDestination",
+          );
+        }
+        await recordingPipeline.appendToDestination({
+          provider,
+          sessionId: providerSessionId,
+          targetPath: output.currentResolvedPath,
+          events: pendingEvents,
+          title: recordingTitle,
+          ...(output.activeRecordingCycleId
+            ? { recordingId: output.activeRecordingCycleId }
+            : {}),
+          recordingIds: output.activeRecordingCycleId
+            ? [output.activeRecordingCycleId]
+            : undefined,
+          workspaceIds: [output.workspaceId],
+        });
+        output.writeCursor = snapshot.events.length;
+        metadataChanged = true;
+      } catch (error) {
+        await operationalLogger.error(
+          "recording.append.failed",
+          "Failed to append events to workspace-scoped recording destination",
+          {
+            provider,
+            sessionId: providerSessionId,
+            workspaceId: output.workspaceId,
+            destination: output.currentResolvedPath,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        await auditLogger.record(
+          "recording.append.failed",
+          "Failed to append events to workspace-scoped recording destination",
+          {
+            provider,
+            sessionId: providerSessionId,
+            workspaceId: output.workspaceId,
+            destination: output.currentResolvedPath,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
+
     if (metadataChanged) {
       await sessionStateStore.saveSessionMetadata(metadata);
       anyMetadataChanged = true;
@@ -1861,6 +2332,19 @@ function toActiveRecordingsFromMetadata(
         sessionId: metadata.providerSessionId,
         outputPath: recording.destination,
         startedAt: readRecordingStartedAt(recording) || metadata.updatedAt,
+        lastWriteAt: metadata.updatedAt,
+      });
+    }
+    for (const output of metadata.workspaceOutputs ?? []) {
+      if (output.desiredState !== "on") {
+        continue;
+      }
+      recordings.push({
+        recordingId: output.activeRecordingCycleId ?? output.workspaceId,
+        provider: metadata.provider,
+        sessionId: metadata.providerSessionId,
+        outputPath: output.currentResolvedPath,
+        startedAt: readWorkspaceOutputStartedAt(output) || metadata.updatedAt,
         lastWriteAt: metadata.updatedAt,
       });
     }
@@ -2168,6 +2652,14 @@ export async function runDaemonRuntimeLoop(
   const exportsLogPath = options.exportsLogPath;
   const cleanSessionStatesOnShutdown = options.cleanSessionStatesOnShutdown ??
     false;
+  const runtimeFeatureFlags = options.runtimeFeatureFlags ?? {
+    writerIncludeCommentary: true,
+    writerIncludeThinking: true,
+    writerIncludeToolCalls: true,
+    writerItalicizeUserMessages: false,
+    daemonExportEnabled: true,
+    captureIncludeSystemEvents: false,
+  };
   const daemonMaxMemoryBytes = (options.daemonMaxMemoryMb ?? 200) * 1024 *
     1024;
 
@@ -2190,6 +2682,12 @@ export async function runDaemonRuntimeLoop(
   const ingestionRunners = options.ingestionRunners ?? [];
   const sessionSnapshotStore = options.sessionSnapshotStore;
   const sessionStateStore = options.sessionStateStore;
+  const workspaceRegistryStore = options.workspaceRegistryStore ??
+    new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath());
+  const workspaceCatalog = options.workspaceCatalog ??
+    new WorkspaceCatalog(workspaceRegistryStore);
+  const workspaceProfileResolver = options.workspaceProfileResolver ??
+    new WorkspaceProfileResolver();
   const loadSessionSnapshot = options.loadSessionSnapshot ??
     (sessionSnapshotStore
       ? (sessionId: string) => {
@@ -2328,11 +2826,14 @@ export async function runDaemonRuntimeLoop(
             await processPersistentRecordingUpdates({
               sessionSnapshotStore,
               sessionStateStore,
-              recordingPipeline,
-              operationalLogger,
-              auditLogger,
-              now,
-            });
+            recordingPipeline,
+            operationalLogger,
+            auditLogger,
+            now,
+            runtimeFeatureFlags,
+            workspaceCatalog,
+            workspaceProfileResolver,
+          });
           sessionMetadataMayHaveChanged = sessionMetadataMayHaveChanged ||
             persistentUpdatesChanged;
         } else {
@@ -2344,6 +2845,9 @@ export async function runDaemonRuntimeLoop(
             auditLogger,
             processEventsFromMs,
             now,
+            runtimeFeatureFlags,
+            workspaceCatalog,
+            workspaceProfileResolver,
           });
         }
       } catch (error) {

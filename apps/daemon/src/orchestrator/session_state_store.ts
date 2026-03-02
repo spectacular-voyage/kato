@@ -153,6 +153,45 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
         },
       }
       : {}),
+    ...(metadata.workspaceOutputs
+      ? {
+        workspaceOutputs: metadata.workspaceOutputs.map((entry) => ({
+          workspaceId: entry.workspaceId,
+          ...(entry.workspaceAliasSnapshot
+            ? { workspaceAliasSnapshot: entry.workspaceAliasSnapshot }
+            : {}),
+          desiredState: entry.desiredState,
+          currentDestination: {
+            kind: entry.currentDestination.kind,
+            ...(entry.currentDestination.relativePathFromWorkspaceRoot
+              ? {
+                relativePathFromWorkspaceRoot:
+                  entry.currentDestination.relativePathFromWorkspaceRoot,
+              }
+              : {}),
+            ...(entry.currentDestination.absolutePath
+              ? { absolutePath: entry.currentDestination.absolutePath }
+              : {}),
+          },
+          currentResolvedPath: entry.currentResolvedPath,
+          ...(entry.sourceConfigPath
+            ? { sourceConfigPath: entry.sourceConfigPath }
+            : {}),
+          workspaceRootSnapshot: entry.workspaceRootSnapshot,
+          resolvedDefaultOutputDir: entry.resolvedDefaultOutputDir,
+          filenameTemplate: entry.filenameTemplate,
+          writerFeatureFlags: {
+            ...entry.writerFeatureFlags,
+          },
+          ...(entry.activeRecordingCycleId
+            ? { activeRecordingCycleId: entry.activeRecordingCycleId }
+            : {}),
+          writeCursor: entry.writeCursor,
+          ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
+          recordingCycles: entry.recordingCycles.map((cycle) => ({ ...cycle })),
+        })),
+      }
+      : {}),
     recordings: metadata.recordings.map((recording) => ({
       recordingId: recording.recordingId,
       destination: recording.destination,

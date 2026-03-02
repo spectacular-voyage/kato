@@ -27,7 +27,10 @@ export interface MarkdownRenderOptions {
   now?: () => Date;
   makeFrontmatterId?: (title: string) => string;
   frontmatterSessionId?: string;
+  frontmatterSessionIds?: string[];
+  frontmatterWorkspaceIds?: string[];
   frontmatterRecordingIds?: string[];
+  frontmatterRecordingCycleIds?: string[];
   frontmatterParticipants?: string[];
   frontmatterTags?: string[];
   frontmatterConversationEventKinds?: string[];
@@ -198,7 +201,10 @@ export function renderEventsToMarkdown(
         now: options.now?.() ?? new Date(),
         makeFrontmatterId: options.makeFrontmatterId,
         sessionId: options.frontmatterSessionId,
+        sessionIds: options.frontmatterSessionIds,
+        workspaceIds: options.frontmatterWorkspaceIds,
         recordingIds: options.frontmatterRecordingIds,
+        recordingCycleIds: options.frontmatterRecordingCycleIds,
         participants: options.frontmatterParticipants,
         tags: options.frontmatterTags,
         conversationEventKinds: options.frontmatterConversationEventKinds,
@@ -480,14 +486,20 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
 
     const existingFrontmatterView = splitExistingFrontmatter(existing.content);
     const shouldMergeFrontmatter = existingFrontmatterView &&
-      ((options.frontmatterRecordingIds?.length ?? 0) > 0 ||
+      ((options.frontmatterSessionIds?.length ?? 0) > 0 ||
+        (options.frontmatterWorkspaceIds?.length ?? 0) > 0 ||
+        (options.frontmatterRecordingIds?.length ?? 0) > 0 ||
+        (options.frontmatterRecordingCycleIds?.length ?? 0) > 0 ||
         (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0);
     const nextFrontmatter = shouldMergeFrontmatter
       ? mergeAccretiveFrontmatterFields({
         frontmatter: existingFrontmatterView.frontmatter,
+        sessionIds: options.frontmatterSessionIds,
+        workspaceIds: options.frontmatterWorkspaceIds,
         recordingIds: options.frontmatterRecordingIds,
+        recordingCycleIds: options.frontmatterRecordingCycleIds,
         participants: options.frontmatterParticipants,
         tags: options.frontmatterTags,
         conversationEventKinds: options.frontmatterConversationEventKinds,
@@ -575,15 +587,22 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     const existingFrontmatter = await extractExistingFrontmatter(outputPath);
     if (existingFrontmatter) {
       const hasAccretiveInputs =
+        (options.frontmatterSessionIds?.length ?? 0) >
+            0 ||
+        (options.frontmatterWorkspaceIds?.length ?? 0) > 0 ||
         (options.frontmatterRecordingIds?.length ?? 0) >
           0 ||
+        (options.frontmatterRecordingCycleIds?.length ?? 0) > 0 ||
         (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0;
       const mergedFrontmatter = hasAccretiveInputs
         ? mergeAccretiveFrontmatterFields({
           frontmatter: existingFrontmatter,
+          sessionIds: options.frontmatterSessionIds,
+          workspaceIds: options.frontmatterWorkspaceIds,
           recordingIds: options.frontmatterRecordingIds,
+          recordingCycleIds: options.frontmatterRecordingCycleIds,
           participants: options.frontmatterParticipants,
           tags: options.frontmatterTags,
           conversationEventKinds: options.frontmatterConversationEventKinds,

@@ -35,11 +35,13 @@ export interface ActiveRecording {
 export interface ActivateRecordingInput {
   provider: string;
   sessionId: string;
+  recordingKey?: string;
   targetPath: string;
   seedEvents?: ConversationEvent[];
   title?: string;
   recordingId?: string;
   recordingIds?: string[];
+  workspaceIds?: string[];
 }
 
 export interface SnapshotExportInput {
@@ -49,6 +51,7 @@ export interface SnapshotExportInput {
   events: ConversationEvent[];
   title?: string;
   recordingIds?: string[];
+  workspaceIds?: string[];
   format?: ExportFormat;
 }
 
@@ -61,9 +64,11 @@ export interface SnapshotExportResult {
 export interface AppendToActiveRecordingInput {
   provider: string;
   sessionId: string;
+  recordingKey?: string;
   events: ConversationEvent[];
   title?: string;
   recordingIds?: string[];
+  workspaceIds?: string[];
 }
 
 export interface AppendToDestinationInput {
@@ -74,6 +79,7 @@ export interface AppendToDestinationInput {
   title?: string;
   recordingId?: string;
   recordingIds?: string[];
+  workspaceIds?: string[];
 }
 
 export interface ValidateDestinationPathInput {
@@ -104,10 +110,11 @@ export interface RecordingPipelineLike {
   validateDestinationPath?(
     input: ValidateDestinationPathInput,
   ): Promise<string>;
-  stopRecording(provider: string, sessionId: string): boolean;
+  stopRecording(provider: string, sessionId: string, recordingKey?: string): boolean;
   getActiveRecording(
     provider: string,
     sessionId: string,
+    recordingKey?: string,
   ): ActiveRecording | undefined;
   listActiveRecordings(): ActiveRecording[];
   getRecordingSummary(): RecordingSummary;
@@ -166,8 +173,14 @@ function makeNoopAuditLogger(now: () => Date): AuditLogger {
   );
 }
 
-function makeSessionKey(provider: string, sessionId: string): string {
-  return `${provider}\u0000${sessionId}`;
+function makeSessionKey(
+  provider: string,
+  sessionId: string,
+  recordingKey?: string,
+): string {
+  return recordingKey
+    ? `${provider}\u0000${sessionId}\u0000${recordingKey}`
+    : `${provider}\u0000${sessionId}`;
 }
 
 function cloneRecording(recording: ActiveRecording): ActiveRecording {
@@ -237,7 +250,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
     });
     const outputPath = decision.canonicalTargetPath ?? input.targetPath;
     const nowIso = this.now().toISOString();
-    const sessionKey = makeSessionKey(input.provider, input.sessionId);
+    const sessionKey = makeSessionKey(
+      input.provider,
+      input.sessionId,
+      input.recordingKey,
+    );
     const normalizedRecordingId = input.recordingId?.trim();
     const recordingId = normalizedRecordingId &&
         normalizedRecordingId.length > 0
@@ -267,6 +284,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
             nextRecording.recordingId,
             ...(input.recordingIds ?? []),
           ],
+          workspaceIds: input.workspaceIds,
+          recordingKey: input.recordingKey,
           trackActiveRecordingKinds: true,
         }),
       );
@@ -312,6 +331,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         events: input.events,
         title: input.title,
         recordingIds: input.recordingIds,
+        workspaceIds: input.workspaceIds,
       }),
       format,
     );
@@ -351,6 +371,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         events: input.events,
         title: input.title,
         recordingIds: input.recordingIds,
+        workspaceIds: input.workspaceIds,
       }),
       format,
     );
@@ -373,7 +394,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
   async appendToActiveRecording(
     input: AppendToActiveRecordingInput,
   ): Promise<AppendToActiveRecordingResult> {
-    const sessionKey = makeSessionKey(input.provider, input.sessionId);
+    const sessionKey = makeSessionKey(
+      input.provider,
+      input.sessionId,
+      input.recordingKey,
+    );
     const activeRecording = this.recordings.get(sessionKey);
     if (!activeRecording) {
       return { appended: false, deduped: false };
@@ -391,6 +416,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
           activeRecording.recordingId,
           ...(input.recordingIds ?? []),
         ],
+        workspaceIds: input.workspaceIds,
+        recordingKey: input.recordingKey,
         trackActiveRecordingKinds: true,
       }),
     );
@@ -427,6 +454,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
           ...(input.recordingId ? [input.recordingId] : []),
           ...(input.recordingIds ?? []),
         ],
+        workspaceIds: input.workspaceIds,
       }),
     );
   }
@@ -443,8 +471,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return decision.canonicalTargetPath ?? input.targetPath;
   }
 
-  stopRecording(provider: string, sessionId: string): boolean {
-    const sessionKey = makeSessionKey(provider, sessionId);
+  stopRecording(provider: string, sessionId: string, recordingKey?: string): boolean {
+    const sessionKey = makeSessionKey(provider, sessionId, recordingKey);
     this.conversationEventKindChecklistByRecording.delete(sessionKey);
     return this.recordings.delete(sessionKey);
   }
@@ -452,8 +480,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
   getActiveRecording(
     provider: string,
     sessionId: string,
+    recordingKey?: string,
   ): ActiveRecording | undefined {
-    const recording = this.recordings.get(makeSessionKey(provider, sessionId));
+    const recording = this.recordings.get(
+      makeSessionKey(provider, sessionId, recordingKey),
+    );
     return recording ? cloneRecording(recording) : undefined;
   }
 
@@ -502,10 +533,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
       return await this.jsonlWriter.writeEvents(
         outputPath,
         events,
-        "overwrite",
+        "append",
       );
     }
-    return await this.writer.overwriteEvents(outputPath, events, writerOptions);
+    return await this.writer.appendEvents(outputPath, events, writerOptions);
   }
 
   private async evaluatePathPolicy(
@@ -555,12 +586,15 @@ export class RecordingPipeline implements RecordingPipelineLike {
     events: ConversationEvent[];
     title: string | undefined;
     recordingIds?: string[];
+    workspaceIds?: string[];
+    recordingKey?: string;
     trackActiveRecordingKinds?: boolean;
   }): MarkdownRenderOptions {
     const frontmatterConversationEventKinds = this
       .buildFrontmatterConversationEventKinds(
         options.provider,
         options.sessionId,
+        options.recordingKey,
         options.events,
         options.trackActiveRecordingKinds ?? false,
       );
@@ -578,7 +612,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
       includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
       includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
       frontmatterSessionId: options.sessionId,
+      frontmatterSessionIds: [options.sessionId],
+      ...(options.workspaceIds ? { frontmatterWorkspaceIds: options.workspaceIds } : {}),
       ...(frontmatterRecordingIds ? { frontmatterRecordingIds } : {}),
+      ...(frontmatterRecordingIds
+        ? { frontmatterRecordingCycleIds: frontmatterRecordingIds }
+        : {}),
       ...(frontmatterConversationEventKinds
         ? { frontmatterConversationEventKinds }
         : {}),
@@ -604,6 +643,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private buildFrontmatterConversationEventKinds(
     provider: string,
     sessionId: string,
+    recordingKey: string | undefined,
     events: ConversationEvent[],
     trackActiveRecordingKinds: boolean,
   ): string[] | undefined {
@@ -612,7 +652,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     }
     const eventKinds = trackActiveRecordingKinds
       ? this.getOrCreateConversationEventKindChecklist(
-        makeSessionKey(provider, sessionId),
+        makeSessionKey(provider, sessionId, recordingKey),
       )
       : new Set<string>();
     for (const event of events) {

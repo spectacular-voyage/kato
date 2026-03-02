@@ -23,6 +23,43 @@ export interface SessionRecordingStateV1 {
   periods: SessionRecordingPeriodV1[];
 }
 
+export type SessionWorkspaceOutputDestinationKindV1 =
+  | "workspace-relative"
+  | "absolute-explicit";
+
+export interface SessionWorkspaceRecordingCycleV1 {
+  recordingCycleId: string;
+  startedCursor: number;
+  stoppedCursor?: number;
+  startedAt?: string;
+  stoppedAt?: string;
+  startedBySeq?: number;
+  stoppedBySeq?: number;
+}
+
+export interface SessionWorkspaceOutputDestinationV1 {
+  kind: SessionWorkspaceOutputDestinationKindV1;
+  relativePathFromWorkspaceRoot?: string;
+  absolutePath?: string;
+}
+
+export interface SessionWorkspaceOutputStateV1 {
+  workspaceId: string;
+  workspaceAliasSnapshot?: string;
+  desiredState: RecordingDesiredState;
+  currentDestination: SessionWorkspaceOutputDestinationV1;
+  currentResolvedPath: string;
+  sourceConfigPath?: string;
+  workspaceRootSnapshot: string;
+  resolvedDefaultOutputDir: string;
+  filenameTemplate: string;
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  activeRecordingCycleId?: string;
+  writeCursor: number;
+  createdAt?: string;
+  recordingCycles: SessionWorkspaceRecordingCycleV1[];
+}
+
 export interface SessionIngestAnchorV1 {
   messageId?: string;
   payloadHash?: string;
@@ -62,6 +99,7 @@ export interface SessionMetadataV1 {
   commandCursor?: number;
   primaryRecordingDestination?: string;
   workspaceAttachment?: SessionWorkspaceAttachmentV1;
+  workspaceOutputs?: SessionWorkspaceOutputStateV1[];
   recordings: SessionRecordingStateV1[];
 }
 
@@ -188,6 +226,145 @@ function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
   return true;
 }
 
+function isWorkspaceRecordingCycle(
+  value: unknown,
+): value is SessionWorkspaceRecordingCycleV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    !isNonEmptyString(value["recordingCycleId"]) ||
+    typeof value["startedCursor"] !== "number" ||
+    !Number.isSafeInteger(value["startedCursor"]) ||
+    value["startedCursor"] < 0
+  ) {
+    return false;
+  }
+  if (
+    value["stoppedCursor"] !== undefined &&
+    (typeof value["stoppedCursor"] !== "number" ||
+      !Number.isSafeInteger(value["stoppedCursor"]) ||
+      value["stoppedCursor"] < 0)
+  ) {
+    return false;
+  }
+  if (
+    value["startedAt"] !== undefined && typeof value["startedAt"] !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value["stoppedAt"] !== undefined && typeof value["stoppedAt"] !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value["startedBySeq"] !== undefined &&
+    (typeof value["startedBySeq"] !== "number" ||
+      !Number.isSafeInteger(value["startedBySeq"]) ||
+      value["startedBySeq"] <= 0)
+  ) {
+    return false;
+  }
+  if (
+    value["stoppedBySeq"] !== undefined &&
+    (typeof value["stoppedBySeq"] !== "number" ||
+      !Number.isSafeInteger(value["stoppedBySeq"]) ||
+      value["stoppedBySeq"] <= 0)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isWorkspaceOutputDestination(
+  value: unknown,
+): value is SessionWorkspaceOutputDestinationV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    value["kind"] !== "workspace-relative" &&
+    value["kind"] !== "absolute-explicit"
+  ) {
+    return false;
+  }
+  if (
+    value["relativePathFromWorkspaceRoot"] !== undefined &&
+    !isNonEmptyString(value["relativePathFromWorkspaceRoot"])
+  ) {
+    return false;
+  }
+  if (
+    value["absolutePath"] !== undefined &&
+    !isNonEmptyString(value["absolutePath"])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isWorkspaceOutputState(
+  value: unknown,
+): value is SessionWorkspaceOutputStateV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    !isNonEmptyString(value["workspaceId"]) ||
+    !isWorkspaceOutputDestination(value["currentDestination"]) ||
+    !isNonEmptyString(value["currentResolvedPath"]) ||
+    !isNonEmptyString(value["workspaceRootSnapshot"]) ||
+    !isNonEmptyString(value["resolvedDefaultOutputDir"]) ||
+    !isNonEmptyString(value["filenameTemplate"])
+  ) {
+    return false;
+  }
+  if (value["desiredState"] !== "on" && value["desiredState"] !== "off") {
+    return false;
+  }
+  if (
+    value["workspaceAliasSnapshot"] !== undefined &&
+    !isNonEmptyString(value["workspaceAliasSnapshot"])
+  ) {
+    return false;
+  }
+  if (
+    value["sourceConfigPath"] !== undefined &&
+    !isNonEmptyString(value["sourceConfigPath"])
+  ) {
+    return false;
+  }
+  if (
+    value["activeRecordingCycleId"] !== undefined &&
+    !isNonEmptyString(value["activeRecordingCycleId"])
+  ) {
+    return false;
+  }
+  if (
+    typeof value["writeCursor"] !== "number" ||
+    !Number.isSafeInteger(value["writeCursor"]) ||
+    value["writeCursor"] < 0
+  ) {
+    return false;
+  }
+  if (
+    value["createdAt"] !== undefined && typeof value["createdAt"] !== "string"
+  ) {
+    return false;
+  }
+  if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
+    return false;
+  }
+  if (
+    !Array.isArray(value["recordingCycles"]) ||
+    !value["recordingCycles"].every((cycle) => isWorkspaceRecordingCycle(cycle))
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function isWorkspaceAttachmentWriterFeatureFlags(
   value: unknown,
 ): value is SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
@@ -305,6 +482,13 @@ export function isSessionMetadataV1(
   if (
     value["workspaceAttachment"] !== undefined &&
     !isSessionWorkspaceAttachmentV1(value["workspaceAttachment"])
+  ) {
+    return false;
+  }
+  if (
+    value["workspaceOutputs"] !== undefined &&
+    (!Array.isArray(value["workspaceOutputs"]) ||
+      !value["workspaceOutputs"].every((entry) => isWorkspaceOutputState(entry)))
   ) {
     return false;
   }

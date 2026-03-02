@@ -23,6 +23,8 @@ const GLOBAL_USAGE_BODY = [
   "  stop                  Queue daemon stop request (or reset stale status)",
   "  status [--json] [--all] [--live]",
   "                        Show daemon status",
+  "  workspace <init|register|list|unregister>",
+  "                        Manage workspace aliases and local workspace config",
   "  attach <session-id> [--output <path>]",
   "                        Bind a session to the nearest workspace config",
   "  attachments [--all]   List session workspace attachments",
@@ -65,6 +67,28 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "  --json    Output as JSON (includes full memory and session fields)",
     "  --all     Include stale sessions",
     "  --live    Refresh-loop display; press q or Ctrl+C to exit (implies --all)",
+  ].join("\n"),
+  "workspace-init": [
+    "Usage: kato workspace init [<dir>]",
+    "",
+    "Creates <dir>/.kato/kato-workspace-config.yaml.",
+    "If <dir> is omitted, uses the current working directory.",
+  ].join("\n"),
+  "workspace-register": [
+    "Usage: kato workspace register [--alias <alias>]",
+    "",
+    "Registers the nearest ancestor workspace config under a workspace alias.",
+    "If --alias is omitted, uses the workspace folder name.",
+  ].join("\n"),
+  "workspace-list": [
+    "Usage: kato workspace list",
+    "",
+    "Lists registered workspaces.",
+  ].join("\n"),
+  "workspace-unregister": [
+    "Usage: kato workspace unregister <alias-or-id>",
+    "",
+    "Removes a registered workspace alias from the registry.",
   ].join("\n"),
   attach: [
     "Usage: kato attach <session-id> [--output <path>]",

@@ -149,3 +149,31 @@ export {
   renderEventsToMarkdown,
   slugifyForFrontmatterId,
 } from "./writer/mod.ts";
+export type {
+  RegisteredWorkspace,
+  ResolvedWorkspaceProfile,
+  WorkspaceCatalogLike,
+  WorkspaceConfigOverrides,
+  WorkspaceProfileResolverLike,
+  WorkspaceRegistryStoreLike,
+} from "./workspace/mod.ts";
+export {
+  createWorkspaceConfigScaffold,
+  DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  DEFAULT_WORKSPACE_CONFIG_SUBDIR,
+  DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
+  DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+  DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+  ensureWorkspaceConfigWorkspaceId,
+  findNearestWorkspaceConfig,
+  isPathWithinRoots,
+  LEGACY_WORKSPACE_CONFIG_FILENAME,
+  loadWorkspaceConfigOverrides,
+  readWorkspaceConfigPathCandidates,
+  readWorkspaceConfigWorkspaceId,
+  resolveDefaultWorkspaceRegistryPath,
+  resolveWorkspaceConfigPath,
+  WorkspaceCatalog,
+  WorkspaceProfileResolver,
+  WorkspaceRegistryFileStore,
+} from "./workspace/mod.ts";

@@ -6,6 +6,10 @@ export type DaemonCliCommandName =
   | "restart"
   | "stop"
   | "status"
+  | "workspace-init"
+  | "workspace-register"
+  | "workspace-list"
+  | "workspace-unregister"
   | "attach"
   | "attachments"
   | "detach"
@@ -18,6 +22,10 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
+  | { name: "workspace-init"; dirPath?: string }
+  | { name: "workspace-register"; alias?: string }
+  | { name: "workspace-list" }
+  | { name: "workspace-unregister"; selector: string }
   | {
     name: "attach";
     sessionId: string;
