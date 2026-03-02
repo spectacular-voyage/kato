@@ -11,7 +11,14 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import { basename, isAbsolute, join, relative, resolve } from "@std/path";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -486,8 +493,8 @@ function openWorkspaceOutputCycle(
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
   startCursor: number,
   nowIso: string,
+  recordingCycleId: string = crypto.randomUUID(),
 ): string {
-  const recordingCycleId = crypto.randomUUID();
   output.recordingCycles.push({
     recordingCycleId,
     startedCursor: startCursor,
@@ -594,6 +601,33 @@ async function isDirectoryTargetPath(path: string): Promise<boolean> {
   }
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function resolveUniqueNonExistingPath(path: string): Promise<string> {
+  if (!(await pathExists(path))) {
+    return path;
+  }
+  const suffix = extname(path);
+  const prefix = suffix.length > 0 ? path.slice(0, -suffix.length) : path;
+  for (let index = 2; index < 10_000; index += 1) {
+    const candidate = `${prefix}-${index}${suffix}`;
+    if (!(await pathExists(candidate))) {
+      return candidate;
+    }
+  }
+  throw new Error(`Unable to resolve unique destination path for: ${path}`);
+}
+
 function toWorkspaceDestinationBinding(
   profile: ResolvedWorkspaceProfile,
   resolvedPath: string,
@@ -626,6 +660,7 @@ async function resolveWorkspaceCommandDestination(options: {
   snapshotSnippet?: string;
   boundarySnapshot?: ConversationEvent[];
   rawArgument?: string;
+  ensureGeneratedPathUnique?: boolean;
   now: Date;
 }): Promise<{
   resolvedPath: string;
@@ -635,7 +670,7 @@ async function resolveWorkspaceCommandDestination(options: {
 }> {
   const normalized = normalizeRawCommandTargetPath(options.rawArgument);
   if (!normalized) {
-    const generated = join(
+    const generatedPath = join(
       options.profile.resolvedDefaultOutputDir,
       renderWorkspaceFilename(
         options.profile,
@@ -648,6 +683,9 @@ async function resolveWorkspaceCommandDestination(options: {
         },
       ),
     );
+    const generated = options.ensureGeneratedPathUnique
+      ? await resolveUniqueNonExistingPath(generatedPath)
+      : generatedPath;
     return {
       resolvedPath: generated,
       binding: toWorkspaceDestinationBinding(options.profile, generated),
@@ -661,7 +699,8 @@ async function resolveWorkspaceCommandDestination(options: {
   const resolvedBase = isAbsolute(normalized)
     ? resolve(normalized)
     : resolve(options.profile.workspaceRoot, normalized);
-  const resolvedPath = await isDirectoryTargetPath(resolvedBase)
+  const generatedFromDirectory = await isDirectoryTargetPath(resolvedBase);
+  const resolvedPathBase = generatedFromDirectory
     ? join(
       resolvedBase,
       renderWorkspaceFilename(
@@ -676,6 +715,10 @@ async function resolveWorkspaceCommandDestination(options: {
       ),
     )
     : resolvedBase;
+  const resolvedPath =
+    options.ensureGeneratedPathUnique && generatedFromDirectory
+      ? await resolveUniqueNonExistingPath(resolvedPathBase)
+      : resolvedPathBase;
   return {
     resolvedPath,
     binding: isAbsolute(normalized)
@@ -1456,6 +1499,7 @@ async function applyPersistentControlCommandsForEvent(
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
+            ensureGeneratedPathUnique: true,
             now: now(),
           });
           const targetPath = await validateDestinationPathForCommand(
@@ -1482,18 +1526,19 @@ async function applyPersistentControlCommandsForEvent(
             { snapshotSnippet },
           );
           const currentCycleId = output?.activeRecordingCycleId;
-          const captureRecordingCycleIds = !destinationChanged &&
-              output?.desiredState === "on" &&
-              currentCycleId
-            ? [currentCycleId]
-            : undefined;
+          const reuseActiveCycleId = !destinationChanged &&
+            output?.desiredState === "on" &&
+            !!currentCycleId;
+          const captureCycleId = reuseActiveCycleId && currentCycleId
+            ? currentCycleId
+            : crypto.randomUUID();
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId: providerSessionId,
             targetPath,
             events: captureEvents,
             title: captureTitle,
-            recordingCycleIds: captureRecordingCycleIds,
+            recordingCycleIds: [captureCycleId],
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
@@ -1529,6 +1574,7 @@ async function applyPersistentControlCommandsForEvent(
               output,
               writeCursor,
               now().toISOString(),
+              captureCycleId,
             );
             stateChanged = true;
           }
@@ -1873,6 +1919,7 @@ async function applyControlCommandsForEvent(
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
+            ensureGeneratedPathUnique: true,
             now: now(),
           });
           const resolvedDestination = await validateDestinationPathForCommand(
@@ -1893,17 +1940,18 @@ async function applyControlCommandsForEvent(
           };
           const destinationChanged = state.currentResolvedPath !==
             resolvedDestination;
-          const activeCycleId = state.desiredState && state.recordingCycleId
-              && !destinationChanged
+          const activeCycleId = state.desiredState && state.recordingCycleId &&
+              !destinationChanged
             ? state.recordingCycleId
             : undefined;
+          const captureCycleId = activeCycleId ?? crypto.randomUUID();
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId,
             targetPath: resolvedDestination,
             events: boundarySnapshot,
             title: recordingTitle,
-            recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
+            recordingCycleIds: [captureCycleId],
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
@@ -1920,7 +1968,7 @@ async function applyControlCommandsForEvent(
                 recordingKey: workspace.workspaceId,
                 events: continuationEvents,
                 title: recordingTitle,
-                recordingCycleIds: [activeCycleId],
+                recordingCycleIds: [captureCycleId],
                 workspaceIds: [workspace.workspaceId],
                 outputOverrides,
               });
@@ -1933,7 +1981,6 @@ async function applyControlCommandsForEvent(
                 workspace.workspaceId,
               );
             }
-            const recordingCycleId = crypto.randomUUID();
             await recordingPipeline.activateRecording({
               provider,
               sessionId,
@@ -1942,12 +1989,12 @@ async function applyControlCommandsForEvent(
               targetPath: resolvedDestination,
               seedEvents: continuationEvents,
               title: recordingTitle,
-              recordingId: recordingCycleId,
+              recordingId: captureCycleId,
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
             state.desiredState = true;
-            state.recordingCycleId = recordingCycleId;
+            state.recordingCycleId = captureCycleId;
           }
           state.currentResolvedPath = resolvedDestination;
           state.workspaceAlias = profile.alias;
@@ -2463,9 +2510,7 @@ function toActiveRecordingsFromMetadata(
         workspaceAlias: output.workspaceAliasSnapshot,
         outputPath: output.currentResolvedPath,
         startedAt,
-        ...(restartedAt && restartedAt !== startedAt
-          ? { restartedAt }
-          : {}),
+        ...(restartedAt && restartedAt !== startedAt ? { restartedAt } : {}),
         lastWriteAt: metadata.updatedAt,
       });
     }

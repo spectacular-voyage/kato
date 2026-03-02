@@ -981,7 +981,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       reason: error.message,
     };
 
-    await this.operationalLogger.warn(
+    await this.operationalLogger.error(
       "provider.ingestion.read_denied",
       "Provider ingestion read access denied",
       attributes,

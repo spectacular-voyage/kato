@@ -1556,6 +1556,7 @@ Deno.test("FileProviderIngestionRunner audits permission-denied discovery failur
         sink.records.some((record) =>
           record.event === "provider.ingestion.read_denied" &&
           record.channel === "operational" &&
+          record.level === "error" &&
           record.attributes?.["operation"] === "readDir"
         ),
       );
@@ -1627,6 +1628,7 @@ Deno.test("FileProviderIngestionRunner audits permission-denied parse reads", as
       sink.records.some((record) =>
         record.event === "provider.ingestion.read_denied" &&
         record.channel === "operational" &&
+        record.level === "error" &&
         record.attributes?.["operation"] === "open" &&
         record.attributes?.["targetPath"] === sessionFile
       ),

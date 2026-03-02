@@ -1090,7 +1090,19 @@ Deno.test(
 
     assertStringIncludes(
       rendered,
-      "**Decision [plan-mode-capture-round]:** Which capture behavior should we validate?",
+      "# Assistant_2026-02-22_0200_00_Tool-decision-plan-mode-capture-round",
+    );
+    assertStringIncludes(
+      rendered,
+      "## Prompt",
+    );
+    assertStringIncludes(
+      rendered,
+      "Which capture behavior should we validate?",
+    );
+    assertStringIncludes(
+      rendered,
+      "## Options",
     );
     assertStringIncludes(
       rendered,
@@ -1105,7 +1117,7 @@ Deno.test(
 );
 
 Deno.test(
-  "renderEventsToMarkdown renders questionnaire accepted decisions as a single line",
+  "renderEventsToMarkdown renders questionnaire accepted decisions with prompt options and selection",
   () => {
     const questionnaireDecision: ConversationEvent = {
       eventId: "decision-questionnaire-1",
@@ -1115,12 +1127,16 @@ Deno.test(
       kind: "decision",
       decisionId: "decision-questionnaire-1",
       decisionKey: "decision-line-policy",
-      summary: "decision_line_policy -> Show both (Recommended)",
+      summary: "Which output format should we use? -> Show both (Recommended)",
       status: "accepted",
       decidedBy: "user",
       basisEventIds: ["tool-result-1"],
       metadata: {
         providerQuestionId: "decision_line_policy",
+        options: [{
+          label: "Show both (Recommended)",
+          description: "Display both formats together.",
+        }],
       },
       source: {
         providerEventType:
@@ -1135,7 +1151,22 @@ Deno.test(
 
     assertStringIncludes(
       rendered,
-      "**Decision [decision-line-policy]:** decision_line_policy -> Show both (Recommended)",
+      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-line-policy",
+    );
+    assertStringIncludes(rendered, "## Prompt");
+    assertStringIncludes(
+      rendered,
+      "Which output format should we use?",
+    );
+    assertStringIncludes(rendered, "## Options");
+    assertStringIncludes(
+      rendered,
+      "- Show both (Recommended): Display both formats together.",
+    );
+    assertStringIncludes(rendered, "## User Selection");
+    assertStringIncludes(
+      rendered,
+      "Show both (Recommended)",
     );
     assertEquals(rendered.includes("*Status: accepted"), false);
   },
@@ -1177,8 +1208,11 @@ Deno.test(
 
     assertStringIncludes(
       rendered,
-      "**Decision [decision-options-visibility]:** Which output format should we use?",
+      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-options-visibility",
     );
+    assertStringIncludes(rendered, "## Prompt");
+    assertStringIncludes(rendered, "Which output format should we use?");
+    assertEquals(rendered.includes("## Options"), false);
     assertEquals(rendered.includes("- Markdown: Use markdown output."), false);
   },
 );

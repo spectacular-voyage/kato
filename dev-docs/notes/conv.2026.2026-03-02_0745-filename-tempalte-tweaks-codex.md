@@ -15579,3 +15579,401 @@ Status renders them in local timezone (`America/Los_Angeles`), so they appear as
 - `2026-03-02 08:41`
 
 So the display matches the source logs.
+
+# User_2026-03-02_1127_13
+
+It's weird, we've had failed workspace configs since then, is the dislpay logic not working or did they just not make the logs? If not, invalid daemon config is probably critical, and invalid workspace config is definitely ERROR. Permissions misses should also be ERROR.
+
+**Planning severity level changes**
+
+# gpt-5.3-codex_2026-03-02_1127_40
+
+I’m checking two things directly: whether those failures are actually present in the runtime logs, and where we currently classify workspace-config/permission issues as `warn` vs `error`. Then I’ll patch severity where needed.
+
+<details>
+<summary>Tool: exec_command — tail -n 400 ~/.kato/runtime/logs/operational.jsonl | rg 'recording.command.failed|recording.command.parse_error|workspace|permission|read_denied|denied|config' | tail -n 120</summary>
+
+```json
+{
+  "cmd": "tail -n 400 ~/.kato/runtime/logs/operational.jsonl | rg 'recording.command.failed|recording.command.parse_error|workspace|permission|read_denied|denied|config' | tail -n 120"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — rg -n "recording\.command\.failed|read_denied|permission|workspace.*config|unsupported workspace config|operationalLogger\.warn\(|operationalLogger\.error\(" apps/daemon/src/orchestrator apps/daemon/src/cli -S | head -n 260</summary>
+
+```json
+{
+  "cmd": "rg -n \"recording\\.command\\.failed|read_denied|permission|workspace.*config|unsupported workspace config|operationalLogger\\.warn\\(|operationalLogger\\.error\\(\" apps/daemon/src/orchestrator apps/daemon/src/cli -S | head -n 260"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '920,1120p' apps/daemon/src/orchestrator/provider_ingestion.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '920,1120p' apps/daemon/src/orchestrator/provider_ingestion.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '1120,1420p' apps/daemon/src/orchestrator/provider_ingestion.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1120,1420p' apps/daemon/src/orchestrator/provider_ingestion.ts"
+}
+```
+
+</details>
+
+**Planning error severity upgrades and status enhancements**
+
+<details>
+<summary>Tool: exec_command — rg -n 'recording.command.failed|provider.ingestion.read_denied|workspace.*invalid|Unsupported markdownFrontmatter key|Unsupported workspace config key' ~/.kato/runtime/logs/operational.jsonl | tail -n 80</summary>
+
+```json
+{
+  "cmd": "rg -n 'recording.command.failed|provider.ingestion.read_denied|workspace.*invalid|Unsupported markdownFrontmatter key|Unsupported workspace config key' ~/.kato/runtime/logs/operational.jsonl | tail -n 80"
+}
+```
+
+</details>
+
+**Implementing enhanced error severity and recent errors merge**
+
+# gpt-5.3-codex_2026-03-02_1128_39
+
+I verified the logs: only one workspace-config command failure was actually written, so the current display is technically correct. I’m now applying your severity policy by making permission misses log as `ERROR` and surfacing invalid workspace configs directly in `Recent Errors` (so they don’t depend on daemon log emission timing).
+
+<details>
+<summary>Tool: exec_command — rg -n "provider\.ingestion\.read_denied|read_denied|permission denied" tests -S | head -n 240</summary>
+
+```json
+{
+  "cmd": "rg -n \"provider\\.ingestion\\.read_denied|read_denied|permission denied\" tests -S | head -n 240"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — rg -n "Recent Errors|workspace detail section|workspace summary line" tests/improved-status_test.ts</summary>
+
+```json
+{
+  "cmd": "rg -n \"Recent Errors|workspace detail section|workspace summary line\" tests/improved-status_test.ts"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — sed -n '320,460p' tests/improved-status_test.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '320,460p' tests/improved-status_test.ts"
+}
+```
+
+</details>
+
+**Inspecting test warning checks**
+
+<details>
+<summary>Tool: exec_command — sed -n '1520,1668p' tests/provider-ingestion_test.ts</summary>
+
+```json
+{
+  "cmd": "sed -n '1520,1668p' tests/provider-ingestion_test.ts"
+}
+```
+
+</details>
+
+**Planning error logging and status patch**
+
+<details>
+<summary>Tool: exec_command — rg -n "startup failed|unable to load runtime config|runDaemonSubprocess|operational.jsonl" tests/daemon-main_test.ts && sed -n '1,260p' tests/daemon-main_test.ts</summary>
+
+```json
+{
+  "cmd": "rg -n \"startup failed|unable to load runtime config|runDaemonSubprocess|operational.jsonl\" tests/daemon-main_test.ts && sed -n '1,260p' tests/daemon-main_test.ts"
+}
+```
+
+</details>
+
+**Implementing startup error logging**
+
+# gpt-5.3-codex_2026-03-02_1129_08
+
+I found the root cause: `Recent Errors` only shows what exists in runtime logs, and status-time workspace validation wasn’t producing runtime log records. I’m patching that gap now by emitting workspace-invalid entries into `Recent Errors` directly, and changing provider permission-denied logs to `ERROR`.
+
+**Running targeted lint and tests**
+
+# gpt-5.3-codex_2026-03-02_1129_59
+
+I’ve patched severity and startup logging. Next I’m running focused tests for status, ingestion permission-denied paths, and daemon startup failure logging to confirm behavior is correct end-to-end.
+
+<details>
+<summary>Tool: exec_command — deno test -A tests/improved-status_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test -A tests/improved-status_test.ts",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — deno test -A tests/provider-ingestion_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test -A tests/provider-ingestion_test.ts",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — deno test -A tests/daemon-main_test.ts</summary>
+
+```json
+{
+  "cmd": "deno test -A tests/daemon-main_test.ts",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 83202,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 19665,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 29844,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+**Polling test output**
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 19665,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+**Diagnosing test failures due to workspace state**
+
+<details>
+<summary>Tool: exec_command — deno task check</summary>
+
+```json
+{
+  "cmd": "deno task check",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 2230,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 4000
+}
+```
+
+</details>
+
+**Running quick lint check**
+
+<details>
+<summary>Tool: exec_command — deno task lint</summary>
+
+```json
+{
+  "cmd": "deno task lint",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 8000
+}
+```
+
+</details>
+
+**Running targeted provider tests**
+
+<details>
+<summary>Tool: exec_command — deno test -A tests/provider-ingestion_test.ts --filter "permission-denied"</summary>
+
+```json
+{
+  "cmd": "deno test -A tests/provider-ingestion_test.ts --filter \"permission-denied\"",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: write_stdin</summary>
+
+```json
+{
+  "session_id": 82507,
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+**Confirming patch details and test results**
+
+<details>
+<summary>Tool: exec_command — git diff -- apps/daemon/src/cli/commands/status.ts | sed -n '1,260p'</summary>
+
+```json
+{
+  "cmd": "git diff -- apps/daemon/src/cli/commands/status.ts | sed -n '1,260p'"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — git diff -- apps/daemon/src/orchestrator/provider_ingestion.ts | sed -n '1,140p'</summary>
+
+```json
+{
+  "cmd": "git diff -- apps/daemon/src/orchestrator/provider_ingestion.ts | sed -n '1,140p'"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — git diff -- apps/daemon/src/main.ts | sed -n '1,220p'</summary>
+
+```json
+{
+  "cmd": "git diff -- apps/daemon/src/main.ts | sed -n '1,220p'"
+}
+```
+
+</details>
+
+<details>
+<summary>Tool: exec_command — git diff -- tests/improved-status_test.ts tests/provider-ingestion_test.ts tests/daemon-main_test.ts | sed -n '1,280p'</summary>
+
+```json
+{
+  "cmd": "git diff -- tests/improved-status_test.ts tests/provider-ingestion_test.ts tests/daemon-main_test.ts | sed -n '1,280p'"
+}
+```
+
+</details>
+
+**Adding checkboxes to task notes**
+
+# gpt-5.3-codex_2026-03-02_1130_47
+
+I’m adding a short implementation update to the task note to capture these severity decisions (`workspace config => ERROR`, `permission denied => ERROR`, startup config failures logged as critical error records).
+
+**Planning status command run**
+
+<details>
+<summary>Tool: exec_command — deno run -A apps/daemon/src/main.ts status --all | sed -n '1,220p'</summary>
+
+```json
+{
+  "cmd": "deno run -A apps/daemon/src/main.ts status --all | sed -n '1,220p'",
+  "yield_time_ms": 1000,
+  "max_output_tokens": 12000
+}
+```
+
+</details>
+
+**Summarizing investigation and changes**
+
+# gpt-5.3-codex_2026-03-02_1131_15
+
+You were right to question it.
+
+`Recent Errors` was working as coded, but only one workspace-config failure had actually been logged (`2026-03-02T16:41:36.461Z`), and status-time workspace validation did not emit runtime log entries before.
+
+I implemented your severity policy:
+
+- Permission misses are now `ERROR` (`provider.ingestion.read_denied`) in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts).
+- Invalid workspace configs now appear directly in `Recent Errors` as operational `ERROR` entries in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts).
+- Startup runtime-config failures now write best-effort operational error records with `severity: "critical"` in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts).
+- Increased recent-log tail window from `256KB` to `2MB` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts).
+
+Also confirmed your timestamp question earlier: the displayed times are local (`America/Los_Angeles`) conversions from UTC log timestamps.
+
+Validation:
+- Passed: `tests/improved-status_test.ts`, `tests/daemon-main_test.ts`, and provider permission-denied filtered tests.
+- `tests/provider-ingestion_test.ts` full file still has 4 pre-existing unrelated failures (cursor offset expectation tests).  
+
+Daemon restart is needed for the new ingestion severity behavior to take effect.

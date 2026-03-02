@@ -18,7 +18,7 @@ const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
 const MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH = 80;
 const RECENT_ERRORS_LIMIT = 8;
-const RECENT_ERRORS_TAIL_BYTES = 256 * 1024;
+const RECENT_ERRORS_TAIL_BYTES = 2 * 1024 * 1024;
 const OPERATIONAL_LOG_FILENAME = "operational.jsonl";
 const SECURITY_AUDIT_LOG_FILENAME = "security-audit.jsonl";
 const KEY_CTRL_C = 3;
@@ -378,6 +378,52 @@ async function loadRecentStatusErrors(
     .slice(0, RECENT_ERRORS_LIMIT);
 }
 
+function deriveWorkspaceStatusErrors(
+  workspaceStatus: WorkspaceStatusSummary | undefined,
+  now: Date,
+): StatusRecentError[] {
+  if (!workspaceStatus) {
+    return [];
+  }
+
+  const timestamp = now.toISOString();
+  const errors: StatusRecentError[] = [];
+
+  if (workspaceStatus.unavailableReason) {
+    errors.push({
+      timestamp,
+      level: "error",
+      channel: "operational",
+      event: "workspace.status.unavailable",
+      message: sanitizeInlineText(workspaceStatus.unavailableReason),
+    });
+    return errors;
+  }
+
+  for (const row of workspaceStatus.rows) {
+    if (row.valid) {
+      continue;
+    }
+    const reason = sanitizeInlineText(
+      row.invalidReason ?? "invalid workspace configuration",
+    );
+    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const reasonLower = reason.toLowerCase();
+    const event = reasonLower.includes("permission denied")
+      ? "workspace.config.permission_denied"
+      : "workspace.config.invalid";
+    errors.push({
+      timestamp,
+      level: "error",
+      channel: "operational",
+      event,
+      message: `${alias} (${row.workspaceId}): ${reason}`,
+    });
+  }
+
+  return errors;
+}
+
 export function isLiveExitKey(keyByte: number): boolean {
   return keyByte === KEY_CTRL_C ||
     keyByte === KEY_LOWER_Q ||
@@ -655,6 +701,11 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
+  const recentErrors = [
+    ...(opts.recentErrors ?? []),
+    ...deriveWorkspaceStatusErrors(opts.workspaceStatus, now),
+  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, RECENT_ERRORS_LIMIT);
 
   const daemonText = snapshot.daemonRunning
     ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
@@ -706,12 +757,12 @@ export function renderStatusText(
     lines.push(divider);
   }
 
-  lines.push(`Recent Errors (${opts.recentErrors?.length ?? 0})`);
+  lines.push(`Recent Errors (${recentErrors.length})`);
   lines.push("");
-  if (!opts.recentErrors || opts.recentErrors.length === 0) {
+  if (recentErrors.length === 0) {
     lines.push("  (none)");
   } else {
-    for (const recentError of opts.recentErrors) {
+    for (const recentError of recentErrors) {
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";

@@ -41,6 +41,7 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
 
 Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded", async () => {
   const stderr: string[] = [];
+  const runtimeDir = await makeTestTempDir("daemon-main-config-load-fail-");
   const configStore: RuntimeConfigStoreLike = {
     load() {
       return Promise.reject(new Error("bad config"));
@@ -50,21 +51,34 @@ Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded
     },
   };
 
-  const options: RunDaemonSubprocessOptions = {
-    runtimeDir: ".kato/runtime",
-    configStore,
-    writeStderr(text: string) {
-      stderr.push(text);
-    },
-    runtimeLoop() {
-      throw new Error("runtime loop should not be called");
-    },
-  };
+  try {
+    const options: RunDaemonSubprocessOptions = {
+      runtimeDir,
+      configStore,
+      writeStderr(text: string) {
+        stderr.push(text);
+      },
+      runtimeLoop() {
+        throw new Error("runtime loop should not be called");
+      },
+    };
 
-  const exitCode = await runDaemonSubprocess(options);
-  assertEquals(exitCode, 1);
-  assertStringIncludes(stderr.join(""), "Daemon startup failed");
-  assertStringIncludes(stderr.join(""), "bad config");
+    const exitCode = await runDaemonSubprocess(options);
+    assertEquals(exitCode, 1);
+    assertStringIncludes(stderr.join(""), "Daemon startup failed");
+    assertStringIncludes(stderr.join(""), "bad config");
+
+    const operationalLogPath = join(runtimeDir, "logs", "operational.jsonl");
+    const operationalLog = await Deno.readTextFile(operationalLogPath);
+    assertStringIncludes(
+      operationalLog,
+      '"event":"daemon.startup.config_load_failed"',
+    );
+    assertStringIncludes(operationalLog, '"severity":"critical"');
+    assertStringIncludes(operationalLog, '"error":"bad config"');
+  } finally {
+    await removePathIfPresent(runtimeDir);
+  }
 });
 
 Deno.test("runDaemonSubprocess wires export feature flag into runtime loop options", async () => {

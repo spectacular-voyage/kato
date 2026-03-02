@@ -60,6 +60,34 @@ function writeToStderr(text: string): void {
   Deno.stderr.writeSync(encoder.encode(text));
 }
 
+async function logBestEffortStartupError(
+  runtimeDir: string,
+  timestamp: Date,
+  event: string,
+  message: string,
+  attributes?: Record<string, unknown>,
+): Promise<void> {
+  const logPath = join(runtimeDir, "logs", "operational.jsonl");
+  const record = {
+    timestamp: timestamp.toISOString(),
+    level: "error" as const,
+    channel: "operational" as const,
+    event,
+    message,
+    ...(attributes ? { attributes } : {}),
+  };
+  try {
+    await Deno.mkdir(dirname(logPath), { recursive: true });
+    await Deno.writeTextFile(
+      logPath,
+      `${JSON.stringify(record)}\n`,
+      { append: true, create: true },
+    );
+  } catch {
+    // Startup logging is best-effort; stderr remains the authoritative signal.
+  }
+}
+
 function parseLogLevelOverride(name: string): LogLevel | undefined {
   const raw = readOptionalEnv(name);
   if (raw === undefined) {
@@ -183,10 +211,20 @@ export async function runDaemonSubprocess(
   try {
     runtimeConfig = await configStore.load();
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await logBestEffortStartupError(
+      runtimeDir,
+      now(),
+      "daemon.startup.config_load_failed",
+      "Daemon startup failed while loading runtime config",
+      {
+        configPath,
+        error: errorMessage,
+        severity: "critical",
+      },
+    );
     writeStderr(
-      `Daemon startup failed: unable to load runtime config at ${configPath}: ${
-        error instanceof Error ? error.message : String(error)
-      }\n`,
+      `Daemon startup failed: unable to load runtime config at ${configPath}: ${errorMessage}\n`,
     );
     return 1;
   }
@@ -197,9 +235,20 @@ export async function runDaemonSubprocess(
   try {
     logLevels = resolveLogLevels(runtimeConfig);
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await logBestEffortStartupError(
+      runtimeConfig.runtimeDir,
+      now(),
+      "daemon.startup.logging_level_invalid",
+      "Daemon startup failed due to invalid logging level override",
+      {
+        error: errorMessage,
+        severity: "critical",
+      },
+    );
     writeStderr(
       `Daemon startup failed: invalid logging level override: ${
-        error instanceof Error ? error.message : String(error)
+        errorMessage
       }\n`,
     );
     return 1;
