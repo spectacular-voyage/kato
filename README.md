@@ -62,7 +62,7 @@ Supported commands:
 - `status [--json]`
   - Show daemon status.
 - `workspace init [<dir>]`
-  - Create `<dir>/.kato/kato-workspace-config.yaml`.
+  - Create `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
 - `workspace register [--alias <alias>]`
   - Register the nearest ancestor workspace config under a workspace alias.
@@ -132,7 +132,7 @@ Default paths:
 - Daemon session index cache: `~/.kato/daemon-control.json`
 - Session metadata + twins: `~/.kato/sessions/*.meta.json` and
   `~/.kato/sessions/*.twin.jsonl`
-- Workspace-local config: `<workspace>/.kato/kato-workspace-config.yaml`
+- Workspace-local config: `<workspace>/kato-workspace-config.yaml`
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
 `~/.kato/kato-config.yaml` is the daemon/global config. Workspace-local output

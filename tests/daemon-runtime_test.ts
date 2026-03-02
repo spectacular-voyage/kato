@@ -176,10 +176,9 @@ async function createRuntimeWorkspaceEntry(
   const workspaceRoot = join(baseDir, options.directoryName);
   const configPath = join(
     workspaceRoot,
-    ".kato",
     DEFAULT_WORKSPACE_CONFIG_FILENAME,
   );
-  await Deno.mkdir(join(workspaceRoot, ".kato"), { recursive: true });
+  await Deno.mkdir(workspaceRoot, { recursive: true });
   await Deno.writeTextFile(
     configPath,
     `${
@@ -216,11 +215,10 @@ async function createTestWorkspaceFixture(
   const workspaceRoot = join(baseDir, "workspace");
   const configPath = join(
     workspaceRoot,
-    ".kato",
     DEFAULT_WORKSPACE_CONFIG_FILENAME,
   );
   const resolvedDefaultOutputDir = join(workspaceRoot, "notes");
-  await Deno.mkdir(join(workspaceRoot, ".kato"), { recursive: true });
+  await Deno.mkdir(workspaceRoot, { recursive: true });
   await Deno.mkdir(resolvedDefaultOutputDir, { recursive: true });
 
   const entry: RegisteredWorkspace = {
@@ -2208,7 +2206,6 @@ Deno.test(
         configPath: join(
           stateDir,
           "renamed-proj",
-          ".kato",
           DEFAULT_WORKSPACE_CONFIG_FILENAME,
         ),
         updatedAt: "2026-02-22T10:00:01.000Z",

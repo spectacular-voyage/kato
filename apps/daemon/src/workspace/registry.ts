@@ -14,9 +14,8 @@ import { parse as parseYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
-export const DEFAULT_WORKSPACE_CONFIG_SUBDIR = ".kato";
 export const DEFAULT_WORKSPACE_CONFIG_FILENAME = "kato-workspace-config.yaml";
-export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".kato/recordings";
+export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
   "{provider}-{sessionShortId}-{timestampUtc}.md";
 
@@ -501,11 +500,7 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
 export async function resolveWorkspaceConfigPath(
   workspaceRoot: string,
 ): Promise<string | undefined> {
-  const path = join(
-    workspaceRoot,
-    DEFAULT_WORKSPACE_CONFIG_SUBDIR,
-    DEFAULT_WORKSPACE_CONFIG_FILENAME,
-  );
+  const path = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
   try {
     const stat = await Deno.stat(path);
     if (stat.isFile) {
@@ -538,7 +533,7 @@ export async function findNearestWorkspaceConfig(
 
 export function createWorkspaceConfigScaffold(): string {
   return [
-    `defaultOutputDir: ${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}`,
+    `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
     "featureFlags:",
     "  writerIncludeCommentary: true",

@@ -68,7 +68,7 @@ graph TD
   subgraph FS
     CONFIG[~/.kato/kato-config.yaml]
     WREG[~/.kato/workspace-registry.json]
-    WCFG[<workspace>/.kato/kato-workspace-config.yaml]
+    WCFG[<workspace>/kato-workspace-config.yaml]
     CONTROL[~/.kato/runtime/control.json]
     STATUS[~/.kato/runtime/status.json]
     SESSIONMETA[~/.kato/sessions/*.meta.json]
@@ -133,7 +133,7 @@ graph TD
 | CLI surface     | Parse commands and dispatch behavior             | none                          | argv, config, status/control         | control queue, stdout/stderr | `apps/daemon/src/cli/*`                              |
 | Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
 | Config          | Validate and default runtime config              | config schema rules           | `~/.kato/kato-config.yaml`, env      | `~/.kato/kato-config.yaml`  | `apps/daemon/src/config/runtime_config.ts`           |
-| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/.kato/kato-workspace-config.yaml` | registry + workspace config files | `apps/daemon/src/workspace/*`                     |
+| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/kato-workspace-config.yaml` | registry + workspace config files | `apps/daemon/src/workspace/*`                     |
 | Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
 | Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | SessionTwin + snapshots      | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
 | Session state   | Persistent session metadata/twin/index           | per-session durable artifacts | ingestion/runtime updates            | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
@@ -309,7 +309,7 @@ unavailable.
 
 - Global runtime config lives at `~/.kato/kato-config.yaml`.
 - Workspace-local output config lives at
-  `<workspace>/.kato/kato-workspace-config.yaml`.
+  `<workspace>/kato-workspace-config.yaml`.
 - `kato workspace init/register/list/unregister` is implemented.
 - New workspace registrations, unregistrations, and workspace-config content
   edits are visible to a running daemon for new alias-scoped commands without a

@@ -517,7 +517,6 @@ Deno.test(
       const workspaceDir = join(tempDir, "My.Proj");
       const configPath = join(
         workspaceDir,
-        ".kato",
         DEFAULT_WORKSPACE_CONFIG_FILENAME,
       );
       const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
@@ -542,7 +541,7 @@ Deno.test(
       );
       assertStringIncludes(
         await Deno.readTextFile(configPath),
-        "defaultOutputDir:",
+        'defaultOutputDir: "."',
       );
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
@@ -587,7 +586,6 @@ Deno.test(
       const movedWorkspaceDir = join(tempDir, "Moved.Proj");
       const movedConfigPath = join(
         movedWorkspaceDir,
-        ".kato",
         DEFAULT_WORKSPACE_CONFIG_FILENAME,
       );
       await Deno.rename(workspaceDir, movedWorkspaceDir);
@@ -652,6 +650,47 @@ Deno.test(
       assertStringIncludes(
         listAfterHarness.stdout.join(""),
         "no registered workspaces",
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonCli workspace register ignores legacy .kato workspace config paths",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-workspace-missing-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const workspaceDir = join(tempDir, "missing-config");
+      const legacyConfigPath = join(
+        workspaceDir,
+        ".kato",
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceDir, { recursive: true });
+      await Deno.mkdir(dirname(legacyConfigPath), { recursive: true });
+      await Deno.writeTextFile(legacyConfigPath, 'defaultOutputDir: "."\n');
+
+      const defaultRuntimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [workspaceDir, katoDir],
+      };
+
+      const registerHarness = makeRuntimeHarness(runtimeDir);
+      registerHarness.runtime.cwdPath = workspaceDir;
+      const exitCode = await runDaemonCli(["workspace", "register"], {
+        runtime: registerHarness.runtime,
+        defaultRuntimeConfig,
+      });
+
+      assertEquals(exitCode, 1);
+      assertStringIncludes(
+        registerHarness.stderr.join(""),
+        "Command failed: No workspace config found. Run `kato workspace init` to create ./kato-workspace-config.yaml from the default template first.",
       );
     } finally {
       await removePathIfPresent(tempDir);

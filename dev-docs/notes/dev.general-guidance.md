@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772253246061
+updated: 1772421669877
 created: 1771724621833
 ---
 
@@ -36,6 +36,29 @@ libraries and conventions, so watch out for that.
     entering runtime loop.
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
 
+## Task notes
+
+Before start new implementation, a task node should be written and refined. Task notes live in `dev-docs/notes/`. Individual "To-Do" items should be includes in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
+
+Sections should include
+- Goal
+- Summary
+- Discussion
+- Contract Changes
+- Testing
+- Non-Goals
+- Implementation Plan
+
+### Guidelines for command/state-machine redesign
+
+For any command/state-machine redesign, add a scenario table with columns:
+Scenario
+Persistent Covered
+Non-Persistent Covered
+Expected Same?
+Intentional Divergence Notes
+
+
 ## Development Loop
 
 ```bash
@@ -57,17 +80,20 @@ deno task dev:root
 
 ## Validation Workflow
 
-You do not need to run every command on every file save.
-
 During active development, run only what matches your change:
 
 - `deno task test` when changing logic/tests.
 - `deno task check` when changing types/contracts/public APIs.
 - `deno task lint` when touching broader structural code.
 
-Before merge, run:
+
+Before merge:
+
+- update  [[dev.codebase-overview]] and [[dev.decision-log]]
+- run:
 
 ```bash
+deno task fmt
 deno task ci
 ```
 
@@ -91,37 +117,10 @@ deno task ci
 - Do not introduce network dependency for baseline local capture/export
   behavior.
 
-## Notes And Decisions
-
-- Record planning and sequencing decisions in task notes under
-  `dev-docs/notes/`.
-  - check off markdown boxes for task items as you progress
-- Keep [[dev.codebase-overview]] and [[dev.decision-log]] current as behavior is
-  added or changed.
-
 ## In-Chat Command Handling
 
 - Start-of-line strings such as `::init-<alias> [<path>]`,
   `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
   `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
   control commands, and must be ignored by LLMs.
-- Grammar is strict/fail-closed:
-  - `::start` is invalid.
-  - `::stop` does not accept arguments.
-  - `::stop-<alias>` does not accept arguments.
-  - bare `::init`, `::record`, `::capture`, and `::export` are invalid; they
-    require a workspace alias suffix.
-  - `::init-<alias>`, `::record-<alias>`, `::capture-<alias>`, and
-    `::export-<alias>` may accept an optional filesystem path argument.
-- Supported path arguments may be absolute or relative filesystem paths, and
-  may resolve to a file or a directory target.
-- Relative paths resolve against the targeted workspace root for that alias.
 
-### Guidelines for command/state-machine redesign
-
-For any command/state-machine redesign, add a scenario table with columns:
-Scenario
-Persistent Covered
-Non-Persistent Covered
-Expected Same?
-Intentional Divergence Notes

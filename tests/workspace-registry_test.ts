@@ -31,7 +31,7 @@ function makeWorkspace(
     alias: overrides.alias ?? overrides.workspaceId,
     workspaceRoot: overrides.workspaceRoot ?? `/tmp/${overrides.workspaceId}`,
     configPath: overrides.configPath ??
-      `/tmp/${overrides.workspaceId}/.kato/${DEFAULT_WORKSPACE_CONFIG_FILENAME}`,
+      `/tmp/${overrides.workspaceId}/${DEFAULT_WORKSPACE_CONFIG_FILENAME}`,
     registeredAt: overrides.registeredAt ?? "2026-03-01T10:00:00.000Z",
     ...(overrides.updatedAt ? { updatedAt: overrides.updatedAt } : {}),
   };
@@ -124,10 +124,9 @@ Deno.test(
       const workspaceRoot = join(tempDir, "My.Proj");
       const configPath = join(
         workspaceRoot,
-        ".kato",
         DEFAULT_WORKSPACE_CONFIG_FILENAME,
       );
-      await Deno.mkdir(join(workspaceRoot, ".kato"), { recursive: true });
+      await Deno.mkdir(workspaceRoot, { recursive: true });
       await Deno.writeTextFile(
         configPath,
         [

@@ -3,7 +3,6 @@ import type { DaemonCliCommandContext } from "./context.ts";
 import {
   createWorkspaceConfigScaffold,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
-  DEFAULT_WORKSPACE_CONFIG_SUBDIR,
   defaultAliasForWorkspaceRoot,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
@@ -49,7 +48,7 @@ export async function resolveRegisterTarget(
   const located = await findNearestWorkspaceConfig(cwd);
   if (!located) {
     throw new Error(
-      `No workspace config found. Create one at .kato/${DEFAULT_WORKSPACE_CONFIG_FILENAME} first.`,
+      `No workspace config found. Run \`kato workspace init\` to create ./${DEFAULT_WORKSPACE_CONFIG_FILENAME} from the default template first.`,
     );
   }
   return located;
@@ -58,20 +57,18 @@ export async function resolveRegisterTarget(
 export async function resolveWorkspaceInitPath(
   ctx: DaemonCliCommandContext,
   dirPath: string | undefined,
-): Promise<{ workspaceRoot: string; configDir: string; configPath: string }> {
+): Promise<{ workspaceRoot: string; configPath: string }> {
   const baseDir = dirPath
     ? resolve(requireCliCwd(ctx), dirPath)
     : requireCliCwd(ctx);
   const workspaceRoot = baseDir;
-  const configDir = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_SUBDIR);
   const existingPath = await resolveWorkspaceConfigPath(workspaceRoot);
   if (existingPath) {
-    return { workspaceRoot, configDir, configPath: existingPath };
+    return { workspaceRoot, configPath: existingPath };
   }
   return {
     workspaceRoot,
-    configDir,
-    configPath: join(configDir, DEFAULT_WORKSPACE_CONFIG_FILENAME),
+    configPath: join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME),
   };
 }
 
