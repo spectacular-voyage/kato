@@ -69,8 +69,8 @@ function isProviderStatus(value: unknown): boolean {
     return false;
   }
 
-  const lastMessageAt = value["lastMessageAt"];
-  if (lastMessageAt !== undefined && typeof lastMessageAt !== "string") {
+  const lastEventAt = value["lastEventAt"];
+  if (lastEventAt !== undefined && typeof lastEventAt !== "string") {
     return false;
   }
 

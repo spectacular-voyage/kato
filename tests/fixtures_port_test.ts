@@ -84,7 +84,7 @@ Deno.test("Codex VSCode fixture keeps preamble and final answer flow", async () 
   assertEquals(finalAnswerCount, 2);
 });
 
-Deno.test("Codex legacy fixture keeps EOF-flush scenario inputs", async () => {
+Deno.test("Codex historical fixture keeps EOF-flush scenario inputs", async () => {
   const rows = await readJsonl("codex-session-legacy.jsonl");
 
   const hasTaskComplete = rows.some((row) => {

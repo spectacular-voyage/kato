@@ -36,7 +36,7 @@ interface ConversationEventBase {
   eventId: string;
   provider: string;
   sessionId: string;
-  timestamp: string;
+  timestamp?: string;
   kind: ConversationEventKind;
   turnId?: string;
   source: ConversationEventSource;

@@ -2,7 +2,7 @@
 id: ssk7ocudcxea841o9ywqk8v
 title: 2026 03 01 Alias Finalization
 desc: ''
-updated: 1772410780225
+updated: 1772417413847
 created: 1772410153437
 ---
 
@@ -66,19 +66,18 @@ code that should survive.
   - `workspaceIds`
   - `recordingCycleIds`
   - append-only `capture` / `export`
-  - legacy frontmatter normalization when older files are appended to
 
-- [ ] Confirm that the daemon-side non-persistent and persistent execution paths
-  stay behaviorally aligned for alias-scoped commands. Both paths were updated,
-  but they still need targeted parity tests.
+- [x] Confirm that the daemon-side non-persistent and persistent execution
+  paths stay behaviorally aligned for alias-scoped commands. The runtime suite
+  now exercises alias-scoped flows in both paths.
 
-- [ ] Review migration and cleanup boundaries for workspace config files:
-  - keep reading legacy `.kato/kato-config.yaml`
+- [x] Review migration and cleanup boundaries for workspace config files:
+  - stop reading legacy `.kato/kato-config.yaml`
   - always write new `.kato/kato-workspace-config.yaml`
   - keep `workspaceId` injection stable and non-destructive
 
-- [ ] Clean up any and all backward-compatibility vestiges. The code currently tolerates:
-  - legacy workspace config filename
-  - legacy frontmatter keys
+- [x] Clean up the remaining backward-compatibility vestiges:
+  - legacy workspace config filename reads
+  - legacy frontmatter key aliases
 
-- [ ] Create a default kato-workspace-config.yaml template
+- [x] Create a default kato-workspace-config.yaml template

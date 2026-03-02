@@ -139,8 +139,8 @@ Deno.test(
       ], {
         title: "Conversation Session",
         includeUpdatedInFrontmatter: false,
-        frontmatterSessionId: "12345678-abcdef",
-        frontmatterRecordingIds: ["rec-seed"],
+        frontmatterSessionIds: ["12345678-abcdef"],
+        frontmatterRecordingCycleIds: ["rec-seed"],
         frontmatterParticipants: ["user.djradon", "codex.gpt-5.3-codex"],
         frontmatterTags: ["provider.codex"],
         frontmatterConversationEventKinds: ["message.user"],
@@ -148,8 +148,8 @@ Deno.test(
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "id: conversation-session-12345678");
-      assertStringIncludes(content, "sessionId: 12345678-abcdef");
-      assertStringIncludes(content, "recordingIds: [rec-seed]");
+      assertStringIncludes(content, "sessionIds: [12345678-abcdef]");
+      assertStringIncludes(content, "recordingCycleIds: [rec-seed]");
       assertStringIncludes(
         content,
         "participants: [user.djradon, codex.gpt-5.3-codex]",
@@ -186,13 +186,13 @@ Deno.test(
         ),
       ], {
         includeFrontmatter: true,
-        frontmatterRecordingIds: ["123", "true", "null", "~", "rec-safe"],
+        frontmatterRecordingCycleIds: ["123", "true", "null", "~", "rec-safe"],
       });
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(
         content,
-        "recordingIds: ['123', 'true', 'null', '~', rec-safe]",
+        "recordingCycleIds: ['123', 'true', 'null', '~', rec-safe]",
       );
     } finally {
       await removePathIfPresent(root);
@@ -201,7 +201,7 @@ Deno.test(
 );
 
 Deno.test(
-  "MarkdownConversationWriter append accretively updates recordingIds, tags, and conversationEventKinds in existing frontmatter",
+  "MarkdownConversationWriter append accretively updates recordingCycleIds, tags, and conversationEventKinds in existing frontmatter",
   async () => {
     const root = makeSandboxRoot();
     const outputPath = join(root, "conversation.md");
@@ -218,7 +218,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingIds: [rec-old]",
+          "recordingCycleIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -239,13 +239,13 @@ Deno.test(
         ),
       ], {
         includeFrontmatter: true,
-        frontmatterRecordingIds: ["rec-new"],
+        frontmatterRecordingCycleIds: ["rec-new"],
         frontmatterTags: ["topic.frontmatter"],
         frontmatterConversationEventKinds: ["message.assistant"],
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.frontmatter]",
@@ -263,7 +263,7 @@ Deno.test(
 );
 
 Deno.test(
-  "MarkdownConversationWriter keeps legacy tags untouched and only merges canonical fields",
+  "MarkdownConversationWriter keeps existing tags untouched and only merges canonical fields",
   async () => {
     const root = makeSandboxRoot();
     const outputPath = join(root, "conversation.md");
@@ -342,7 +342,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingIds: [rec-old]",
+          "recordingCycleIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -361,13 +361,13 @@ Deno.test(
         ),
       ], {
         includeFrontmatter: false,
-        frontmatterRecordingIds: ["rec-new"],
+        frontmatterRecordingCycleIds: ["rec-new"],
         frontmatterTags: ["topic.extra"],
         frontmatterConversationEventKinds: ["message.assistant"],
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.extra]",
@@ -385,7 +385,7 @@ Deno.test(
 );
 
 Deno.test(
-  "MarkdownConversationWriter does not migrate legacy messageEventKinds key",
+  "MarkdownConversationWriter preserves unknown frontmatter keys while merging canonical fields",
   async () => {
     const root = makeSandboxRoot();
     const outputPath = join(root, "conversation.md");
@@ -402,7 +402,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingIds: [rec-old]",
+          "recordingCycleIds: [rec-old]",
           "messageEventKinds: [message.user]",
           "---",
           "",
@@ -472,12 +472,12 @@ Deno.test(
         ),
       ], {
         includeFrontmatter: false,
-        frontmatterRecordingIds: ["rec-new"],
+        frontmatterRecordingCycleIds: ["rec-new"],
       });
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "customPadded: '  keep me padded  '");
-      assertStringIncludes(content, "recordingIds: [rec-new]");
+      assertStringIncludes(content, "recordingCycleIds: [rec-new]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await removePathIfPresent(root);

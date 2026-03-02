@@ -195,7 +195,7 @@ export async function* parseCodexEvents(
   let turnFinalized = false;
 
   let currentByteOffset = 0;
-  const timestamp = new Date().toISOString();
+  const timestamp = fromOffset > 0 ? new Date().toISOString() : undefined;
   const pendingRequestUserInputCalls = new Map<
     string,
     PendingRequestUserInputCall
@@ -212,7 +212,7 @@ export async function* parseCodexEvents(
       eventId: makeEventId(sessionId, lineEnd, kind, index),
       provider,
       sessionId,
-      timestamp,
+      ...(timestamp !== undefined ? { timestamp } : {}),
       kind,
       // turnIdOverride semantics: undefined → fall back to currentTurnId;
       // empty string → explicitly suppress turnId; non-empty → use as turnId.

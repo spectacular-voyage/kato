@@ -2,7 +2,7 @@
 id: t3lfa9r314byjwjoga3d5qe
 title: 2026 03 01 Workspace Aliases
 desc: ''
-updated: 1772410861641
+updated: 1772415248669
 created: 1772395927887
 ---
 
@@ -70,7 +70,7 @@ Canonical new path:
 Rules:
 
 - `workspace init` always writes the new filename.
-- `workspace register` may discover either filename.
+- `workspace register` expects the canonical workspace-local filename.
 - Docs should only teach the new workspace-local filename.
 
 ## Live Workspace Catalog Design
@@ -438,7 +438,7 @@ These make the live-refresh boundary explicit and testable.
 
 ### Live workspace-config changes
 
-- Editing `defaultOutputDir` in a workspace-local config changes the next generated destination for `init`, `capture`, `export`, or a newly started `record` cycle without restart.
+- Editing `defaultOutputDir` in a workspace-local config changes the next generated destination for `::init-<alias>`, `::capture-<alias>`, `::export-<alias>`, or a newly started `::record-<alias>` cycle without restart.
 - Editing `filenameTemplate` changes the next generated filename without restart.
 - Editing writer flags changes the next new recording cycle’s render behavior without restart.
 - An already-active recording cycle keeps using its existing stored writer flags and destination behavior until stopped.

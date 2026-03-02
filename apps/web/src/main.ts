@@ -24,15 +24,10 @@ export function toStatusViewModel(
     includeStale,
   });
 
-  // Fall back to legacy provider aggregate if sessions list is absent
-  const sessionCount = snapshot.sessions !== undefined
-    ? sessions.length
-    : snapshot.providers.reduce((sum, p) => sum + p.activeSessions, 0);
-
   return {
     generatedAt: snapshot.generatedAt,
     daemon: snapshot.daemonRunning ? "running" : "stopped",
-    sessionCount,
+    sessionCount: sessions.length,
     recordingCount: snapshot.recordings.activeRecordings,
     sessions,
     memory: snapshot.memory,

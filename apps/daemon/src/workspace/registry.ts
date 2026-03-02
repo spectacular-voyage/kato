@@ -16,7 +16,6 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
 export const DEFAULT_WORKSPACE_CONFIG_SUBDIR = ".kato";
 export const DEFAULT_WORKSPACE_CONFIG_FILENAME = "kato-workspace-config.yaml";
-export const LEGACY_WORKSPACE_CONFIG_FILENAME = "kato-config.yaml";
 export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".kato/recordings";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
   "{provider}-{sessionShortId}-{timestampUtc}.md";
@@ -499,29 +498,22 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
   }
 }
 
-export function readWorkspaceConfigPathCandidates(
-  workspaceRoot: string,
-): string[] {
-  const configDir = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_SUBDIR);
-  return [
-    join(configDir, DEFAULT_WORKSPACE_CONFIG_FILENAME),
-    join(configDir, LEGACY_WORKSPACE_CONFIG_FILENAME),
-  ];
-}
-
 export async function resolveWorkspaceConfigPath(
   workspaceRoot: string,
 ): Promise<string | undefined> {
-  for (const path of readWorkspaceConfigPathCandidates(workspaceRoot)) {
-    try {
-      const stat = await Deno.stat(path);
-      if (stat.isFile) {
-        return path;
-      }
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
+  const path = join(
+    workspaceRoot,
+    DEFAULT_WORKSPACE_CONFIG_SUBDIR,
+    DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  );
+  try {
+    const stat = await Deno.stat(path);
+    if (stat.isFile) {
+      return path;
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
     }
   }
   return undefined;

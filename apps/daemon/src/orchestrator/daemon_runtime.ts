@@ -195,7 +195,7 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
 function makeRuntimeEventSignature(event: ConversationEvent): string {
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp}`;
+  }\0${event.timestamp ?? ""}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
@@ -248,25 +248,6 @@ function normalizeRawCommandTargetPath(
   normalized = unwrapMatchingDelimiters(normalized);
 
   return normalized.length > 0 ? normalized : undefined;
-}
-
-function resolveExplicitAbsolutePathArgument(
-  rawArgument: string | undefined,
-): { path?: string; reason?: string } {
-  const normalized = normalizeRawCommandTargetPath(rawArgument);
-  if (!normalized) {
-    return { reason: "Path argument is missing" };
-  }
-  if (normalized.startsWith("@")) {
-    return {
-      reason:
-        "Path argument must be an absolute filesystem path (mentions are not allowed)",
-    };
-  }
-  if (!isAbsolute(normalized)) {
-    return { reason: "Path argument must be absolute" };
-  }
-  return { path: normalized };
 }
 
 function resolveConversationTitle(
@@ -820,8 +801,8 @@ function matchesCaptureBoundaryEvent(
   }
 
   if (
-    candidate.timestamp.length > 0 &&
-    commandEvent.timestamp.length > 0 &&
+    (candidate.timestamp?.length ?? 0) > 0 &&
+    (commandEvent.timestamp?.length ?? 0) > 0 &&
     candidate.timestamp !== commandEvent.timestamp
   ) {
     return false;
@@ -880,52 +861,6 @@ async function resolveBoundaryEventsFromTwinStart(
     return slice;
   }
   return fallbackBoundaryEvents;
-}
-
-async function logInvalidTargetForCommand(options: {
-  provider: string;
-  sessionId: string;
-  eventId: string;
-  command: string;
-  rawArgument: string | undefined;
-  reason: string;
-  operationalLogger: StructuredLogger;
-  auditLogger: AuditLogger;
-}): Promise<void> {
-  const {
-    provider,
-    sessionId,
-    eventId,
-    command,
-    rawArgument,
-    reason,
-    operationalLogger,
-    auditLogger,
-  } = options;
-  await operationalLogger.warn(
-    "recording.command.invalid_target",
-    "Skipping in-chat control command because target path is invalid",
-    {
-      provider,
-      sessionId,
-      eventId,
-      command,
-      rawArgument,
-      reason,
-    },
-  );
-  await auditLogger.record(
-    "recording.command.invalid_target",
-    "In-chat control command target path invalid",
-    {
-      provider,
-      sessionId,
-      eventId,
-      command,
-      rawArgument,
-      reason,
-    },
-  );
 }
 
 async function logMissingWorkspaceForCommand(options: {
@@ -1230,7 +1165,7 @@ async function applyPersistentControlCommandsForEvent(
                 events: seedEvents,
                 title: boundarySnapshotTitle,
                 recordingId: cycleId,
-                recordingIds: [cycleId],
+                recordingCycleIds: [cycleId],
                 workspaceIds: [workspace.workspaceId],
               });
             }
@@ -1289,7 +1224,7 @@ async function applyPersistentControlCommandsForEvent(
             targetPath,
             events: captureEvents,
             title: captureTitle,
-            recordingIds: currentCycleId ? [currentCycleId] : undefined,
+            recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
             workspaceIds: [workspace.workspaceId],
           });
           const continuationEvents = buildCommandSeedEvents(
@@ -1310,7 +1245,7 @@ async function applyPersistentControlCommandsForEvent(
               events: continuationEvents,
               title: captureTitle,
               ...(currentCycleId ? { recordingId: currentCycleId } : {}),
-              recordingIds: currentCycleId ? [currentCycleId] : undefined,
+              recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
             });
           }
@@ -1656,7 +1591,7 @@ async function applyControlCommandsForEvent(
             targetPath: resolvedDestination,
             events: boundarySnapshot,
             title: recordingTitle,
-            recordingIds: existingState?.recordingCycleId
+            recordingCycleIds: existingState?.recordingCycleId
               ? [existingState.recordingCycleId]
               : undefined,
             workspaceIds: [workspace.workspaceId],
@@ -1681,7 +1616,7 @@ async function applyControlCommandsForEvent(
               ...(existingState?.recordingCycleId
                 ? { recordingId: existingState.recordingCycleId }
                 : {}),
-              recordingIds: existingState?.recordingCycleId
+              recordingCycleIds: existingState?.recordingCycleId
                 ? [existingState.recordingCycleId]
                 : undefined,
               workspaceIds: [workspace.workspaceId],
@@ -1904,7 +1839,7 @@ async function processInChatRecordingUpdates(
             recordingKey: outputState.workspaceId,
             events: [event],
             title: recordingTitle,
-            recordingIds: outputState.recordingCycleId
+            recordingCycleIds: outputState.recordingCycleId
               ? [outputState.recordingCycleId]
               : undefined,
             workspaceIds: [outputState.workspaceId],
@@ -2078,7 +2013,7 @@ async function processPersistentRecordingUpdates(
           ...(output.activeRecordingCycleId
             ? { recordingId: output.activeRecordingCycleId }
             : {}),
-          recordingIds: output.activeRecordingCycleId
+          recordingCycleIds: output.activeRecordingCycleId
             ? [output.activeRecordingCycleId]
             : undefined,
           workspaceIds: [output.workspaceId],
@@ -2213,7 +2148,7 @@ function toProviderStatuses(
     .map(([provider, status]) => ({
       provider,
       activeSessions: status.activeSessions,
-      ...(status.lastEventAt ? { lastMessageAt: status.lastEventAt } : {}),
+      ...(status.lastEventAt ? { lastEventAt: status.lastEventAt } : {}),
     }));
 }
 
@@ -2896,14 +2831,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-async function findSessionMetadataByExactSessionId(
-  sessionId: string,
-  sessionStateStore: PersistentSessionStateStore,
-): Promise<SessionMetadataV1 | undefined> {
-  const metadataList = await sessionStateStore.listSessionMetadata();
-  return metadataList.find((entry) => entry.sessionId === sessionId);
 }
 
 type ExportSessionResolutionMatch =

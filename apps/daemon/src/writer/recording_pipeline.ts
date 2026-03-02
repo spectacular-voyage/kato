@@ -40,7 +40,7 @@ export interface ActivateRecordingInput {
   seedEvents?: ConversationEvent[];
   title?: string;
   recordingId?: string;
-  recordingIds?: string[];
+  recordingCycleIds?: string[];
   workspaceIds?: string[];
 }
 
@@ -50,7 +50,7 @@ export interface SnapshotExportInput {
   targetPath: string;
   events: ConversationEvent[];
   title?: string;
-  recordingIds?: string[];
+  recordingCycleIds?: string[];
   workspaceIds?: string[];
   format?: ExportFormat;
 }
@@ -67,7 +67,7 @@ export interface AppendToActiveRecordingInput {
   recordingKey?: string;
   events: ConversationEvent[];
   title?: string;
-  recordingIds?: string[];
+  recordingCycleIds?: string[];
   workspaceIds?: string[];
 }
 
@@ -78,7 +78,7 @@ export interface AppendToDestinationInput {
   events: ConversationEvent[];
   title?: string;
   recordingId?: string;
-  recordingIds?: string[];
+  recordingCycleIds?: string[];
   workspaceIds?: string[];
 }
 
@@ -110,7 +110,11 @@ export interface RecordingPipelineLike {
   validateDestinationPath?(
     input: ValidateDestinationPathInput,
   ): Promise<string>;
-  stopRecording(provider: string, sessionId: string, recordingKey?: string): boolean;
+  stopRecording(
+    provider: string,
+    sessionId: string,
+    recordingKey?: string,
+  ): boolean;
   getActiveRecording(
     provider: string,
     sessionId: string,
@@ -280,9 +284,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
           sessionId: input.sessionId,
           events: input.seedEvents ?? [],
           title: input.title,
-          recordingIds: [
+          recordingCycleIds: [
             nextRecording.recordingId,
-            ...(input.recordingIds ?? []),
+            ...(input.recordingCycleIds ?? []),
           ],
           workspaceIds: input.workspaceIds,
           recordingKey: input.recordingKey,
@@ -330,7 +334,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         sessionId: input.sessionId,
         events: input.events,
         title: input.title,
-        recordingIds: input.recordingIds,
+        recordingCycleIds: input.recordingCycleIds,
         workspaceIds: input.workspaceIds,
       }),
       format,
@@ -370,7 +374,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
         sessionId: input.sessionId,
         events: input.events,
         title: input.title,
-        recordingIds: input.recordingIds,
+        recordingCycleIds: input.recordingCycleIds,
         workspaceIds: input.workspaceIds,
       }),
       format,
@@ -412,9 +416,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
         sessionId: input.sessionId,
         events: input.events,
         title: input.title,
-        recordingIds: [
+        recordingCycleIds: [
           activeRecording.recordingId,
-          ...(input.recordingIds ?? []),
+          ...(input.recordingCycleIds ?? []),
         ],
         workspaceIds: input.workspaceIds,
         recordingKey: input.recordingKey,
@@ -450,9 +454,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
         sessionId: input.sessionId,
         events: input.events,
         title: input.title,
-        recordingIds: [
+        recordingCycleIds: [
           ...(input.recordingId ? [input.recordingId] : []),
-          ...(input.recordingIds ?? []),
+          ...(input.recordingCycleIds ?? []),
         ],
         workspaceIds: input.workspaceIds,
       }),
@@ -471,7 +475,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
     return decision.canonicalTargetPath ?? input.targetPath;
   }
 
-  stopRecording(provider: string, sessionId: string, recordingKey?: string): boolean {
+  stopRecording(
+    provider: string,
+    sessionId: string,
+    recordingKey?: string,
+  ): boolean {
     const sessionKey = makeSessionKey(provider, sessionId, recordingKey);
     this.conversationEventKindChecklistByRecording.delete(sessionKey);
     return this.recordings.delete(sessionKey);
@@ -585,7 +593,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     sessionId: string;
     events: ConversationEvent[];
     title: string | undefined;
-    recordingIds?: string[];
+    recordingCycleIds?: string[];
     workspaceIds?: string[];
     recordingKey?: string;
     trackActiveRecordingKinds?: boolean;
@@ -602,8 +610,8 @@ export class RecordingPipeline implements RecordingPipelineLike {
       options.provider,
       options.events,
     );
-    const frontmatterRecordingIds = this.resolveRecordingIds(
-      options.recordingIds,
+    const frontmatterRecordingCycleIds = this.resolveRecordingCycleIds(
+      options.recordingCycleIds,
     );
     return {
       ...this.defaultRenderOptions,
@@ -611,13 +619,11 @@ export class RecordingPipeline implements RecordingPipelineLike {
       now: this.now,
       includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
       includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
-      frontmatterSessionId: options.sessionId,
       frontmatterSessionIds: [options.sessionId],
-      ...(options.workspaceIds ? { frontmatterWorkspaceIds: options.workspaceIds } : {}),
-      ...(frontmatterRecordingIds ? { frontmatterRecordingIds } : {}),
-      ...(frontmatterRecordingIds
-        ? { frontmatterRecordingCycleIds: frontmatterRecordingIds }
+      ...(options.workspaceIds
+        ? { frontmatterWorkspaceIds: options.workspaceIds }
         : {}),
+      ...(frontmatterRecordingCycleIds ? { frontmatterRecordingCycleIds } : {}),
       ...(frontmatterConversationEventKinds
         ? { frontmatterConversationEventKinds }
         : {}),
@@ -625,7 +631,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
     };
   }
 
-  private resolveRecordingIds(values?: string[]): string[] | undefined {
+  private resolveRecordingCycleIds(values?: string[]): string[] | undefined {
     if (!values || values.length === 0) {
       return undefined;
     }

@@ -599,7 +599,7 @@ async function readGeminiMessages(
 function eventSignature(event: ConversationEvent): string {
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp}`;
+  }\0${event.timestamp ?? ""}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":

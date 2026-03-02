@@ -105,10 +105,8 @@ export function renderFrontmatter(options: {
   title: string;
   now?: Date;
   makeFrontmatterId?: (title: string) => string;
-  sessionId?: string;
   sessionIds?: string[];
   workspaceIds?: string[];
-  recordingIds?: string[];
   recordingCycleIds?: string[];
   participants?: string[];
   tags?: string[];
@@ -116,14 +114,9 @@ export function renderFrontmatter(options: {
   includeUpdated?: boolean;
 }): string {
   const now = options.now ?? new Date();
-  const sessionId = options.sessionId?.trim();
-  const sessionIds = dedupeStrings(
-    options.sessionIds ?? (sessionId ? [sessionId] : undefined),
-  );
+  const sessionIds = dedupeStrings(options.sessionIds);
   const workspaceIds = dedupeStrings(options.workspaceIds);
-  const recordingCycleIds = dedupeStrings(
-    options.recordingCycleIds ?? options.recordingIds,
-  );
+  const recordingCycleIds = dedupeStrings(options.recordingCycleIds);
   const frontmatterSessionId = sessionIds[0];
   const frontmatterId = options.makeFrontmatterId
     ? options.makeFrontmatterId(options.title)
@@ -272,7 +265,6 @@ export function mergeAccretiveFrontmatterFields(options: {
   frontmatter: string;
   sessionIds?: ReadonlyArray<string>;
   workspaceIds?: ReadonlyArray<string>;
-  recordingIds?: ReadonlyArray<string>;
   recordingCycleIds?: ReadonlyArray<string>;
   participants?: ReadonlyArray<string>;
   tags?: ReadonlyArray<string>;
@@ -280,9 +272,7 @@ export function mergeAccretiveFrontmatterFields(options: {
 }): string {
   const incomingSessionIds = dedupeStrings(options.sessionIds);
   const incomingWorkspaceIds = dedupeStrings(options.workspaceIds);
-  const incomingRecordingCycleIds = dedupeStrings(
-    options.recordingCycleIds ?? options.recordingIds,
-  );
+  const incomingRecordingCycleIds = dedupeStrings(options.recordingCycleIds);
   const incomingParticipants = dedupeStrings(options.participants);
   const incomingTags = dedupeStrings(options.tags);
   const incomingConversationEventKinds = dedupeStrings(
@@ -316,15 +306,9 @@ export function mergeAccretiveFrontmatterFields(options: {
     return options.frontmatter;
   }
 
-  const existingSessionIds = mergeStringLists(
-    readStringList(parsed["sessionIds"]),
-    readStringList(parsed["sessionId"]),
-  );
+  const existingSessionIds = readStringList(parsed["sessionIds"]);
   const existingWorkspaceIds = readStringList(parsed["workspaceIds"]);
-  const existingRecordingCycleIds = mergeStringLists(
-    readStringList(parsed["recordingCycleIds"]),
-    readStringList(parsed["recordingIds"]),
-  );
+  const existingRecordingCycleIds = readStringList(parsed["recordingCycleIds"]);
   const existingParticipants = readStringList(parsed["participants"]);
   const existingTags = readStringList(parsed["tags"]);
   const existingConversationEventKinds = readStringList(
@@ -382,14 +366,12 @@ export function mergeAccretiveFrontmatterFields(options: {
   const nextRecord: Record<string, unknown> = { ...parsed };
   if (sessionIdsChanged) {
     nextRecord["sessionIds"] = mergedSessionIds;
-    delete nextRecord["sessionId"];
   }
   if (workspaceIdsChanged) {
     nextRecord["workspaceIds"] = mergedWorkspaceIds;
   }
   if (recordingCycleIdsChanged) {
     nextRecord["recordingCycleIds"] = mergedRecordingCycleIds;
-    delete nextRecord["recordingIds"];
   }
   if (participantsChanged) {
     nextRecord["participants"] = mergedParticipants;

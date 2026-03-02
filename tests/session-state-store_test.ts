@@ -192,7 +192,7 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
         relativePathFromWorkspaceRoot: "notes/session.md",
       },
       currentResolvedPath: `${dir}/workspace/notes/session.md`,
-      sourceConfigPath: `${dir}/workspace/.kato/kato-config.yaml`,
+      sourceConfigPath: `${dir}/workspace/.kato/kato-workspace-config.yaml`,
       workspaceRootSnapshot: `${dir}/workspace`,
       resolvedDefaultOutputDir: `${dir}/workspace/notes`,
       filenameTemplate: "{provider}-{sessionShortId}.md",

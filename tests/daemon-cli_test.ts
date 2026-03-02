@@ -878,7 +878,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonCli status preserves stale sessions when lastMessageAt is missing",
+  "runDaemonCli status preserves stale sessions when lastEventAt is missing",
   async () => {
     const runtimeDir = ".kato/test-runtime";
     const harness = makeRuntimeHarness(runtimeDir);

@@ -1,7 +1,7 @@
 export interface ProviderStatus {
   provider: string;
   activeSessions: number;
-  lastMessageAt?: string;
+  lastEventAt?: string;
 }
 
 export interface RecordingStatus {
@@ -47,7 +47,7 @@ export interface DaemonSessionStatus {
   providerSessionId?: string;
   snippet?: string;
   updatedAt: string;
-  lastMessageAt?: string;
+  lastEventAt?: string;
   stale: boolean;
   recordings?: DaemonRecordingStatus[];
 }

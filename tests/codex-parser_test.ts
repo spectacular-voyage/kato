@@ -168,6 +168,33 @@ Deno.test("codex parser cursor increases monotonically and supports resume", asy
   );
 });
 
+Deno.test("codex parser omits synthetic timestamps for retrospective parses", async () => {
+  const results = await collectEvents(FIXTURE_VSCODE, 0);
+  assert(results.length > 0);
+  assertEquals(
+    results.every((result) => result.event.timestamp === undefined),
+    true,
+  );
+});
+
+Deno.test("codex parser adds synthetic timestamps for incremental parses", async () => {
+  const baseline = await collectEvents(FIXTURE_VSCODE, 0);
+  assert(baseline.length > 1);
+
+  const resumed = await collectEvents(
+    FIXTURE_VSCODE,
+    baseline[0]!.cursor.value,
+  );
+  assert(resumed.length > 0);
+  assertEquals(
+    resumed.every((result) =>
+      typeof result.event.timestamp === "string" &&
+      result.event.timestamp.length > 0
+    ),
+    true,
+  );
+});
+
 Deno.test("codex parser handles aborted session without errors", async () => {
   const results = await collectEvents(
     FIXTURE_ABORTED,

@@ -13,7 +13,9 @@ export async function runWorkspaceInitCommand(
 
   await ctx.operationalLogger.info(
     "workspace.init",
-    created ? "Workspace config initialized" : "Workspace config already present",
+    created
+      ? "Workspace config initialized"
+      : "Workspace config already present",
     {
       workspaceRoot: target.workspaceRoot,
       configPath: target.configPath,
@@ -28,7 +30,9 @@ export async function runWorkspaceInitCommand(
 
   ctx.runtime.writeStdout(
     `${
-      created ? "created workspace config at" : "workspace config already exists at"
+      created
+        ? "created workspace config at"
+        : "workspace config already exists at"
     } ${target.configPath}\n`,
   );
 }

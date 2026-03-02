@@ -137,6 +137,7 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     sessionId: "abc123",
     snippet: "how do I configure X",
     updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
     stale: false,
     recordings: [{
       outputPath: "/home/user/notes.md",
@@ -148,14 +149,17 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     showAll: false,
     now: NOW,
     stale: false,
+    terminalWidth: 160,
   });
   assertStringIncludes(out, "● claude:");
   assertStringIncludes(out, "how do I configure X");
+  assert(/updated \d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out));
+  assertStringIncludes(out, "last event 1m ago");
   assertStringIncludes(out, "/home/user/notes.md");
   assertStringIncludes(out, "recording");
 });
 
-Deno.test("renderStatusText: missing lastMessageAt renders as unknown", () => {
+Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {
   const sessions: DaemonSessionStatus[] = [{
     provider: "claude",
     sessionId: "no-msg-time",
@@ -167,7 +171,8 @@ Deno.test("renderStatusText: missing lastMessageAt renders as unknown", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "(no-msg-time)  ·  last message unknown");
+  assertStringIncludes(out, "(no-msg-time)  ·  updated ");
+  assertEquals(out.includes("last event"), false);
 });
 
 Deno.test("renderStatusText: stale session hidden by default", () => {
@@ -190,7 +195,7 @@ Deno.test("renderStatusText: stale session hidden by default", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "(active)  ·  last message");
+  assertStringIncludes(out, "(active)  ·  updated ");
   assertEquals(out.includes("codex/stale"), false);
 });
 
@@ -249,10 +254,10 @@ Deno.test("renderStatusText: sessionCap limits displayed sessions", () => {
     stale: false,
   });
   // Should only mention the 3 most recent (s0, s1, s2)
-  assertStringIncludes(out, "(s0)  ·  last message");
-  assertStringIncludes(out, "(s1)  ·  last message");
-  assertStringIncludes(out, "(s2)  ·  last message");
-  assertEquals(out.includes("(s3)  ·  last message"), false);
+  assertStringIncludes(out, "(s0)  ·  updated ");
+  assertStringIncludes(out, "(s1)  ·  updated ");
+  assertStringIncludes(out, "(s2)  ·  updated ");
+  assertEquals(out.includes("(s3)  ·  updated "), false);
 });
 
 Deno.test("renderStatusText: narrow width keeps lines within width", () => {
@@ -350,7 +355,7 @@ Deno.test("toStatusViewModel: memory forwarded from snapshot", () => {
   assertEquals(vm.memory?.daemonMaxMemoryBytes, 200 * 1024 * 1024);
 });
 
-Deno.test("toStatusViewModel: falls back to provider aggregate when sessions absent", () => {
+Deno.test("toStatusViewModel: sessions absent yields empty session count", () => {
   const snapshot: DaemonStatusSnapshot = {
     schemaVersion: 1,
     generatedAt: "2026-02-24T10:00:00.000Z",
@@ -360,6 +365,6 @@ Deno.test("toStatusViewModel: falls back to provider aggregate when sessions abs
     recordings: { activeRecordings: 0, destinations: 0 },
   };
   const vm = toStatusViewModel(snapshot);
-  assertEquals(vm.sessionCount, 3);
+  assertEquals(vm.sessionCount, 0);
   assertEquals(vm.sessions.length, 0);
 });

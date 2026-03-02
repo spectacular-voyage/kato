@@ -31,6 +31,19 @@ function formatRelativeTime(isoString: string | undefined, now: Date): string {
   return `${Math.floor(diffSec / 86400)}d ago`;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalTimestamp(isoString: string | undefined): string {
+  if (!isoString) return "unknown";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${
+    pad2(date.getDate())
+  } ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -132,12 +145,10 @@ function normalizeSnapshotForStatusDisplay(
   if (!snapshot.sessions) return snapshot;
   const normalizedSessions = snapshot.sessions.map((session) => ({
     ...session,
-    stale: session.lastMessageAt
-      ? isSessionStale(session.lastMessageAt, now)
+    stale: session.lastEventAt
+      ? isSessionStale(session.lastEventAt, now)
       : typeof session.stale === "boolean"
       ? session.stale
-      : session.updatedAt
-      ? isSessionStale(session.updatedAt, now)
       : true,
   }));
   return {
@@ -217,9 +228,17 @@ function renderSessionRow(
     ? `"${sanitizeInlineText(s.snippet)}"`
     : "(no user message)";
   const identity = s.sessionShortId ?? s.sessionId;
-  const lastMessage = formatRelativeTime(s.lastMessageAt, now);
-  const header =
-    `${marker} ${s.provider}: ${label} (${identity})  ·  last message ${lastMessage}`;
+  const updatedAt = formatLocalTimestamp(s.updatedAt);
+  const modified = formatRelativeTime(s.updatedAt, now);
+  const headerParts = [
+    `${marker} ${s.provider}: ${label} (${identity})`,
+    `updated ${updatedAt}`,
+    `modified ${modified}`,
+  ];
+  if (s.lastEventAt) {
+    headerParts.push(`last event ${formatRelativeTime(s.lastEventAt, now)}`);
+  }
+  const header = headerParts.join("  ·  ");
 
   const lines: string[] = [truncate(header, width)];
 

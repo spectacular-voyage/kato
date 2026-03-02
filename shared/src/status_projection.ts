@@ -107,7 +107,7 @@ export function projectSessionStatus(opts: {
       : {}),
     snippet: session.snippet ?? extractSnippet(session.events ?? []),
     updatedAt: session.updatedAt,
-    ...(session.lastEventAt ? { lastMessageAt: session.lastEventAt } : {}),
+    ...(session.lastEventAt ? { lastEventAt: session.lastEventAt } : {}),
     stale,
   };
 
@@ -129,12 +129,10 @@ export function projectSessionStatus(opts: {
 /**
  * Key used for recency sorting.
  *
- * Sort by incoming message recency first. Fallback to updatedAt when message
- * timestamp is unavailable.
+ * Sort by daemon ingest recency (`updatedAt`) only.
  */
 function recencyKey(s: DaemonSessionStatus): number {
-  const ts = s.lastMessageAt ?? s.updatedAt;
-  const parsed = Date.parse(ts);
+  const parsed = Date.parse(s.updatedAt);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -143,8 +141,8 @@ function hasActiveRecording(s: DaemonSessionStatus): boolean {
 }
 
 /**
- * Sort sessions with active recordings first, then by incoming-message
- * recency descending, then by provider+sessionId as tiebreaker.
+ * Sort sessions with active recordings first, then by `updatedAt`
+ * descending, then by provider+sessionId as tiebreaker.
  */
 export function sortSessionsByRecency(
   sessions: DaemonSessionStatus[],

@@ -22,7 +22,9 @@ export async function runWorkspaceUnregisterCommand(
     throw new Error(`Workspace not found: ${trimmed}`);
   }
 
-  const nextEntries = entries.filter((entry) => entry.workspaceId !== match.workspaceId);
+  const nextEntries = entries.filter((entry) =>
+    entry.workspaceId !== match.workspaceId
+  );
   await store.save(nextEntries);
 
   await ctx.operationalLogger.info(

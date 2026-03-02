@@ -24,8 +24,11 @@ export function requireCliCwd(ctx: DaemonCliCommandContext): string {
 export function resolveWorkspaceRegistryStore(
   ctx: DaemonCliCommandContext,
 ): WorkspaceRegistryFileStore {
-  const katoDir = ctx.runtimeConfig.katoDir ?? dirname(ctx.runtimeConfig.runtimeDir);
-  return new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath(katoDir));
+  const katoDir = ctx.runtimeConfig.katoDir ??
+    dirname(ctx.runtimeConfig.runtimeDir);
+  return new WorkspaceRegistryFileStore(
+    resolveDefaultWorkspaceRegistryPath(katoDir),
+  );
 }
 
 export function validateWorkspaceAlias(alias: string): string {
@@ -56,7 +59,9 @@ export async function resolveWorkspaceInitPath(
   ctx: DaemonCliCommandContext,
   dirPath: string | undefined,
 ): Promise<{ workspaceRoot: string; configDir: string; configPath: string }> {
-  const baseDir = dirPath ? resolve(requireCliCwd(ctx), dirPath) : requireCliCwd(ctx);
+  const baseDir = dirPath
+    ? resolve(requireCliCwd(ctx), dirPath)
+    : requireCliCwd(ctx);
   const workspaceRoot = baseDir;
   const configDir = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_SUBDIR);
   const existingPath = await resolveWorkspaceConfigPath(workspaceRoot);

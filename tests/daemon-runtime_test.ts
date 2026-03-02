@@ -12,7 +12,6 @@ import {
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   InMemorySessionSnapshotStore,
   type LogRecord,
-  makeDefaultSessionCursor,
   mapConversationEventsToTwin,
   PersistentSessionStateStore,
   type ProviderIngestionRunner,
@@ -991,7 +990,7 @@ Deno.test(
     try {
       const destination = join(scenarioDir, "pointer.md");
       const captureTargets: string[] = [];
-      const captureRecordingIds: string[][] = [];
+      const captureRecordingCycleIds: string[][] = [];
       const result = await runPersistentInChatScenario({
         events: [
           makeEvent(
@@ -1003,7 +1002,7 @@ Deno.test(
         recordingPipeline: makePersistentInChatRecordingPipeline({
           captureSnapshot(input) {
             captureTargets.push(input.targetPath);
-            captureRecordingIds.push(input.recordingIds ?? []);
+            captureRecordingCycleIds.push(input.recordingCycleIds ?? []);
             return Promise.resolve({
               outputPath: input.targetPath,
               writeResult: {
@@ -1040,7 +1039,7 @@ Deno.test(
       stateDir = result.stateDir;
 
       assertEquals(captureTargets, [destination]);
-      assertEquals(captureRecordingIds, [["cycle-pointer"]]);
+      assertEquals(captureRecordingCycleIds, [["cycle-pointer"]]);
 
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
@@ -1064,7 +1063,7 @@ Deno.test(
 
     try {
       const destination = join(scenarioDir, "same.md");
-      const captureRecordingIds: string[][] = [];
+      const captureRecordingCycleIds: string[][] = [];
       const result = await runPersistentInChatScenario({
         events: [
           makeEvent(
@@ -1085,7 +1084,7 @@ Deno.test(
         ],
         recordingPipeline: makePersistentInChatRecordingPipeline({
           captureSnapshot(input) {
-            captureRecordingIds.push(input.recordingIds ?? []);
+            captureRecordingCycleIds.push(input.recordingCycleIds ?? []);
             return Promise.resolve({
               outputPath: input.targetPath,
               writeResult: {
@@ -1106,9 +1105,9 @@ Deno.test(
       assertEquals(session.workspaceOutputs?.length ?? 0, 1);
       assertEquals(output.currentResolvedPath, destination);
       assertEquals(output.recordingCycles.length, 1);
-      assertEquals(captureRecordingIds.length, 1);
+      assertEquals(captureRecordingCycleIds.length, 1);
       assertEquals(
-        captureRecordingIds[0],
+        captureRecordingCycleIds[0],
         [output.recordingCycles[0]?.recordingCycleId],
       );
     } finally {
@@ -2796,19 +2795,18 @@ Deno.test("runDaemonRuntimeLoop populates status.providers from session snapshot
     {
       provider: "claude",
       activeSessions: 1,
-      lastMessageAt: "2026-02-22T10:00:03.000Z",
+      lastEventAt: "2026-02-22T10:00:03.000Z",
     },
     {
       provider: "codex",
       activeSessions: 2,
-      lastMessageAt: "2026-02-22T10:00:05.000Z",
+      lastEventAt: "2026-02-22T10:00:05.000Z",
     },
   ]);
 });
 
-// Note: `lastMessageAt` is the external ProviderStatus field name (status.json API surface,
-// intentionally kept for backward compatibility). Internally the snapshot store uses `lastEventAt`.
-Deno.test("runDaemonRuntimeLoop omits lastMessageAt when provider sessions have no message timestamps", async () => {
+// Note: `lastEventAt` is the public ProviderStatus field name in `status.json`.
+Deno.test("runDaemonRuntimeLoop omits lastEventAt when provider sessions have no message timestamps", async () => {
   const statusHistory: DaemonStatusSnapshot[] = [];
   let currentStatus: DaemonStatusSnapshot = {
     schemaVersion: 1,
