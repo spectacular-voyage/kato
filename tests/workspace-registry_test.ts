@@ -310,6 +310,17 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA filenameTemplateT
         configPath,
         [
           "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'filenameTemplateTimezone: "US/Pacific"',
+        ].join("\n") + "\n",
+      );
+      const aliasLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(aliasLoaded.filenameTemplateTimezone, "US/Pacific");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
           'filenameTemplate: "conv.{YYYY}.{YY}-{MM}-{DD}_{HH}{mm}-{provider}.md"',
           'filenameTemplateTimezone: "America/Los_Angeles"',
         ].join("\n") + "\n",

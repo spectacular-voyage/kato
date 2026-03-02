@@ -763,6 +763,57 @@ Deno.test(
 );
 
 Deno.test(
+  "renderEventsToMarkdown resets duplicate suppression after standalone tool result blocks",
+  () => {
+    const assistant: ConversationEvent = {
+      eventId: "assistant-dup-reset",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Repeated message around tool result.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-dup-reset",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-dup-reset",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-dup-reset",
+      result: "tool result payload",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-dup-reset",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [assistant, toolResult, assistant],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: false,
+        includeToolResults: true,
+        includeThinking: false,
+      },
+    );
+
+    assertEquals(
+      rendered.split("Repeated message around tool result.").length - 1,
+      2,
+    );
+    assertStringIncludes(
+      rendered,
+      "<summary>Tool result: tool-dup-reset</summary>",
+    );
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown keeps thinking revisions when includeThinking is enabled",
   () => {
     const thinking1: ConversationEvent = {

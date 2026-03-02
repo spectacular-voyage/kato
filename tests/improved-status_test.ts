@@ -161,6 +161,31 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
   assertStringIncludes(out, "workspace: k");
 });
 
+Deno.test("renderStatusText: recording workspace alias strips ANSI and controls", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "ansi-alias",
+    snippet: "status",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: false,
+    recordings: [{
+      workspaceAlias: "  \u001b[31mMy\u001b[0m\tProj\n\u0007  ",
+      outputPath: "/home/user/notes.md",
+      startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+      lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    }],
+  }];
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "workspace: My Proj");
+  assertEquals(out.includes("\u001b["), false);
+});
+
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {
   const sessions: DaemonSessionStatus[] = [{
     provider: "claude",

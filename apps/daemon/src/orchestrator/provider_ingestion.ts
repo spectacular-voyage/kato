@@ -40,7 +40,6 @@ import {
   resolveHomeDir,
 } from "../utils/env.ts";
 import { hashStringFNV1a, stableStringify } from "../utils/hash.ts";
-import { utf8ByteLength } from "../utils/text.ts";
 
 export interface ProviderSessionFile {
   sessionId: string;
@@ -437,37 +436,28 @@ async function readCodexSessionMeta(
 async function readLatestCodexCompactionAnchor(
   filePath: string,
 ): Promise<CodexCompactionAnchor | undefined> {
-  let content: string;
-  try {
-    content = await Deno.readTextFile(filePath);
-  } catch (error) {
-    if (error instanceof Deno.errors.PermissionDenied) {
-      throw new ProviderIngestionReadDeniedError("open", filePath, error);
-    }
-    if (error instanceof Deno.errors.NotFound) {
-      return undefined;
-    }
-    throw error;
-  }
-
-  const lines = content.split("\n");
+  let file: Deno.FsFile | undefined;
   let lineEnd = 0;
   let latest: CodexCompactionAnchor | undefined;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    const hasNewline = i < lines.length - 1;
-    lineEnd += utf8ByteLength(line) + (hasNewline ? 1 : 0);
+  const decoder = new TextDecoder();
+
+  const processLine = (
+    lineBytes: Uint8Array,
+    hasTrailingNewline: boolean,
+  ): void => {
+    const line = decoder.decode(lineBytes);
+    lineEnd += lineBytes.length + (hasTrailingNewline ? 1 : 0);
     if (!line.includes('"type":"compacted"')) {
-      continue;
+      return;
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch {
-      continue;
+      return;
     }
     if (!isRecordValue(parsed) || parsed["type"] !== "compacted") {
-      continue;
+      return;
     }
     latest = {
       lineEnd,
@@ -476,6 +466,62 @@ async function readLatestCodexCompactionAnchor(
         payloadHash: hashStringFNV1a(line),
       },
     };
+  };
+
+  try {
+    file = await Deno.open(filePath, { read: true });
+    const reader = file.readable.getReader();
+    let pending = new Uint8Array(0);
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (!value || value.length === 0) {
+          continue;
+        }
+        const chunk = pending.length === 0 ? value : (() => {
+          const combined = new Uint8Array(pending.length + value.length);
+          combined.set(pending);
+          combined.set(value, pending.length);
+          return combined;
+        })();
+        let lineStart = 0;
+        for (let i = 0; i < chunk.length; i += 1) {
+          if (chunk[i] !== 0x0a) {
+            continue;
+          }
+          processLine(chunk.subarray(lineStart, i), true);
+          lineStart = i + 1;
+        }
+        pending = lineStart === 0 ? chunk : chunk.subarray(lineStart);
+        if (pending.length > 0 && pending.buffer === chunk.buffer) {
+          pending = pending.slice();
+        }
+      }
+      if (pending.length > 0) {
+        processLine(pending, false);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    throw error;
+  } finally {
+    if (file) {
+      try {
+        file.close();
+      } catch {
+        // file.readable may already close the file once the stream drains
+      }
+    }
   }
 
   return latest;

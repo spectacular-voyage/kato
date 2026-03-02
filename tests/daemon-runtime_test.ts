@@ -1053,6 +1053,78 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> ignores stale active cycle ids when workspace output is off",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-stale-cycle-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const destination = join(scenarioDir, "pointer.md");
+      const captureRecordingCycleIds: Array<string[] | undefined> = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-stale-cycle",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureRecordingCycleIds.push(input.recordingCycleIds);
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: destination,
+                  desiredState: "off",
+                  writeCursor: 1,
+                  activeRecordingCycleId: "cycle-stale",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-stale",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      assertEquals(captureRecordingCycleIds, [undefined]);
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(output.currentResolvedPath, destination);
+      assertEquals(output.desiredState, "on");
+      assertExists(output.activeRecordingCycleId);
+      assert(output.activeRecordingCycleId !== "cycle-stale");
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat reuses the same workspace output when commands target the same destination",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(
@@ -1501,6 +1573,7 @@ Deno.test(
         }),
       );
 
+      const recordTargets: string[] = [];
       const captureTargets: string[] = [];
       const exportTargets: string[] = [];
       const result = await runPersistentInChatScenario({
@@ -1548,6 +1621,15 @@ Deno.test(
               format: "markdown" as const,
             });
           },
+          appendToDestination(input) {
+            recordTargets.push(input.targetPath);
+            return Promise.resolve({
+              mode: "append",
+              outputPath: input.targetPath,
+              wrote: true,
+              deduped: false,
+            });
+          },
         }),
         operationalLogger,
         auditLogger,
@@ -1570,6 +1652,8 @@ Deno.test(
         "relative-export.md",
       );
 
+      assertEquals(recordTargets[0], resolvedRecordPath);
+      assert(recordTargets.includes(resolvedRecordPath));
       assertEquals(captureTargets, [resolvedCapturePath]);
       assertEquals(exportTargets, [resolvedExportPath]);
 

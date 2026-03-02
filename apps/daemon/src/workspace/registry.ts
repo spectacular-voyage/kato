@@ -392,18 +392,6 @@ function validateFilenameTemplateTokens(
 }
 
 function isValidIanaTimezone(timeZone: string): boolean {
-  const intlWithSupportedValues = Intl as typeof Intl & {
-    supportedValuesOf?: (key: string) => string[];
-  };
-  if (typeof intlWithSupportedValues.supportedValuesOf === "function") {
-    const supported = new Set(
-      intlWithSupportedValues.supportedValuesOf("timeZone"),
-    );
-    if (!supported.has(timeZone)) {
-      return false;
-    }
-  }
-
   try {
     new Intl.DateTimeFormat("en-US", { timeZone });
     return true;

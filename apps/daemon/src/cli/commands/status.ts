@@ -9,9 +9,19 @@ const DEFAULT_TERMINAL_WIDTH = 100;
 const MIN_TERMINAL_WIDTH = 48;
 const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
+const MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH = 80;
 const KEY_CTRL_C = 3;
 const KEY_LOWER_Q = 113;
 const KEY_UPPER_Q = 81;
+const ANSI_ESCAPE = String.fromCharCode(0x1b);
+const ANSI_OSC_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
+  "g",
+);
+const ANSI_CSI_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
+  "g",
+);
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -52,6 +62,22 @@ function formatBytes(bytes: number): string {
 
 function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
+  if (!alias) return undefined;
+  const withoutAnsi = alias
+    .replace(ANSI_OSC_PATTERN, "")
+    .replace(ANSI_CSI_PATTERN, "");
+  let withoutControl = "";
+  for (const char of withoutAnsi) {
+    const code = char.charCodeAt(0);
+    const isControl = code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    withoutControl += isControl ? " " : char;
+  }
+  const normalized = sanitizeInlineText(withoutControl);
+  if (normalized.length === 0) return undefined;
+  return normalized.slice(0, MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH);
 }
 
 function truncate(text: string, width: number): string {
@@ -264,7 +290,7 @@ function renderSessionRow(
 
     const started = formatRelativeTime(recording.startedAt, now);
     const lastWrite = formatRelativeTime(recording.lastWriteAt, now);
-    const workspaceLabel = recording.workspaceAlias?.trim();
+    const workspaceLabel = sanitizeWorkspaceAlias(recording.workspaceAlias);
     const recordingDetail = workspaceLabel && workspaceLabel.length > 0
       ? `started ${started} · last write ${lastWrite} · workspace: ${workspaceLabel}`
       : `started ${started} · last write ${lastWrite}`;

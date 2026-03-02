@@ -1349,13 +1349,17 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
           );
           const currentCycleId = output.activeRecordingCycleId;
+          const captureRecordingCycleIds = output.desiredState === "on" &&
+              currentCycleId
+            ? [currentCycleId]
+            : undefined;
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId: providerSessionId,
             targetPath,
             events: captureEvents,
             title: captureTitle,
-            recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
+            recordingCycleIds: captureRecordingCycleIds,
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });

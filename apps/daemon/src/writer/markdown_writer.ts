@@ -351,6 +351,7 @@ export function renderEventsToMarkdown(
         "</details>",
       ];
       parts.push(resultParts.join("\n"), "");
+      lastSignature = undefined;
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;
