@@ -183,6 +183,9 @@ exportFeatureFlags:
   writerIncludeThinking: false
   writerIncludeToolCalls: false
   writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
 logging:
   operationalLevel: info
@@ -226,6 +229,9 @@ Notes:
   - `writerIncludeThinking`
   - `writerIncludeToolCalls`
   - `writerIncludeToolResults`
+  - `writerIncludeDecisionPrompt`
+  - `writerIncludeDecisionOptions`
+  - `writerIncludeDecisionSelection`
   - `writerItalicizeUserMessages`
 - Workspace runtime formatting lives only in workspace config
   (`markdownFrontmatter` and `workspaceFeatureFlags`).
@@ -271,6 +277,9 @@ workspaceFeatureFlags:
   writerIncludeThinking: true
   writerIncludeToolCalls: true
   writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
 ```
 

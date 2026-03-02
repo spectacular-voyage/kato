@@ -47,6 +47,9 @@ const WRITER_FEATURE_FLAG_KEYS = [
   "writerIncludeThinking",
   "writerIncludeToolCalls",
   "writerIncludeToolResults",
+  "writerIncludeDecisionPrompt",
+  "writerIncludeDecisionOptions",
+  "writerIncludeDecisionSelection",
   "writerItalicizeUserMessages",
 ] as const;
 const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
@@ -447,6 +450,11 @@ export function createDefaultWorkspaceWriterFeatureFlags(
     writerIncludeThinking: overrides.writerIncludeThinking ?? true,
     writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? true,
     writerIncludeToolResults: overrides.writerIncludeToolResults ?? false,
+    writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ?? true,
+    writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
+      true,
+    writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
+      true,
     writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ?? false,
   };
 }
@@ -908,6 +916,9 @@ export function createWorkspaceConfigScaffold(): string {
     "  writerIncludeThinking: true",
     "  writerIncludeToolCalls: true",
     "  writerIncludeToolResults: false",
+    "  writerIncludeDecisionPrompt: true",
+    "  writerIncludeDecisionOptions: true",
+    "  writerIncludeDecisionSelection: true",
     "  writerItalicizeUserMessages: false",
     "",
   ].join("\n");

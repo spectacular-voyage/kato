@@ -1006,6 +1006,82 @@ Deno.test(
 );
 
 Deno.test(
+  "renderEventsToMarkdown can hide questionnaire decision options while keeping prompt",
+  () => {
+    const questionnairePrompt: ConversationEvent = {
+      eventId: "decision-questionnaire-proposed-options-hidden-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-proposed-options-hidden-1",
+      decisionKey: "decision-options-visibility",
+      summary: "Which output format should we use?",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-1"],
+      metadata: {
+        providerQuestionId: "decision_options_visibility",
+        options: [{
+          label: "Markdown",
+          description: "Use markdown output.",
+        }],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-proposed-options-hidden-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnairePrompt], {
+      includeFrontmatter: false,
+      includeDecisionPrompt: true,
+      includeDecisionOptions: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [decision-options-visibility]:** Which output format should we use?",
+    );
+    assertEquals(rendered.includes("- Markdown: Use markdown output."), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can hide accepted questionnaire decision selections",
+  () => {
+    const questionnaireDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-selection-hidden-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-selection-hidden-1",
+      decisionKey: "decision-selection-visibility",
+      summary: "decision_selection_visibility -> Markdown",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_selection_visibility",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-selection-hidden-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnaireDecision], {
+      includeFrontmatter: false,
+      includeDecisionSelection: false,
+    });
+
+    assertEquals(rendered.includes("decision_selection_visibility"), false);
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown suppresses identical commentary when same-turn final repeats it",
   () => {
     const commentary: ConversationEvent = {

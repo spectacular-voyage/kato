@@ -87,6 +87,9 @@ const EXPORT_FEATURE_FLAG_KEYS: Array<keyof ExportFeatureFlags> = [
   "writerIncludeThinking",
   "writerIncludeToolCalls",
   "writerIncludeToolResults",
+  "writerIncludeDecisionPrompt",
+  "writerIncludeDecisionOptions",
+  "writerIncludeDecisionSelection",
   "writerItalicizeUserMessages",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
@@ -148,6 +151,9 @@ export function createDefaultExportFeatureFlags(
     writerIncludeThinking: false,
     writerIncludeToolCalls: false,
     writerIncludeToolResults: false,
+    writerIncludeDecisionPrompt: true,
+    writerIncludeDecisionOptions: true,
+    writerIncludeDecisionSelection: true,
     writerItalicizeUserMessages: false,
   };
   if (!overrides) {
@@ -163,6 +169,12 @@ export function createDefaultExportFeatureFlags(
       defaults.writerIncludeToolCalls,
     writerIncludeToolResults: overrides.writerIncludeToolResults ??
       defaults.writerIncludeToolResults,
+    writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ??
+      defaults.writerIncludeDecisionPrompt,
+    writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
+      defaults.writerIncludeDecisionOptions,
+    writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
+      defaults.writerIncludeDecisionSelection,
     writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ??
       defaults.writerItalicizeUserMessages,
   };

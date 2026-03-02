@@ -16,4 +16,7 @@ workspaceFeatureFlags:
   writerIncludeThinking: true
   writerIncludeToolCalls: true
   writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false

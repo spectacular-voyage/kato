@@ -85,6 +85,9 @@ function makeWriterSpy(callOrder: string[]): {
       includeThinking?: boolean;
       includeToolCalls?: boolean;
       includeToolResults?: boolean;
+      includeDecisionPrompt?: boolean;
+      includeDecisionOptions?: boolean;
+      includeDecisionSelection?: boolean;
       italicizeUserMessages?: boolean;
     }
   >;
@@ -109,6 +112,9 @@ function makeWriterSpy(callOrder: string[]): {
       includeThinking?: boolean;
       includeToolCalls?: boolean;
       includeToolResults?: boolean;
+      includeDecisionPrompt?: boolean;
+      includeDecisionOptions?: boolean;
+      includeDecisionSelection?: boolean;
       italicizeUserMessages?: boolean;
     }
   > = [];
@@ -157,6 +163,9 @@ function makeWriterSpy(callOrder: string[]): {
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
           includeToolResults: options?.includeToolResults,
+          includeDecisionPrompt: options?.includeDecisionPrompt,
+          includeDecisionOptions: options?.includeDecisionOptions,
+          includeDecisionSelection: options?.includeDecisionSelection,
           italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = appendOutcomes.shift() ??
@@ -197,6 +206,9 @@ function makeWriterSpy(callOrder: string[]): {
           includeThinking: options?.includeThinking,
           includeToolCalls: options?.includeToolCalls,
           includeToolResults: options?.includeToolResults,
+          includeDecisionPrompt: options?.includeDecisionPrompt,
+          includeDecisionOptions: options?.includeDecisionOptions,
+          includeDecisionSelection: options?.includeDecisionSelection,
           italicizeUserMessages: options?.italicizeUserMessages,
         });
         const outcome = overwriteOutcomes.shift() ??
@@ -336,6 +348,9 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     includeThinking: undefined,
     includeToolCalls: undefined,
     includeToolResults: undefined,
+    includeDecisionPrompt: undefined,
+    includeDecisionOptions: undefined,
+    includeDecisionSelection: undefined,
     italicizeUserMessages: undefined,
   });
 });
@@ -366,6 +381,9 @@ Deno.test("RecordingPipeline export passes deterministic clock to writer", async
     includeThinking: undefined,
     includeToolCalls: undefined,
     includeToolResults: undefined,
+    includeDecisionPrompt: undefined,
+    includeDecisionOptions: undefined,
+    includeDecisionSelection: undefined,
     italicizeUserMessages: undefined,
   });
 });
@@ -469,6 +487,9 @@ Deno.test(
         includeThinking: false,
         includeToolCalls: false,
         includeToolResults: false,
+        includeDecisionPrompt: false,
+        includeDecisionOptions: false,
+        includeDecisionSelection: true,
         italicizeUserMessages: true,
       },
       now: () => new Date("2026-02-22T10:00:00.000Z"),
@@ -497,6 +518,9 @@ Deno.test(
       includeThinking: false,
       includeToolCalls: false,
       includeToolResults: false,
+      includeDecisionPrompt: false,
+      includeDecisionOptions: false,
+      includeDecisionSelection: true,
       italicizeUserMessages: true,
     });
     assertEquals(writerSpy.calls[1], {
@@ -508,6 +532,9 @@ Deno.test(
       includeThinking: false,
       includeToolCalls: false,
       includeToolResults: false,
+      includeDecisionPrompt: false,
+      includeDecisionOptions: false,
+      includeDecisionSelection: true,
       italicizeUserMessages: true,
     });
   },

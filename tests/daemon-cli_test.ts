@@ -626,6 +626,10 @@ Deno.test(
       );
       assertStringIncludes(
         await Deno.readTextFile(configPath),
+        "writerIncludeDecisionPrompt: true",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
         "includeSessionIds: true",
       );
 

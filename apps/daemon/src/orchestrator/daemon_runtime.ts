@@ -841,6 +841,9 @@ function createOutputOverrides(options: {
     writerIncludeThinking: boolean;
     writerIncludeToolCalls: boolean;
     writerIncludeToolResults?: boolean;
+    writerIncludeDecisionPrompt?: boolean;
+    writerIncludeDecisionOptions?: boolean;
+    writerIncludeDecisionSelection?: boolean;
     writerItalicizeUserMessages: boolean;
   };
   captureIncludeSystemEvents: boolean;
@@ -864,6 +867,12 @@ function createOutputOverrides(options: {
       includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
       includeToolResults: options.writerFeatureFlags.writerIncludeToolResults ??
         false,
+      includeDecisionPrompt:
+        options.writerFeatureFlags.writerIncludeDecisionPrompt ?? true,
+      includeDecisionOptions:
+        options.writerFeatureFlags.writerIncludeDecisionOptions ?? true,
+      includeDecisionSelection:
+        options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,

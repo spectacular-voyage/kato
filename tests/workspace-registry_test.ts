@@ -154,6 +154,12 @@ Deno.test(
       assertEquals(first.filenameTemplate, "{provider}-{sessionShortId}.md");
       assertEquals(first.writerFeatureFlags.writerIncludeCommentary, true);
       assertEquals(first.writerFeatureFlags.writerIncludeToolResults, false);
+      assertEquals(first.writerFeatureFlags.writerIncludeDecisionPrompt, true);
+      assertEquals(first.writerFeatureFlags.writerIncludeDecisionOptions, true);
+      assertEquals(
+        first.writerFeatureFlags.writerIncludeDecisionSelection,
+        true,
+      );
       assertEquals(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
@@ -170,6 +176,7 @@ Deno.test(
           "workspaceFeatureFlags:",
           "  writerIncludeCommentary: false",
           "  writerIncludeToolResults: true",
+          "  writerIncludeDecisionSelection: false",
         ].join("\n") + "\n",
       );
       await Deno.utime(
@@ -186,6 +193,10 @@ Deno.test(
       assertEquals(second.filenameTemplate, "{provider}.md");
       assertEquals(second.writerFeatureFlags.writerIncludeCommentary, false);
       assertEquals(second.writerFeatureFlags.writerIncludeToolResults, true);
+      assertEquals(
+        second.writerFeatureFlags.writerIncludeDecisionSelection,
+        false,
+      );
     });
   },
 );

@@ -12,6 +12,9 @@ export interface ExportFeatureFlags {
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
   writerIncludeToolResults: boolean;
+  writerIncludeDecisionPrompt: boolean;
+  writerIncludeDecisionOptions: boolean;
+  writerIncludeDecisionSelection: boolean;
   writerItalicizeUserMessages: boolean;
 }
 

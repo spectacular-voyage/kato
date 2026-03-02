@@ -23,6 +23,9 @@ export type RecordingRenderOptionOverrides = Pick<
   | "includeThinking"
   | "includeToolCalls"
   | "includeToolResults"
+  | "includeDecisionPrompt"
+  | "includeDecisionOptions"
+  | "includeDecisionSelection"
   | "italicizeUserMessages"
   | "includeSystemEvents"
 >;
@@ -176,6 +179,9 @@ export interface RecordingPipelineOptions {
     | "includeThinking"
     | "includeToolCalls"
     | "includeToolResults"
+    | "includeDecisionPrompt"
+    | "includeDecisionOptions"
+    | "includeDecisionSelection"
     | "italicizeUserMessages"
     | "includeSystemEvents"
   >;

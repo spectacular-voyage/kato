@@ -150,6 +150,10 @@ function buildOutputOverrides(options: {
       includeThinking: options.featureFlags.writerIncludeThinking,
       includeToolCalls: options.featureFlags.writerIncludeToolCalls,
       includeToolResults: options.featureFlags.writerIncludeToolResults,
+      includeDecisionPrompt: options.featureFlags.writerIncludeDecisionPrompt,
+      includeDecisionOptions: options.featureFlags.writerIncludeDecisionOptions,
+      includeDecisionSelection:
+        options.featureFlags.writerIncludeDecisionSelection,
       italicizeUserMessages: options.featureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.includeSystemEvents,
     },
@@ -283,6 +287,12 @@ export async function runDaemonSubprocess(
       includeThinking: workspaceWriterDefaults.writerIncludeThinking,
       includeToolCalls: workspaceWriterDefaults.writerIncludeToolCalls,
       includeToolResults: workspaceWriterDefaults.writerIncludeToolResults,
+      includeDecisionPrompt:
+        workspaceWriterDefaults.writerIncludeDecisionPrompt,
+      includeDecisionOptions:
+        workspaceWriterDefaults.writerIncludeDecisionOptions,
+      includeDecisionSelection:
+        workspaceWriterDefaults.writerIncludeDecisionSelection,
       italicizeUserMessages:
         workspaceWriterDefaults.writerItalicizeUserMessages,
       includeSystemEvents: featureSettings.captureIncludeSystemEvents,

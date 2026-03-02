@@ -35,6 +35,9 @@ export interface MarkdownRenderOptions {
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
   includeToolResults?: boolean;
+  includeDecisionPrompt?: boolean;
+  includeDecisionOptions?: boolean;
+  includeDecisionSelection?: boolean;
   includeThinking?: boolean;
   italicizeUserMessages?: boolean;
   includeSystemEvents?: boolean;
@@ -165,6 +168,9 @@ export function renderEventsToMarkdown(
   const includeCommentary = options.includeCommentary ?? true;
   const includeToolCalls = options.includeToolCalls ?? true;
   const includeToolResults = options.includeToolResults ?? includeToolCalls;
+  const includeDecisionPrompt = options.includeDecisionPrompt ?? true;
+  const includeDecisionOptions = options.includeDecisionOptions ?? true;
+  const includeDecisionSelection = options.includeDecisionSelection ?? true;
   const includeThinking = options.includeThinking ?? true;
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
@@ -368,11 +374,17 @@ export function renderEventsToMarkdown(
 
       let decisionParts: string[];
       if (questionnaireAcceptedDecision) {
+        if (!includeDecisionSelection) {
+          continue;
+        }
         decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,
         ];
       } else if (questionnaireProposedDecision) {
+        if (!includeDecisionPrompt && !includeDecisionOptions) {
+          continue;
+        }
         const optionsValue = questionnaireMetadata?.["options"];
         const optionLines = Array.isArray(optionsValue)
           ? optionsValue
@@ -389,12 +401,25 @@ export function renderEventsToMarkdown(
             })
             .filter((line) => line.length > 0)
           : [];
-        decisionParts = [
-          "",
-          `**Decision [${event.decisionKey}]:** ${event.summary}`,
-          ...optionLines,
-        ];
+        decisionParts = [""];
+        if (includeDecisionPrompt) {
+          decisionParts.push(
+            `**Decision [${event.decisionKey}]:** ${event.summary}`,
+          );
+        }
+        if (includeDecisionOptions) {
+          decisionParts.push(...optionLines);
+        }
+        if (decisionParts.length === 1) {
+          continue;
+        }
       } else {
+        const includeNonQuestionnaireDecision = event.status === "accepted"
+          ? includeDecisionSelection
+          : includeDecisionPrompt;
+        if (!includeNonQuestionnaireDecision) {
+          continue;
+        }
         decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,
