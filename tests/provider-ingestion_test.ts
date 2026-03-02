@@ -255,6 +255,73 @@ Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch u
   });
 });
 
+Deno.test(
+  "FileProviderIngestionRunner skips stale discovered sessions until they update after runner start",
+  async () => {
+    await withTempDir("provider-ingestion-startup-skip-", async (dir) => {
+      const sessionFile = join(dir, "session-stale.jsonl");
+      await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+      const store = new InMemorySessionSnapshotStore();
+      const parseOffsets: number[] = [];
+      let currentNowMs = Date.parse("2026-02-26T10:00:00.000Z");
+      let discoveredModifiedAtMs = Date.parse("2026-02-26T09:59:59.000Z");
+
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        autoGenerateSnapshots: true,
+        discoveryIntervalMs: 0,
+        now: () => new Date(currentNowMs),
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-stale",
+            filePath: sessionFile,
+            modifiedAtMs: discoveredModifiedAtMs,
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          parseOffsets.push(fromOffset);
+          return (async function* () {
+            if (fromOffset === 0) {
+              yield {
+                event: makeEvent("stale-1", "2026-02-26T10:00:01.000Z"),
+                cursor: { kind: "byte-offset" as const, value: 10 },
+              };
+            }
+          })();
+        },
+      });
+
+      await runner.start();
+
+      const firstPoll = await runner.poll();
+      assertEquals(firstPoll.sessionsUpdated, 0);
+      assertEquals(firstPoll.eventsObserved, 0);
+      assertEquals(parseOffsets, []);
+      assertEquals(store.get("session-stale"), undefined);
+
+      discoveredModifiedAtMs = Date.parse("2026-02-26T10:00:01.000Z");
+      currentNowMs = Date.parse("2026-02-26T10:00:02.000Z");
+
+      const secondPoll = await runner.poll();
+      assertEquals(secondPoll.sessionsUpdated, 1);
+      assertEquals(secondPoll.eventsObserved, 1);
+      assertEquals(parseOffsets, [0]);
+      const snapshot = store.get("session-stale");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.map((event) => event.eventId), ["stale-1"]);
+
+      await runner.stop();
+    });
+  },
+);
+
 Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates snapshot from session twin", async () => {
   await withTempDir("provider-ingestion-persistent-", async (dir) => {
     const sessionFile = join(dir, "session-persist.jsonl");
@@ -1591,6 +1658,7 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
     const runner = createClaudeIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-22T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 
@@ -1656,6 +1724,7 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
     const runner = createCodexIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-22T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 
@@ -1721,6 +1790,7 @@ Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", asyn
     const runner = createGeminiIngestionRunner({
       sessionSnapshotStore: store,
       sessionRoots: [dir],
+      now: () => new Date("2026-02-24T19:59:59.000Z"),
       watchFs: harness.watchFn,
     });
 

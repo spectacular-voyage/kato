@@ -675,6 +675,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
+  private startedAtMs = 0;
   private lastDuplicateDiscoveryWarningKey: string | undefined;
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
@@ -701,6 +702,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.startedAtMs = this.now().getTime();
     this.needsDiscovery = true;
 
     await this.operationalLogger.info(
@@ -929,7 +931,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     for (const session of deduped) {
       activeSessionIds.add(session.sessionId);
       const current = this.sessions.get(session.sessionId);
-      if (!current || current.filePath !== session.filePath) {
+      const isNewSession = !current;
+      const filePathChanged = current
+        ? current.filePath !== session.filePath
+        : false;
+      const modifiedAtChanged = current
+        ? current.modifiedAtMs !== session.modifiedAtMs
+        : false;
+      if (isNewSession || filePathChanged || modifiedAtChanged) {
         this.sessions.set(session.sessionId, session);
         this.sessionByFilePath.set(session.filePath, session.sessionId);
         if (current && current.filePath !== session.filePath) {
@@ -938,7 +947,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.cursorSourcePaths.delete(session.sessionId);
           this.sourceSnippetBySessionId.delete(session.sessionId);
         }
-        this.dirtySessions.add(session.sessionId);
+        if (
+          filePathChanged ||
+          modifiedAtChanged ||
+          this.shouldProactivelyIngestDiscoveredSession(session)
+        ) {
+          this.dirtySessions.add(session.sessionId);
+        }
       }
     }
 
@@ -954,6 +969,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     this.needsDiscovery = false;
     this.nextDiscoveryAtMs = this.now().getTime() + this.discoveryIntervalMs;
+  }
+
+  private shouldProactivelyIngestDiscoveredSession(
+    session: ProviderSessionFile,
+  ): boolean {
+    return session.modifiedAtMs >= this.startedAtMs;
   }
 
   private async dedupeDiscoveredSessions(
