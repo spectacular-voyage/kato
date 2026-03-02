@@ -15,6 +15,7 @@ import {
   mapConversationEventsToTwin,
   PersistentSessionStateStore,
   type ProviderIngestionRunner,
+  RecordingPipeline,
   type RecordingPipelineLike,
   type RegisteredWorkspace,
   type ResolvedWorkspaceProfile,
@@ -22,8 +23,12 @@ import {
   SessionSnapshotMemoryBudgetExceededError,
   type SessionSnapshotStore,
   StructuredLogger,
+  WorkspaceCatalog,
   type WorkspaceCatalogLike,
+  WorkspaceProfileResolver,
   type WorkspaceProfileResolverLike,
+  type WorkspaceRegistryStoreLike,
+  type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 import {
   makeTestTempDir,
@@ -41,6 +46,28 @@ function makeEvent(
     eventId: id,
     provider: "codex",
     sessionId: "session-1",
+    timestamp,
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: id,
+    },
+  } as unknown as ConversationEvent;
+}
+
+function makeEventForSession(
+  sessionId: string,
+  id: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+  timestamp = "2026-02-22T19:00:00.000Z",
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "codex",
+    sessionId,
     timestamp,
     kind,
     role: kind === "message.user" ? "user" : "assistant",
@@ -102,6 +129,84 @@ function cloneWorkspaceProfile(
     resolvedDefaultOutputDir: profile.resolvedDefaultOutputDir,
     filenameTemplate: profile.filenameTemplate,
     writerFeatureFlags: { ...profile.writerFeatureFlags },
+  };
+}
+
+function makeMutableWorkspaceRegistryStore(
+  initial: RegisteredWorkspace[] = [],
+): {
+  store: WorkspaceRegistryStoreLike;
+  setEntries(entries: RegisteredWorkspace[]): Promise<void>;
+} {
+  let entries = initial.map(cloneRegisteredWorkspace);
+  let mtime = 0;
+
+  return {
+    store: {
+      load() {
+        return Promise.resolve(entries.map(cloneRegisteredWorkspace));
+      },
+      save(nextEntries: RegisteredWorkspace[]) {
+        entries = nextEntries.map(cloneRegisteredWorkspace);
+        mtime += 1;
+        return Promise.resolve();
+      },
+      statMtimeMs() {
+        return Promise.resolve(mtime);
+      },
+    },
+    setEntries(nextEntries: RegisteredWorkspace[]) {
+      entries = nextEntries.map(cloneRegisteredWorkspace);
+      mtime += 1;
+      return Promise.resolve();
+    },
+  };
+}
+
+async function createRuntimeWorkspaceEntry(
+  baseDir: string,
+  options: {
+    workspaceId: string;
+    alias: string;
+    directoryName: string;
+    configLines?: string[];
+    registeredAt?: string;
+  },
+): Promise<RegisteredWorkspace> {
+  const workspaceRoot = join(baseDir, options.directoryName);
+  const configPath = join(
+    workspaceRoot,
+    ".kato",
+    DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  );
+  await Deno.mkdir(join(workspaceRoot, ".kato"), { recursive: true });
+  await Deno.writeTextFile(
+    configPath,
+    `${
+      (options.configLines ?? [`workspaceId: ${options.workspaceId}`]).join(
+        "\n",
+      )
+    }\n`,
+  );
+  return {
+    workspaceId: options.workspaceId,
+    alias: options.alias,
+    workspaceRoot,
+    configPath,
+    registeredAt: options.registeredAt ?? "2026-02-22T09:55:00.000Z",
+  };
+}
+
+function makeAllowAllPathPolicyGate(): WritePathPolicyGateLike {
+  return {
+    evaluateWritePath(targetPath: string) {
+      return Promise.resolve({
+        decision: "allow" as const,
+        targetPath,
+        reason: "allowed-for-test",
+        canonicalTargetPath: targetPath,
+      });
+    },
   };
 }
 
@@ -1620,6 +1725,803 @@ Deno.test(
       );
     } finally {
       await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop applies live workspace register and unregister updates without breaking active workspace outputs",
+  async () => {
+    const stateDir = await makeTestTempDir("daemon-runtime-live-register-");
+
+    try {
+      const workspace = await createRuntimeWorkspaceEntry(stateDir, {
+        workspaceId: "ws-live-register",
+        alias: "Live.Proj",
+        directoryName: "live-proj",
+      });
+      const destination = join(stateDir, "live-register.md");
+      const { store, setEntries } = makeMutableWorkspaceRegistryStore();
+      const workspaceCatalog = new WorkspaceCatalog(store);
+      const workspaceProfileResolver = new WorkspaceProfileResolver();
+      const appendTargets: string[] = [];
+
+      let currentStatus: DaemonStatusSnapshot = {
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+      };
+      const statusStore: DaemonStatusSnapshotStoreLike = {
+        load() {
+          return Promise.resolve({
+            ...currentStatus,
+            providers: [...currentStatus.providers],
+            recordings: { ...currentStatus.recordings },
+          });
+        },
+        save(snapshot) {
+          currentStatus = {
+            ...snapshot,
+            providers: [...snapshot.providers],
+            recordings: { ...snapshot.recordings },
+          };
+          return Promise.resolve();
+        },
+      };
+
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => "kato-session-live-register-1234",
+      });
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appendTargets.push(input.targetPath);
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const firstEvent = makeEvent(
+        "u-live-register",
+        "message.user",
+        `::record-${workspace.alias} ${destination}`,
+      );
+      const secondEvent = makeEvent(
+        "a-live-continue",
+        "message.assistant",
+        "still writing",
+      );
+      const thirdEvent = makeEvent(
+        "u-live-stop",
+        "message.user",
+        `::stop-${workspace.alias}`,
+      );
+
+      let pollCount = 0;
+      const stopRequests = [{
+        requestId: "req-stop-live-register",
+        requestedAt: "2026-02-22T10:00:03.000Z",
+        command: "stop" as const,
+      }];
+      const controlStore: DaemonControlRequestStoreLike = {
+        list() {
+          return Promise.resolve(
+            pollCount >= 3
+              ? stopRequests.map((request) => ({ ...request }))
+              : [],
+          );
+        },
+        enqueue(_request) {
+          throw new Error("enqueue should not be called in this test");
+        },
+        markProcessed(requestId: string) {
+          const index = stopRequests.findIndex((request) =>
+            request.requestId === requestId
+          );
+          if (index >= 0) {
+            stopRequests.splice(0, index + 1);
+          }
+          return Promise.resolve();
+        },
+      };
+
+      const ingestionRunner: ProviderIngestionRunner = {
+        provider: "codex",
+        start() {
+          return Promise.resolve();
+        },
+        async poll() {
+          pollCount += 1;
+          if (pollCount === 1) {
+            await setEntries([workspace]);
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 1 },
+              events: [firstEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:00.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 2) {
+            await setEntries([]);
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 2 },
+              events: [firstEvent, secondEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:01.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 3) {
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 3 },
+              events: [firstEvent, secondEvent, thirdEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:02.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          return {
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:03.000Z",
+            sessionsUpdated: 0,
+            eventsObserved: 0,
+          };
+        },
+        stop() {
+          return Promise.resolve();
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        ingestionRunners: [ingestionRunner],
+        sessionSnapshotStore,
+        sessionStateStore,
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog,
+        workspaceProfileResolver,
+      });
+
+      const metadataList = await sessionStateStore.listSessionMetadata();
+      const session = findScenarioMetadata(metadataList);
+      const output = findWorkspaceOutputState(session, workspace.workspaceId);
+
+      assertEquals(appendTargets, [destination, destination, destination]);
+      assertEquals(output.currentResolvedPath, destination);
+      assertEquals(output.desiredState, "on");
+      assertExists(output.activeRecordingCycleId);
+      assertEquals(output.recordingCycles.length, 1);
+      assertEquals(output.recordingCycles[0]?.stoppedCursor, undefined);
+      assertEquals(
+        await workspaceCatalog.getByAlias(workspace.alias),
+        undefined,
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop reloads workspace config for future commands without retargeting existing active outputs",
+  async () => {
+    const stateDir = await makeTestTempDir("daemon-runtime-live-config-");
+
+    try {
+      const workspace = await createRuntimeWorkspaceEntry(stateDir, {
+        workspaceId: "ws-live-config",
+        alias: "Config.Proj",
+        directoryName: "config-proj",
+        configLines: [
+          "workspaceId: ws-live-config",
+          "defaultOutputDir: notes-old",
+        ],
+      });
+      const { store } = makeMutableWorkspaceRegistryStore([workspace]);
+      const workspaceCatalog = new WorkspaceCatalog(store);
+      const workspaceProfileResolver = new WorkspaceProfileResolver();
+      const appendCalls: Array<{ sessionId: string; targetPath: string }> = [];
+
+      let currentStatus: DaemonStatusSnapshot = {
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+      };
+      const statusStore: DaemonStatusSnapshotStoreLike = {
+        load() {
+          return Promise.resolve({
+            ...currentStatus,
+            providers: [...currentStatus.providers],
+            recordings: { ...currentStatus.recordings },
+          });
+        },
+        save(snapshot) {
+          currentStatus = {
+            ...snapshot,
+            providers: [...snapshot.providers],
+            recordings: { ...snapshot.recordings },
+          };
+          return Promise.resolve();
+        },
+      };
+
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      let nextSessionId = 0;
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => `kato-session-live-config-${++nextSessionId}`,
+      });
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appendCalls.push({
+            sessionId: input.sessionId,
+            targetPath: input.targetPath,
+          });
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const firstEvent = makeEventForSession(
+        "session-1",
+        "u-config-record-1",
+        "message.user",
+        `::record-${workspace.alias}`,
+      );
+      const secondEvent = makeEventForSession(
+        "session-1",
+        "a-config-followup",
+        "message.assistant",
+        "still on old output",
+      );
+      const thirdEvent = makeEventForSession(
+        "session-2",
+        "u-config-record-2",
+        "message.user",
+        `::record-${workspace.alias}`,
+      );
+
+      let pollCount = 0;
+      const stopRequests = [{
+        requestId: "req-stop-live-config",
+        requestedAt: "2026-02-22T10:00:03.000Z",
+        command: "stop" as const,
+      }];
+      const controlStore: DaemonControlRequestStoreLike = {
+        list() {
+          return Promise.resolve(
+            pollCount >= 3
+              ? stopRequests.map((request) => ({ ...request }))
+              : [],
+          );
+        },
+        enqueue(_request) {
+          throw new Error("enqueue should not be called in this test");
+        },
+        markProcessed(requestId: string) {
+          const index = stopRequests.findIndex((request) =>
+            request.requestId === requestId
+          );
+          if (index >= 0) {
+            stopRequests.splice(0, index + 1);
+          }
+          return Promise.resolve();
+        },
+      };
+
+      const ingestionRunner: ProviderIngestionRunner = {
+        provider: "codex",
+        start() {
+          return Promise.resolve();
+        },
+        async poll() {
+          pollCount += 1;
+          if (pollCount === 1) {
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 1 },
+              events: [firstEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:00.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 2) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            await Deno.writeTextFile(
+              workspace.configPath,
+              [
+                "workspaceId: ws-live-config",
+                "defaultOutputDir: notes-new",
+              ].join("\n") + "\n",
+            );
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 2 },
+              events: [firstEvent, secondEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:01.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 3) {
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 2 },
+              events: [firstEvent, secondEvent],
+            });
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-2",
+              cursor: { kind: "byte-offset", value: 1 },
+              events: [thirdEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:02.000Z",
+              sessionsUpdated: 2,
+              eventsObserved: 1,
+            };
+          }
+          return {
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:03.000Z",
+            sessionsUpdated: 0,
+            eventsObserved: 0,
+          };
+        },
+        stop() {
+          return Promise.resolve();
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        ingestionRunners: [ingestionRunner],
+        sessionSnapshotStore,
+        sessionStateStore,
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog,
+        workspaceProfileResolver,
+      });
+
+      const metadataList = await sessionStateStore.listSessionMetadata();
+      const sessionOne = metadataList.find((entry) =>
+        entry.providerSessionId === "session-1"
+      );
+      const sessionTwo = metadataList.find((entry) =>
+        entry.providerSessionId === "session-2"
+      );
+      assertExists(sessionOne);
+      assertExists(sessionTwo);
+
+      const outputOne = findWorkspaceOutputState(
+        sessionOne,
+        workspace.workspaceId,
+      );
+      const outputTwo = findWorkspaceOutputState(
+        sessionTwo,
+        workspace.workspaceId,
+      );
+      const oldPrefix = join(workspace.workspaceRoot, "notes-old");
+      const newPrefix = join(workspace.workspaceRoot, "notes-new");
+      const sessionOneTargets = appendCalls
+        .filter((call) => call.sessionId === "session-1")
+        .map((call) => call.targetPath);
+      const sessionTwoTargets = appendCalls
+        .filter((call) => call.sessionId === "session-2")
+        .map((call) => call.targetPath);
+
+      assert(outputOne.currentResolvedPath.startsWith(oldPrefix));
+      assert(outputTwo.currentResolvedPath.startsWith(newPrefix));
+      assert(outputOne.currentResolvedPath !== outputTwo.currentResolvedPath);
+      assertEquals(
+        sessionOneTargets.every((targetPath) =>
+          targetPath === outputOne.currentResolvedPath
+        ),
+        true,
+      );
+      assertEquals(sessionTwoTargets, [outputTwo.currentResolvedPath]);
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop defers alias, root, and config-path mutations for existing workspace entries until restart",
+  async () => {
+    const stateDir = await makeTestTempDir("daemon-runtime-live-mutation-");
+
+    try {
+      const workspace = await createRuntimeWorkspaceEntry(stateDir, {
+        workspaceId: "ws-live-mutation",
+        alias: "Stable.Proj",
+        directoryName: "stable-proj",
+      });
+      const renamedWorkspace: RegisteredWorkspace = {
+        ...workspace,
+        alias: "Renamed.Proj",
+        workspaceRoot: join(stateDir, "renamed-proj"),
+        configPath: join(
+          stateDir,
+          "renamed-proj",
+          ".kato",
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        ),
+        updatedAt: "2026-02-22T10:00:01.000Z",
+      };
+      const firstDestination = join(stateDir, "stable-one.md");
+      const renamedDestination = join(stateDir, "renamed-ignored.md");
+      const secondDestination = join(stateDir, "stable-two.md");
+      const { store, setEntries } = makeMutableWorkspaceRegistryStore([
+        workspace,
+      ]);
+      const workspaceCatalog = new WorkspaceCatalog(store);
+      const workspaceProfileResolver = new WorkspaceProfileResolver();
+      const appendTargets: string[] = [];
+
+      let currentStatus: DaemonStatusSnapshot = {
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+      };
+      const statusStore: DaemonStatusSnapshotStoreLike = {
+        load() {
+          return Promise.resolve({
+            ...currentStatus,
+            providers: [...currentStatus.providers],
+            recordings: { ...currentStatus.recordings },
+          });
+        },
+        save(snapshot) {
+          currentStatus = {
+            ...snapshot,
+            providers: [...snapshot.providers],
+            recordings: { ...snapshot.recordings },
+          };
+          return Promise.resolve();
+        },
+      };
+
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => "kato-session-live-mutation-1234",
+      });
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appendTargets.push(input.targetPath);
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const firstEvent = makeEvent(
+        "u-mutation-old",
+        "message.user",
+        `::record-${workspace.alias} ${firstDestination}`,
+      );
+      const secondEvent = makeEvent(
+        "u-mutation-new",
+        "message.user",
+        `::record-${renamedWorkspace.alias} ${renamedDestination}`,
+      );
+      const thirdEvent = makeEvent(
+        "u-mutation-old-again",
+        "message.user",
+        `::record-${workspace.alias} ${secondDestination}`,
+      );
+
+      let pollCount = 0;
+      const stopRequests = [{
+        requestId: "req-stop-live-mutation",
+        requestedAt: "2026-02-22T10:00:03.000Z",
+        command: "stop" as const,
+      }];
+      const controlStore: DaemonControlRequestStoreLike = {
+        list() {
+          return Promise.resolve(
+            pollCount >= 3
+              ? stopRequests.map((request) => ({ ...request }))
+              : [],
+          );
+        },
+        enqueue(_request) {
+          throw new Error("enqueue should not be called in this test");
+        },
+        markProcessed(requestId: string) {
+          const index = stopRequests.findIndex((request) =>
+            request.requestId === requestId
+          );
+          if (index >= 0) {
+            stopRequests.splice(0, index + 1);
+          }
+          return Promise.resolve();
+        },
+      };
+
+      const ingestionRunner: ProviderIngestionRunner = {
+        provider: "codex",
+        start() {
+          return Promise.resolve();
+        },
+        async poll() {
+          pollCount += 1;
+          if (pollCount === 1) {
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 1 },
+              events: [firstEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:00.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 2) {
+            await setEntries([renamedWorkspace]);
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 2 },
+              events: [firstEvent, secondEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:01.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          if (pollCount === 3) {
+            sessionSnapshotStore.upsert({
+              provider: "codex",
+              sessionId: "session-1",
+              cursor: { kind: "byte-offset", value: 3 },
+              events: [firstEvent, secondEvent, thirdEvent],
+            });
+            return {
+              provider: "codex",
+              polledAt: "2026-02-22T10:00:02.000Z",
+              sessionsUpdated: 1,
+              eventsObserved: 1,
+            };
+          }
+          return {
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:03.000Z",
+            sessionsUpdated: 0,
+            eventsObserved: 0,
+          };
+        },
+        stop() {
+          return Promise.resolve();
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        ingestionRunners: [ingestionRunner],
+        sessionSnapshotStore,
+        sessionStateStore,
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog,
+        workspaceProfileResolver,
+      });
+
+      const metadataList = await sessionStateStore.listSessionMetadata();
+      const session = findScenarioMetadata(metadataList);
+      const output = findWorkspaceOutputState(session, workspace.workspaceId);
+      const stillOldAlias = await workspaceCatalog.getByAlias(workspace.alias);
+
+      assertEquals(appendTargets.includes(renamedDestination), false);
+      assertEquals(
+        appendTargets.filter((targetPath) => targetPath === firstDestination)
+          .length,
+        2,
+      );
+      assertEquals(appendTargets[appendTargets.length - 1], secondDestination);
+      assertEquals(output.currentResolvedPath, secondDestination);
+      assertEquals(output.workspaceAliasSnapshot, workspace.alias);
+      assertEquals(output.workspaceRootSnapshot, workspace.workspaceRoot);
+      assertEquals(output.sourceConfigPath, workspace.configPath);
+      assertEquals(output.recordingCycles.length, 2);
+      assertExists(stillOldAlias);
+      assertEquals(stillOldAlias.workspaceRoot, workspace.workspaceRoot);
+      assertEquals(
+        await workspaceCatalog.getByAlias(renamedWorkspace.alias),
+        undefined,
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> writes plural frontmatter and appends trailing content end to end",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-frontmatter-e2e-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const destination = join(scenarioDir, "capture-frontmatter.md");
+      const recordingPipeline = new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-frontmatter-e2e",
+            "message.user",
+            `Before capture\n::capture-${TEST_WORKSPACE_ALIAS}\nAfter capture`,
+          ),
+        ],
+        recordingPipeline,
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: destination,
+                  desiredState: "on",
+                  writeCursor: 0,
+                  activeRecordingCycleId: "cycle-capture-e2e",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-capture-e2e",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const content = await Deno.readTextFile(destination);
+      assert(content.includes("sessionIds: [session-1]"));
+      assert(content.includes(`workspaceIds: [${TEST_WORKSPACE_ID}]`));
+      assert(content.includes("recordingCycleIds: [cycle-capture-e2e]"));
+      assert(content.includes("Before capture"));
+      assert(content.includes("After capture"));
+      assert(
+        content.indexOf("Before capture") < content.indexOf("After capture"),
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::export-<alias> writes plural frontmatter and appends trailing content end to end",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-export-frontmatter-e2e-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const destination = join(scenarioDir, "export-frontmatter.md");
+      const recordingPipeline = new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-export-frontmatter-e2e",
+            "message.user",
+            `Before export\n::export-${TEST_WORKSPACE_ALIAS} ${destination}\nAfter export`,
+          ),
+        ],
+        recordingPipeline,
+      });
+      stateDir = result.stateDir;
+
+      const content = await Deno.readTextFile(destination);
+      assert(content.includes("sessionIds: [session-1]"));
+      assert(content.includes(`workspaceIds: [${TEST_WORKSPACE_ID}]`));
+      assertEquals(content.includes("recordingCycleIds:"), false);
+      assert(content.includes("Before export"));
+      assert(content.includes("After export"));
+      assert(
+        content.indexOf("Before export") < content.indexOf("After export"),
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
     }
   },
 );

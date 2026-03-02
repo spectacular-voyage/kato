@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772417842244
+updated: 1772419888491
 created: 1771724652182
 ---
 
@@ -25,4 +25,5 @@ created: 1771724652182
   - still should be able to keep status (and control?) the same
   - need to add a config item for where the sessions/twins are stored so they can be re-used
   - dangerous that if a common status/control is not used in the workspace config, multiple katos could overwrite each other :(, but maybe we can work around by daemon awareness somehow
-- snippets should only include the first line
+- does it make sense to split kato-config into kato-daemon-config and kato-workspace-config? And then don't initialize ~/.kato as a workspace automatically, it's probably best to not store recordings there anyhow? 
+- make sure we're not capturing metadata for sessions that haven't been updated since the daemon started. stale files will be activated on update.

@@ -23,7 +23,7 @@ function makeUserEvent(content: string): ConversationEvent {
 
 Deno.test("mapConversationEventsToTwin emits canonical kinds and command events", () => {
   const events: ConversationEvent[] = [
-    makeUserEvent("hello\n::init /tmp/a.md\n::stop"),
+    makeUserEvent("hello\n::init-My.Proj /tmp/a.md\n::stop"),
     {
       eventId: "a1",
       provider: "codex",
@@ -56,6 +56,8 @@ Deno.test("mapConversationEventsToTwin emits canonical kinds and command events"
   );
   assertEquals(commandEvents.length, 2);
   assertEquals(commandEvents[0]?.payload["command"], "init");
+  assertEquals(commandEvents[0]?.payload["workspaceAlias"], "My.Proj");
+  assertEquals(commandEvents[0]?.payload["rawArgument"], "/tmp/a.md");
   assertEquals(commandEvents[1]?.payload["command"], "stop");
 
   // Codex backfill omits provider timestamps by policy.

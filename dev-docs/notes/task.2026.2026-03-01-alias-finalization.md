@@ -30,7 +30,7 @@ code that should survive.
   alias-scoped command model (`::init-<alias>`, `::record-<alias>`,
   `::capture-<alias>`, `::export-<alias>`, `::stop-<alias>`).
 
-- [ ] Add explicit runtime tests for the live-refresh behaviors that are now
+- [x] Add explicit runtime tests for the live-refresh behaviors that are now
   part of the design:
   - new `workspace register` entries become visible without restart
   - `workspace unregister` removes aliases for new commands without breaking
@@ -60,7 +60,7 @@ code that should survive.
   - alias/root/config-path edits on existing entries are restart-bound
   - alias-scoped in-chat commands are the steady-state UX
 
-- [ ] Add end-to-end tests around frontmatter pluralization and append-only
+- [x] Add end-to-end tests around frontmatter pluralization and append-only
   behavior:
   - `sessionIds`
   - `workspaceIds`

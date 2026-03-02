@@ -1285,6 +1285,26 @@ async function applyPersistentControlCommandsForEvent(
             title: snapshotTitle,
             workspaceIds: [workspace.workspaceId],
           });
+          const continuationEvents = buildCommandSeedEvents(
+            event,
+            command.line + 1,
+            boundary.lastLineInSegment,
+          );
+          if (continuationEvents.length > 0) {
+            if (!recordingPipeline.appendToDestination) {
+              throw new Error(
+                "Recording pipeline does not support appendToDestination",
+              );
+            }
+            await recordingPipeline.appendToDestination({
+              provider,
+              sessionId: providerSessionId,
+              targetPath,
+              events: continuationEvents,
+              title: snapshotTitle,
+              workspaceIds: [workspace.workspaceId],
+            });
+          }
         }
       }
 
@@ -1653,6 +1673,26 @@ async function applyControlCommandsForEvent(
             title: recordingTitle,
             workspaceIds: [workspace.workspaceId],
           });
+          const continuationEvents = buildCommandSeedEvents(
+            event,
+            command.line + 1,
+            boundary.lastLineInSegment,
+          );
+          if (continuationEvents.length > 0) {
+            if (!recordingPipeline.appendToDestination) {
+              throw new Error(
+                "Recording pipeline does not support appendToDestination",
+              );
+            }
+            await recordingPipeline.appendToDestination({
+              provider,
+              sessionId,
+              targetPath,
+              events: continuationEvents,
+              title: recordingTitle,
+              workspaceIds: [workspace.workspaceId],
+            });
+          }
         }
       }
 
