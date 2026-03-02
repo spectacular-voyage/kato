@@ -1221,8 +1221,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
-        recording.desiredState === "on"
+      const hasActiveRecordings = (stateMetadata.workspaceOutputs ?? []).some(
+        (output) => output.desiredState === "on",
       );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
         hasActiveRecordings;
@@ -1429,8 +1429,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const hasActiveRecordings = stateMetadata.recordings.some((recording) =>
-        recording.desiredState === "on"
+      const hasActiveRecordings = (stateMetadata.workspaceOutputs ?? []).some(
+        (output) => output.desiredState === "on",
       );
       const shouldAppendTwin = this.autoGenerateSnapshots ||
         hasActiveRecordings;

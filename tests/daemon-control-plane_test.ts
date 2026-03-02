@@ -81,27 +81,27 @@ Deno.test("DaemonControlRequestFileStore appends and lists requests", async () =
       command: "stop",
       payload: { requestedByPid: 2222 },
     });
-    const attachRequest = await store.enqueue({
-      command: "attach",
+    const exportRequest = await store.enqueue({
+      command: "export",
       payload: { sessionId: "session-1" },
     });
-    const detachRequest = await store.enqueue({
-      command: "detach",
-      payload: { sessionId: "session-1" },
+    const cleanRequest = await store.enqueue({
+      command: "clean",
+      payload: { all: true },
     });
 
     assertEquals(startRequest.requestId, "req-1");
     assertEquals(stopRequest.requestId, "req-2");
-    assertEquals(attachRequest.requestId, "req-3");
-    assertEquals(detachRequest.requestId, "req-4");
+    assertEquals(exportRequest.requestId, "req-3");
+    assertEquals(cleanRequest.requestId, "req-4");
     assertEquals(startRequest.requestedAt, "2026-02-22T12:15:00.000Z");
 
     const listed = await store.list();
     assertEquals(listed.length, 4);
     assertEquals(listed[0]?.command, "start");
     assertEquals(listed[1]?.command, "stop");
-    assertEquals(listed[2]?.command, "attach");
-    assertEquals(listed[3]?.command, "detach");
+    assertEquals(listed[2]?.command, "export");
+    assertEquals(listed[3]?.command, "clean");
 
     const raw = JSON.parse(await Deno.readTextFile(controlPath)) as {
       requests?: unknown[];
@@ -124,6 +124,37 @@ Deno.test("DaemonControlRequestFileStore fails closed on invalid queue files", a
       JSON.stringify({
         schemaVersion: 999,
         requests: [{ requestId: 1 }],
+      }),
+    );
+
+    const store = new DaemonControlRequestFileStore(controlPath);
+    await assertRejects(
+      () => store.list(),
+      Error,
+      "unsupported schema",
+    );
+  });
+});
+
+Deno.test("DaemonControlRequestFileStore fails closed on unknown commands", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    await Deno.writeTextFile(
+      controlPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        requests: [
+          {
+            requestId: "req-1",
+            requestedAt: "2026-02-22T12:15:00.000Z",
+            command: "start",
+          },
+          {
+            requestId: "req-2",
+            requestedAt: "2026-02-22T12:15:00.000Z",
+            command: "attach",
+          },
+        ],
       }),
     );
 

@@ -19,8 +19,6 @@ const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 30_000;
 export type DaemonControlCommand =
   | "start"
   | "stop"
-  | "attach"
-  | "detach"
   | "export"
   | "clean";
 
@@ -148,8 +146,6 @@ function isDaemonControlRequest(value: unknown): value is DaemonControlRequest {
   if (
     command !== "start" &&
     command !== "stop" &&
-    command !== "attach" &&
-    command !== "detach" &&
     command !== "export" &&
     command !== "clean"
   ) {

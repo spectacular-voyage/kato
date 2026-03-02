@@ -5,24 +5,6 @@ export const SESSION_METADATA_SCHEMA_VERSION = 1 as const;
 
 export type RecordingDesiredState = "on" | "off";
 
-export interface SessionRecordingPeriodV1 {
-  startedCursor: number;
-  stoppedCursor?: number;
-  startedAt?: string;
-  stoppedAt?: string;
-  startedBySeq?: number;
-  stoppedBySeq?: number;
-}
-
-export interface SessionRecordingStateV1 {
-  recordingId: string;
-  destination: string;
-  desiredState: RecordingDesiredState;
-  writeCursor: number;
-  createdAt?: string;
-  periods: SessionRecordingPeriodV1[];
-}
-
 export type SessionWorkspaceOutputDestinationKindV1 =
   | "workspace-relative"
   | "absolute-explicit";
@@ -72,15 +54,6 @@ export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   writerItalicizeUserMessages: boolean;
 }
 
-export interface SessionWorkspaceAttachmentV1 {
-  attachedAt: string;
-  sourceConfigPath?: string;
-  workspaceRoot: string;
-  resolvedDefaultOutputDir: string;
-  filenameTemplate: string;
-  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
-}
-
 export interface SessionMetadataV1 {
   schemaVersion: typeof SESSION_METADATA_SCHEMA_VERSION;
   sessionKey: string;
@@ -97,10 +70,7 @@ export interface SessionMetadataV1 {
   nextTwinSeq: number;
   recentFingerprints: string[];
   commandCursor?: number;
-  primaryRecordingDestination?: string;
-  workspaceAttachment?: SessionWorkspaceAttachmentV1;
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
-  recordings: SessionRecordingStateV1[];
 }
 
 export interface DaemonControlSessionIndexEntryV1 {
@@ -142,88 +112,6 @@ function isProviderCursor(value: unknown): value is ProviderCursor {
     return typeof cursorValue === "string";
   }
   return false;
-}
-
-function isRecordingPeriod(value: unknown): value is SessionRecordingPeriodV1 {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (
-    typeof value["startedCursor"] !== "number" ||
-    !Number.isSafeInteger(value["startedCursor"]) ||
-    value["startedCursor"] < 0
-  ) {
-    return false;
-  }
-  if (
-    value["stoppedCursor"] !== undefined &&
-    (typeof value["stoppedCursor"] !== "number" ||
-      !Number.isSafeInteger(value["stoppedCursor"]) ||
-      value["stoppedCursor"] < 0)
-  ) {
-    return false;
-  }
-  if (
-    value["startedAt"] !== undefined && typeof value["startedAt"] !== "string"
-  ) {
-    return false;
-  }
-  if (
-    value["stoppedAt"] !== undefined && typeof value["stoppedAt"] !== "string"
-  ) {
-    return false;
-  }
-  if (
-    value["startedBySeq"] !== undefined &&
-    (typeof value["startedBySeq"] !== "number" ||
-      !Number.isSafeInteger(value["startedBySeq"]) ||
-      value["startedBySeq"] <= 0)
-  ) {
-    return false;
-  }
-  if (
-    value["stoppedBySeq"] !== undefined &&
-    (typeof value["stoppedBySeq"] !== "number" ||
-      !Number.isSafeInteger(value["stoppedBySeq"]) ||
-      value["stoppedBySeq"] <= 0)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function isRecordingState(value: unknown): value is SessionRecordingStateV1 {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (
-    !isNonEmptyString(value["recordingId"]) ||
-    !isNonEmptyString(value["destination"])
-  ) {
-    return false;
-  }
-  if (value["desiredState"] !== "on" && value["desiredState"] !== "off") {
-    return false;
-  }
-  if (
-    typeof value["writeCursor"] !== "number" ||
-    !Number.isSafeInteger(value["writeCursor"]) ||
-    value["writeCursor"] < 0
-  ) {
-    return false;
-  }
-  if (
-    value["createdAt"] !== undefined && typeof value["createdAt"] !== "string"
-  ) {
-    return false;
-  }
-  if (
-    !Array.isArray(value["periods"]) ||
-    !value["periods"].every((period) => isRecordingPeriod(period))
-  ) {
-    return false;
-  }
-  return true;
 }
 
 function isWorkspaceRecordingCycle(
@@ -377,32 +265,6 @@ function isWorkspaceAttachmentWriterFeatureFlags(
     typeof value["writerItalicizeUserMessages"] === "boolean";
 }
 
-export function isSessionWorkspaceAttachmentV1(
-  value: unknown,
-): value is SessionWorkspaceAttachmentV1 {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (
-    !isNonEmptyString(value["attachedAt"]) ||
-    !isNonEmptyString(value["workspaceRoot"]) ||
-    !isNonEmptyString(value["resolvedDefaultOutputDir"]) ||
-    !isNonEmptyString(value["filenameTemplate"])
-  ) {
-    return false;
-  }
-  if (
-    value["sourceConfigPath"] !== undefined &&
-    !isNonEmptyString(value["sourceConfigPath"])
-  ) {
-    return false;
-  }
-  if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
-    return false;
-  }
-  return true;
-}
-
 export function isSessionMetadataV1(
   value: unknown,
 ): value is SessionMetadataV1 {
@@ -474,31 +336,14 @@ export function isSessionMetadataV1(
     return false;
   }
   if (
-    value["primaryRecordingDestination"] !== undefined &&
-    !isNonEmptyString(value["primaryRecordingDestination"])
-  ) {
-    return false;
-  }
-  if (
-    value["workspaceAttachment"] !== undefined &&
-    !isSessionWorkspaceAttachmentV1(value["workspaceAttachment"])
-  ) {
-    return false;
-  }
-  if (
     value["workspaceOutputs"] !== undefined &&
     (!Array.isArray(value["workspaceOutputs"]) ||
-      !value["workspaceOutputs"].every((entry) => isWorkspaceOutputState(entry)))
+      !value["workspaceOutputs"].every((entry) =>
+        isWorkspaceOutputState(entry)
+      ))
   ) {
     return false;
   }
-  if (
-    !Array.isArray(value["recordings"]) ||
-    !value["recordings"].every((recording) => isRecordingState(recording))
-  ) {
-    return false;
-  }
-
   return true;
 }
 

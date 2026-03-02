@@ -2,11 +2,9 @@
 id: t3lfa9r314byjwjoga3d5qe
 title: 2026 03 01 Workspace Aliases
 desc: ''
-updated: 1772410497486
+updated: 1772410861641
 created: 1772395927887
 ---
-
-# Workspace Aliases
 
 Supersedes [task.2026.2026-02-28-session-attach.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-28-session-attach.md).
 # Workspace Aliases: Live Registration Revision
@@ -68,11 +66,6 @@ It remains the daemon bootstrap config.
 Canonical new path:
 
 - `<workspaceRoot>/.kato/kato-workspace-config.yaml`
-
-Compatibility lookup order:
-
-1. `.kato/kato-workspace-config.yaml`
-2. `.kato/kato-config.yaml` (legacy fallback only)
 
 Rules:
 

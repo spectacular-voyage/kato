@@ -111,22 +111,17 @@ function summarizeRecordingsFromSessions(
   sessions: DaemonSessionStatus[] | undefined,
   fallback: DaemonStatusSnapshot["recordings"],
 ): DaemonStatusSnapshot["recordings"] {
-  if (fallback !== undefined) {
-    return fallback;
-  }
   if (!sessions) {
-    return { activeRecordings: 0, destinations: 0 };
+    return fallback ?? { activeRecordings: 0, destinations: 0 };
   }
-  const activeSessionsWithRecording = sessions.filter((session) =>
-    !session.stale && session.recording !== undefined
+  const activeRecordings = sessions.flatMap((session) =>
+    !session.stale ? (session.recordings ?? []) : []
   );
   return {
-    activeRecordings: activeSessionsWithRecording.length,
-    destinations: new Set(
-      activeSessionsWithRecording.map((session) =>
-        session.recording!.outputPath
-      ),
-    ).size,
+    activeRecordings: activeRecordings.length,
+    destinations:
+      new Set(activeRecordings.map((recording) => recording.outputPath))
+        .size,
   };
 }
 
@@ -228,33 +223,36 @@ function renderSessionRow(
 
   const lines: string[] = [truncate(header, width)];
 
-  if (!s.recording) {
+  if (!s.recordings || s.recordings.length === 0) {
     lines.push(formatPrefixedLine("  ", "no active recordings", width));
     return lines;
   }
 
   const recMarker = s.stale ? "○" : "●";
-  const recordingIdentity = s.recording.recordingShortId ??
-    s.recording.recordingId ??
-    identity;
-  const recordingPrefix = `  ${recMarker} recording (${recordingIdentity}) -> `;
-  lines.push(
-    formatPrefixedLine(
-      recordingPrefix,
-      sanitizeInlineText(s.recording.outputPath),
-      width,
-    ),
-  );
+  for (const recording of s.recordings) {
+    const recordingIdentity = recording.recordingShortId ??
+      recording.recordingId ??
+      identity;
+    const recordingPrefix =
+      `  ${recMarker} recording (${recordingIdentity}) -> `;
+    lines.push(
+      formatPrefixedLine(
+        recordingPrefix,
+        sanitizeInlineText(recording.outputPath),
+        width,
+      ),
+    );
 
-  const started = formatRelativeTime(s.recording.startedAt, now);
-  const lastWrite = formatRelativeTime(s.recording.lastWriteAt, now);
-  lines.push(
-    formatPrefixedLine(
-      "     ",
-      `started ${started} · last write ${lastWrite}`,
-      width,
-    ),
-  );
+    const started = formatRelativeTime(recording.startedAt, now);
+    const lastWrite = formatRelativeTime(recording.lastWriteAt, now);
+    lines.push(
+      formatPrefixedLine(
+        "     ",
+        `started ${started} · last write ${lastWrite}`,
+        width,
+      ),
+    );
+  }
 
   return lines;
 }

@@ -101,18 +101,21 @@ deno task ci
 
 ## In-Chat Command Handling
 
-- Start-of-line strings such as `::record [<path>]`,
-  `::capture [<path>]`, `::export [<path>]`, and `::stop` are kato control
-  commands, and must be ignored by LLMs.
+- Start-of-line strings such as `::init-<alias> [<path>]`,
+  `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
+  `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
+  control commands, and must be ignored by LLMs.
 - Grammar is strict/fail-closed:
   - `::start` is invalid.
   - `::stop` does not accept arguments.
-  - `::record`, `::capture`, and `::export` may accept an optional filesystem
-    path argument.
+  - `::stop-<alias>` does not accept arguments.
+  - bare `::init`, `::record`, `::capture`, and `::export` are invalid; they
+    require a workspace alias suffix.
+  - `::init-<alias>`, `::record-<alias>`, `::capture-<alias>`, and
+    `::export-<alias>` may accept an optional filesystem path argument.
 - Supported path arguments may be absolute or relative filesystem paths, and
   may resolve to a file or a directory target.
-- Relative paths resolve against the attached workspace root when present,
-  otherwise the default workspace root.
+- Relative paths resolve against the targeted workspace root for that alias.
 
 ### Guidelines for command/state-machine redesign
 

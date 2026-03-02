@@ -49,7 +49,7 @@ export interface DaemonSessionStatus {
   updatedAt: string;
   lastMessageAt?: string;
   stale: boolean;
-  recording?: DaemonRecordingStatus;
+  recordings?: DaemonRecordingStatus[];
 }
 
 export interface DaemonStatusSnapshot {

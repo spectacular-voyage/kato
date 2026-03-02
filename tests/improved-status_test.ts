@@ -138,11 +138,11 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     snippet: "how do I configure X",
     updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
     stale: false,
-    recording: {
+    recordings: [{
       outputPath: "/home/user/notes.md",
       startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
       lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
-    },
+    }],
   }];
   const out = renderStatusText(makeSnapshot(sessions), {
     showAll: false,
@@ -263,12 +263,12 @@ Deno.test("renderStatusText: narrow width keeps lines within width", () => {
       "this is a long snippet that should be truncated when terminal width is very narrow",
     updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
     stale: false,
-    recording: {
+    recordings: [{
       outputPath:
         "/home/user/really/long/path/to/a/file/that/should/be/truncated/in/narrow/view.md",
       startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
       lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
-    },
+    }],
   }];
   const width = 60;
   const out = renderStatusText(makeSnapshot(sessions), {

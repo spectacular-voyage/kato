@@ -10,9 +10,6 @@ export type DaemonCliCommandName =
   | "workspace-register"
   | "workspace-list"
   | "workspace-unregister"
-  | "attach"
-  | "attachments"
-  | "detach"
   | "export"
   | "clean";
 
@@ -26,16 +23,6 @@ export type DaemonCliCommand =
   | { name: "workspace-register"; alias?: string }
   | { name: "workspace-list" }
   | { name: "workspace-unregister"; selector: string }
-  | {
-    name: "attach";
-    sessionId: string;
-    outputPath?: string;
-  }
-  | { name: "attachments"; all: boolean }
-  | {
-    name: "detach";
-    sessionId: string;
-  }
   | {
     name: "export";
     sessionId: string;

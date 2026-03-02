@@ -80,11 +80,11 @@ export function isSessionStale(
  */
 export function projectSessionStatus(opts: {
   session: SessionProjectionInput;
-  recording?: RecordingProjectionInput;
+  recordings?: RecordingProjectionInput[];
   now: Date;
   staleAfterMs?: number;
 }): DaemonSessionStatus {
-  const { session, recording, now, staleAfterMs } = opts;
+  const { session, recordings, now, staleAfterMs } = opts;
   // Staleness is derived strictly from event time.
   // We intentionally do not fallback to mtime/updatedAt so missing lastEventAt
   // remains visible as a data issue.
@@ -111,8 +111,8 @@ export function projectSessionStatus(opts: {
     stale,
   };
 
-  if (recording) {
-    const rec: DaemonRecordingStatus = {
+  if (recordings && recordings.length > 0) {
+    result.recordings = recordings.map((recording): DaemonRecordingStatus => ({
       ...(recording.recordingId ? { recordingId: recording.recordingId } : {}),
       ...(recording.recordingShortId
         ? { recordingShortId: recording.recordingShortId }
@@ -120,8 +120,7 @@ export function projectSessionStatus(opts: {
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
       lastWriteAt: recording.lastWriteAt,
-    };
-    result.recording = rec;
+    }));
   }
 
   return result;
@@ -140,7 +139,7 @@ function recencyKey(s: DaemonSessionStatus): number {
 }
 
 function hasActiveRecording(s: DaemonSessionStatus): boolean {
-  return !s.stale && s.recording !== undefined;
+  return !s.stale && (s.recordings?.length ?? 0) > 0;
 }
 
 /**

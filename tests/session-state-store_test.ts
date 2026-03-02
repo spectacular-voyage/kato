@@ -166,27 +166,34 @@ Deno.test(
   },
 );
 
-Deno.test("PersistentSessionStateStore persists workspace attachments", async () => {
-  await withTempDir("session-state-store-attachment-", async (dir) => {
+Deno.test("PersistentSessionStateStore persists workspace outputs", async () => {
+  await withTempDir("session-state-store-workspace-output-", async (dir) => {
     const katoDir = join(dir, ".kato");
     const store = new PersistentSessionStateStore({
       katoDir,
       now: () => new Date("2026-02-28T10:00:00.000Z"),
-      makeSessionId: () => "session-uuid-attach-1234",
+      makeSessionId: () => "session-uuid-workspace-output-1234",
     });
 
     const created = await store.getOrCreateSessionMetadata({
       provider: "codex",
-      providerSessionId: "session-attach",
-      sourceFilePath: "/tmp/codex-session-attach.jsonl",
+      providerSessionId: "session-workspace-output",
+      sourceFilePath: "/tmp/codex-session-workspace-output.jsonl",
       initialCursor: makeDefaultSessionCursor("codex"),
     });
 
     const updated = structuredClone(created);
-    updated.workspaceAttachment = {
-      attachedAt: "2026-02-28T10:00:00.000Z",
+    updated.workspaceOutputs = [{
+      workspaceId: "workspace-my-proj",
+      workspaceAliasSnapshot: "My.Proj",
+      desiredState: "on",
+      currentDestination: {
+        kind: "workspace-relative",
+        relativePathFromWorkspaceRoot: "notes/session.md",
+      },
+      currentResolvedPath: `${dir}/workspace/notes/session.md`,
       sourceConfigPath: `${dir}/workspace/.kato/kato-config.yaml`,
-      workspaceRoot: `${dir}/workspace`,
+      workspaceRootSnapshot: `${dir}/workspace`,
       resolvedDefaultOutputDir: `${dir}/workspace/notes`,
       filenameTemplate: "{provider}-{sessionShortId}.md",
       writerFeatureFlags: {
@@ -195,7 +202,16 @@ Deno.test("PersistentSessionStateStore persists workspace attachments", async ()
         writerIncludeToolCalls: false,
         writerItalicizeUserMessages: true,
       },
-    };
+      activeRecordingCycleId: "cycle-1",
+      writeCursor: 42,
+      createdAt: "2026-02-28T10:00:00.000Z",
+      recordingCycles: [{
+        recordingCycleId: "cycle-1",
+        startedCursor: 5,
+        startedAt: "2026-02-28T10:00:00.000Z",
+        startedBySeq: 3,
+      }],
+    }];
 
     await store.saveSessionMetadata(updated, { touchUpdatedAt: true });
 
@@ -205,18 +221,31 @@ Deno.test("PersistentSessionStateStore persists workspace attachments", async ()
     });
     const reloaded = (await reloadedStore.listSessionMetadata())[0];
     assertExists(reloaded);
-    assertExists(reloaded.workspaceAttachment);
+    assertExists(reloaded.workspaceOutputs);
+    assertEquals(reloaded.workspaceOutputs.length, 1);
+    const output = reloaded.workspaceOutputs[0];
     assertEquals(
-      reloaded.workspaceAttachment.workspaceRoot,
+      output.workspaceRootSnapshot,
       `${dir}/workspace`,
     );
     assertEquals(
-      reloaded.workspaceAttachment.writerFeatureFlags.writerIncludeCommentary,
+      output.currentDestination.kind,
+      "workspace-relative",
+    );
+    assertEquals(
+      output.currentDestination.relativePathFromWorkspaceRoot,
+      "notes/session.md",
+    );
+    assertEquals(
+      output.writerFeatureFlags.writerIncludeCommentary,
       false,
     );
     assertEquals(
-      reloaded.workspaceAttachment.writerFeatureFlags.writerIncludeThinking,
+      output.writerFeatureFlags.writerIncludeThinking,
       true,
     );
+    assertEquals(output.activeRecordingCycleId, "cycle-1");
+    assertEquals(output.recordingCycles.length, 1);
+    assertEquals(output.recordingCycles[0]?.startedCursor, 5);
   });
 });

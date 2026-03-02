@@ -61,6 +61,16 @@ Supported commands:
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
   - Show daemon status.
+- `workspace init [<dir>]`
+  - Create `<dir>/.kato/kato-workspace-config.yaml`.
+  - If `<dir>` is omitted, uses the current working directory.
+- `workspace register [--alias <alias>]`
+  - Register the nearest ancestor workspace config under a workspace alias.
+  - If `--alias` is omitted, uses the workspace folder name.
+- `workspace list`
+  - Show registered workspace aliases.
+- `workspace unregister <alias-or-id>`
+  - Remove a registered workspace alias from the registry.
 - `export <session-id> [--output|-o <path>] [--format|-f markdown|jsonl]`
   - Queue one-off export request for the specified session id.
   - `--format markdown` (default): render as a human-readable markdown file.
@@ -83,37 +93,50 @@ deno run -A apps/daemon/src/main.ts help start
 deno run -A apps/daemon/src/main.ts --version
 ```
 
-## In-Chat Recording Commands
+Workspace registration changes are visible to a running daemon for new
+alias-scoped commands without a restart. Changes to an already-registered
+workspace's alias, root, or config path are restart-bound.
+
+## In-Chat Control Commands
 
 Kato also watches user messages for in-chat control commands:
 
-- `::init [<abs-path>]`
-- `::record`
-- `::capture [<abs-path>]`
-- `::export <abs-path>`
+- `::init-<alias> [<path>]`
+- `::record-<alias> [<path>]`
+- `::capture-<alias> [<path>]`
+- `::export-<alias> [<path>]`
 - `::stop`
+- `::stop-<alias>`
 
 Rules:
 
-- All explicit path arguments must be absolute.
-- `::init` sets/prepares the session primary destination without starting
-  recording.
-- `::record` starts/resumes recording at the session primary destination.
-- If no primary destination is set, destination-resolving commands fall back to
-  a generated file under `~/.kato/recordings/`.
+- `::init`, `::record`, `::capture`, and `::export` require a workspace alias
+  suffix.
+- `::stop` stops all active workspace outputs for the session.
+- `::stop-<alias>` stops only the active output bound to that alias.
+- Explicit path arguments may be absolute or relative, and may point to a file
+  or a directory target.
+- Relative paths resolve against the registered workspace root for the command's
+  alias.
+- Pathless alias-scoped commands use that workspace's configured default output
+  rules.
 
 ## Runtime Files
 
 Default paths:
 
-- Config: `~/.kato/kato-config.yaml`
+- Global runtime config: `~/.kato/kato-config.yaml`
+- Workspace registry: `~/.kato/workspace-registry.json`
 - Status: `~/.kato/runtime/status.json`
 - Control queue: `~/.kato/runtime/control.json`
 - Daemon session index cache: `~/.kato/daemon-control.json`
 - Session metadata + twins: `~/.kato/sessions/*.meta.json` and
   `~/.kato/sessions/*.twin.jsonl`
+- Workspace-local config: `<workspace>/.kato/kato-workspace-config.yaml`
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
+`~/.kato/kato-config.yaml` is the daemon/global config. Workspace-local output
+settings belong in `kato-workspace-config.yaml`.
 
 ## Runtime Config
 

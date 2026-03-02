@@ -321,6 +321,115 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
   });
 });
 
+Deno.test(
+  "FileProviderIngestionRunner persists session twin when a workspace output is active",
+  async () => {
+    await withTempDir(
+      "provider-ingestion-workspace-output-twin-",
+      async (dir) => {
+        const sessionFile = join(dir, "session-workspace-output.jsonl");
+        await Deno.writeTextFile(sessionFile, "placeholder\n");
+        const stateRoot = join(dir, ".kato");
+        const stateStore = new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-uuid-workspace-output-1234",
+        });
+        const metadata = await stateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-workspace-output",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        metadata.workspaceOutputs = [{
+          workspaceId: "workspace-my-proj",
+          workspaceAliasSnapshot: "My.Proj",
+          desiredState: "on",
+          currentDestination: {
+            kind: "absolute-explicit",
+            absolutePath: join(dir, "notes", "session.md"),
+          },
+          currentResolvedPath: join(dir, "notes", "session.md"),
+          workspaceRootSnapshot: join(dir, "workspace"),
+          resolvedDefaultOutputDir: join(dir, "workspace", "notes"),
+          filenameTemplate: "{provider}-{sessionShortId}.md",
+          writerFeatureFlags: {
+            writerIncludeCommentary: true,
+            writerIncludeThinking: true,
+            writerIncludeToolCalls: true,
+            writerItalicizeUserMessages: false,
+          },
+          activeRecordingCycleId: "cycle-1",
+          writeCursor: 0,
+          createdAt: "2026-02-26T10:00:00.000Z",
+          recordingCycles: [{
+            recordingCycleId: "cycle-1",
+            startedCursor: 0,
+            startedAt: "2026-02-26T10:00:00.000Z",
+          }],
+        }];
+        await stateStore.saveSessionMetadata(metadata);
+
+        const store = new InMemorySessionSnapshotStore();
+        const runner = new FileProviderIngestionRunner({
+          provider: "test-provider",
+          watchRoots: [dir],
+          sessionSnapshotStore: store,
+          sessionStateStore: new PersistentSessionStateStore({
+            katoDir: stateRoot,
+            now: () => new Date("2026-02-26T10:00:00.000Z"),
+            makeSessionId: () => "session-uuid-workspace-output-1234",
+          }),
+          autoGenerateSnapshots: false,
+          discoverSessions() {
+            return Promise.resolve([{
+              sessionId: "session-workspace-output",
+              filePath: sessionFile,
+              modifiedAtMs: Date.now(),
+            }]);
+          },
+          parseEvents(
+            _filePath: string,
+            fromOffset: number,
+            _ctx: { provider: string; sessionId: string },
+          ) {
+            return (async function* () {
+              if (fromOffset === 0) {
+                yield {
+                  event: makeEvent(
+                    "workspace-output-1",
+                    "2026-02-26T10:00:00.000Z",
+                  ),
+                  cursor: { kind: "byte-offset" as const, value: 10 },
+                };
+              }
+            })();
+          },
+        });
+
+        await runner.start();
+        await runner.poll();
+        await runner.stop();
+
+        const reloadedStore = new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-uuid-workspace-output-1234",
+        });
+        const reloaded = await reloadedStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-workspace-output",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        const twinEvents = await reloadedStore.readTwinEvents(reloaded, 1);
+        assertEquals(reloaded.nextTwinSeq, 2);
+        assertEquals(twinEvents.map((event) => event.seq), [1]);
+      },
+    );
+  },
+);
+
 Deno.test("FileProviderIngestionRunner recovers first-user snippet when resuming from persisted cursor", async () => {
   await withTempDir("provider-ingestion-snippet-recover-", async (dir) => {
     const sessionFile = join(dir, "session-snippet-recover.jsonl");

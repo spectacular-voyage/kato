@@ -131,28 +131,6 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.commandCursor !== undefined
       ? { commandCursor: metadata.commandCursor }
       : {}),
-    ...(metadata.primaryRecordingDestination !== undefined
-      ? { primaryRecordingDestination: metadata.primaryRecordingDestination }
-      : {}),
-    ...(metadata.workspaceAttachment
-      ? {
-        workspaceAttachment: {
-          attachedAt: metadata.workspaceAttachment.attachedAt,
-          ...(metadata.workspaceAttachment.sourceConfigPath
-            ? {
-              sourceConfigPath: metadata.workspaceAttachment.sourceConfigPath,
-            }
-            : {}),
-          workspaceRoot: metadata.workspaceAttachment.workspaceRoot,
-          resolvedDefaultOutputDir:
-            metadata.workspaceAttachment.resolvedDefaultOutputDir,
-          filenameTemplate: metadata.workspaceAttachment.filenameTemplate,
-          writerFeatureFlags: {
-            ...metadata.workspaceAttachment.writerFeatureFlags,
-          },
-        },
-      }
-      : {}),
     ...(metadata.workspaceOutputs
       ? {
         workspaceOutputs: metadata.workspaceOutputs.map((entry) => ({
@@ -192,14 +170,6 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
         })),
       }
       : {}),
-    recordings: metadata.recordings.map((recording) => ({
-      recordingId: recording.recordingId,
-      destination: recording.destination,
-      desiredState: recording.desiredState,
-      writeCursor: recording.writeCursor,
-      ...(recording.createdAt ? { createdAt: recording.createdAt } : {}),
-      periods: recording.periods.map((period) => ({ ...period })),
-    })),
   };
 }
 
@@ -381,7 +351,6 @@ export class PersistentSessionStateStore {
       nextTwinSeq: 1,
       recentFingerprints: [],
       commandCursor: 0,
-      recordings: [],
     };
 
     await ensureDir(this.sessionsDir);

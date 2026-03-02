@@ -17,6 +17,36 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Alias-Scoped Workspace Outputs
+
+- Decision:
+  - The canonical in-chat command surface is alias-scoped:
+    `::init-<alias>`, `::record-<alias>`, `::capture-<alias>`,
+    `::export-<alias>`, plus `::stop` and `::stop-<alias>`.
+  - Persistent session state stores only workspace-scoped output state in
+    `workspaceOutputs`; the old single-session `recordings`,
+    `workspaceAttachment`, and `primaryRecordingDestination` model is removed.
+  - Status/reporting surfaces expose multiple active recordings per session
+    instead of collapsing to one "primary" destination.
+- Owner: Kato engineering
+- Date: 2026-03-02
+- Why:
+  - The workspace registry is now a first-class routing model, so command
+    targets need to be explicit about which workspace they address.
+  - Removing the single-session pointer model avoids ambiguous retargeting and
+    keeps state aligned with the actual per-workspace recording lifecycle.
+  - One session can legitimately have multiple active workspace outputs, so the
+    status model must represent that directly.
+- Tradeoffs:
+  - Users must register a workspace alias before alias-scoped commands resolve.
+  - Alias/root/config-path edits on existing registrations remain restart-bound
+    for the running daemon.
+- Follow-up tasks:
+  - Keep removing remaining compatibility-only vestiges (legacy workspace
+    config filename reads, legacy frontmatter keys).
+  - Add more live-refresh coverage around register/unregister and config reload
+    behavior.
+
 ### CLI Framework
 
 - Decision: Use Deno standard-library argument parsing (`@std/cli`) with a small

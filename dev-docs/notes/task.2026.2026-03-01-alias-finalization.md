@@ -2,7 +2,7 @@
 id: ssk7ocudcxea841o9ywqk8v
 title: 2026 03 01 Alias Finalization
 desc: ''
-updated: 1772410711087
+updated: 1772410780225
 created: 1772410153437
 ---
 
@@ -24,7 +24,7 @@ code that should survive.
 
 ## Remaining Work
 
-- [ ] Rewrite the runtime integration coverage in
+- [x] Rewrite the runtime integration coverage in
   [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts)
   from the old bare `::init` / `::record` / `::capture` model to the
   alias-scoped command model (`::init-<alias>`, `::record-<alias>`,
@@ -39,33 +39,26 @@ code that should survive.
     active recording cycles
   - alias/root/config-path changes on existing entries remain restart-bound
 
-- [ ] Finalize the session-state migration away from the attach-era model:
-  remove or fully demote legacy reliance on `workspaceAttachment`,
-  `primaryRecordingDestination`, and the old single-session recording pointer in
-  favor of `workspaceOutputs`.
+- [x] Finalize the session-state migration away from the attach-era model:
+  remove or fully demote the remaining old single-session recording pointer in
+  favor of `workspaceOutputs` (the legacy `workspaceAttachment` and
+  `primaryRecordingDestination` metadata fields are now gone).
 
-- [ ] Audit status/reporting surfaces so they reflect the new
+- [x] Audit status/reporting surfaces so they reflect the new
   per-session-plus-per-workspace model correctly:
   `kato status`, session summaries, and any status counters should handle
   multiple workspace-scoped outputs for one session without collapsing back to a
   single “primary” destination.
 
-- [ ] Remove any vestiges of the attach-era CLI:
+- [x] Remove any vestiges of the attach-era CLI:
   `attach`, `attachments`, and `detach` still exist, but they should be cleaned up along with any supporting code that is no longer necessary.
 
-- [ ] Update the docs to match the new canonical workspace model everywhere:
+- [x] Update the docs to match the new canonical workspace model everywhere:
   - workspace-local config filename is `.kato/kato-workspace-config.yaml`
-  - legacy `.kato/kato-config.yaml` is compatibility-only fallback
+  - `.kato/kato-config.yaml` is only the global/daemon config
   - live registration/unregistration is supported without restart
   - alias/root/config-path edits on existing entries are restart-bound
   - alias-scoped in-chat commands are the steady-state UX
-
-- [ ] Reconcile the design notes so the canonical task docs match the actual
-  implementation direction. In particular:
-  - the current code supports `::init-<alias>`
-  - the older workspace-alias note still describes `init` as removed
-  - the older note also still describes daemon pickup as restart-only, which is
-    no longer the full design
 
 - [ ] Add end-to-end tests around frontmatter pluralization and append-only
   behavior:

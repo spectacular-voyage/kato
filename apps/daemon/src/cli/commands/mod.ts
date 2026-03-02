@@ -1,7 +1,4 @@
-export { runAttachCommand } from "./attach.ts";
-export { runAttachmentsCommand } from "./attachments.ts";
 export { type CleanCommandOptions, runCleanCommand } from "./clean.ts";
-export { runDetachCommand } from "./detach.ts";
 export { runExportCommand } from "./export.ts";
 export { runInitCommand } from "./init.ts";
 export { runRestartCommand } from "./restart.ts";

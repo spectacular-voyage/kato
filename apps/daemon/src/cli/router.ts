@@ -32,10 +32,7 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
-  runAttachCommand,
-  runAttachmentsCommand,
   runCleanCommand,
-  runDetachCommand,
   runExportCommand,
   runInitCommand,
   runRestartCommand,
@@ -324,19 +321,6 @@ export async function runDaemonCli(
           commandContext,
           intent.command.selector,
         );
-        return 0;
-      case "attach":
-        await runAttachCommand(
-          commandContext,
-          intent.command.sessionId,
-          intent.command.outputPath,
-        );
-        return 0;
-      case "attachments":
-        await runAttachmentsCommand(commandContext, intent.command.all);
-        return 0;
-      case "detach":
-        await runDetachCommand(commandContext, intent.command.sessionId);
         return 0;
       case "export":
         await runExportCommand(

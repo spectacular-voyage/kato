@@ -128,10 +128,10 @@ Deno.test("projectSessionStatus marks active session as not stale", () => {
   assertEquals(result.snippet, "hello");
   assertEquals(result.provider, "claude");
   assertEquals(result.sessionId, "abc");
-  assertEquals(result.recording, undefined);
+  assertEquals(result.recordings, undefined);
 });
 
-Deno.test("projectSessionStatus attaches recording when provided", () => {
+Deno.test("projectSessionStatus attaches recordings when provided", () => {
   const now = new Date("2026-02-24T10:00:00.000Z");
   const updatedAt = new Date(now.getTime() - 60_000).toISOString();
   const result = projectSessionStatus({
@@ -141,16 +141,25 @@ Deno.test("projectSessionStatus attaches recording when provided", () => {
       updatedAt,
       events: [],
     },
-    recording: {
+    recordings: [{
       provider: "codex",
       sessionId: "xyz",
       outputPath: "/out/notes.md",
       startedAt: updatedAt,
       lastWriteAt: updatedAt,
-    },
+    }, {
+      provider: "codex",
+      sessionId: "xyz",
+      outputPath: "/out/other.md",
+      startedAt: updatedAt,
+      lastWriteAt: updatedAt,
+    }],
     now,
   });
-  assertEquals(result.recording?.outputPath, "/out/notes.md");
+  assertEquals(
+    result.recordings?.map((recording) => recording.outputPath),
+    ["/out/notes.md", "/out/other.md"],
+  );
 });
 
 Deno.test("projectSessionStatus marks session stale when lastEventAt absent", () => {
@@ -281,12 +290,12 @@ Deno.test("sortSessionsByRecency for active recordings uses lastMessageAt over l
       stale: false,
       updatedAt: "2026-02-24T10:00:00.000Z",
       lastMessageAt: "2026-02-24T10:00:00.000Z",
-      recording: {
+      recordings: [{
         outputPath: "/out-older.md",
         startedAt: "2026-02-24T09:00:00.000Z",
         // Intentionally newer than newer-message session. Should be ignored.
         lastWriteAt: "2026-02-24T12:00:00.000Z",
-      },
+      }],
     },
     {
       provider: "claude",
@@ -294,11 +303,11 @@ Deno.test("sortSessionsByRecency for active recordings uses lastMessageAt over l
       stale: false,
       updatedAt: "2026-02-24T11:00:00.000Z",
       lastMessageAt: "2026-02-24T11:00:00.000Z",
-      recording: {
+      recordings: [{
         outputPath: "/out-newer.md",
         startedAt: "2026-02-24T10:00:00.000Z",
         lastWriteAt: "2026-02-24T11:00:00.000Z",
-      },
+      }],
     },
   ];
   const result = sortSessionsByRecency(sessions);
@@ -315,12 +324,12 @@ Deno.test(
         stale: true,
         updatedAt: "2026-02-24T09:00:00.000Z",
         lastMessageAt: "2026-02-24T09:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/out-old.md",
           startedAt: "2026-02-24T09:00:00.000Z",
           // Intentionally newer than the other stale session. Should be ignored.
           lastWriteAt: "2026-02-24T12:00:00.000Z",
-        },
+        }],
       },
       {
         provider: "claude",
@@ -328,11 +337,11 @@ Deno.test(
         stale: true,
         updatedAt: "2026-02-24T10:00:00.000Z",
         lastMessageAt: "2026-02-24T10:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/out-new.md",
           startedAt: "2026-02-24T10:00:00.000Z",
           lastWriteAt: "2026-02-24T11:00:00.000Z",
-        },
+        }],
       },
     ];
 
@@ -357,11 +366,11 @@ Deno.test(
         sessionId: "recording-older",
         stale: false,
         updatedAt: "2026-02-24T11:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/out.md",
           startedAt: "2026-02-24T10:00:00.000Z",
           lastWriteAt: "2026-02-24T11:00:00.000Z",
-        },
+        }],
       },
     ];
 
@@ -381,11 +390,11 @@ Deno.test(
         stale: false,
         updatedAt: "2026-02-24T09:00:00.000Z",
         lastMessageAt: "2026-02-24T09:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/active.md",
           startedAt: "2026-02-24T08:00:00.000Z",
           lastWriteAt: "2026-02-24T09:00:00.000Z",
-        },
+        }],
       },
       {
         provider: "claude",
@@ -393,11 +402,11 @@ Deno.test(
         stale: true,
         updatedAt: "2026-02-24T11:00:00.000Z",
         lastMessageAt: "2026-02-24T11:00:00.000Z",
-        recording: {
+        recordings: [{
           outputPath: "/stale.md",
           startedAt: "2026-02-24T08:30:00.000Z",
           lastWriteAt: "2026-02-24T11:30:00.000Z",
-        },
+        }],
       },
     ];
 
