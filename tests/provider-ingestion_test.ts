@@ -249,7 +249,7 @@ Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch u
       "m2",
     ]);
     assertEquals(secondSnapshot.cursor, { kind: "byte-offset", value: 20 });
-    assertEquals(parseOffsets, [0, 10]);
+    assertEquals(parseOffsets, [0, 10, 0]);
 
     await runner.stop();
   });
@@ -384,7 +384,7 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
     const secondSnapshot = secondStore.get("session-persist");
     assertExists(secondSnapshot);
     assertEquals(secondSnapshot.events.length, 1);
-    assertEquals(parseOffsets, [0, 10]);
+    assertEquals(parseOffsets, [0, 10, 0]);
   });
 });
 
@@ -1114,7 +1114,7 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
         ),
         ["bootstrap-1-content", "bootstrap-2-content"],
       );
-      assertEquals(parseOffsets, [0, 0, 10]);
+      assertEquals(parseOffsets, [0, 0, 10, 0]);
 
       const reloadedStateStore = new PersistentSessionStateStore({
         katoDir: stateRoot,
@@ -1326,7 +1326,7 @@ Deno.test("FileProviderIngestionRunner realigns Gemini cursor via persisted anch
       await secondRunner.poll();
       await secondRunner.stop();
 
-      assertEquals(parseOffsets, [0, 1]);
+      assertEquals(parseOffsets, [0, 1, 0]);
       assert(
         sink.records.some((record) =>
           record.event === "provider.ingestion.anchor.realigned" &&

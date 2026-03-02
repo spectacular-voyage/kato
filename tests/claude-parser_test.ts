@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import { parseClaudeEvents } from "../apps/daemon/src/providers/claude/mod.ts";
+import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const FIXTURE = join(THIS_DIR, "fixtures", "claude-session.jsonl");
@@ -244,10 +245,7 @@ Deno.test("claude parser synthesizes decision events for AskUserQuestion prompts
 Deno.test(
   "claude parser uses matched question text as providerQuestionId when answer key is a normalized variant",
   async () => {
-    const tempPath = await Deno.makeTempFile({
-      prefix: "claude-ask-user-question-",
-      suffix: ".jsonl",
-    });
+    const tempPath = makeTestTempPath("claude-ask-user-question-") + ".jsonl";
     const questionText = "Which output format should we use?";
     const questionHeader = "Output format";
     try {
@@ -318,7 +316,7 @@ Deno.test(
       assertEquals(metadata["providerQuestionId"], questionText);
       assertEquals(metadata["header"], questionHeader);
     } finally {
-      await Deno.remove(tempPath).catch(() => undefined);
+      await removePathIfPresent(tempPath);
     }
   },
 );
