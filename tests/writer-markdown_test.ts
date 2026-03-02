@@ -147,7 +147,7 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "id: conversation-session-12345678");
+      assertStringIncludes(content, "id: conversation-session-recseed");
       assertStringIncludes(content, "kato-sessionIds: [12345678-abcdef]");
       assertStringIncludes(content, "kato-recordingIds: [rec-seed]");
       assertStringIncludes(
@@ -163,6 +163,37 @@ Deno.test(
         "conversationEventKinds: [message.user]",
       );
       assertEquals(content.includes("\nupdated:"), false);
+    } finally {
+      await removePathIfPresent(root);
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter default id falls back to session id when recording id is absent",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation-session-fallback.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e-session-fallback",
+          "message.user",
+          "hello",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ], {
+        title: "Conversation Session",
+        includeUpdatedInFrontmatter: false,
+        frontmatterSessionIds: ["12345678-abcdef"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "id: conversation-session-12345678");
+      assertStringIncludes(content, "kato-sessionIds: [12345678-abcdef]");
+      assertEquals(content.includes("kato-recordingIds:"), false);
     } finally {
       await removePathIfPresent(root);
     }

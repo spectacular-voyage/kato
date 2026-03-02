@@ -38,8 +38,20 @@ export function makeCompactFrontmatterId(title: string): string {
   return `${slug}-${suffix}`;
 }
 
-function normalizeSessionShortId(sessionId: string): string {
-  return sessionId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+function normalizeFrontmatterScopeShortId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+}
+
+function makeRecordingScopedFrontmatterId(
+  title: string,
+  recordingCycleId: string,
+): string {
+  const slug = slugifyForFrontmatterId(title);
+  const recordingShortId = normalizeFrontmatterScopeShortId(recordingCycleId);
+  if (recordingShortId.length === 0) {
+    return makeCompactFrontmatterId(title);
+  }
+  return `${slug}-${recordingShortId}`;
 }
 
 export function makeSessionScopedFrontmatterId(
@@ -47,7 +59,7 @@ export function makeSessionScopedFrontmatterId(
   sessionId: string,
 ): string {
   const slug = slugifyForFrontmatterId(title);
-  const sessionShortId = normalizeSessionShortId(sessionId);
+  const sessionShortId = normalizeFrontmatterScopeShortId(sessionId);
   if (sessionShortId.length === 0) {
     return makeCompactFrontmatterId(title);
   }
@@ -120,9 +132,15 @@ export function renderFrontmatter(options: {
   const sessionIds = dedupeStrings(options.sessionIds);
   const workspaceIds = dedupeStrings(options.workspaceIds);
   const recordingCycleIds = dedupeStrings(options.recordingCycleIds);
+  const frontmatterRecordingCycleId = recordingCycleIds[0];
   const frontmatterSessionId = sessionIds[0];
   const frontmatterId = options.makeFrontmatterId
     ? options.makeFrontmatterId(options.title)
+    : frontmatterRecordingCycleId
+    ? makeRecordingScopedFrontmatterId(
+      options.title,
+      frontmatterRecordingCycleId,
+    )
     : frontmatterSessionId
     ? makeSessionScopedFrontmatterId(options.title, frontmatterSessionId)
     : makeCompactFrontmatterId(options.title);
