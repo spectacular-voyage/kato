@@ -113,6 +113,22 @@ function resolveLastAssistantSpeaker(
   return speakerNames?.assistant ?? "Assistant";
 }
 
+function resolveInitialAssistantSpeaker(
+  events: ConversationEvent[],
+  speakerNames: MarkdownSpeakerNames | undefined,
+): string {
+  for (const event of events) {
+    if (event.kind !== "message.assistant") {
+      continue;
+    }
+    const normalizedModel = event.model?.trim();
+    if (normalizedModel && normalizedModel.length > 0) {
+      return formatModelName(normalizedModel);
+    }
+  }
+  return speakerNames?.assistant ?? "Assistant";
+}
+
 function formatUserMessageContent(content: string): string {
   return content.split("\n").map((line) => {
     const trimmed = line.trim();
@@ -279,7 +295,10 @@ export function renderEventsToMarkdown(
 
   let lastRole: string | undefined;
   let lastSignature: string | undefined;
-  let lastAssistantSpeaker = options.speakerNames?.assistant ?? "Assistant";
+  let lastAssistantSpeaker = resolveInitialAssistantSpeaker(
+    events,
+    options.speakerNames,
+  );
 
   // Pass 2: Render events in sequence.
   for (let i = 0; i < events.length; i++) {

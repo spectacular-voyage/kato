@@ -796,6 +796,125 @@ Deno.test(
 );
 
 Deno.test(
+  "renderEventsToMarkdown keeps latest model heading for tool calls when assistant events omit model",
+  () => {
+    const assistantWithModel: ConversationEvent = {
+      eventId: "assistant-tool-heading-with-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Preparing command.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-with-model",
+      },
+    } as unknown as ConversationEvent;
+    const assistantWithoutModel: ConversationEvent = {
+      eventId: "assistant-tool-heading-without-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:09.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Continuing plan.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-without-model",
+      },
+    } as unknown as ConversationEvent;
+    const toolCall: ConversationEvent = {
+      eventId: "tc-heading-stable-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:10.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-stable-model",
+      name: "exec_command",
+      description: "rg -n \"Tool-exec_command\" -S",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-stable-model",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [assistantWithModel, assistantWithoutModel, toolCall],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: true,
+        includeToolResults: false,
+        includeThinking: false,
+      },
+    );
+
+    assertStringIncludes(
+      rendered,
+      "# gpt-5.3-codex_2026-03-02_0222_10_Tool-exec_command",
+    );
+    assertEquals(
+      rendered.includes("# Assistant_2026-03-02_0222_10_Tool-exec_command"),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown infers tool call heading model when tool calls precede assistant messages",
+  () => {
+    const toolCallBeforeAssistant: ConversationEvent = {
+      eventId: "tc-heading-before-assistant",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:07.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-before-assistant",
+      name: "exec_command",
+      description: "sed -n '1,120p' apps/daemon/src/writer/markdown_writer.ts",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-before-assistant",
+      },
+    } as unknown as ConversationEvent;
+    const assistantWithModel: ConversationEvent = {
+      eventId: "assistant-heading-after-tool",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Inspecting file now.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-heading-after-tool",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [toolCallBeforeAssistant, assistantWithModel],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: true,
+        includeToolResults: false,
+        includeThinking: false,
+      },
+    );
+
+    assertStringIncludes(
+      rendered,
+      "# gpt-5.3-codex_2026-03-02_0222_07_Tool-exec_command",
+    );
+    assertEquals(
+      rendered.includes("# Assistant_2026-03-02_0222_07_Tool-exec_command"),
+      false,
+    );
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown can show standalone tool results when tool calls are hidden",
   () => {
     const assistant = makeEvent(

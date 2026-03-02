@@ -7,7 +7,7 @@ updated: 1772480942032
 participants: [user.djradon, codex.gpt-5.3-codex]
 kato-sessionIds: [019cafd6-eb24-7a32-8641-77efd29442a0]
 kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-conversationEventKinds: [message.assistant, message.user, thinking, tool.call, tool.result]
+conversationEventKinds: [message.assistant, message.user, thinking, tool.call, tool.result, decision]
 kato-recordingIds: [b1990ebd-8a79-40f0-9203-22b17ed111df]
 ---
 
@@ -1308,3 +1308,73 @@ Regression coverage added:
 Focused tests passed with `deno test -A`.
 
 Existing note files keep their old `id` (frontmatter ID is preserved on append), but new captures after daemon restart should be recording-scoped.
+
+# User_2026-03-02_1155_28
+
+The decision markdown no looks like this:
+
+# Assistant_2026-03-02_1153_25_Tool-decision-which-approach-should-we-tackle-next-from-the-task-note
+
+## Prompt
+
+Which approach should we tackle next from the task note?
+
+## User Selection
+
+Something else
+
+It's not captureing the options, at least for Claude. Can you offer me decision to test for Codex, I've turned on plan mode which is I think a pre-requisite for the GUI-oriented decisions.
+
+**Planning decision prompt for Codex testing**
+
+# gpt-5.3-codex_2026-03-02_1155_44
+
+You’re aiming to verify the decision-capture path in Codex Plan mode. I’ll do a quick non-mutating check of how decision options are extracted for Claude vs Codex, then I’ll send you a live decision prompt to click through.
+
+# gpt-5.3-codex_2026-03-02_1155_44_Tool-exec_command
+
+rg -n "decision|questionnaire|options|User Selection|includeDecisionOptions|tool.decision" apps/daemon/src -S
+
+# gpt-5.3-codex_2026-03-02_1155_44_Tool-exec_command
+
+rg -n "decision|options|questionnaire" tests/writer-markdown_test.ts tests -S
+
+**Inspecting markdown writer decision logic**
+
+# Assistant_2026-03-02_1155_51_Tool-exec_command
+
+sed -n '300,520p' apps/daemon/src/writer/markdown_writer.ts
+
+**Assessing generic fallback**
+
+# Assistant_2026-03-02_1155_53_Tool-exec_command
+
+sed -n '520,620p' apps/daemon/src/writer/markdown_writer.ts
+
+**Inspecting parser key normalization**
+
+# Assistant_2026-03-02_1155_56_Tool-exec_command
+
+sed -n '250,390p' apps/daemon/src/providers/claude/parser.ts
+
+**Reviewing decision key construction**
+
+# Assistant_2026-03-02_1155_59_Tool-exec_command
+
+sed -n '390,490p' apps/daemon/src/providers/claude/parser.ts
+
+**Preparing decision test with options**
+
+# Assistant_2026-03-02_1156_13_Tool-request_user_input
+
+# Assistant_2026-03-02_1156_13_Tool-decision-codex-option-capture-probe
+
+## Prompt
+
+Which option should we select to verify Codex captures prompt, options, and selection end-to-end?
+
+## Options
+
+- Option A (Recommended): Baseline check with a normal predefined option selection.
+- Option B: Alternate predefined option to confirm label/description rendering.
+- Option C: Third predefined option to verify ordering remains stable.
