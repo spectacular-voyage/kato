@@ -1,7 +1,7 @@
 ---
 id: 4t97owqubbhk7poems1t1va
 title: 2026 03 01 Filename Template Tweaks
-desc: ''
+desc: ""
 updated: 1772439219106
 created: 1772422088094
 ---
@@ -10,16 +10,17 @@ created: 1772422088094
 
 ## Goal
 
-- Replace UTC-only filename timestamp token behavior with clearer, timezone-aware tokens.
+- Replace UTC-only filename token behavior with simpler, timezone-aware filename
+  templating.
 - Add an explicit workspace config key for filename timestamp timezone.
+- Remove in-chat `::init` command support.
 - Document supported template tokens and timezone behavior in `README.md`.
 
 ## Summary
 
 Current filename rendering only supports `{timestampUtc}` and always uses UTC.
-This task adds three explicit tokens:
+This task replaces timestamp token behavior with:
 
-- `{timestampISO8601}`
 - `{timestampHumane}` (format `YYYY-MM-DD_HHmm`, for example `2026-03-01_1234`)
 - `{snippetSlug}` (slugified session snippet)
 
@@ -34,25 +35,37 @@ supported values:
 
 ### Current behavior (baseline)
 
-- `apps/daemon/src/orchestrator/daemon_runtime.ts` renders only `{timestampUtc}`.
+- `apps/daemon/src/orchestrator/daemon_runtime.ts` renders only
+  `{timestampUtc}`.
 - `apps/daemon/src/workspace/registry.ts` scaffolds
   `filenameTemplate: "{provider}-{sessionShortId}-{timestampUtc}.md"`.
 - Workspace config does not currently expose a filename timezone key.
 
 ### Proposed token behavior
 
-- `{timestampISO8601}`:
-  - Timestamp in configured timezone using ISO8601 offset form.
-  - Example source value: `2026-03-01T12:34:56-08:00`.
-  - Existing filename normalization remains in place after token replacement.
 - `{timestampHumane}`:
   - Timestamp in configured timezone using `YYYY-MM-DD_HHmm`.
   - Example: `2026-03-01_1234`.
   - Intended for shorter, easier-to-read filenames.
 - `{snippetSlug}`:
-  - Slugified snippet derived from session content.
+  - Slugified snippet derived from the session snippet.
   - Should be filesystem-safe and lowercase with `-` separators.
-  - Falls back to a stable placeholder when no snippet text is available.
+  - Leading blank lines should be ignored (reuse existing snippet extraction
+    behavior).
+  - Fallback chain should be:
+    - `snapshot.metadata.snippet` when available
+    - `extractSnippet(boundarySnapshot)` at command time
+    - stable placeholder `"conversation"`
+
+### Snippet availability
+
+Sessions can still lack a snippet in edge cases, for example:
+
+- no non-empty user message exists yet
+- session content contains only assistant/tool/system events
+- first user message is blank/whitespace-only
+
+So placeholder fallback remains required, but should be rare.
 
 ### Timezone behavior
 
@@ -69,27 +82,53 @@ supported values:
 
 - Default scaffold template should move to
   `"{timestampHumane}-{snippetSlug}-{provider}.md"`
-- Remove `{timestampUtc}` everywhere, no backward compatibility needed
+- Remove `{timestampUtc}` and `{timestampISO8601}` everywhere, no backward
+  compatibility.
+- Workspace configs that still reference removed tokens should fail
+  config/profile validation with a clear error.
 - README needs updates.
+
+### Command surface changes
+
+- Remove in-chat `::init` and `::init-<alias>` support entirely.
+- Keep `::record-<alias>`, `::capture-<alias>`, `::export-<alias>`,
+  `::stop[-<alias>]`.
+- Rationale: filename generation should happen at record/capture/export command
+  time when snippet context exists.
 
 ### Library/runtime choice
 
 - No third-party date/time dependency is required.
 - Prefer Deno runtime `Intl` APIs for timezone handling/validation:
-  - `Intl.DateTimeFormat(..., { timeZone })` validation via try/catch.
-  - `Intl.supportedValuesOf("timeZone")` when available for stricter checks.
+  - If `Intl.supportedValuesOf("timeZone")` exists, validate against that set.
+  - Always validate with `Intl.DateTimeFormat(..., { timeZone })` try/catch as
+    runtime fallback.
+
+### Snippet persistence
+
+- Do not add snippet to persistent session `.meta.json` in this task.
+- Reuse existing runtime snapshot metadata snippet and command-time fallback
+  extraction.
+- Revisit persistent snippet in a separate task only if restart-time performance
+  indicates need.
 
 ## Contract Changes
 
 - Workspace config schema (`kato-workspace-config.yaml` and default template):
   - add optional `filenameTemplateTimezone: string`
+  - add key to `WORKSPACE_CONFIG_TOP_LEVEL_KEYS`
+  - add key to `WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS`
 - Workspace profile resolution contracts:
   - `WorkspaceConfigOverrides` gains `filenameTemplateTimezone?: string`
   - `ResolvedWorkspaceProfile` gains `filenameTemplateTimezone: string`
 - Filename renderer token contract:
-  - add `{timestampISO8601}`
   - add `{timestampHumane}`
   - add `{snippetSlug}`
+  - remove `{timestampUtc}`
+  - remove `{timestampISO8601}`
+  - update hardcoded renderer fallback literal (currently uses `timestampUtc`)
+- Command parsing/runtime contract:
+  - remove `init` from in-chat command grammar and runtime handlers
 - Documentation contract:
   - README includes a token table with examples and timezone semantics
   - README config examples include `filenameTemplateTimezone`
@@ -100,13 +139,17 @@ supported values:
   - accepts `"local"` and valid IANA timezone values
   - rejects invalid timezone values
   - default fallback is `"local"` when missing
+  - rejects removed/unknown filename template tokens
+  - `allowMissing` load path does not treat `filenameTemplateTimezone`-only
+    config as empty
 - Add/extend runtime tests in `tests/daemon-runtime_test.ts`:
-  - generated filenames include `timestampISO8601` in configured timezone
   - generated filenames include `timestampHumane` in configured timezone
   - generated filenames include `snippetSlug` derived from session snippet text
+  - snippet extraction ignores leading blank lines
   - missing snippet falls back to non-empty placeholder slug
-- Add a DST-sensitive assertion using a fixed instant and explicit timezone
-  (for example `America/Los_Angeles`) to verify offset correctness.
+  - in-chat `::init` / `::init-<alias>` is rejected as unknown/unsupported
+- Add a DST-sensitive assertion using a fixed instant and explicit timezone (for
+  example `America/Los_Angeles`) to verify offset correctness.
 - Run:
   - `deno task test`
   - `deno task check`
@@ -122,20 +165,29 @@ supported values:
 
 ## Implementation Plan
 
-- [ ] Add `filenameTemplateTimezone` to workspace config parsing and scaffolding
+- [x] Add `filenameTemplateTimezone` to workspace config parsing and scaffolding
       in `apps/daemon/src/workspace/registry.ts`.
-- [ ] Add timezone validation helper and enforce fail-closed errors for invalid
+- [x] Add `filenameTemplateTimezone` to workspace key allowlists in
+      `apps/daemon/src/workspace/registry.ts`
+      (`WORKSPACE_CONFIG_TOP_LEVEL_KEYS`, `WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS`).
+- [x] Add timezone validation helper and enforce fail-closed errors for invalid
       values.
-- [ ] Extend `WorkspaceConfigOverrides` and `ResolvedWorkspaceProfile` to carry
+- [x] Update `DefaultWorkspaceConfigFileStore.load()` emptiness check to include
+      `filenameTemplateTimezone` so timezone-only overrides are not treated as
+      empty.
+- [x] Extend `WorkspaceConfigOverrides` and `ResolvedWorkspaceProfile` to carry
       timezone for filename rendering.
-- [ ] Update filename rendering in
+- [x] Update filename rendering in
       `apps/daemon/src/orchestrator/daemon_runtime.ts` to support
-      `{timestampISO8601}`, `{timestampHumane}`, and `{snippetSlug}`.
-- [ ] Add session-snippet extraction and slugification logic for
-      `{snippetSlug}` with deterministic fallback behavior.
-- [ ] Update default filename template constant to use
-      `{timestampHumane}`.
-- [ ] Update README workspace-config examples and add explicit token docs.
-- [ ] Add targeted tests for parsing, rendering, timezone handling, and
+      `{timestampHumane}` and `{snippetSlug}` only.
+- [x] Remove renderer support for `{timestampUtc}` and `{timestampISO8601}`, and
+      update any fallback filename literals that still reference `timestampUtc`.
+- [x] Add session-snippet slugification for `{snippetSlug}` with deterministic
+      fallback chain: `snapshot.metadata.snippet` ->
+      `extractSnippet(boundarySnapshot)` -> `"conversation"`.
+- [x] Remove in-chat `::init` parsing and runtime handling paths.
+- [x] Update default filename template constant to use `{timestampHumane}`.
+- [x] Update README workspace-config examples and add explicit token docs.
+- [x] Add targeted tests for parsing, rendering, timezone handling, and
       compatibility.
-- [ ] Run full validation (`deno task ci`).
+- [x] Run full validation (`deno task ci`).

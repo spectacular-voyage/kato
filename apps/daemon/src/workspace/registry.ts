@@ -19,7 +19,21 @@ export const DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME =
   "default-kato-workspace-config.yaml";
 export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
-  "{provider}-{sessionShortId}-{timestampUtc}.md";
+  "{timestampHumane}-{snippetSlug}-{provider}.md";
+export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE = "local";
+
+const FILENAME_TEMPLATE_TOKEN_PATTERN = /\{([A-Za-z0-9]+)\}/g;
+const ALLOWED_FILENAME_TEMPLATE_TOKENS = new Set([
+  "provider",
+  "sessionId",
+  "sessionShortId",
+  "timestampHumane",
+  "snippetSlug",
+]);
+const REMOVED_FILENAME_TEMPLATE_TOKENS = new Set([
+  "timestampUtc",
+  "timestampISO8601",
+]);
 
 const WORKSPACE_REGISTRY_SCHEMA_VERSION = 1 as const;
 const WRITER_FEATURE_FLAG_KEYS = [
@@ -39,12 +53,14 @@ const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceId",
   "defaultOutputDir",
   "filenameTemplate",
+  "filenameTemplateTimezone",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
 const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
   "defaultOutputDir",
   "filenameTemplate",
+  "filenameTemplateTimezone",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
@@ -90,6 +106,7 @@ export interface WorkspaceCatalogLike {
 export interface WorkspaceConfigOverrides {
   defaultOutputDir?: string;
   filenameTemplate?: string;
+  filenameTemplateTimezone?: string;
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -101,6 +118,7 @@ export interface ResolvedWorkspaceProfile {
   configPath: string;
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
+  filenameTemplateTimezone: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
@@ -337,6 +355,80 @@ function trimOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function validateFilenameTemplateTokens(
+  template: string,
+  configPath: string,
+): void {
+  for (const match of template.matchAll(FILENAME_TEMPLATE_TOKEN_PATTERN)) {
+    const token = match[1];
+    if (!token) {
+      continue;
+    }
+    if (ALLOWED_FILENAME_TEMPLATE_TOKENS.has(token)) {
+      continue;
+    }
+    if (REMOVED_FILENAME_TEMPLATE_TOKENS.has(token)) {
+      throw new Error(
+        `filenameTemplate token '{${token}}' is no longer supported: ${configPath}`,
+      );
+    }
+    throw new Error(
+      `filenameTemplate token '{${token}}' is unsupported: ${configPath}`,
+    );
+  }
+}
+
+function isValidIanaTimezone(timeZone: string): boolean {
+  const intlWithSupportedValues = Intl as typeof Intl & {
+    supportedValuesOf?: (key: string) => string[];
+  };
+  if (typeof intlWithSupportedValues.supportedValuesOf === "function") {
+    const supported = new Set(
+      intlWithSupportedValues.supportedValuesOf("timeZone"),
+    );
+    if (!supported.has(timeZone)) {
+      return false;
+    }
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function parseFilenameTemplateTimezone(
+  value: unknown,
+  configPath: string,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = trimOptionalString(value);
+  if (!trimmed) {
+    throw new Error(
+      `filenameTemplateTimezone must be a non-empty string: ${configPath}`,
+    );
+  }
+  if (
+    trimmed === DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE ||
+    trimmed === "UTC"
+  ) {
+    return trimmed;
+  }
+  if (!isValidIanaTimezone(trimmed)) {
+    throw new Error(
+      `filenameTemplateTimezone must be \"local\", \"UTC\", or a valid IANA timezone: ${configPath}`,
+    );
+  }
+  return trimmed;
+}
+
 export function createDefaultWorkspaceWriterFeatureFlags(
   overrides: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1> = {},
 ): SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
@@ -503,14 +595,20 @@ async function loadWorkspaceConfigLikeOverrides(
   }
 
   const filenameTemplateRaw = parsed["filenameTemplate"];
-  if (
-    filenameTemplateRaw !== undefined &&
-    trimOptionalString(filenameTemplateRaw) === undefined
-  ) {
+  const filenameTemplate = trimOptionalString(filenameTemplateRaw);
+  if (filenameTemplateRaw !== undefined && filenameTemplate === undefined) {
     throw new Error(
       `filenameTemplate must be a non-empty string: ${configPath}`,
     );
   }
+  if (filenameTemplate) {
+    validateFilenameTemplateTokens(filenameTemplate, configPath);
+  }
+
+  const filenameTemplateTimezone = parseFilenameTemplateTimezone(
+    parsed["filenameTemplateTimezone"],
+    configPath,
+  );
 
   const markdownFrontmatter = parseWorkspaceMarkdownFrontmatter(
     parsed["markdownFrontmatter"],
@@ -525,9 +623,8 @@ async function loadWorkspaceConfigLikeOverrides(
     ...(trimOptionalString(defaultOutputDirRaw)
       ? { defaultOutputDir: trimOptionalString(defaultOutputDirRaw) }
       : {}),
-    ...(trimOptionalString(filenameTemplateRaw)
-      ? { filenameTemplate: trimOptionalString(filenameTemplateRaw) }
-      : {}),
+    ...(filenameTemplate ? { filenameTemplate } : {}),
+    ...(filenameTemplateTimezone ? { filenameTemplateTimezone } : {}),
     ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
     writerFeatureFlags,
   };
@@ -659,6 +756,8 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       resolvedDefaultOutputDir,
       filenameTemplate: overrides.filenameTemplate ??
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
+      filenameTemplateTimezone: overrides.filenameTemplateTimezone ??
+        DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE,
       markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
       writerFeatureFlags: resolveWriterFeatureFlags(overrides),
     };
@@ -703,6 +802,7 @@ export class DefaultWorkspaceConfigFileStore {
       options.allowMissing &&
       loaded.defaultOutputDir === undefined &&
       loaded.filenameTemplate === undefined &&
+      loaded.filenameTemplateTimezone === undefined &&
       loaded.markdownFrontmatter === undefined &&
       Object.keys(loaded.writerFeatureFlags).length === 0
     ) {
@@ -779,6 +879,7 @@ export function createWorkspaceConfigScaffold(): string {
   return [
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
+    `filenameTemplateTimezone: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE}"`,
     "markdownFrontmatter:",
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",

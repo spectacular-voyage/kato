@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772422438008
+updated: 1772440851432
 created: 1771724652182
 ---
 
@@ -27,3 +27,4 @@ created: 1771724652182
   - dangerous that if a common status/control is not used in the workspace config, multiple katos could overwrite each other :(, but maybe we can work around by daemon awareness somehow
 - does it make sense to split kato-config into kato-daemon-config and kato-workspace-config? And then don't initialize ~/.kato as a workspace automatically, it's probably best to not store recordings there anyhow? 
 - make sure we're not capturing metadata for sessions that haven't been updated since the daemon started. stale files will be activated on update.
+- split writerIncludeToolCalls in to calls and results.

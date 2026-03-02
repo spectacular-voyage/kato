@@ -4,26 +4,26 @@ import { detectInChatControlCommands } from "../apps/daemon/src/mod.ts";
 Deno.test("detectInChatControlCommands parses strict control commands", () => {
   const result = detectInChatControlCommands(`
 Intro text
-::init-My.Proj notes/session.md
-::record-My.Proj
-  ::capture-My.Proj notes/capture.md
+::record-My.Proj notes/session.md
+::capture-My.Proj notes/capture.md
+  ::export-My.Proj notes/export.md
 ::stop
 `);
 
   assertEquals(result.errors.length, 0);
   assertEquals(result.commands.length, 4);
 
-  assertEquals(result.commands[0]?.verb, "init");
-  assertEquals(result.commands[0]?.name, "init");
+  assertEquals(result.commands[0]?.verb, "record");
+  assertEquals(result.commands[0]?.name, "record");
   assertEquals(result.commands[0]?.alias, "My.Proj");
   assertEquals(result.commands[0]?.argument, "notes/session.md");
-  assertEquals(result.commands[1]?.verb, "record");
-  assertEquals(result.commands[1]?.name, "record");
+  assertEquals(result.commands[1]?.verb, "capture");
+  assertEquals(result.commands[1]?.name, "capture");
   assertEquals(result.commands[1]?.alias, "My.Proj");
-  assertEquals(result.commands[2]?.verb, "capture");
-  assertEquals(result.commands[2]?.name, "capture");
+  assertEquals(result.commands[2]?.verb, "export");
+  assertEquals(result.commands[2]?.name, "export");
   assertEquals(result.commands[2]?.alias, "My.Proj");
-  assertEquals(result.commands[2]?.argument, "notes/capture.md");
+  assertEquals(result.commands[2]?.argument, "notes/export.md");
   assertEquals(result.commands[3]?.verb, "stop");
   assertEquals(result.commands[3]?.name, "stop");
   assertEquals(result.commands[3]?.alias, undefined);
@@ -47,7 +47,7 @@ Use \`::record notes/not-a-command.md\` in docs.
   assertEquals(result.commands[0]?.argument, "notes/real-command.md");
 });
 
-Deno.test("detectInChatControlCommands rejects bare ::init", () => {
+Deno.test("detectInChatControlCommands rejects ::init as unsupported", () => {
   const result = detectInChatControlCommands(`
 ::init
 `);
@@ -56,7 +56,20 @@ Deno.test("detectInChatControlCommands rejects bare ::init", () => {
   assertEquals(result.errors.length, 1);
   assertStringIncludes(
     result.errors[0]?.reason ?? "",
-    "requires a workspace alias suffix",
+    "Unsupported control command",
+  );
+});
+
+Deno.test("detectInChatControlCommands rejects ::init-<alias> as unsupported", () => {
+  const result = detectInChatControlCommands(`
+::init-myproj notes/session.md
+`);
+
+  assertEquals(result.commands.length, 0);
+  assertEquals(result.errors.length, 1);
+  assertStringIncludes(
+    result.errors[0]?.reason ?? "",
+    "Unsupported control command",
   );
 });
 

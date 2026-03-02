@@ -66,7 +66,8 @@ Supported commands:
   - If `<dir>` is omitted, uses the current working directory.
 - `workspace register [<dir>] --alias <alias>`
   - Register a workspace config under an explicit workspace alias.
-  - If `<dir>` is provided, Kato uses exactly `<dir>/kato-workspace-config.yaml`.
+  - If `<dir>` is provided, Kato uses exactly
+    `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, Kato searches nearest ancestors from the current
     working directory.
 - `workspace list`
@@ -103,7 +104,6 @@ workspace's alias, root, or config path are restart-bound.
 
 Kato also watches user messages for in-chat control commands:
 
-- `::init-<alias> [<path>]`
 - `::record-<alias> [<path>]`
 - `::capture-<alias> [<path>]`
 - `::export-<alias> [<path>]`
@@ -112,8 +112,8 @@ Kato also watches user messages for in-chat control commands:
 
 Rules:
 
-- `::init`, `::record`, `::capture`, and `::export` require a workspace alias
-  suffix.
+- `::record`, `::capture`, and `::export` require a workspace alias suffix.
+- `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
 - `::stop` stops all active workspace outputs for the session.
 - `::stop-<alias>` stops only the active output bound to that alias.
 - Explicit path arguments may be absolute or relative, and may point to a file
@@ -139,9 +139,9 @@ Default paths:
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
 `~/.kato/kato-config.yaml` is the daemon/global config plus plain CLI
-non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml`
-is only the template used by `kato workspace init`. Workspace-local runtime
-output settings belong in `<workspace>/kato-workspace-config.yaml`.
+non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml` is
+only the template used by `kato workspace init`. Workspace-local runtime output
+settings belong in `<workspace>/kato-workspace-config.yaml`.
 
 ## Runtime Config
 
@@ -217,8 +217,8 @@ Notes:
   - `writerIncludeThinking`
   - `writerIncludeToolCalls`
   - `writerItalicizeUserMessages`
-- Workspace runtime formatting lives only in workspace config (`markdownFrontmatter`
-  and `workspaceFeatureFlags`).
+- Workspace runtime formatting lives only in workspace config
+  (`markdownFrontmatter` and `workspaceFeatureFlags`).
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:
@@ -245,7 +245,8 @@ except only the workspace-local file may include `workspaceId`:
 
 ```yaml
 defaultOutputDir: "."
-filenameTemplate: "{provider}-{sessionShortId}-{timestampUtc}.md"
+filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"
+filenameTemplateTimezone: "local"
 markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
@@ -258,6 +259,21 @@ workspaceFeatureFlags:
   writerIncludeToolCalls: true
   writerItalicizeUserMessages: false
 ```
+
+Supported `filenameTemplate` tokens:
+
+- `{provider}`: provider slug (for example `codex`)
+- `{sessionId}`: full session id slug
+- `{sessionShortId}`: first 8 chars of session id (slugged)
+- `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `filenameTemplateTimezone`
+- `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
+  then command-time snippet extraction, then `conversation`)
+
+`filenameTemplateTimezone` accepts:
+
+- `"local"`: daemon process local timezone
+- `"UTC"`
+- any valid IANA timezone id (for example `"America/Los_Angeles"`)
 
 ## Current MVP Status
 

@@ -23,7 +23,7 @@ function makeUserEvent(content: string): ConversationEvent {
 
 Deno.test("mapConversationEventsToTwin emits canonical kinds and command events", () => {
   const events: ConversationEvent[] = [
-    makeUserEvent("hello\n::init-My.Proj /tmp/a.md\n::stop"),
+    makeUserEvent("hello\n::record-My.Proj /tmp/a.md\n::stop"),
     {
       eventId: "a1",
       provider: "codex",
@@ -55,7 +55,7 @@ Deno.test("mapConversationEventsToTwin emits canonical kinds and command events"
     event.kind === "user.kato-command"
   );
   assertEquals(commandEvents.length, 2);
-  assertEquals(commandEvents[0]?.payload["command"], "init");
+  assertEquals(commandEvents[0]?.payload["command"], "record");
   assertEquals(commandEvents[0]?.payload["workspaceAlias"], "My.Proj");
   assertEquals(commandEvents[0]?.payload["rawArgument"], "/tmp/a.md");
   assertEquals(commandEvents[1]?.payload["command"], "stop");
@@ -159,7 +159,7 @@ Deno.test("mapTwinEventsToConversation reconstructs scoped kato commands with ra
           emitIndex: 1,
         },
         payload: {
-          command: "init",
+          command: "record",
           workspaceAlias: "My.Proj",
           rawArgument: "/tmp/a.md",
         },
@@ -192,7 +192,7 @@ Deno.test("mapTwinEventsToConversation reconstructs scoped kato commands with ra
   if (roundTrip[0]?.kind !== "message.user") {
     throw new Error("expected first event to be message.user");
   }
-  assertEquals(roundTrip[0].content, "::init-My.Proj /tmp/a.md");
+  assertEquals(roundTrip[0].content, "::record-My.Proj /tmp/a.md");
   assertEquals(roundTrip[1]?.kind, "message.user");
   if (roundTrip[1]?.kind !== "message.user") {
     throw new Error("expected second event to be message.user");
