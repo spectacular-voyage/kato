@@ -114,6 +114,9 @@ Rules:
 
 - `::record`, `::capture`, and `::export` require a workspace alias suffix.
 - `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
+- `::capture-<alias>` writes a snapshot and activates recording for that
+  workspace output (current binding when pathless, resolved target when path is
+  provided).
 - `::stop` stops all active workspace outputs for the session.
 - `::stop-<alias>` stops only the active output bound to that alias.
 - Explicit path arguments may be absolute or relative, and may point to a file
@@ -265,6 +268,12 @@ Supported `filenameTemplate` tokens:
 - `{provider}`: provider slug (for example `codex`)
 - `{sessionId}`: full session id slug
 - `{sessionShortId}`: first 8 chars of session id (slugged)
+- `{YYYY}`: 4-digit year in `filenameTemplateTimezone`
+- `{YY}`: 2-digit year in `filenameTemplateTimezone`
+- `{MM}`: 2-digit month in `filenameTemplateTimezone`
+- `{DD}`: 2-digit day in `filenameTemplateTimezone`
+- `{HH}`: 24-hour clock hour in `filenameTemplateTimezone`
+- `{mm}`: 2-digit minute in `filenameTemplateTimezone`
 - `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `filenameTemplateTimezone`
 - `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
   then command-time snippet extraction, then `conversation`)

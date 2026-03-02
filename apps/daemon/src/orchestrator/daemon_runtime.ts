@@ -168,6 +168,7 @@ interface SessionEventProcessingState {
     string,
     {
       workspaceId: string;
+      workspaceAlias?: string;
       currentResolvedPath: string;
       desiredState: boolean;
       recordingCycleId?: string;
@@ -365,10 +366,18 @@ function readDatePart(
   return parts.find((part) => part.type === type)?.value ?? "";
 }
 
-function formatTimestampHumane(
+function readTimestampTemplateParts(
   now: Date,
   timeZone: string,
-): string {
+): {
+  YYYY: string;
+  YY: string;
+  MM: string;
+  DD: string;
+  HH: string;
+  mm: string;
+  timestampHumane: string;
+} {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
@@ -384,7 +393,15 @@ function formatTimestampHumane(
   const day = readDatePart(parts, "day");
   const hour = readDatePart(parts, "hour");
   const minute = readDatePart(parts, "minute");
-  return `${year}-${month}-${day}_${hour}${minute}`;
+  return {
+    YYYY: year,
+    YY: year.slice(-2),
+    MM: month,
+    DD: day,
+    HH: hour,
+    mm: minute,
+    timestampHumane: `${year}-${month}-${day}_${hour}${minute}`,
+  };
 }
 
 function readWorkspaceOutputs(
@@ -523,14 +540,21 @@ function renderWorkspaceFilename(
     boundarySnapshot?: ConversationEvent[];
   } = {},
 ): string {
+  const timestampTokens = readTimestampTemplateParts(
+    now,
+    profile.filenameTemplateTimezone,
+  );
   const tokens: Record<string, string> = {
     provider: sanitizeFilenamePart(provider),
     sessionId: sanitizeFilenamePart(sessionId),
     sessionShortId: sanitizeFilenamePart(sessionId.slice(0, 8)),
-    timestampHumane: formatTimestampHumane(
-      now,
-      profile.filenameTemplateTimezone,
-    ),
+    YYYY: timestampTokens.YYYY,
+    YY: timestampTokens.YY,
+    MM: timestampTokens.MM,
+    DD: timestampTokens.DD,
+    HH: timestampTokens.HH,
+    mm: timestampTokens.mm,
+    timestampHumane: timestampTokens.timestampHumane,
     snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)),
   };
   let rendered = profile.filenameTemplate;
@@ -1240,6 +1264,11 @@ async function applyPersistentControlCommandsForEvent(
           }
         } else if (command.verb === "capture") {
           let targetPath: string;
+          let resolvedBinding:
+            | NonNullable<SessionMetadataV1["workspaceOutputs"]>[number][
+              "currentDestination"
+            ]
+            | undefined;
           let stateChanged = false;
           if (!command.argument && output) {
             targetPath = output.currentResolvedPath;
@@ -1253,6 +1282,7 @@ async function applyPersistentControlCommandsForEvent(
               rawArgument: command.argument,
               now: now(),
             });
+            resolvedBinding = resolved.binding;
             targetPath = await validateDestinationPathForCommand(
               recordingPipeline,
               provider,
@@ -1260,7 +1290,7 @@ async function applyPersistentControlCommandsForEvent(
               resolved.resolvedPath,
               "capture",
             );
-            if (!command.argument && !output) {
+            if (!output) {
               output = createWorkspaceOutputState({
                 profile,
                 binding: resolved.binding,
@@ -1271,8 +1301,26 @@ async function applyPersistentControlCommandsForEvent(
               });
               readWorkspaceOutputs(metadata).push(output);
               stateChanged = true;
+            } else if (output.currentResolvedPath !== targetPath) {
+              closeWorkspaceOutputCycle(
+                output,
+                writeCursor,
+                now().toISOString(),
+              );
+              applyWorkspaceProfileSnapshot(output, profile);
+              if (resolvedBinding) {
+                output.currentDestination = resolvedBinding;
+              }
+              output.currentResolvedPath = targetPath;
+              output.writeCursor = writeCursor;
+              output.desiredState = "off";
+              stateChanged = true;
             }
           }
+          if (!output) {
+            throw new Error("Workspace output state was not created");
+          }
+          applyWorkspaceProfileSnapshot(output, profile);
           loggedTargetPath = targetPath;
           const captureEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
@@ -1285,7 +1333,7 @@ async function applyPersistentControlCommandsForEvent(
             captureEvents,
             providerSessionId,
           );
-          const currentCycleId = output?.activeRecordingCycleId;
+          const currentCycleId = output.activeRecordingCycleId;
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId: providerSessionId,
@@ -1296,6 +1344,15 @@ async function applyPersistentControlCommandsForEvent(
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
+          let activeCycleId = output.activeRecordingCycleId;
+          if (!activeCycleId || output.desiredState !== "on") {
+            activeCycleId = openWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            stateChanged = true;
+          }
           const continuationEvents = buildCommandSeedEvents(
             event,
             command.line + 1,
@@ -1313,12 +1370,14 @@ async function applyPersistentControlCommandsForEvent(
               targetPath,
               events: continuationEvents,
               title: captureTitle,
-              ...(currentCycleId ? { recordingId: currentCycleId } : {}),
-              recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
+              ...(activeCycleId ? { recordingId: activeCycleId } : {}),
+              recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
           }
+          output.writeCursor = writeCursor;
+          stateChanged = true;
           metadataChanged = metadataChanged || stateChanged;
         } else if (command.verb === "export") {
           const resolved = await resolveWorkspaceCommandDestination({
@@ -1580,6 +1639,7 @@ async function applyControlCommandsForEvent(
           loggedTargetPath = resolvedDestination;
           const state = existingState ?? {
             workspaceId: workspace.workspaceId,
+            workspaceAlias: profile.alias,
             currentResolvedPath: resolvedDestination,
             desiredState: false,
             outputOverrides,
@@ -1606,6 +1666,7 @@ async function applyControlCommandsForEvent(
               provider,
               sessionId,
               recordingKey: workspace.workspaceId,
+              workspaceAlias: profile.alias,
               targetPath: resolvedDestination,
               seedEvents,
               title: recordingTitle,
@@ -1616,6 +1677,7 @@ async function applyControlCommandsForEvent(
             state.currentResolvedPath = resolvedDestination;
             state.desiredState = true;
             state.recordingCycleId = recordingCycleId;
+            state.workspaceAlias = profile.alias;
             state.outputOverrides = outputOverrides;
             sessionEventState.workspaceOutputs.set(
               workspace.workspaceId,
@@ -1646,15 +1708,39 @@ async function applyControlCommandsForEvent(
             throw new Error("Unable to resolve workspace capture destination");
           }
           loggedTargetPath = resolvedDestination;
+          const state = existingState ?? {
+            workspaceId: workspace.workspaceId,
+            workspaceAlias: profile.alias,
+            currentResolvedPath: resolvedDestination,
+            desiredState: false,
+            outputOverrides,
+          };
+          const destinationChanged = state.currentResolvedPath !==
+            resolvedDestination;
+          if (destinationChanged && state.desiredState) {
+            recordingPipeline.stopRecording(
+              provider,
+              sessionId,
+              workspace.workspaceId,
+            );
+          }
+          if (destinationChanged) {
+            state.currentResolvedPath = resolvedDestination;
+            state.desiredState = false;
+            delete state.recordingCycleId;
+          }
+          state.workspaceAlias = profile.alias;
+          state.outputOverrides = outputOverrides;
+          const activeCycleId = state.desiredState && state.recordingCycleId
+            ? state.recordingCycleId
+            : undefined;
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId,
             targetPath: resolvedDestination,
             events: boundarySnapshot,
             title: recordingTitle,
-            recordingCycleIds: existingState?.recordingCycleId
-              ? [existingState.recordingCycleId]
-              : undefined,
+            recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
@@ -1663,36 +1749,37 @@ async function applyControlCommandsForEvent(
             command.line + 1,
             boundary.lastLineInSegment,
           );
-          if (continuationEvents.length > 0) {
-            if (!recordingPipeline.appendToDestination) {
-              throw new Error(
-                "Recording pipeline does not support appendToDestination",
-              );
+          if (state.desiredState && state.recordingCycleId) {
+            if (continuationEvents.length > 0) {
+              await recordingPipeline.appendToActiveRecording({
+                provider,
+                sessionId,
+                recordingKey: workspace.workspaceId,
+                events: continuationEvents,
+                title: recordingTitle,
+                recordingCycleIds: [state.recordingCycleId],
+                workspaceIds: [workspace.workspaceId],
+                outputOverrides,
+              });
             }
-            await recordingPipeline.appendToDestination({
+          } else {
+            const recordingCycleId = crypto.randomUUID();
+            await recordingPipeline.activateRecording({
               provider,
               sessionId,
+              recordingKey: workspace.workspaceId,
+              workspaceAlias: profile.alias,
               targetPath: resolvedDestination,
-              events: continuationEvents,
+              seedEvents: continuationEvents,
               title: recordingTitle,
-              ...(existingState?.recordingCycleId
-                ? { recordingId: existingState.recordingCycleId }
-                : {}),
-              recordingCycleIds: existingState?.recordingCycleId
-                ? [existingState.recordingCycleId]
-                : undefined,
+              recordingId: recordingCycleId,
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
+            state.desiredState = true;
+            state.recordingCycleId = recordingCycleId;
           }
-          if (!command.argument && !existingState) {
-            sessionEventState.workspaceOutputs.set(workspace.workspaceId, {
-              workspaceId: workspace.workspaceId,
-              currentResolvedPath: resolvedDestination,
-              desiredState: false,
-              outputOverrides,
-            });
-          }
+          sessionEventState.workspaceOutputs.set(workspace.workspaceId, state);
         } else if (command.verb === "export") {
           const resolved = await resolveWorkspaceCommandDestination({
             profile,
@@ -1858,6 +1945,7 @@ async function processInChatRecordingUpdates(
       destinationRecordingIds: new Map<string, string>(),
       workspaceOutputs: new Map<string, {
         workspaceId: string;
+        workspaceAlias?: string;
         currentResolvedPath: string;
         desiredState: boolean;
         recordingCycleId?: string;
@@ -2166,6 +2254,7 @@ function toActiveRecordingsFromMetadata(
         recordingId: output.activeRecordingCycleId ?? output.workspaceId,
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
+        workspaceAlias: output.workspaceAliasSnapshot,
         outputPath: output.currentResolvedPath,
         startedAt: readWorkspaceOutputStartedAt(output) || metadata.updatedAt,
         lastWriteAt: metadata.updatedAt,
@@ -2295,6 +2384,9 @@ function toSessionStatuses(
           : {}),
         ...(recording.recordingId
           ? { recordingShortId: recording.recordingId.slice(0, 8) }
+          : {}),
+        ...(recording.workspaceAlias
+          ? { workspaceAlias: recording.workspaceAlias }
           : {}),
         outputPath: recording.outputPath,
         startedAt: recording.startedAt,

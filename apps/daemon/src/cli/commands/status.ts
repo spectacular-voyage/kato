@@ -264,10 +264,14 @@ function renderSessionRow(
 
     const started = formatRelativeTime(recording.startedAt, now);
     const lastWrite = formatRelativeTime(recording.lastWriteAt, now);
+    const workspaceLabel = recording.workspaceAlias?.trim();
+    const recordingDetail = workspaceLabel && workspaceLabel.length > 0
+      ? `started ${started} · last write ${lastWrite} · workspace: ${workspaceLabel}`
+      : `started ${started} · last write ${lastWrite}`;
     lines.push(
       formatPrefixedLine(
         "     ",
-        `started ${started} · last write ${lastWrite}`,
+        recordingDetail,
         width,
       ),
     );

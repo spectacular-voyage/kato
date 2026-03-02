@@ -43,6 +43,7 @@ export interface ActiveRecording {
   recordingId: string;
   provider: string;
   sessionId: string;
+  workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
   lastWriteAt: string;
@@ -52,6 +53,7 @@ export interface ActivateRecordingInput {
   provider: string;
   sessionId: string;
   recordingKey?: string;
+  workspaceAlias?: string;
   targetPath: string;
   seedEvents?: ConversationEvent[];
   title?: string;
@@ -212,6 +214,9 @@ function cloneRecording(recording: ActiveRecording): ActiveRecording {
     recordingId: recording.recordingId,
     provider: recording.provider,
     sessionId: recording.sessionId,
+    ...(recording.workspaceAlias
+      ? { workspaceAlias: recording.workspaceAlias }
+      : {}),
     outputPath: recording.outputPath,
     startedAt: recording.startedAt,
     lastWriteAt: recording.lastWriteAt,
@@ -284,6 +289,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       recordingId,
       provider: input.provider,
       sessionId: input.sessionId,
+      ...(input.workspaceAlias ? { workspaceAlias: input.workspaceAlias } : {}),
       outputPath,
       startedAt: nowIso,
       lastWriteAt: nowIso,

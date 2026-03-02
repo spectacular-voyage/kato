@@ -27,6 +27,12 @@ const ALLOWED_FILENAME_TEMPLATE_TOKENS = new Set([
   "provider",
   "sessionId",
   "sessionShortId",
+  "YYYY",
+  "YY",
+  "MM",
+  "DD",
+  "HH",
+  "mm",
   "timestampHumane",
   "snippetSlug",
 ]);

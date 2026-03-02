@@ -35,6 +35,7 @@ export interface MemoryStatus {
 export interface DaemonRecordingStatus {
   recordingId?: string;
   recordingShortId?: string;
+  workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
   lastWriteAt: string;

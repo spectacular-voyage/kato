@@ -34,6 +34,7 @@ export interface RecordingProjectionInput {
   sessionId: string;
   recordingId?: string;
   recordingShortId?: string;
+  workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
   lastWriteAt: string;
@@ -116,6 +117,9 @@ export function projectSessionStatus(opts: {
       ...(recording.recordingId ? { recordingId: recording.recordingId } : {}),
       ...(recording.recordingShortId
         ? { recordingShortId: recording.recordingShortId }
+        : {}),
+      ...(recording.workspaceAlias
+        ? { workspaceAlias: recording.workspaceAlias }
         : {}),
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,

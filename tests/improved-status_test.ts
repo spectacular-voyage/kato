@@ -140,6 +140,7 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
     stale: false,
     recordings: [{
+      workspaceAlias: "k",
       outputPath: "/home/user/notes.md",
       startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
       lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
@@ -157,6 +158,7 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
   assertStringIncludes(out, "last event 1m ago");
   assertStringIncludes(out, "/home/user/notes.md");
   assertStringIncludes(out, "recording");
+  assertStringIncludes(out, "workspace: k");
 });
 
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {

@@ -1162,7 +1162,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> with an explicit path preserves the active workspace binding",
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> with an explicit path switches the active workspace binding",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(
       "daemon-runtime-capture-switch-",
@@ -1222,9 +1222,14 @@ Deno.test(
       assertEquals(captureTargets, [newDestination]);
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
-      assertEquals(output.currentResolvedPath, oldDestination);
+      assertEquals(output.currentResolvedPath, newDestination);
       assertEquals(output.desiredState, "on");
-      assertEquals(output.activeRecordingCycleId, "cycle-old");
+      assertExists(output.activeRecordingCycleId);
+      assert(output.activeRecordingCycleId !== "cycle-old");
+      assertEquals(output.recordingCycles.length, 2);
+      assertEquals(output.recordingCycles[0]?.recordingCycleId, "cycle-old");
+      assertEquals(output.recordingCycles[0]?.stoppedCursor, 1);
+      assertEquals(output.recordingCycles[1]?.startedCursor, 1);
     } finally {
       await removeDirIfPresent(stateDir);
       await removeDirIfPresent(scenarioDir);
@@ -1576,11 +1581,11 @@ Deno.test(
 
       const session = findScenarioMetadata(result.metadataList);
       const output = findWorkspaceOutputState(session);
-      assertEquals(output.currentResolvedPath, resolvedRecordPath);
+      assertEquals(output.currentResolvedPath, resolvedCapturePath);
       assertEquals(output.currentDestination.kind, "workspace-relative");
       assertEquals(
         output.currentDestination.relativePathFromWorkspaceRoot,
-        "notes/relative-record.md",
+        "notes/relative-capture.md",
       );
     } finally {
       await removeDirIfPresent(stateDir);
@@ -4416,7 +4421,7 @@ Deno.test("runDaemonRuntimeLoop in-chat dedupe keeps distinct same-content event
   }
 });
 
-Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> without activating recording", async () => {
+Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates recording", async () => {
   let currentStatus: DaemonStatusSnapshot = {
     schemaVersion: 1,
     generatedAt: "2026-02-22T10:00:00.000Z",
@@ -4570,10 +4575,12 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> without activa
   const activatedTargets: string[] = [];
   const appendedMessageIds: string[] = [];
   let activeRecording = false;
+  let activeRecordingKey: string | undefined;
   const recordingPipeline: RecordingPipelineLike = {
     activateRecording(input) {
       callOrder.push("record");
       activeRecording = true;
+      activeRecordingKey = input.recordingKey;
       activatedTargets.push(input.targetPath);
       const nowIso = "2026-02-22T10:00:01.000Z";
       return Promise.resolve({
@@ -4603,7 +4610,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> without activa
       throw new Error("not used");
     },
     appendToActiveRecording(input) {
-      if (!activeRecording) {
+      if (!activeRecording || input.recordingKey !== activeRecordingKey) {
         return Promise.resolve({
           appended: false,
           deduped: false,
@@ -4618,8 +4625,12 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> without activa
         deduped: false,
       });
     },
-    stopRecording() {
+    stopRecording(_provider, _sessionId, recordingKey) {
+      if (recordingKey && recordingKey !== activeRecordingKey) {
+        return false;
+      }
       activeRecording = false;
+      activeRecordingKey = undefined;
       return true;
     },
     getActiveRecording() {
@@ -4650,10 +4661,10 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> without activa
     workspaceProfileResolver: workspace.workspaceProfileResolver,
   });
 
-  assertEquals(callOrder, ["capture"]);
+  assertEquals(callOrder, ["capture", "record"]);
   assertEquals(captureTargets, ["/tmp/captured.md"]);
-  assertEquals(activatedTargets, []);
-  assertEquals(appendedMessageIds, []);
+  assertEquals(activatedTargets, ["/tmp/captured.md"]);
+  assertEquals(appendedMessageIds, ["m2", "m3"]);
 });
 
 Deno.test(
@@ -4836,9 +4847,9 @@ Deno.test(
       workspaceProfileResolver: workspace.workspaceProfileResolver,
     });
 
-    assertEquals(callOrder, ["capture"]);
+    assertEquals(callOrder, ["capture", "record"]);
     assertEquals(captureTargets, ["/tmp/first-seen.md"]);
-    assertEquals(activatedTargets, []);
+    assertEquals(activatedTargets, ["/tmp/first-seen.md"]);
   },
 );
 
@@ -6530,12 +6541,12 @@ Deno.test(
       nowIso: string,
       firstUserContent: string,
       providerSessionId: string,
+      filenameTemplate = "{timestampHumane}-{snippetSlug}-{provider}.md",
     ): Promise<string> {
       const stateDir = await makeTestTempDir("daemon-runtime-filename-dst-");
       try {
         const workspace = await createTestWorkspaceFixture(stateDir);
-        workspace.profile.filenameTemplate =
-          "{timestampHumane}-{snippetSlug}-{provider}.md";
+        workspace.profile.filenameTemplate = filenameTemplate;
         workspace.profile.filenameTemplateTimezone = "America/Los_Angeles";
 
         let currentStatus: DaemonStatusSnapshot = {
@@ -6722,6 +6733,17 @@ Deno.test(
       "session-filename-summer",
     );
     assertEquals(summerFilename, "2026-07-15_1300-leading-snippet-codex.md");
+
+    const componentFilename = await runFilenameScenario(
+      "2026-07-15T20:00:00.000Z",
+      "\n\n  Leading Snippet",
+      "session-filename-components",
+      "conv.{YYYY}.{YY}-{MM}-{DD}_{HH}{mm}-{snippetSlug}-{provider}.md",
+    );
+    assertEquals(
+      componentFilename,
+      "conv.2026.26-07-15_1300-leading-snippet-codex.md",
+    );
   },
 );
 
