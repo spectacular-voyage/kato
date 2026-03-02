@@ -1,5 +1,4 @@
 export type InChatControlCommandName =
-  | "init"
   | "record"
   | "capture"
   | "export"
@@ -112,7 +111,6 @@ function parseCommandLine(
     verb: InChatControlCommandName;
     allowArgument: boolean;
   }> = [
-    { prefix: "init-", verb: "init", allowArgument: true },
     { prefix: "record-", verb: "record", allowArgument: true },
     { prefix: "capture-", verb: "capture", allowArgument: true },
     { prefix: "export-", verb: "export", allowArgument: true },
@@ -150,10 +148,18 @@ function parseCommandLine(
     };
   }
 
-  if (
-    name === "init" || name === "record" || name === "capture" ||
-    name === "export"
-  ) {
+  if (name === "init" || name?.startsWith("init-")) {
+    return {
+      error: {
+        ...commandBase,
+        reason: `Unsupported control command '::${
+          rawName ?? ""
+        }'. Use ::record-<alias>, ::capture-<alias>, or ::export-<alias>.`,
+      },
+    };
+  }
+
+  if (name === "record" || name === "capture" || name === "export") {
     return {
       error: {
         ...commandBase,

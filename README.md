@@ -61,12 +61,15 @@ Supported commands:
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
   - Show daemon status.
+  - Text mode includes a `Recent Errors` section sourced from runtime
+    operational/security-audit WARN and ERROR log entries.
 - `workspace init [<dir>]`
   - Create `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
 - `workspace register [<dir>] --alias <alias>`
   - Register a workspace config under an explicit workspace alias.
-  - If `<dir>` is provided, Kato uses exactly `<dir>/kato-workspace-config.yaml`.
+  - If `<dir>` is provided, Kato uses exactly
+    `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, Kato searches nearest ancestors from the current
     working directory.
 - `workspace list`
@@ -103,7 +106,6 @@ workspace's alias, root, or config path are restart-bound.
 
 Kato also watches user messages for in-chat control commands:
 
-- `::init-<alias> [<path>]`
 - `::record-<alias> [<path>]`
 - `::capture-<alias> [<path>]`
 - `::export-<alias> [<path>]`
@@ -112,8 +114,14 @@ Kato also watches user messages for in-chat control commands:
 
 Rules:
 
-- `::init`, `::record`, `::capture`, and `::export` require a workspace alias
-  suffix.
+- `::record`, `::capture`, and `::export` require a workspace alias suffix.
+- `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
+- `::capture-<alias>` is create-only: it fails when the resolved target path
+  already exists.
+- Pathless `::capture-<alias>` always resolves a fresh default filename for the
+  workspace (it does not reuse the current recording binding).
+- Successful `::capture-<alias>` writes a full snapshot to the resolved target
+  and then activates recording for subsequent events at that destination.
 - `::stop` stops all active workspace outputs for the session.
 - `::stop-<alias>` stops only the active output bound to that alias.
 - Explicit path arguments may be absolute or relative, and may point to a file
@@ -139,9 +147,9 @@ Default paths:
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
 `~/.kato/kato-config.yaml` is the daemon/global config plus plain CLI
-non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml`
-is only the template used by `kato workspace init`. Workspace-local runtime
-output settings belong in `<workspace>/kato-workspace-config.yaml`.
+non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml` is
+only the template used by `kato workspace init`. Workspace-local runtime output
+settings belong in `<workspace>/kato-workspace-config.yaml`.
 
 ## Runtime Config
 
@@ -152,8 +160,7 @@ schemaVersion: 1
 runtimeDir: ~/.kato/runtime
 statusPath: ~/.kato/runtime/status.json
 controlPath: ~/.kato/runtime/control.json
-allowedWriteRoots:
-  - .
+allowedWriteRoots: []
 providerSessionRoots:
   claude:
     - ~/.claude/projects
@@ -172,11 +179,18 @@ exportMarkdownFrontmatter:
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
   includeConversationEventKinds: false
 exportFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: false
   writerIncludeToolCalls: false
+  writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
 logging:
   operationalLevel: info
@@ -210,15 +224,22 @@ Notes:
   - `defaultParticipantUsername` preferred username when username inclusion is
     enabled. Fallback order is: `defaultParticipantUsername` ->
     `USER`/`USERNAME` env vars -> home-directory basename.
+  - `includeSessionIds` to include `kato-sessionIds` (default `true`)
+  - `includeWorkspaceIds` to include `kato-workspaceIds` (default `true`)
+  - `includeRecordingIds` to include `kato-recordingIds` (default `true`)
   - `includeConversationEventKinds` to add `conversationEventKinds` from all
     observed `ConversationEvent.kind` values (default `false`)
 - `exportFeatureFlags` currently controls:
   - `writerIncludeCommentary`
   - `writerIncludeThinking`
   - `writerIncludeToolCalls`
+  - `writerIncludeToolResults`
+  - `writerIncludeDecisionPrompt`
+  - `writerIncludeDecisionOptions`
+  - `writerIncludeDecisionSelection`
   - `writerItalicizeUserMessages`
-- Workspace runtime formatting lives only in workspace config (`markdownFrontmatter`
-  and `workspaceFeatureFlags`).
+- Workspace runtime formatting lives only in workspace config
+  (`markdownFrontmatter` and `workspaceFeatureFlags`).
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:
@@ -245,19 +266,48 @@ except only the workspace-local file may include `workspaceId`:
 
 ```yaml
 defaultOutputDir: "."
-filenameTemplate: "{provider}-{sessionShortId}-{timestampUtc}.md"
+filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"
+filenameTemplateTimezone: "local"
 markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
   defaultParticipantUsername: ""
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
   includeConversationEventKinds: false
 workspaceFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: true
   writerIncludeToolCalls: true
+  writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
 ```
+
+Supported `filenameTemplate` tokens:
+
+- `{provider}`: provider slug (for example `codex`)
+- `{sessionId}`: full session id slug
+- `{sessionShortId}`: first 8 chars of session id (slugged)
+- `{YYYY}`: 4-digit year in `filenameTemplateTimezone`
+- `{YY}`: 2-digit year in `filenameTemplateTimezone`
+- `{MM}`: 2-digit month in `filenameTemplateTimezone`
+- `{DD}`: 2-digit day in `filenameTemplateTimezone`
+- `{HH}`: 24-hour clock hour in `filenameTemplateTimezone`
+- `{mm}`: 2-digit minute in `filenameTemplateTimezone`
+- `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `filenameTemplateTimezone`
+- `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
+  then command-time snippet extraction, then `conversation`)
+
+`filenameTemplateTimezone` accepts:
+
+- `"local"`: daemon process local timezone
+- `"UTC"`
+- any valid IANA timezone id (for example `"America/Los_Angeles"`)
 
 ## Current MVP Status
 

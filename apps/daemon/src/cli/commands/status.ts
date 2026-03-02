@@ -1,7 +1,14 @@
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
+import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import type { RegisteredWorkspace } from "../../workspace/mod.ts";
+import {
+  loadWorkspaceConfigOverrides,
+  readWorkspaceConfigWorkspaceId,
+} from "../../workspace/mod.ts";
+import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -9,9 +16,47 @@ const DEFAULT_TERMINAL_WIDTH = 100;
 const MIN_TERMINAL_WIDTH = 48;
 const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
+const MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH = 80;
+const RECENT_ERRORS_LIMIT = 8;
+const RECENT_ERRORS_TAIL_BYTES = 256 * 1024;
+const OPERATIONAL_LOG_FILENAME = "operational.jsonl";
+const SECURITY_AUDIT_LOG_FILENAME = "security-audit.jsonl";
 const KEY_CTRL_C = 3;
 const KEY_LOWER_Q = 113;
 const KEY_UPPER_Q = 81;
+const ANSI_ESCAPE = String.fromCharCode(0x1b);
+const ANSI_OSC_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
+  "g",
+);
+const ANSI_CSI_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
+  "g",
+);
+
+export interface WorkspaceStatusRow {
+  workspaceId: string;
+  alias: string;
+  workspaceRoot: string;
+  configPath: string;
+  valid: boolean;
+  invalidReason?: string;
+}
+
+export interface WorkspaceStatusSummary {
+  activeCount: number;
+  invalidCount: number;
+  rows: WorkspaceStatusRow[];
+  unavailableReason?: string;
+}
+
+export interface StatusRecentError {
+  timestamp: string;
+  level: "warn" | "error";
+  channel: "operational" | "security-audit";
+  event: string;
+  message: string;
+}
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -54,6 +99,22 @@ function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
+  if (!alias) return undefined;
+  const withoutAnsi = alias
+    .replace(ANSI_OSC_PATTERN, "")
+    .replace(ANSI_CSI_PATTERN, "");
+  let withoutControl = "";
+  for (const char of withoutAnsi) {
+    const code = char.charCodeAt(0);
+    const isControl = code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    withoutControl += isControl ? " " : char;
+  }
+  const normalized = sanitizeInlineText(withoutControl);
+  if (normalized.length === 0) return undefined;
+  return normalized.slice(0, MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH);
+}
+
 function truncate(text: string, width: number): string {
   if (width <= 0) return "";
   if (text.length <= width) return text;
@@ -94,6 +155,227 @@ function resolveTerminalWidth(): number {
   } catch {
     return DEFAULT_TERMINAL_WIDTH;
   }
+}
+
+function formatWorkspaceValidationError(error: unknown): string {
+  if (error instanceof Deno.errors.NotFound) {
+    return "config file not found";
+  }
+  if (error instanceof Deno.errors.PermissionDenied) {
+    return "permission denied while reading config";
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return sanitizeInlineText(error.message);
+  }
+  return sanitizeInlineText(String(error));
+}
+
+function toWorkspaceStatusRow(
+  entry: RegisteredWorkspace,
+  opts: { valid: boolean; invalidReason?: string },
+): WorkspaceStatusRow {
+  return {
+    workspaceId: entry.workspaceId,
+    alias: entry.alias,
+    workspaceRoot: entry.workspaceRoot,
+    configPath: entry.configPath,
+    valid: opts.valid,
+    ...(opts.invalidReason ? { invalidReason: opts.invalidReason } : {}),
+  };
+}
+
+async function validateWorkspaceEntry(
+  entry: RegisteredWorkspace,
+): Promise<WorkspaceStatusRow> {
+  try {
+    await loadWorkspaceConfigOverrides(entry.configPath);
+    const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
+      entry.configPath,
+      { allowMissing: true },
+    );
+    if (
+      configuredWorkspaceId &&
+      configuredWorkspaceId !== entry.workspaceId
+    ) {
+      return toWorkspaceStatusRow(entry, {
+        valid: false,
+        invalidReason:
+          `workspaceId mismatch (registry=${entry.workspaceId}, config=${configuredWorkspaceId})`,
+      });
+    }
+    return toWorkspaceStatusRow(entry, { valid: true });
+  } catch (error) {
+    return toWorkspaceStatusRow(entry, {
+      valid: false,
+      invalidReason: formatWorkspaceValidationError(error),
+    });
+  }
+}
+
+async function loadWorkspaceStatusSummary(
+  ctx: DaemonCliCommandContext,
+): Promise<WorkspaceStatusSummary> {
+  let entries: RegisteredWorkspace[];
+  try {
+    entries = await resolveWorkspaceRegistryStore(ctx).load();
+  } catch (error) {
+    return {
+      activeCount: 0,
+      invalidCount: 0,
+      rows: [],
+      unavailableReason: formatWorkspaceValidationError(error),
+    };
+  }
+
+  const rows = await Promise.all(
+    entries.map((entry) => validateWorkspaceEntry(entry)),
+  );
+  rows.sort((a, b) =>
+    a.alias.localeCompare(b.alias) ||
+    a.workspaceId.localeCompare(b.workspaceId)
+  );
+
+  const activeCount = rows.filter((row) => row.valid).length;
+  return {
+    activeCount,
+    invalidCount: rows.length - activeCount,
+    rows,
+  };
+}
+
+async function readTailText(
+  filePath: string,
+  maxBytes: number,
+): Promise<string | undefined> {
+  let file: Deno.FsFile;
+  try {
+    file = await Deno.open(filePath, { read: true });
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotFound ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+
+  try {
+    const stat = await file.stat();
+    if (stat.size <= 0) {
+      return "";
+    }
+    const start = Math.max(0, stat.size - maxBytes);
+    await file.seek(start, Deno.SeekMode.Start);
+
+    const bytes = new Uint8Array(Number(stat.size - start));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = await file.read(bytes.subarray(offset));
+      if (read === null) {
+        break;
+      }
+      offset += read;
+    }
+    let text = new TextDecoder().decode(bytes.subarray(0, offset));
+    if (start > 0) {
+      const firstBreak = text.indexOf("\n");
+      text = firstBreak === -1 ? "" : text.slice(firstBreak + 1);
+    }
+    return text;
+  } finally {
+    file.close();
+  }
+}
+
+function parseStatusRecentError(
+  value: unknown,
+): StatusRecentError | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const level = record["level"];
+  if (level !== "warn" && level !== "error") {
+    return undefined;
+  }
+  const channel = record["channel"];
+  if (channel !== "operational" && channel !== "security-audit") {
+    return undefined;
+  }
+  const timestamp = record["timestamp"];
+  if (
+    typeof timestamp !== "string" ||
+    timestamp.length === 0 ||
+    Number.isNaN(Date.parse(timestamp))
+  ) {
+    return undefined;
+  }
+  const event = record["event"];
+  const message = record["message"];
+  return {
+    timestamp,
+    level,
+    channel,
+    event: typeof event === "string" && event.length > 0 ? event : "unknown",
+    message: typeof message === "string" && message.trim().length > 0
+      ? sanitizeInlineText(message)
+      : "no message",
+  };
+}
+
+async function loadRecentErrorsFromLog(
+  filePath: string,
+): Promise<StatusRecentError[]> {
+  const tail = await readTailText(filePath, RECENT_ERRORS_TAIL_BYTES);
+  if (!tail) {
+    return [];
+  }
+  const errors: StatusRecentError[] = [];
+  const lines = tail.split(/\r\n?|\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]?.trim();
+    if (!line) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      const errorRecord = parseStatusRecentError(parsed);
+      if (!errorRecord) {
+        continue;
+      }
+      errors.push(errorRecord);
+    } catch {
+      continue;
+    }
+  }
+  return errors;
+}
+
+async function loadRecentStatusErrors(
+  ctx: DaemonCliCommandContext,
+): Promise<StatusRecentError[]> {
+  const operationalPath = join(
+    ctx.runtime.runtimeDir,
+    "logs",
+    OPERATIONAL_LOG_FILENAME,
+  );
+  const securityAuditPath = join(
+    ctx.runtime.runtimeDir,
+    "logs",
+    SECURITY_AUDIT_LOG_FILENAME,
+  );
+  const [operational, securityAudit] = await Promise.all([
+    loadRecentErrorsFromLog(operationalPath),
+    loadRecentErrorsFromLog(securityAuditPath),
+  ]);
+  return [...operational, ...securityAudit]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, RECENT_ERRORS_LIMIT);
 }
 
 export function isLiveExitKey(keyByte: number): boolean {
@@ -229,11 +511,9 @@ function renderSessionRow(
     : "(no user message)";
   const identity = s.sessionShortId ?? s.sessionId;
   const updatedAt = formatLocalTimestamp(s.updatedAt);
-  const modified = formatRelativeTime(s.updatedAt, now);
   const headerParts = [
     `${marker} ${s.provider}: ${label} (${identity})`,
     `updated ${updatedAt}`,
-    `modified ${modified}`,
   ];
   if (s.lastEventAt) {
     headerParts.push(`last event ${formatRelativeTime(s.lastEventAt, now)}`);
@@ -252,27 +532,105 @@ function renderSessionRow(
     const recordingIdentity = recording.recordingShortId ??
       recording.recordingId ??
       identity;
-    const recordingPrefix =
-      `  ${recMarker} recording (${recordingIdentity}) -> `;
+    const started = formatLocalTimestamp(recording.startedAt);
+    const lastWrite = formatRelativeTime(recording.lastWriteAt, now);
+    const restarted = recording.restartedAt
+      ? ` · re-started ${formatRelativeTime(recording.restartedAt, now)}`
+      : "";
+    const workspaceLabel = sanitizeWorkspaceAlias(recording.workspaceAlias);
+    const recordingHeader = workspaceLabel && workspaceLabel.length > 0
+      ? `started: ${started}${restarted} · last write ${lastWrite} · workspace: ${workspaceLabel}`
+      : `started: ${started}${restarted} · last write ${lastWrite}`;
     lines.push(
       formatPrefixedLine(
-        recordingPrefix,
-        sanitizeInlineText(recording.outputPath),
+        "  ",
+        `${recMarker} recording (${recordingIdentity}) ${recordingHeader}`,
         width,
       ),
     );
-
-    const started = formatRelativeTime(recording.startedAt, now);
-    const lastWrite = formatRelativeTime(recording.lastWriteAt, now);
     lines.push(
       formatPrefixedLine(
-        "     ",
-        `started ${started} · last write ${lastWrite}`,
+        "   -> ",
+        sanitizeInlineText(recording.outputPath),
         width,
       ),
     );
   }
 
+  return lines;
+}
+
+function renderWorkspaceSummaryLine(
+  workspaceStatus: WorkspaceStatusSummary | undefined,
+): string | undefined {
+  if (!workspaceStatus) {
+    return undefined;
+  }
+  if (workspaceStatus.unavailableReason) {
+    return `workspaces: unavailable (${workspaceStatus.unavailableReason})`;
+  }
+  return `workspaces: ${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid`;
+}
+
+function renderWorkspaceSection(
+  workspaceStatus: WorkspaceStatusSummary,
+  width: number,
+): string[] {
+  if (workspaceStatus.unavailableReason) {
+    return [
+      "Workspaces",
+      "",
+      formatPrefixedLine(
+        "  ",
+        `unavailable: ${workspaceStatus.unavailableReason}`,
+        width,
+      ),
+    ];
+  }
+
+  const lines: string[] = [
+    `Workspaces (${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid)`,
+    "",
+  ];
+
+  if (workspaceStatus.rows.length === 0) {
+    lines.push("  (none registered)");
+    return lines;
+  }
+
+  for (const row of workspaceStatus.rows) {
+    const marker = row.valid ? "●" : "○";
+    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const statusLabel = row.valid
+      ? "valid"
+      : `invalid: ${row.invalidReason ?? "unknown error"}`;
+    lines.push(
+      formatPrefixedLine(
+        `  ${marker} `,
+        `${alias} -> ${row.workspaceId} (${statusLabel})`,
+        width,
+      ),
+    );
+    lines.push(
+      formatPrefixedLine(
+        "     ",
+        `root: ${sanitizeInlineText(row.workspaceRoot)}`,
+        width,
+      ),
+    );
+    lines.push(
+      formatPrefixedLine(
+        "     ",
+        `config: ${sanitizeInlineText(row.configPath)}`,
+        width,
+      ),
+    );
+    lines.push("");
+  }
+
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
   return lines;
 }
 
@@ -287,12 +645,16 @@ export function renderStatusText(
     now: Date;
     stale: boolean;
     terminalWidth?: number;
+    workspaceStatus?: WorkspaceStatusSummary;
+    showWorkspaceDetails?: boolean;
+    recentErrors?: StatusRecentError[];
   },
 ): string {
   const { showAll, now, stale } = opts;
   const sessionCap = opts.sessionCap ?? Infinity;
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
+  const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
 
   const daemonText = snapshot.daemonRunning
     ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
@@ -335,6 +697,33 @@ export function renderStatusText(
       recordingSummary,
     }),
   );
+  if (workspaceSummary) {
+    lines.push(truncate(workspaceSummary, width));
+  }
+  lines.push(divider);
+  if (opts.showWorkspaceDetails && opts.workspaceStatus) {
+    lines.push(...renderWorkspaceSection(opts.workspaceStatus, width));
+    lines.push(divider);
+  }
+
+  lines.push(`Recent Errors (${opts.recentErrors?.length ?? 0})`);
+  lines.push("");
+  if (!opts.recentErrors || opts.recentErrors.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const recentError of opts.recentErrors) {
+      const channel = recentError.channel === "security-audit"
+        ? "audit"
+        : "operational";
+      const detail =
+        `[${formatLocalTimestamp(recentError.timestamp)}] ${
+          recentError.level.toUpperCase()
+        } ${channel} ${sanitizeInlineText(recentError.event)} · ${
+          sanitizeInlineText(recentError.message)
+        }`;
+      lines.push(formatPrefixedLine("  ", detail, width));
+    }
+  }
   lines.push(divider);
 
   lines.push(`Sessions${sessionSummary}`);
@@ -412,6 +801,10 @@ async function runLiveMode(
         await ctx.statusStore.load(),
         now,
       );
+      const [workspaceStatus, recentErrors] = await Promise.all([
+        loadWorkspaceStatusSummary(ctx),
+        loadRecentStatusErrors(ctx),
+      ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
 
@@ -421,6 +814,8 @@ async function runLiveMode(
         now,
         stale,
         terminalWidth,
+        workspaceStatus,
+        recentErrors,
       });
 
       // Clear screen and draw
@@ -462,7 +857,11 @@ export async function runStatusCommand(
     await ctx.statusStore.load(),
     now,
   );
+  const workspaceStatus = asJson
+    ? undefined
+    : await loadWorkspaceStatusSummary(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
+  const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
 
   await ctx.operationalLogger.info(
     "daemon.status",
@@ -474,6 +873,10 @@ export async function runStatusCommand(
       daemonPid: snapshot.daemonPid,
       stale,
       statusPath: ctx.runtime.statusPath,
+      workspaceActiveCount: workspaceStatus?.activeCount,
+      workspaceInvalidCount: workspaceStatus?.invalidCount,
+      workspaceStatusUnavailable:
+        workspaceStatus?.unavailableReason !== undefined,
     },
   );
   await ctx.auditLogger.command("status", { asJson, showAll });
@@ -486,6 +889,14 @@ export async function runStatusCommand(
 
   const terminalWidth = resolveTerminalWidth();
   ctx.runtime.writeStdout(
-    renderStatusText(snapshot, { showAll, now, stale, terminalWidth }) + "\n",
+    renderStatusText(snapshot, {
+      showAll,
+      now,
+      stale,
+      terminalWidth,
+      workspaceStatus,
+      showWorkspaceDetails: true,
+      recentErrors,
+    }) + "\n",
   );
 }

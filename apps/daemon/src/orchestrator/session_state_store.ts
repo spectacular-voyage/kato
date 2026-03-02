@@ -131,6 +131,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.commandCursor !== undefined
       ? { commandCursor: metadata.commandCursor }
       : {}),
+    ...(metadata.commandCursorAnchor
+      ? { commandCursorAnchor: { ...metadata.commandCursorAnchor } }
+      : {}),
     ...(metadata.workspaceOutputs
       ? {
         workspaceOutputs: metadata.workspaceOutputs.map((entry) => ({

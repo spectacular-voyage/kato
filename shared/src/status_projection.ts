@@ -34,8 +34,10 @@ export interface RecordingProjectionInput {
   sessionId: string;
   recordingId?: string;
   recordingShortId?: string;
+  workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
+  restartedAt?: string;
   lastWriteAt: string;
 }
 
@@ -117,8 +119,14 @@ export function projectSessionStatus(opts: {
       ...(recording.recordingShortId
         ? { recordingShortId: recording.recordingShortId }
         : {}),
+      ...(recording.workspaceAlias
+        ? { workspaceAlias: recording.workspaceAlias }
+        : {}),
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
+      ...(recording.restartedAt
+        ? { restartedAt: recording.restartedAt }
+        : {}),
       lastWriteAt: recording.lastWriteAt,
     }));
   }
@@ -133,7 +141,9 @@ export function projectSessionStatus(opts: {
  */
 function recencyKey(s: DaemonSessionStatus): number {
   const parsed = Date.parse(s.updatedAt);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  if (Number.isNaN(parsed)) return 0;
+  // Floor to minute granularity to prevent active sessions from flapping
+  return Math.floor(parsed / 60_000) * 60_000;
 }
 
 function hasActiveRecording(s: DaemonSessionStatus): boolean {

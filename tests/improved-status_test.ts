@@ -9,6 +9,8 @@ import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import {
   isLiveExitKey,
   renderStatusText,
+  type StatusRecentError,
+  type WorkspaceStatusSummary,
 } from "../apps/daemon/src/cli/commands/status.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
@@ -140,6 +142,7 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
     lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
     stale: false,
     recordings: [{
+      workspaceAlias: "k",
       outputPath: "/home/user/notes.md",
       startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
       lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
@@ -157,6 +160,93 @@ Deno.test("renderStatusText: active session shown with bullet marker", () => {
   assertStringIncludes(out, "last event 1m ago");
   assertStringIncludes(out, "/home/user/notes.md");
   assertStringIncludes(out, "recording");
+  assertStringIncludes(out, "workspace: k");
+});
+
+Deno.test("renderStatusText: recording detail line is shown before destination path", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "layout-ordered",
+    snippet: "layout",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: false,
+    recordings: [{
+      workspaceAlias: "k",
+      outputPath: "/home/user/notes.md",
+      startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+      lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    }],
+  }];
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    terminalWidth: 160,
+  });
+  const lines = out.split("\n");
+  const detailIndex = lines.findIndex((line) =>
+    line.includes("recording (layout-ordered)") && line.includes("started")
+  );
+  const pathIndex = lines.findIndex((line) =>
+    line.includes("-> /home/user/notes.md")
+  );
+  assert(detailIndex >= 0);
+  assert(pathIndex >= 0);
+  assert(detailIndex < pathIndex);
+});
+
+Deno.test("renderStatusText: recording workspace alias strips ANSI and controls", () => {
+  const sessions: DaemonSessionStatus[] = [{
+    provider: "claude",
+    sessionId: "ansi-alias",
+    snippet: "status",
+    updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    stale: false,
+    recordings: [{
+      workspaceAlias: "  \u001b[31mMy\u001b[0m\tProj\n\u0007  ",
+      outputPath: "/home/user/notes.md",
+      startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+      lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    }],
+  }];
+  const out = renderStatusText(makeSnapshot(sessions), {
+    showAll: false,
+    now: NOW,
+    stale: false,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "workspace: My Proj");
+  assertEquals(out.includes("\u001b["), false);
+});
+
+Deno.test("renderStatusText: recent errors section renders warn/error records", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "warn",
+    channel: "operational",
+    event: "provider.ingestion.read_denied",
+    message: "permission denied",
+  }, {
+    timestamp: "2026-02-24T09:59:00.000Z",
+    level: "error",
+    channel: "security-audit",
+    event: "recording.command.failed",
+    message: "capture destination already exists",
+  }];
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "Recent Errors (2)");
+  assertStringIncludes(out, "WARN operational provider.ingestion.read_denied");
+  assertStringIncludes(out, "ERROR audit recording.command.failed");
+  assertStringIncludes(out, "permission denied");
+  assertStringIncludes(out, "capture destination already exists");
 });
 
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {
@@ -302,6 +392,67 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     out.split("\n").some((line) =>
       line.includes("daemon: running") && line.includes("memory:")
     ),
+  );
+});
+
+Deno.test("renderStatusText: workspace summary line renders for live mode", () => {
+  const workspaceStatus: WorkspaceStatusSummary = {
+    activeCount: 1,
+    invalidCount: 1,
+    rows: [],
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    workspaceStatus,
+  });
+  assertStringIncludes(out, "workspaces: 1 active, 1 invalid");
+  assertEquals(out.includes("Workspaces ("), false);
+});
+
+Deno.test("renderStatusText: workspace detail section renders in non-live mode", () => {
+  const workspaceStatus: WorkspaceStatusSummary = {
+    activeCount: 1,
+    invalidCount: 1,
+    rows: [
+      {
+        workspaceId: "ws-valid",
+        alias: "My.Proj",
+        workspaceRoot: "/workspaces/My.Proj",
+        configPath: "/workspaces/My.Proj/kato-workspace-config.yaml",
+        valid: true,
+      },
+      {
+        workspaceId: "ws-invalid",
+        alias: "Broken.Proj",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "Unsupported workspace config key 'featureFlags'",
+      },
+    ],
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    workspaceStatus,
+    showWorkspaceDetails: true,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "workspaces: 1 active, 1 invalid");
+  assertStringIncludes(out, "Workspaces (1 active, 1 invalid)");
+  assertStringIncludes(out, "● My.Proj -> ws-valid (valid)");
+  assertStringIncludes(out, "○ Broken.Proj -> ws-invalid (invalid:");
+  assertStringIncludes(
+    out,
+    "Unsupported workspace config key 'featureFlags'",
+  );
+  assertStringIncludes(out, "root: /workspaces/My.Proj");
+  assertStringIncludes(
+    out,
+    "config: /workspaces/Broken.Proj/kato-workspace-config.yaml",
   );
 });
 

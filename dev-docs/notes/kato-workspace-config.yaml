@@ -1,0 +1,22 @@
+workspaceId: cd940f00-5558-40dc-bead-46f904ab937b
+defaultOutputDir: "."
+filenameTemplate: "conv.{YYYY}.{timestampHumane}-{snippetSlug}-{provider}.md"
+filenameTemplateTimezone: "local"
+markdownFrontmatter:
+  includeFrontmatterInMarkdownRecordings: true
+  includeUpdatedInFrontmatter: true
+  addParticipantUsernameToFrontmatter: true
+  defaultParticipantUsername: "djradon"
+  includeSessionIds: true
+  includeWorkspaceIds: true
+  includeRecordingIds: true
+  includeConversationEventKinds: true
+workspaceFeatureFlags:
+  writerIncludeCommentary: true
+  writerIncludeThinking: true
+  writerIncludeToolCalls: true
+  writerIncludeToolResults: false
+  writerIncludeDecisionPrompt: true
+  writerIncludeDecisionOptions: true
+  writerIncludeDecisionSelection: true
+  writerItalicizeUserMessages: false

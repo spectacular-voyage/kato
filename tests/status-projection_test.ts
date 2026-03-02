@@ -144,6 +144,7 @@ Deno.test("projectSessionStatus attaches recordings when provided", () => {
     recordings: [{
       provider: "codex",
       sessionId: "xyz",
+      workspaceAlias: "k",
       outputPath: "/out/notes.md",
       startedAt: updatedAt,
       lastWriteAt: updatedAt,
@@ -160,6 +161,7 @@ Deno.test("projectSessionStatus attaches recordings when provided", () => {
     result.recordings?.map((recording) => recording.outputPath),
     ["/out/notes.md", "/out/other.md"],
   );
+  assertEquals(result.recordings?.[0]?.workspaceAlias, "k");
 });
 
 Deno.test("projectSessionStatus marks session stale when lastEventAt absent", () => {

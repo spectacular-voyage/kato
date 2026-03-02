@@ -565,6 +565,26 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
 });
 
 Deno.test(
+  "runDaemonCli init defaults allowedWriteRoots to an empty list",
+  async () => {
+    const runtimeDir = await makeTestTempDir("daemon-cli-init-empty-roots-");
+    try {
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["init"], {
+        runtime: harness.runtime,
+      });
+      assertEquals(code, 0);
+      const runtimeConfig = await Deno.readTextFile(
+        join(runtimeDir, "kato-config.yaml"),
+      );
+      assertStringIncludes(runtimeConfig, "allowedWriteRoots: []");
+    } finally {
+      await removePathIfPresent(runtimeDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonCli workspace commands manage registry without loading runtime config",
   async () => {
     const tempDir = await makeTestTempDir("daemon-cli-workspace-");
@@ -599,6 +619,18 @@ Deno.test(
       assertStringIncludes(
         await Deno.readTextFile(configPath),
         'defaultOutputDir: "."',
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "writerIncludeToolResults: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "writerIncludeDecisionPrompt: true",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeSessionIds: true",
       );
 
       const registerHarness = makeRuntimeHarness(runtimeDir);
@@ -770,6 +802,132 @@ Deno.test(
         await Deno.readTextFile(registryPath),
         `"workspaceRoot": "${workspaceDir}"`,
       );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonCli status reports workspace validity with mappings",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-status-workspaces-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const validWorkspaceDir = join(tempDir, "Valid.Proj");
+      const invalidWorkspaceDir = join(tempDir, "Invalid.Proj");
+      const validConfigPath = join(
+        validWorkspaceDir,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      const invalidConfigPath = join(
+        invalidWorkspaceDir,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      const validWorkspaceId = crypto.randomUUID();
+      const invalidWorkspaceId = crypto.randomUUID();
+      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      await Deno.mkdir(katoDir, { recursive: true });
+      await Deno.mkdir(validWorkspaceDir, { recursive: true });
+      await Deno.mkdir(invalidWorkspaceDir, { recursive: true });
+
+      await Deno.writeTextFile(
+        validConfigPath,
+        [
+          `workspaceId: ${validWorkspaceId}`,
+          'defaultOutputDir: "."',
+        ].join("\n") + "\n",
+      );
+      await Deno.writeTextFile(
+        invalidConfigPath,
+        [
+          `workspaceId: ${invalidWorkspaceId}`,
+          "featureFlags:",
+          "  writerIncludeCommentary: true",
+        ].join("\n") + "\n",
+      );
+
+      await Deno.writeTextFile(
+        registryPath,
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            updatedAt: "2026-03-02T10:00:00.000Z",
+            workspaces: [
+              {
+                workspaceId: validWorkspaceId,
+                alias: "Valid.Proj",
+                workspaceRoot: validWorkspaceDir,
+                configPath: validConfigPath,
+                registeredAt: "2026-03-02T10:00:00.000Z",
+              },
+              {
+                workspaceId: invalidWorkspaceId,
+                alias: "Invalid.Proj",
+                workspaceRoot: invalidWorkspaceDir,
+                configPath: invalidConfigPath,
+                registeredAt: "2026-03-02T10:00:00.000Z",
+              },
+            ],
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+
+      const defaultRuntimeConfig: RuntimeConfig = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const statusStore = makeInMemoryStatusStore({
+        schemaVersion: 1,
+        generatedAt: "2026-03-02T10:00:00.000Z",
+        heartbeatAt: "2026-03-02T10:00:00.000Z",
+        daemonRunning: true,
+        daemonPid: 4242,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      });
+      const controlStore = makeInMemoryControlStore();
+      const harness = makeRuntimeHarness(runtimeDir);
+
+      const code = await runDaemonCli(["status"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+
+      assertEquals(code, 0);
+      const output = harness.stdout.join("");
+      assertStringIncludes(output, "workspaces: 1 active, 1 invalid");
+      assertStringIncludes(output, "Workspaces (1 active, 1 invalid)");
+      assertStringIncludes(
+        output,
+        `● Valid.Proj -> ${validWorkspaceId} (valid)`,
+      );
+      assertStringIncludes(
+        output,
+        `○ Invalid.Proj -> ${invalidWorkspaceId} (invalid:`,
+      );
+      assertStringIncludes(
+        output,
+        "invalid: Unsupported workspace config k",
+      );
+      assertStringIncludes(output, "root: ");
+      assertStringIncludes(output, "config: ");
     } finally {
       await removePathIfPresent(tempDir);
     }
@@ -1062,68 +1220,76 @@ Deno.test(
 Deno.test(
   "runDaemonCli start auto-initializes runtime config when missing",
   async () => {
-    const runtimeDir = ".test-tmp/test-runtime";
-    const harness = makeRuntimeHarness(runtimeDir);
-    const statusStore = makeInMemoryStatusStore();
-    const controlStore = makeInMemoryControlStore();
-    const daemonLauncher = makeDaemonLauncher(
-      31337,
-      makeStartupAckCallback(statusStore, 31337),
-    );
-    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-    const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+    const runtimeDir = await makeTestTempDir("daemon-cli-start-auto-init-");
+    try {
+      const harness = makeRuntimeHarness(runtimeDir);
+      const statusStore = makeInMemoryStatusStore();
+      const controlStore = makeInMemoryControlStore();
+      const daemonLauncher = makeDaemonLauncher(
+        31337,
+        makeStartupAckCallback(statusStore, 31337),
+      );
+      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+      const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
 
-    const code = await runDaemonCli(["start"], {
-      runtime: harness.runtime,
-      defaultRuntimeConfig,
-      configStore,
-      statusStore,
-      controlStore: controlStore.store,
-      daemonLauncher: daemonLauncher.launcher,
-      autoInitOnStart: true,
-    });
+      const code = await runDaemonCli(["start"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+        daemonLauncher: daemonLauncher.launcher,
+        autoInitOnStart: true,
+      });
 
-    assertEquals(code, 0);
-    assertStringIncludes(
-      harness.stdout.join(""),
-      `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
-    );
-    assertStringIncludes(harness.stdout.join(""), "started in background");
-    assertEquals(ensureCalls.value, 1);
+      assertEquals(code, 0);
+      assertStringIncludes(
+        harness.stdout.join(""),
+        `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
+      );
+      assertStringIncludes(harness.stdout.join(""), "started in background");
+      assertEquals(ensureCalls.value, 1);
+    } finally {
+      await removePathIfPresent(runtimeDir);
+    }
   },
 );
 
 Deno.test(
   "runDaemonCli restart auto-initializes runtime config when missing",
   async () => {
-    const runtimeDir = ".test-tmp/test-runtime";
-    const harness = makeRuntimeHarness(runtimeDir);
-    const statusStore = makeInMemoryStatusStore();
-    const controlStore = makeInMemoryControlStore();
-    const daemonLauncher = makeDaemonLauncher(
-      31337,
-      makeStartupAckCallback(statusStore, 31337),
-    );
-    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-    const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+    const runtimeDir = await makeTestTempDir("daemon-cli-restart-auto-init-");
+    try {
+      const harness = makeRuntimeHarness(runtimeDir);
+      const statusStore = makeInMemoryStatusStore();
+      const controlStore = makeInMemoryControlStore();
+      const daemonLauncher = makeDaemonLauncher(
+        31337,
+        makeStartupAckCallback(statusStore, 31337),
+      );
+      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+      const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
 
-    const code = await runDaemonCli(["restart"], {
-      runtime: harness.runtime,
-      defaultRuntimeConfig,
-      configStore,
-      statusStore,
-      controlStore: controlStore.store,
-      daemonLauncher: daemonLauncher.launcher,
-      autoInitOnStart: true,
-    });
+      const code = await runDaemonCli(["restart"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+        daemonLauncher: daemonLauncher.launcher,
+        autoInitOnStart: true,
+      });
 
-    assertEquals(code, 0);
-    assertStringIncludes(
-      harness.stdout.join(""),
-      `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
-    );
-    assertStringIncludes(harness.stdout.join(""), "started in background");
-    assertEquals(ensureCalls.value, 1);
+      assertEquals(code, 0);
+      assertStringIncludes(
+        harness.stdout.join(""),
+        `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
+      );
+      assertStringIncludes(harness.stdout.join(""), "started in background");
+      assertEquals(ensureCalls.value, 1);
+    } finally {
+      await removePathIfPresent(runtimeDir);
+    }
   },
 );
 

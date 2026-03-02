@@ -11,6 +11,10 @@ export interface ExportFeatureFlags {
   writerIncludeCommentary: boolean;
   writerIncludeThinking: boolean;
   writerIncludeToolCalls: boolean;
+  writerIncludeToolResults: boolean;
+  writerIncludeDecisionPrompt: boolean;
+  writerIncludeDecisionOptions: boolean;
+  writerIncludeDecisionSelection: boolean;
   writerItalicizeUserMessages: boolean;
 }
 
@@ -24,6 +28,9 @@ export interface MarkdownFrontmatterConfig {
   includeUpdatedInFrontmatter: boolean;
   addParticipantUsernameToFrontmatter: boolean;
   defaultParticipantUsername: string;
+  includeSessionIds: boolean;
+  includeWorkspaceIds: boolean;
+  includeRecordingIds: boolean;
   includeConversationEventKinds: boolean;
 }
 

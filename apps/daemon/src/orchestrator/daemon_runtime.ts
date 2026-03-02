@@ -11,14 +11,7 @@ import {
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-} from "@std/path";
+import { basename, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -30,7 +23,6 @@ import {
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../policy/mod.ts";
-import { renderFrontmatter } from "../writer/frontmatter.ts";
 import {
   type ActiveRecording,
   type RecordingOutputOverrides,
@@ -176,6 +168,7 @@ interface SessionEventProcessingState {
     string,
     {
       workspaceId: string;
+      workspaceAlias?: string;
       currentResolvedPath: string;
       desiredState: boolean;
       recordingCycleId?: string;
@@ -212,6 +205,7 @@ interface ProcessPersistentRecordingUpdatesOptions {
 interface ApplyControlCommandsForEventOptions {
   provider: string;
   sessionId: string;
+  snapshotSnippet?: string;
   events: ConversationEvent[];
   eventIndex: number;
   event: ConversationEvent & { kind: "message.user" };
@@ -291,7 +285,15 @@ function normalizeRawCommandTargetPath(
 function resolveConversationTitle(
   events: ConversationEvent[],
   fallback: string,
+  options: { snapshotSnippet?: string } = {},
 ): string {
+  const snapshotFirstLine = options.snapshotSnippet
+    ?.split(/\r\n?|\n/)
+    .find((line) => line.trim().length > 0)
+    ?.trim();
+  if (snapshotFirstLine && snapshotFirstLine.length > 0) {
+    return snapshotFirstLine;
+  }
   const snippet = extractSnippet(events);
   if (snippet && snippet.trim().length > 0) {
     return snippet;
@@ -302,6 +304,7 @@ function resolveConversationTitle(
 interface PersistentRecordingCommandContext {
   provider: string;
   providerSessionId: string;
+  snapshotSnippet?: string;
   events: ConversationEvent[];
   eventIndex: number;
   event: ConversationEvent & { kind: "message.user" };
@@ -322,19 +325,91 @@ interface InChatCommandBoundary {
   lastLineInSegment: number;
 }
 
-interface InitFrontmatterSettings {
-  includeFrontmatter: boolean;
-  includeUpdatedInFrontmatter: boolean;
-  includeConversationEventKinds: boolean;
-  participantUsername?: string;
-}
-
 function sanitizeFilenamePart(value: string): string {
   const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(
     /-+/g,
     "-",
   ).replace(/^-+|-+$/g, "");
   return normalized.length > 0 ? normalized : "recording";
+}
+
+function slugifySnippetForFilename(value: string): string {
+  const normalized = value.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized.length > 0 ? normalized : "conversation";
+}
+
+function firstNonEmptyLine(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.split(/\r\n?|\n/)
+    .find((line) => line.trim().length > 0)
+    ?.trim();
+}
+
+function resolveFilenameSnippet(options: {
+  snapshotSnippet?: string;
+  boundarySnapshot?: ConversationEvent[];
+}): string {
+  const fromSnapshot = firstNonEmptyLine(options.snapshotSnippet);
+  if (fromSnapshot) {
+    return fromSnapshot;
+  }
+  const fromBoundary = firstNonEmptyLine(
+    extractSnippet(options.boundarySnapshot ?? []),
+  );
+  if (fromBoundary) {
+    return fromBoundary;
+  }
+  return "conversation";
+}
+
+function readDatePart(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): string {
+  return parts.find((part) => part.type === type)?.value ?? "";
+}
+
+function readTimestampTemplateParts(
+  now: Date,
+  timeZone: string,
+): {
+  YYYY: string;
+  YY: string;
+  MM: string;
+  DD: string;
+  HH: string;
+  mm: string;
+  timestampHumane: string;
+} {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    ...(timeZone === "local" ? {} : { timeZone }),
+  });
+  const parts = formatter.formatToParts(now);
+  const year = readDatePart(parts, "year");
+  const month = readDatePart(parts, "month");
+  const day = readDatePart(parts, "day");
+  const hour = readDatePart(parts, "hour");
+  const minute = readDatePart(parts, "minute");
+  return {
+    YYYY: year,
+    YY: year.slice(-2),
+    MM: month,
+    DD: day,
+    HH: hour,
+    mm: minute,
+    timestampHumane: `${year}-${month}-${day}_${hour}${minute}`,
+  };
 }
 
 function readWorkspaceOutputs(
@@ -468,15 +543,27 @@ function renderWorkspaceFilename(
   provider: string,
   sessionId: string,
   now: Date,
+  options: {
+    snapshotSnippet?: string;
+    boundarySnapshot?: ConversationEvent[];
+  } = {},
 ): string {
+  const timestampTokens = readTimestampTemplateParts(
+    now,
+    profile.filenameTemplateTimezone,
+  );
   const tokens: Record<string, string> = {
     provider: sanitizeFilenamePart(provider),
     sessionId: sanitizeFilenamePart(sessionId),
     sessionShortId: sanitizeFilenamePart(sessionId.slice(0, 8)),
-    timestampUtc: now.toISOString().replace(/[-:]/g, "").replace(
-      /\.\d+Z$/,
-      "Z",
-    ),
+    YYYY: timestampTokens.YYYY,
+    YY: timestampTokens.YY,
+    MM: timestampTokens.MM,
+    DD: timestampTokens.DD,
+    HH: timestampTokens.HH,
+    mm: timestampTokens.mm,
+    timestampHumane: timestampTokens.timestampHumane,
+    snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)),
   };
   let rendered = profile.filenameTemplate;
   for (const [token, replacement] of Object.entries(tokens)) {
@@ -489,7 +576,7 @@ function renderWorkspaceFilename(
     .replace(/^-+|-+$/g, "");
   return normalized.length > 0
     ? normalized
-    : `${tokens.provider}-${tokens.sessionShortId}-${tokens.timestampUtc}.md`;
+    : `${tokens.timestampHumane}-${tokens.snippetSlug}-${tokens.provider}.md`;
 }
 
 async function isDirectoryTargetPath(path: string): Promise<boolean> {
@@ -536,6 +623,8 @@ async function resolveWorkspaceCommandDestination(options: {
   profile: ResolvedWorkspaceProfile;
   provider: string;
   sessionId: string;
+  snapshotSnippet?: string;
+  boundarySnapshot?: ConversationEvent[];
   rawArgument?: string;
   now: Date;
 }): Promise<{
@@ -553,6 +642,10 @@ async function resolveWorkspaceCommandDestination(options: {
         options.provider,
         options.sessionId,
         options.now,
+        {
+          snapshotSnippet: options.snapshotSnippet,
+          boundarySnapshot: options.boundarySnapshot,
+        },
       ),
     );
     return {
@@ -576,6 +669,10 @@ async function resolveWorkspaceCommandDestination(options: {
         options.provider,
         options.sessionId,
         options.now,
+        {
+          snapshotSnippet: options.snapshotSnippet,
+          boundarySnapshot: options.boundarySnapshot,
+        },
       ),
     )
     : resolvedBase;
@@ -598,8 +695,156 @@ function readCommandCursor(metadata: SessionMetadataV1): number {
   return raw;
 }
 
-function writeCommandCursor(metadata: SessionMetadataV1, cursor: number): void {
-  metadata.commandCursor = Math.max(0, Math.floor(cursor));
+function normalizeCommandCursorAnchor(
+  value: SessionMetadataV1["commandCursorAnchor"] | undefined,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const eventId = readString(value.eventId);
+  const providerEventType = readString(value.providerEventType);
+  const providerEventId = readString(value.providerEventId);
+  const timestamp = readString(value.timestamp);
+  if (!eventId && !(providerEventType && providerEventId) && !timestamp) {
+    return undefined;
+  }
+  return {
+    ...(eventId ? { eventId } : {}),
+    ...(providerEventType ? { providerEventType } : {}),
+    ...(providerEventId ? { providerEventId } : {}),
+    ...(timestamp ? { timestamp } : {}),
+  };
+}
+
+function readCommandCursorAnchor(
+  metadata: SessionMetadataV1,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  return normalizeCommandCursorAnchor(metadata.commandCursorAnchor);
+}
+
+function buildCommandCursorAnchor(
+  event: ConversationEvent | undefined,
+): SessionMetadataV1["commandCursorAnchor"] | undefined {
+  if (!event) {
+    return undefined;
+  }
+  return normalizeCommandCursorAnchor({
+    eventId: event.eventId,
+    providerEventType: event.source.providerEventType,
+    providerEventId: event.source.providerEventId,
+    timestamp: event.timestamp,
+  });
+}
+
+function commandCursorAnchorMatchesEvent(
+  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
+  event: ConversationEvent,
+): boolean {
+  if (anchor.eventId && event.eventId === anchor.eventId) {
+    return true;
+  }
+  if (
+    anchor.providerEventType &&
+    anchor.providerEventId &&
+    event.source.providerEventType === anchor.providerEventType &&
+    event.source.providerEventId === anchor.providerEventId
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function findCommandCursorAnchorIndex(
+  events: ConversationEvent[],
+  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
+): number {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event) {
+      continue;
+    }
+    if (commandCursorAnchorMatchesEvent(anchor, event)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function findFirstEventAfterTimestamp(
+  events: ConversationEvent[],
+  timestamp: string,
+): number {
+  const anchorTimeMs = readTimeMs(timestamp);
+  if (anchorTimeMs === undefined) {
+    return events.length;
+  }
+  for (let i = 0; i < events.length; i += 1) {
+    const event = events[i];
+    if (!event) {
+      continue;
+    }
+    const eventTimeMs = readTimeMs(event.timestamp);
+    if (eventTimeMs !== undefined && eventTimeMs > anchorTimeMs) {
+      return i;
+    }
+  }
+  return events.length;
+}
+
+function resolveCommandStartCursor(
+  metadata: SessionMetadataV1,
+  events: ConversationEvent[],
+): number {
+  const anchor = readCommandCursorAnchor(metadata);
+  if (anchor) {
+    const anchorIndex = findCommandCursorAnchorIndex(events, anchor);
+    if (anchorIndex >= 0) {
+      return anchorIndex + 1;
+    }
+    if (anchor.timestamp) {
+      return findFirstEventAfterTimestamp(events, anchor.timestamp);
+    }
+  }
+  const persisted = readCommandCursor(metadata);
+  if (persisted <= events.length) {
+    return persisted;
+  }
+  return events.length;
+}
+
+function commandCursorAnchorEquals(
+  left: SessionMetadataV1["commandCursorAnchor"] | undefined,
+  right: SessionMetadataV1["commandCursorAnchor"] | undefined,
+): boolean {
+  const leftNormalized = normalizeCommandCursorAnchor(left);
+  const rightNormalized = normalizeCommandCursorAnchor(right);
+  if (!leftNormalized && !rightNormalized) {
+    return true;
+  }
+  if (!leftNormalized || !rightNormalized) {
+    return false;
+  }
+  return leftNormalized.eventId === rightNormalized.eventId &&
+    leftNormalized.providerEventType === rightNormalized.providerEventType &&
+    leftNormalized.providerEventId === rightNormalized.providerEventId &&
+    leftNormalized.timestamp === rightNormalized.timestamp;
+}
+
+function writeCommandCursor(
+  metadata: SessionMetadataV1,
+  cursor: number,
+  events: ConversationEvent[],
+): void {
+  const normalizedCursor = Math.max(0, Math.floor(cursor));
+  metadata.commandCursor = normalizedCursor;
+  const anchor = normalizedCursor > 0
+    ? buildCommandCursorAnchor(events[normalizedCursor - 1])
+    : undefined;
+  if (anchor) {
+    metadata.commandCursorAnchor = anchor;
+  } else {
+    delete metadata.commandCursorAnchor;
+  }
 }
 
 function resolveCommandBoundaries(
@@ -685,7 +930,7 @@ async function validateDestinationPathForCommand(
   provider: string,
   sessionId: string,
   destination: string,
-  commandName: "init" | "record" | "capture" | "export",
+  commandName: "record" | "capture" | "export",
 ): Promise<string> {
   if (!recordingPipeline.validateDestinationPath) {
     return destination;
@@ -698,17 +943,18 @@ async function validateDestinationPathForCommand(
   });
 }
 
-function resolveFrontmatterSettings(
-  outputOverrides: RecordingOutputOverrides,
-): InitFrontmatterSettings {
-  return {
-    includeFrontmatter: outputOverrides.includeFrontmatter !== false,
-    includeUpdatedInFrontmatter: outputOverrides.includeUpdatedInFrontmatter ??
-      false,
-    includeConversationEventKinds:
-      outputOverrides.includeConversationEventKinds ?? false,
-    participantUsername: outputOverrides.participantUsername,
-  };
+async function assertCaptureDestinationDoesNotExist(
+  targetPath: string,
+): Promise<void> {
+  try {
+    await Deno.stat(targetPath);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Capture destination already exists: ${targetPath}`);
 }
 
 function normalizeFrontmatterParticipantUsername(
@@ -764,6 +1010,10 @@ function createOutputOverrides(options: {
     writerIncludeCommentary: boolean;
     writerIncludeThinking: boolean;
     writerIncludeToolCalls: boolean;
+    writerIncludeToolResults?: boolean;
+    writerIncludeDecisionPrompt?: boolean;
+    writerIncludeDecisionOptions?: boolean;
+    writerIncludeDecisionSelection?: boolean;
     writerItalicizeUserMessages: boolean;
   };
   captureIncludeSystemEvents: boolean;
@@ -773,6 +1023,9 @@ function createOutputOverrides(options: {
       options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
     includeUpdatedInFrontmatter:
       options.markdownFrontmatter.includeUpdatedInFrontmatter,
+    includeSessionIds: options.markdownFrontmatter.includeSessionIds,
+    includeWorkspaceIds: options.markdownFrontmatter.includeWorkspaceIds,
+    includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
     participantUsername: resolveConfiguredParticipantUsername(
@@ -782,6 +1035,14 @@ function createOutputOverrides(options: {
       includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
       includeThinking: options.writerFeatureFlags.writerIncludeThinking,
       includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
+      includeToolResults: options.writerFeatureFlags.writerIncludeToolResults ??
+        false,
+      includeDecisionPrompt:
+        options.writerFeatureFlags.writerIncludeDecisionPrompt ?? true,
+      includeDecisionOptions:
+        options.writerFeatureFlags.writerIncludeDecisionOptions ?? true,
+      includeDecisionSelection:
+        options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,
@@ -839,101 +1100,6 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     ),
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
   });
-}
-
-function buildFrontmatterParticipants(
-  provider: string,
-  events: ConversationEvent[],
-  participantUsername: string | undefined,
-): string[] | undefined {
-  const participants: string[] = [];
-  if (participantUsername) {
-    participants.push(`user.${participantUsername}`);
-  }
-  const assistantParticipants = new Set<string>();
-  for (const event of events) {
-    if (event.kind !== "message.assistant") {
-      continue;
-    }
-    const eventProvider = event.provider?.trim() || provider;
-    const model = event.model?.trim();
-    assistantParticipants.add(
-      model && model.length > 0
-        ? `${eventProvider}.${model}`
-        : `${eventProvider}.assistant`,
-    );
-  }
-  participants.push(
-    ...Array.from(assistantParticipants).sort((a, b) => a.localeCompare(b)),
-  );
-  return participants.length > 0 ? participants : undefined;
-}
-
-function buildFrontmatterConversationKinds(
-  events: ConversationEvent[],
-): string[] | undefined {
-  const kinds = Array.from(new Set(events.map((event) => event.kind)))
-    .sort((a, b) => a.localeCompare(b));
-  return kinds.length > 0 ? kinds : undefined;
-}
-
-function isMarkdownDestination(path: string): boolean {
-  return path.toLowerCase().endsWith(".md");
-}
-
-async function prepareInitDestination(
-  destination: string,
-  provider: string,
-  providerSessionId: string,
-  boundaryEvents: ConversationEvent[],
-  recordingCycleId: string,
-  now: () => Date,
-  frontmatterSettings: InitFrontmatterSettings,
-  workspaceId?: string,
-): Promise<void> {
-  await Deno.mkdir(dirname(destination), { recursive: true });
-  try {
-    const stat = await Deno.stat(destination);
-    if (stat.isFile) {
-      return;
-    }
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
-  }
-
-  if (!isMarkdownDestination(destination)) {
-    await Deno.writeTextFile(destination, "");
-    return;
-  }
-
-  if (!frontmatterSettings.includeFrontmatter) {
-    await Deno.writeTextFile(destination, "");
-    return;
-  }
-
-  const title = resolveConversationTitle(boundaryEvents, providerSessionId);
-  const participants = buildFrontmatterParticipants(
-    provider,
-    boundaryEvents,
-    frontmatterSettings.participantUsername,
-  );
-  const conversationEventKinds =
-    frontmatterSettings.includeConversationEventKinds
-      ? buildFrontmatterConversationKinds(boundaryEvents)
-      : undefined;
-  const frontmatter = renderFrontmatter({
-    title,
-    now: now(),
-    sessionIds: [providerSessionId],
-    ...(workspaceId ? { workspaceIds: [workspaceId] } : {}),
-    recordingCycleIds: [recordingCycleId],
-    participants,
-    conversationEventKinds,
-    includeUpdated: frontmatterSettings.includeUpdatedInFrontmatter,
-  });
-  await Deno.writeTextFile(destination, `${frontmatter}\n`);
 }
 
 function matchesCaptureBoundaryEvent(
@@ -1075,6 +1241,7 @@ async function applyPersistentControlCommandsForEvent(
   const {
     provider,
     providerSessionId,
+    snapshotSnippet,
     events,
     eventIndex,
     event,
@@ -1140,6 +1307,7 @@ async function applyPersistentControlCommandsForEvent(
     const boundarySnapshotTitle = resolveConversationTitle(
       boundarySnapshot,
       providerSessionId,
+      { snapshotSnippet },
     );
     let commandNoop = false;
     let loggedTargetPath: string | undefined;
@@ -1193,68 +1361,6 @@ async function applyPersistentControlCommandsForEvent(
             commandNoop = !stopped;
             metadataChanged = stopped;
           }
-        } else if (command.verb === "init") {
-          if (!command.argument && output) {
-            commandNoop = true;
-          } else {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId: providerSessionId,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            const resolvedDestination = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              providerSessionId,
-              resolved.resolvedPath,
-              "init",
-            );
-            loggedTargetPath = resolvedDestination;
-            const initMarkerId = output?.activeRecordingCycleId ??
-              crypto.randomUUID();
-            if (!output) {
-              output = createWorkspaceOutputState({
-                profile,
-                binding: resolved.binding,
-                resolvedPath: resolvedDestination,
-                desiredState: "off",
-                writeCursor,
-                nowIso: now().toISOString(),
-              });
-              readWorkspaceOutputs(metadata).push(output);
-            } else {
-              closeWorkspaceOutputCycle(
-                output,
-                writeCursor,
-                now().toISOString(),
-              );
-              applyWorkspaceProfileSnapshot(output, profile);
-              output.currentDestination = resolved.binding;
-              output.currentResolvedPath = resolvedDestination;
-              output.writeCursor = writeCursor;
-              output.desiredState = "off";
-            }
-            const boundaryEvents = await resolveBoundaryEventsFromTwinStart(
-              metadata,
-              boundarySnapshot,
-              event,
-              command.line,
-              sessionStateStore,
-            );
-            await prepareInitDestination(
-              resolvedDestination,
-              provider,
-              providerSessionId,
-              boundaryEvents,
-              initMarkerId,
-              now,
-              resolveFrontmatterSettings(outputOverrides),
-              workspace.workspaceId,
-            );
-            metadataChanged = true;
-          }
         } else if (command.verb === "record") {
           let retargeted = false;
           if (!output || command.argument) {
@@ -1262,6 +1368,8 @@ async function applyPersistentControlCommandsForEvent(
               profile,
               provider,
               sessionId: providerSessionId,
+              snapshotSnippet,
+              boundarySnapshot,
               rawArgument: command.argument,
               now: now(),
             });
@@ -1341,39 +1449,26 @@ async function applyPersistentControlCommandsForEvent(
             metadataChanged = true;
           }
         } else if (command.verb === "capture") {
-          let targetPath: string;
-          let stateChanged = false;
-          if (!command.argument && output) {
-            targetPath = output.currentResolvedPath;
-          } else {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId: providerSessionId,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            targetPath = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              providerSessionId,
-              resolved.resolvedPath,
-              "capture",
-            );
-            if (!command.argument && !output) {
-              output = createWorkspaceOutputState({
-                profile,
-                binding: resolved.binding,
-                resolvedPath: targetPath,
-                desiredState: "off",
-                writeCursor,
-                nowIso: now().toISOString(),
-              });
-              readWorkspaceOutputs(metadata).push(output);
-              stateChanged = true;
-            }
-          }
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
+            provider,
+            sessionId: providerSessionId,
+            snapshotSnippet,
+            boundarySnapshot,
+            rawArgument: command.argument,
+            now: now(),
+          });
+          const targetPath = await validateDestinationPathForCommand(
+            recordingPipeline,
+            provider,
+            providerSessionId,
+            resolved.resolvedPath,
+            "capture",
+          );
+          await assertCaptureDestinationDoesNotExist(targetPath);
           loggedTargetPath = targetPath;
+          const destinationChanged = !output ||
+            output.currentResolvedPath !== targetPath;
           const captureEvents = await resolveBoundaryEventsFromTwinStart(
             metadata,
             boundarySnapshot,
@@ -1384,18 +1479,59 @@ async function applyPersistentControlCommandsForEvent(
           const captureTitle = resolveConversationTitle(
             captureEvents,
             providerSessionId,
+            { snapshotSnippet },
           );
           const currentCycleId = output?.activeRecordingCycleId;
+          const captureRecordingCycleIds = !destinationChanged &&
+              output?.desiredState === "on" &&
+              currentCycleId
+            ? [currentCycleId]
+            : undefined;
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId: providerSessionId,
             targetPath,
             events: captureEvents,
             title: captureTitle,
-            recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
+            recordingCycleIds: captureRecordingCycleIds,
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
+          let stateChanged = false;
+          if (!output) {
+            output = createWorkspaceOutputState({
+              profile,
+              binding: resolved.binding,
+              resolvedPath: targetPath,
+              desiredState: "off",
+              writeCursor,
+              nowIso: now().toISOString(),
+            });
+            readWorkspaceOutputs(metadata).push(output);
+            stateChanged = true;
+          } else if (destinationChanged) {
+            closeWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            stateChanged = true;
+          }
+          if (!output) {
+            throw new Error("Workspace output state was not created");
+          }
+          applyWorkspaceProfileSnapshot(output, profile);
+          output.currentDestination = resolved.binding;
+          output.currentResolvedPath = targetPath;
+          let activeCycleId = output.activeRecordingCycleId;
+          if (!activeCycleId || output.desiredState !== "on") {
+            activeCycleId = openWorkspaceOutputCycle(
+              output,
+              writeCursor,
+              now().toISOString(),
+            );
+            stateChanged = true;
+          }
           const continuationEvents = buildCommandSeedEvents(
             event,
             command.line + 1,
@@ -1413,18 +1549,22 @@ async function applyPersistentControlCommandsForEvent(
               targetPath,
               events: continuationEvents,
               title: captureTitle,
-              ...(currentCycleId ? { recordingId: currentCycleId } : {}),
-              recordingCycleIds: currentCycleId ? [currentCycleId] : undefined,
+              ...(activeCycleId ? { recordingId: activeCycleId } : {}),
+              recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
           }
+          output.writeCursor = writeCursor;
+          stateChanged = true;
           metadataChanged = metadataChanged || stateChanged;
         } else if (command.verb === "export") {
           const resolved = await resolveWorkspaceCommandDestination({
             profile,
             provider,
             sessionId: providerSessionId,
+            snapshotSnippet,
+            boundarySnapshot,
             rawArgument: command.argument,
             now: now(),
           });
@@ -1446,6 +1586,7 @@ async function applyPersistentControlCommandsForEvent(
           const snapshotTitle = resolveConversationTitle(
             exportEvents,
             providerSessionId,
+            { snapshotSnippet },
           );
           await recordingPipeline.exportSnapshot({
             provider,
@@ -1529,6 +1670,7 @@ async function applyControlCommandsForEvent(
   const {
     provider,
     sessionId,
+    snapshotSnippet,
     events,
     eventIndex,
     event,
@@ -1591,6 +1733,7 @@ async function applyControlCommandsForEvent(
     const recordingTitle = resolveConversationTitle(
       boundarySnapshot,
       sessionId,
+      { snapshotSnippet },
     );
     let loggedTargetPath: string | undefined;
     let commandNoop = false;
@@ -1649,51 +1792,6 @@ async function applyControlCommandsForEvent(
             delete existingState.recordingCycleId;
           }
           commandNoop = !stopped;
-        } else if (command.verb === "init") {
-          if (!command.argument && existingState) {
-            commandNoop = true;
-          } else {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            const resolvedDestination = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              sessionId,
-              resolved.resolvedPath,
-              "init",
-            );
-            loggedTargetPath = resolvedDestination;
-            const recordingCycleId = existingState?.recordingCycleId ??
-              crypto.randomUUID();
-            await prepareInitDestination(
-              resolvedDestination,
-              provider,
-              sessionId,
-              boundarySnapshot,
-              recordingCycleId,
-              now,
-              resolveFrontmatterSettings(outputOverrides),
-              workspace.workspaceId,
-            );
-            if (existingState?.desiredState) {
-              recordingPipeline.stopRecording(
-                provider,
-                sessionId,
-                workspace.workspaceId,
-              );
-            }
-            sessionEventState.workspaceOutputs.set(workspace.workspaceId, {
-              workspaceId: workspace.workspaceId,
-              currentResolvedPath: resolvedDestination,
-              desiredState: false,
-              outputOverrides,
-            });
-          }
         } else if (command.verb === "record") {
           let resolvedDestination = existingState?.currentResolvedPath;
           if (!existingState || command.argument) {
@@ -1701,6 +1799,8 @@ async function applyControlCommandsForEvent(
               profile,
               provider,
               sessionId,
+              snapshotSnippet,
+              boundarySnapshot,
               rawArgument: command.argument,
               now: now(),
             });
@@ -1720,6 +1820,7 @@ async function applyControlCommandsForEvent(
           loggedTargetPath = resolvedDestination;
           const state = existingState ?? {
             workspaceId: workspace.workspaceId,
+            workspaceAlias: profile.alias,
             currentResolvedPath: resolvedDestination,
             desiredState: false,
             outputOverrides,
@@ -1746,6 +1847,7 @@ async function applyControlCommandsForEvent(
               provider,
               sessionId,
               recordingKey: workspace.workspaceId,
+              workspaceAlias: profile.alias,
               targetPath: resolvedDestination,
               seedEvents,
               title: recordingTitle,
@@ -1756,6 +1858,7 @@ async function applyControlCommandsForEvent(
             state.currentResolvedPath = resolvedDestination;
             state.desiredState = true;
             state.recordingCycleId = recordingCycleId;
+            state.workspaceAlias = profile.alias;
             state.outputOverrides = outputOverrides;
             sessionEventState.workspaceOutputs.set(
               workspace.workspaceId,
@@ -1763,36 +1866,44 @@ async function applyControlCommandsForEvent(
             );
           }
         } else if (command.verb === "capture") {
-          let resolvedDestination = existingState?.currentResolvedPath;
-          if (!existingState || command.argument) {
-            const resolved = await resolveWorkspaceCommandDestination({
-              profile,
-              provider,
-              sessionId,
-              rawArgument: command.argument,
-              now: now(),
-            });
-            resolvedDestination = await validateDestinationPathForCommand(
-              recordingPipeline,
-              provider,
-              sessionId,
-              resolved.resolvedPath,
-              "capture",
-            );
-          }
-          if (!resolvedDestination) {
-            throw new Error("Unable to resolve workspace capture destination");
-          }
+          const resolved = await resolveWorkspaceCommandDestination({
+            profile,
+            provider,
+            sessionId,
+            snapshotSnippet,
+            boundarySnapshot,
+            rawArgument: command.argument,
+            now: now(),
+          });
+          const resolvedDestination = await validateDestinationPathForCommand(
+            recordingPipeline,
+            provider,
+            sessionId,
+            resolved.resolvedPath,
+            "capture",
+          );
+          await assertCaptureDestinationDoesNotExist(resolvedDestination);
           loggedTargetPath = resolvedDestination;
+          const state = existingState ?? {
+            workspaceId: workspace.workspaceId,
+            workspaceAlias: profile.alias,
+            currentResolvedPath: resolvedDestination,
+            desiredState: false,
+            outputOverrides,
+          };
+          const destinationChanged = state.currentResolvedPath !==
+            resolvedDestination;
+          const activeCycleId = state.desiredState && state.recordingCycleId
+              && !destinationChanged
+            ? state.recordingCycleId
+            : undefined;
           await recordingPipeline.captureSnapshot({
             provider,
             sessionId,
             targetPath: resolvedDestination,
             events: boundarySnapshot,
             title: recordingTitle,
-            recordingCycleIds: existingState?.recordingCycleId
-              ? [existingState.recordingCycleId]
-              : undefined,
+            recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
             workspaceIds: [workspace.workspaceId],
             outputOverrides,
           });
@@ -1801,41 +1912,54 @@ async function applyControlCommandsForEvent(
             command.line + 1,
             boundary.lastLineInSegment,
           );
-          if (continuationEvents.length > 0) {
-            if (!recordingPipeline.appendToDestination) {
-              throw new Error(
-                "Recording pipeline does not support appendToDestination",
+          if (activeCycleId) {
+            if (continuationEvents.length > 0) {
+              await recordingPipeline.appendToActiveRecording({
+                provider,
+                sessionId,
+                recordingKey: workspace.workspaceId,
+                events: continuationEvents,
+                title: recordingTitle,
+                recordingCycleIds: [activeCycleId],
+                workspaceIds: [workspace.workspaceId],
+                outputOverrides,
+              });
+            }
+          } else {
+            if (state.desiredState) {
+              recordingPipeline.stopRecording(
+                provider,
+                sessionId,
+                workspace.workspaceId,
               );
             }
-            await recordingPipeline.appendToDestination({
+            const recordingCycleId = crypto.randomUUID();
+            await recordingPipeline.activateRecording({
               provider,
               sessionId,
+              recordingKey: workspace.workspaceId,
+              workspaceAlias: profile.alias,
               targetPath: resolvedDestination,
-              events: continuationEvents,
+              seedEvents: continuationEvents,
               title: recordingTitle,
-              ...(existingState?.recordingCycleId
-                ? { recordingId: existingState.recordingCycleId }
-                : {}),
-              recordingCycleIds: existingState?.recordingCycleId
-                ? [existingState.recordingCycleId]
-                : undefined,
+              recordingId: recordingCycleId,
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
+            state.desiredState = true;
+            state.recordingCycleId = recordingCycleId;
           }
-          if (!command.argument && !existingState) {
-            sessionEventState.workspaceOutputs.set(workspace.workspaceId, {
-              workspaceId: workspace.workspaceId,
-              currentResolvedPath: resolvedDestination,
-              desiredState: false,
-              outputOverrides,
-            });
-          }
+          state.currentResolvedPath = resolvedDestination;
+          state.workspaceAlias = profile.alias;
+          state.outputOverrides = outputOverrides;
+          sessionEventState.workspaceOutputs.set(workspace.workspaceId, state);
         } else if (command.verb === "export") {
           const resolved = await resolveWorkspaceCommandDestination({
             profile,
             provider,
             sessionId,
+            snapshotSnippet,
+            boundarySnapshot,
             rawArgument: command.argument,
             now: now(),
           });
@@ -1994,6 +2118,7 @@ async function processInChatRecordingUpdates(
       destinationRecordingIds: new Map<string, string>(),
       workspaceOutputs: new Map<string, {
         workspaceId: string;
+        workspaceAlias?: string;
         currentResolvedPath: string;
         desiredState: boolean;
         recordingCycleId?: string;
@@ -2019,7 +2144,13 @@ async function processInChatRecordingUpdates(
       }
     }
 
-    const recordingTitle = resolveConversationTitle(snapshot.events, sessionId);
+    const recordingTitle = resolveConversationTitle(
+      snapshot.events,
+      sessionId,
+      {
+        snapshotSnippet: snapshot.metadata.snippet,
+      },
+    );
     for (let i = 0; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event) continue;
@@ -2033,6 +2164,7 @@ async function processInChatRecordingUpdates(
         await applyControlCommandsForEvent({
           provider,
           sessionId,
+          snapshotSnippet: snapshot.metadata.snippet,
           events: snapshot.events,
           eventIndex: i,
           event: event as ConversationEvent & { kind: "message.user" },
@@ -2105,16 +2237,28 @@ async function processInChatRecordingUpdates(
   }
 }
 
-function readWorkspaceOutputStartedAt(
+function readWorkspaceOutputInitialStartedAt(
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
 ): string {
-  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < output.recordingCycles.length; i += 1) {
     const cycle = output.recordingCycles[i];
     if (cycle?.startedAt) {
       return cycle.startedAt;
     }
   }
   return output.createdAt ?? "";
+}
+
+function readWorkspaceOutputLatestStartedAt(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string | undefined {
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (cycle?.startedAt) {
+      return cycle.startedAt;
+    }
+  }
+  return undefined;
 }
 
 async function processPersistentRecordingUpdates(
@@ -2175,7 +2319,9 @@ async function processPersistentRecordingUpdates(
     }
 
     let metadataChanged = false;
-    const commandCursor = readCommandCursor(metadata);
+    const persistedCommandCursor = readCommandCursor(metadata);
+    const persistedCommandCursorAnchor = readCommandCursorAnchor(metadata);
+    const commandCursor = resolveCommandStartCursor(metadata, snapshot.events);
     for (let i = commandCursor; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event || event.kind !== "message.user") {
@@ -2184,6 +2330,7 @@ async function processPersistentRecordingUpdates(
       const changed = await applyPersistentControlCommandsForEvent({
         provider,
         providerSessionId,
+        snapshotSnippet: snapshot.metadata.snippet,
         events: snapshot.events,
         eventIndex: i,
         event: event as ConversationEvent & { kind: "message.user" },
@@ -2199,14 +2346,24 @@ async function processPersistentRecordingUpdates(
       });
       metadataChanged = metadataChanged || changed;
     }
-    if (commandCursor !== snapshot.events.length) {
-      writeCommandCursor(metadata, snapshot.events.length);
+    const nextCommandCursorAnchor = buildCommandCursorAnchor(
+      snapshot.events[snapshot.events.length - 1],
+    );
+    if (
+      persistedCommandCursor !== snapshot.events.length ||
+      !commandCursorAnchorEquals(
+        persistedCommandCursorAnchor,
+        nextCommandCursorAnchor,
+      )
+    ) {
+      writeCommandCursor(metadata, snapshot.events.length, snapshot.events);
       metadataChanged = true;
     }
 
     const recordingTitle = resolveConversationTitle(
       snapshot.events,
       providerSessionId,
+      { snapshotSnippet: snapshot.metadata.snippet },
     );
     const activeOutputs = activeWorkspaceOutputs(metadata);
     for (const output of activeOutputs) {
@@ -2296,12 +2453,19 @@ function toActiveRecordingsFromMetadata(
       if (output.desiredState !== "on") {
         continue;
       }
+      const startedAt = readWorkspaceOutputInitialStartedAt(output) ||
+        metadata.updatedAt;
+      const restartedAt = readWorkspaceOutputLatestStartedAt(output);
       recordings.push({
         recordingId: output.activeRecordingCycleId ?? output.workspaceId,
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
+        workspaceAlias: output.workspaceAliasSnapshot,
         outputPath: output.currentResolvedPath,
-        startedAt: readWorkspaceOutputStartedAt(output) || metadata.updatedAt,
+        startedAt,
+        ...(restartedAt && restartedAt !== startedAt
+          ? { restartedAt }
+          : {}),
         lastWriteAt: metadata.updatedAt,
       });
     }
@@ -2429,6 +2593,9 @@ function toSessionStatuses(
           : {}),
         ...(recording.recordingId
           ? { recordingShortId: recording.recordingId.slice(0, 8) }
+          : {}),
+        ...(recording.workspaceAlias
+          ? { workspaceAlias: recording.workspaceAlias }
           : {}),
         outputPath: recording.outputPath,
         startedAt: recording.startedAt,

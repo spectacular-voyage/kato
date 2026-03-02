@@ -147,9 +147,9 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "id: conversation-session-12345678");
-      assertStringIncludes(content, "sessionIds: [12345678-abcdef]");
-      assertStringIncludes(content, "recordingCycleIds: [rec-seed]");
+      assertStringIncludes(content, "id: conversation-session-recseed");
+      assertStringIncludes(content, "kato-sessionIds: [12345678-abcdef]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-seed]");
       assertStringIncludes(
         content,
         "participants: [user.djradon, codex.gpt-5.3-codex]",
@@ -163,6 +163,37 @@ Deno.test(
         "conversationEventKinds: [message.user]",
       );
       assertEquals(content.includes("\nupdated:"), false);
+    } finally {
+      await removePathIfPresent(root);
+    }
+  },
+);
+
+Deno.test(
+  "MarkdownConversationWriter default id falls back to session id when recording id is absent",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "conversation-session-fallback.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e-session-fallback",
+          "message.user",
+          "hello",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ], {
+        title: "Conversation Session",
+        includeUpdatedInFrontmatter: false,
+        frontmatterSessionIds: ["12345678-abcdef"],
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "id: conversation-session-12345678");
+      assertStringIncludes(content, "kato-sessionIds: [12345678-abcdef]");
+      assertEquals(content.includes("kato-recordingIds:"), false);
     } finally {
       await removePathIfPresent(root);
     }
@@ -192,7 +223,7 @@ Deno.test(
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(
         content,
-        "recordingCycleIds: ['123', 'true', 'null', '~', rec-safe]",
+        "kato-recordingIds: ['123', 'true', 'null', '~', rec-safe]",
       );
     } finally {
       await removePathIfPresent(root);
@@ -218,7 +249,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -245,7 +276,7 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.frontmatter]",
@@ -342,7 +373,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "tags: [provider.codex]",
           "conversationEventKinds: [message.user]",
           "---",
@@ -367,7 +398,7 @@ Deno.test(
       });
 
       const content = await Deno.readTextFile(outputPath);
-      assertStringIncludes(content, "recordingCycleIds: [rec-old, rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-old, rec-new]");
       assertStringIncludes(
         content,
         "tags: [provider.codex, topic.extra]",
@@ -402,7 +433,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "recordingCycleIds: [rec-old]",
+          "kato-recordingIds: [rec-old]",
           "messageEventKinds: [message.user]",
           "---",
           "",
@@ -477,7 +508,7 @@ Deno.test(
 
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(content, "customPadded: '  keep me padded  '");
-      assertStringIncludes(content, "recordingCycleIds: [rec-new]");
+      assertStringIncludes(content, "kato-recordingIds: [rec-new]");
       assertStringIncludes(content, "assistant follow-up");
     } finally {
       await removePathIfPresent(root);
@@ -659,6 +690,211 @@ Deno.test(
     assertStringIncludes(rendered, "Done.");
     assertEquals(rendered.includes("first-result"), false);
     assertEquals(rendered.includes("second-result"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can show tool calls without tool results",
+  () => {
+    const assistant = makeEvent(
+      "assistant-tool-no-results",
+      "message.assistant",
+      "Done.",
+      "2026-02-22T10:00:00.000Z",
+    );
+    const toolCall: ConversationEvent = {
+      eventId: "tc-no-results",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-no-results",
+      name: "search",
+      description: "search internet for weather",
+      input: { q: "weather sf" },
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-no-results",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-no-results",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-no-results",
+      result: "result-content",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-no-results",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall, toolResult], {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeToolResults: false,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(rendered, "# Assistant_2026-02-22_0200_00_Tool-search");
+    assertStringIncludes(rendered, "search internet for weather");
+    assertEquals(rendered.includes("\"q\": \"weather sf\""), false);
+    assertEquals(rendered.includes("result-content"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown uses latest assistant model for tool call headings",
+  () => {
+    const assistant: ConversationEvent = {
+      eventId: "assistant-tool-heading-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Preparing command.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-model",
+      },
+    } as unknown as ConversationEvent;
+    const toolCall: ConversationEvent = {
+      eventId: "tc-heading-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:09.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-model",
+      name: "exec_command",
+      description: "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-model",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall], {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeToolResults: false,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "# gpt-5.3-codex_2026-03-02_0222_09_Tool-exec_command",
+    );
+    assertStringIncludes(
+      rendered,
+      "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can show standalone tool results when tool calls are hidden",
+  () => {
+    const assistant = makeEvent(
+      "assistant-tool-results-only",
+      "message.assistant",
+      "Done.",
+      "2026-02-22T10:00:00.000Z",
+    );
+    const toolCall: ConversationEvent = {
+      eventId: "tc-results-only",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-results-only",
+      name: "search",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-results-only",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-results-only",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-results-only",
+      result: "result-content",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-results-only",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([assistant, toolCall, toolResult], {
+      includeFrontmatter: false,
+      includeToolCalls: false,
+      includeToolResults: true,
+      includeThinking: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "<summary>Tool result: tool-results-only</summary>",
+    );
+    assertStringIncludes(rendered, "result-content");
+    assertEquals(rendered.includes("<summary>Tool: search</summary>"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown resets duplicate suppression after standalone tool result blocks",
+  () => {
+    const assistant: ConversationEvent = {
+      eventId: "assistant-dup-reset",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Repeated message around tool result.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-dup-reset",
+      },
+    } as unknown as ConversationEvent;
+    const toolResult: ConversationEvent = {
+      eventId: "tr-dup-reset",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      kind: "tool.result",
+      toolCallId: "tool-dup-reset",
+      result: "tool result payload",
+      source: {
+        providerEventType: "tool_result",
+        providerEventId: "tr-dup-reset",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [assistant, toolResult, assistant],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: false,
+        includeToolResults: true,
+        includeThinking: false,
+      },
+    );
+
+    assertEquals(
+      rendered.split("Repeated message around tool result.").length - 1,
+      2,
+    );
+    assertStringIncludes(
+      rendered,
+      "<summary>Tool result: tool-dup-reset</summary>",
+    );
   },
 );
 
@@ -902,6 +1138,82 @@ Deno.test(
       "**Decision [decision-line-policy]:** decision_line_policy -> Show both (Recommended)",
     );
     assertEquals(rendered.includes("*Status: accepted"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can hide questionnaire decision options while keeping prompt",
+  () => {
+    const questionnairePrompt: ConversationEvent = {
+      eventId: "decision-questionnaire-proposed-options-hidden-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-proposed-options-hidden-1",
+      decisionKey: "decision-options-visibility",
+      summary: "Which output format should we use?",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-1"],
+      metadata: {
+        providerQuestionId: "decision_options_visibility",
+        options: [{
+          label: "Markdown",
+          description: "Use markdown output.",
+        }],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-proposed-options-hidden-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnairePrompt], {
+      includeFrontmatter: false,
+      includeDecisionPrompt: true,
+      includeDecisionOptions: false,
+    });
+
+    assertStringIncludes(
+      rendered,
+      "**Decision [decision-options-visibility]:** Which output format should we use?",
+    );
+    assertEquals(rendered.includes("- Markdown: Use markdown output."), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown can hide accepted questionnaire decision selections",
+  () => {
+    const questionnaireDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-selection-hidden-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-selection-hidden-1",
+      decisionKey: "decision-selection-visibility",
+      summary: "decision_selection_visibility -> Markdown",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_selection_visibility",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-selection-hidden-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([questionnaireDecision], {
+      includeFrontmatter: false,
+      includeDecisionSelection: false,
+    });
+
+    assertEquals(rendered.includes("decision_selection_visibility"), false);
   },
 );
 

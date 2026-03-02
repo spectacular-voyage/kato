@@ -38,6 +38,9 @@ const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
   "defaultParticipantUsername",
+  "includeSessionIds",
+  "includeWorkspaceIds",
+  "includeRecordingIds",
   "includeConversationEventKinds",
 ];
 const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
@@ -83,6 +86,10 @@ const EXPORT_FEATURE_FLAG_KEYS: Array<keyof ExportFeatureFlags> = [
   "writerIncludeCommentary",
   "writerIncludeThinking",
   "writerIncludeToolCalls",
+  "writerIncludeToolResults",
+  "writerIncludeDecisionPrompt",
+  "writerIncludeDecisionOptions",
+  "writerIncludeDecisionSelection",
   "writerItalicizeUserMessages",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
@@ -143,6 +150,10 @@ export function createDefaultExportFeatureFlags(
     writerIncludeCommentary: true,
     writerIncludeThinking: false,
     writerIncludeToolCalls: false,
+    writerIncludeToolResults: false,
+    writerIncludeDecisionPrompt: true,
+    writerIncludeDecisionOptions: true,
+    writerIncludeDecisionSelection: true,
     writerItalicizeUserMessages: false,
   };
   if (!overrides) {
@@ -156,6 +167,14 @@ export function createDefaultExportFeatureFlags(
       defaults.writerIncludeThinking,
     writerIncludeToolCalls: overrides.writerIncludeToolCalls ??
       defaults.writerIncludeToolCalls,
+    writerIncludeToolResults: overrides.writerIncludeToolResults ??
+      defaults.writerIncludeToolResults,
+    writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ??
+      defaults.writerIncludeDecisionPrompt,
+    writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
+      defaults.writerIncludeDecisionOptions,
+    writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
+      defaults.writerIncludeDecisionSelection,
     writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ??
       defaults.writerItalicizeUserMessages,
   };
@@ -229,6 +248,9 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     includeUpdatedInFrontmatter: false,
     addParticipantUsernameToFrontmatter: false,
     defaultParticipantUsername: "",
+    includeSessionIds: true,
+    includeWorkspaceIds: true,
+    includeRecordingIds: true,
     includeConversationEventKinds: false,
   };
   if (!overrides) {
@@ -246,6 +268,12 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
         defaults.addParticipantUsernameToFrontmatter,
     defaultParticipantUsername: overrides.defaultParticipantUsername ??
       defaults.defaultParticipantUsername,
+    includeSessionIds: overrides.includeSessionIds ??
+      defaults.includeSessionIds,
+    includeWorkspaceIds: overrides.includeWorkspaceIds ??
+      defaults.includeWorkspaceIds,
+    includeRecordingIds: overrides.includeRecordingIds ??
+      defaults.includeRecordingIds,
     includeConversationEventKinds: overrides.includeConversationEventKinds ??
       defaults.includeConversationEventKinds,
   };
@@ -334,6 +362,21 @@ function parseRuntimeMarkdownFrontmatterConfig(
         return undefined;
       }
       resolved.addParticipantUsernameToFrontmatter = candidate;
+    } else if (key === "includeSessionIds") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeSessionIds = candidate;
+    } else if (key === "includeWorkspaceIds") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeWorkspaceIds = candidate;
+    } else if (key === "includeRecordingIds") {
+      if (typeof candidate !== "boolean") {
+        return undefined;
+      }
+      resolved.includeRecordingIds = candidate;
     } else if (key === "includeConversationEventKinds") {
       if (typeof candidate !== "boolean") {
         return undefined;

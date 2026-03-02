@@ -34,6 +34,10 @@ export interface MarkdownRenderOptions {
   frontmatterConversationEventKinds?: string[];
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
+  includeToolResults?: boolean;
+  includeDecisionPrompt?: boolean;
+  includeDecisionOptions?: boolean;
+  includeDecisionSelection?: boolean;
   includeThinking?: boolean;
   italicizeUserMessages?: boolean;
   includeSystemEvents?: boolean;
@@ -85,6 +89,15 @@ function formatModelName(model: string): string {
   return model.replace(/-(\d+)-(\d+)$/, "-$1.$2");
 }
 
+function resolveAssistantSpeaker(
+  model: string | undefined,
+  speakerNames: MarkdownSpeakerNames | undefined,
+): string {
+  return model
+    ? formatModelName(model)
+    : (speakerNames?.assistant ?? "Assistant");
+}
+
 function formatUserMessageContent(content: string): string {
   return content.split("\n").map((line) => {
     const trimmed = line.trim();
@@ -124,12 +137,8 @@ function formatMessageHeading(
   } else if (event.kind === "message.system") {
     speaker = speakerNames?.system ?? "System";
   } else {
-    const model = "model" in event
-      ? (event.model as string | undefined)
-      : undefined;
-    speaker = model
-      ? formatModelName(model)
-      : (speakerNames?.assistant ?? "Assistant");
+    const model = "model" in event ? event.model : undefined;
+    speaker = resolveAssistantSpeaker(model, speakerNames);
   }
   return `# ${speaker}_${formatHeadingTimestamp(event.timestamp)}`;
 }
@@ -163,34 +172,14 @@ export function renderEventsToMarkdown(
   const includeFrontmatter = options.includeFrontmatter !== false;
   const includeCommentary = options.includeCommentary ?? true;
   const includeToolCalls = options.includeToolCalls ?? true;
+  const includeToolResults = options.includeToolResults ?? includeToolCalls;
+  const includeDecisionPrompt = options.includeDecisionPrompt ?? true;
+  const includeDecisionOptions = options.includeDecisionOptions ?? true;
+  const includeDecisionSelection = options.includeDecisionSelection ?? true;
   const includeThinking = options.includeThinking ?? true;
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
-
-  // Pass 1: Build tool result queue per toolCallId (preserves order for revisions).
-  const toolResultQueues = new Map<
-    string,
-    Array<ConversationEvent & { kind: "tool.result" }>
-  >();
-  for (const event of events) {
-    if (event.kind === "tool.result") {
-      const queue = toolResultQueues.get(event.toolCallId) ?? [];
-      queue.push(event);
-      toolResultQueues.set(event.toolCallId, queue);
-    }
-  }
-  // Mutable pointer per toolCallId to consume results in order.
-  const toolResultPointers = new Map<string, number>();
-  function nextToolResult(
-    toolCallId: string,
-  ): (ConversationEvent & { kind: "tool.result" }) | undefined {
-    const queue = toolResultQueues.get(toolCallId);
-    if (!queue) return undefined;
-    const idx = toolResultPointers.get(toolCallId) ?? 0;
-    toolResultPointers.set(toolCallId, idx + 1);
-    return queue[idx];
-  }
 
   const parts: string[] = [];
 
@@ -215,10 +204,18 @@ export function renderEventsToMarkdown(
 
   let lastRole: string | undefined;
   let lastSignature: string | undefined;
+  let lastAssistantSpeaker = options.speakerNames?.assistant ?? "Assistant";
 
   // Pass 2: Render events in sequence.
   for (let i = 0; i < events.length; i++) {
     const event = events[i]!;
+    if (event.kind === "message.assistant") {
+      lastAssistantSpeaker = resolveAssistantSpeaker(
+        event.model,
+        options.speakerNames,
+      );
+    }
+
     if (isMessageEvent(event)) {
       if (event.kind === "message.system" && !includeSystemEvents) {
         continue;
@@ -288,35 +285,36 @@ export function renderEventsToMarkdown(
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
 
-      const result = nextToolResult(event.toolCallId);
       const callParts: string[] = [
-        "",
-        "<details>",
-        `<summary>Tool: ${event.name}${
-          event.description ? ` — ${event.description}` : ""
-        }</summary>`,
-        "",
+        `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-${event.name}`,
       ];
-      if (event.input && Object.keys(event.input).length > 0) {
-        callParts.push(
-          "```json",
-          JSON.stringify(event.input, null, 2),
-          "```",
-        );
+      if (event.description?.trim().length) {
+        callParts.push("", event.description);
       }
-      if (result && result.result.length > 0) {
-        callParts.push(
-          "",
-          "```",
-          truncate(result.result, truncateToolResults),
-          "```",
-        );
-      }
-      callParts.push("", "</details>");
       parts.push(callParts.join("\n"), "");
       lastSignature = undefined;
     } else if (event.kind === "tool.result") {
-      // Skip: rendered inline with its tool.call above.
+      if (!includeToolResults) {
+        continue;
+      }
+
+      const resultContent = event.result.trim();
+      if (resultContent.length === 0) {
+        continue;
+      }
+      const resultParts = [
+        "",
+        "<details>",
+        `<summary>Tool result: ${event.toolCallId}</summary>`,
+        "",
+        "```",
+        truncate(event.result, truncateToolResults),
+        "```",
+        "",
+        "</details>",
+      ];
+      parts.push(resultParts.join("\n"), "");
+      lastSignature = undefined;
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;
@@ -340,11 +338,17 @@ export function renderEventsToMarkdown(
 
       let decisionParts: string[];
       if (questionnaireAcceptedDecision) {
+        if (!includeDecisionSelection) {
+          continue;
+        }
         decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,
         ];
       } else if (questionnaireProposedDecision) {
+        if (!includeDecisionPrompt && !includeDecisionOptions) {
+          continue;
+        }
         const optionsValue = questionnaireMetadata?.["options"];
         const optionLines = Array.isArray(optionsValue)
           ? optionsValue
@@ -361,12 +365,25 @@ export function renderEventsToMarkdown(
             })
             .filter((line) => line.length > 0)
           : [];
-        decisionParts = [
-          "",
-          `**Decision [${event.decisionKey}]:** ${event.summary}`,
-          ...optionLines,
-        ];
+        decisionParts = [""];
+        if (includeDecisionPrompt) {
+          decisionParts.push(
+            `**Decision [${event.decisionKey}]:** ${event.summary}`,
+          );
+        }
+        if (includeDecisionOptions) {
+          decisionParts.push(...optionLines);
+        }
+        if (decisionParts.length === 1) {
+          continue;
+        }
       } else {
+        const includeNonQuestionnaireDecision = event.status === "accepted"
+          ? includeDecisionSelection
+          : includeDecisionPrompt;
+        if (!includeNonQuestionnaireDecision) {
+          continue;
+        }
         decisionParts = [
           "",
           `**Decision [${event.decisionKey}]:** ${event.summary}`,

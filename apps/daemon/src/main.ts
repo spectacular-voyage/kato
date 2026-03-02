@@ -137,6 +137,9 @@ function buildOutputOverrides(options: {
       options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
     includeUpdatedInFrontmatter:
       options.markdownFrontmatter.includeUpdatedInFrontmatter,
+    includeSessionIds: options.markdownFrontmatter.includeSessionIds,
+    includeWorkspaceIds: options.markdownFrontmatter.includeWorkspaceIds,
+    includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
     participantUsername: resolveFrontmatterParticipantUsername(
@@ -146,6 +149,11 @@ function buildOutputOverrides(options: {
       includeCommentary: options.featureFlags.writerIncludeCommentary,
       includeThinking: options.featureFlags.writerIncludeThinking,
       includeToolCalls: options.featureFlags.writerIncludeToolCalls,
+      includeToolResults: options.featureFlags.writerIncludeToolResults,
+      includeDecisionPrompt: options.featureFlags.writerIncludeDecisionPrompt,
+      includeDecisionOptions: options.featureFlags.writerIncludeDecisionOptions,
+      includeDecisionSelection:
+        options.featureFlags.writerIncludeDecisionSelection,
       italicizeUserMessages: options.featureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.includeSystemEvents,
     },
@@ -263,6 +271,12 @@ export async function runDaemonSubprocess(
       workspaceFrontmatterDefaults.includeFrontmatterInMarkdownRecordings,
     includeUpdatedInFrontmatter:
       workspaceFrontmatterDefaults.includeUpdatedInFrontmatter,
+    includeSessionIdsInFrontmatter:
+      workspaceFrontmatterDefaults.includeSessionIds,
+    includeWorkspaceIdsInFrontmatter:
+      workspaceFrontmatterDefaults.includeWorkspaceIds,
+    includeRecordingIdsInFrontmatter:
+      workspaceFrontmatterDefaults.includeRecordingIds,
     includeConversationEventKindsInFrontmatter:
       workspaceFrontmatterDefaults.includeConversationEventKinds,
     frontmatterParticipantUsername: resolveFrontmatterParticipantUsername(
@@ -272,6 +286,13 @@ export async function runDaemonSubprocess(
       includeCommentary: workspaceWriterDefaults.writerIncludeCommentary,
       includeThinking: workspaceWriterDefaults.writerIncludeThinking,
       includeToolCalls: workspaceWriterDefaults.writerIncludeToolCalls,
+      includeToolResults: workspaceWriterDefaults.writerIncludeToolResults,
+      includeDecisionPrompt:
+        workspaceWriterDefaults.writerIncludeDecisionPrompt,
+      includeDecisionOptions:
+        workspaceWriterDefaults.writerIncludeDecisionOptions,
+      includeDecisionSelection:
+        workspaceWriterDefaults.writerIncludeDecisionSelection,
       italicizeUserMessages:
         workspaceWriterDefaults.writerItalicizeUserMessages,
       includeSystemEvents: featureSettings.captureIncludeSystemEvents,

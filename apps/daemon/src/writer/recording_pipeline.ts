@@ -22,6 +22,10 @@ export type RecordingRenderOptionOverrides = Pick<
   | "includeCommentary"
   | "includeThinking"
   | "includeToolCalls"
+  | "includeToolResults"
+  | "includeDecisionPrompt"
+  | "includeDecisionOptions"
+  | "includeDecisionSelection"
   | "italicizeUserMessages"
   | "includeSystemEvents"
 >;
@@ -29,6 +33,9 @@ export type RecordingRenderOptionOverrides = Pick<
 export interface RecordingOutputOverrides {
   includeFrontmatter?: boolean;
   includeUpdatedInFrontmatter?: boolean;
+  includeSessionIds?: boolean;
+  includeWorkspaceIds?: boolean;
+  includeRecordingIds?: boolean;
   includeConversationEventKinds?: boolean;
   participantUsername?: string;
   renderOptions?: Partial<RecordingRenderOptionOverrides>;
@@ -43,8 +50,10 @@ export interface ActiveRecording {
   recordingId: string;
   provider: string;
   sessionId: string;
+  workspaceAlias?: string;
   outputPath: string;
   startedAt: string;
+  restartedAt?: string;
   lastWriteAt: string;
 }
 
@@ -52,6 +61,7 @@ export interface ActivateRecordingInput {
   provider: string;
   sessionId: string;
   recordingKey?: string;
+  workspaceAlias?: string;
   targetPath: string;
   seedEvents?: ConversationEvent[];
   title?: string;
@@ -106,7 +116,7 @@ export interface ValidateDestinationPathInput {
   provider: string;
   sessionId: string;
   targetPath: string;
-  commandName?: "init" | "record" | "capture" | "export";
+  commandName?: "record" | "capture" | "export";
 }
 
 export interface AppendToActiveRecordingResult {
@@ -145,6 +155,9 @@ export interface RecordingPipelineLike {
   getMarkdownFrontmatterSettings?(): {
     includeFrontmatter: boolean;
     includeUpdatedInFrontmatter: boolean;
+    includeSessionIds: boolean;
+    includeWorkspaceIds: boolean;
+    includeRecordingIds: boolean;
     includeConversationEventKinds: boolean;
     participantUsername?: string;
   };
@@ -156,6 +169,9 @@ export interface RecordingPipelineOptions {
   jsonlWriter?: JsonlConversationWriter;
   includeFrontmatterInMarkdownRecordings?: boolean;
   includeUpdatedInFrontmatter?: boolean;
+  includeSessionIdsInFrontmatter?: boolean;
+  includeWorkspaceIdsInFrontmatter?: boolean;
+  includeRecordingIdsInFrontmatter?: boolean;
   includeConversationEventKindsInFrontmatter?: boolean;
   frontmatterParticipantUsername?: string;
   defaultRenderOptions?: Pick<
@@ -163,6 +179,10 @@ export interface RecordingPipelineOptions {
     | "includeCommentary"
     | "includeThinking"
     | "includeToolCalls"
+    | "includeToolResults"
+    | "includeDecisionPrompt"
+    | "includeDecisionOptions"
+    | "includeDecisionSelection"
     | "italicizeUserMessages"
     | "includeSystemEvents"
   >;
@@ -173,7 +193,7 @@ export interface RecordingPipelineOptions {
 }
 
 interface PathDecisionContext {
-  commandName: "init" | "record" | "capture" | "export";
+  commandName: "record" | "capture" | "export";
   provider: string;
   sessionId: string;
   targetPath: string;
@@ -212,6 +232,9 @@ function cloneRecording(recording: ActiveRecording): ActiveRecording {
     recordingId: recording.recordingId,
     provider: recording.provider,
     sessionId: recording.sessionId,
+    ...(recording.workspaceAlias
+      ? { workspaceAlias: recording.workspaceAlias }
+      : {}),
     outputPath: recording.outputPath,
     startedAt: recording.startedAt,
     lastWriteAt: recording.lastWriteAt,
@@ -236,6 +259,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
   private readonly auditLogger: AuditLogger;
   private readonly includeFrontmatterInMarkdownRecordings: boolean;
   private readonly includeUpdatedInFrontmatter: boolean;
+  private readonly includeSessionIdsInFrontmatter: boolean;
+  private readonly includeWorkspaceIdsInFrontmatter: boolean;
+  private readonly includeRecordingIdsInFrontmatter: boolean;
   private readonly includeConversationEventKindsInFrontmatter: boolean;
   private readonly frontmatterParticipantUsername: string | undefined;
 
@@ -253,6 +279,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
       options.includeFrontmatterInMarkdownRecordings ?? true;
     this.includeUpdatedInFrontmatter = options.includeUpdatedInFrontmatter ??
       false;
+    this.includeSessionIdsInFrontmatter =
+      options.includeSessionIdsInFrontmatter ?? true;
+    this.includeWorkspaceIdsInFrontmatter =
+      options.includeWorkspaceIdsInFrontmatter ?? true;
+    this.includeRecordingIdsInFrontmatter =
+      options.includeRecordingIdsInFrontmatter ?? true;
     this.includeConversationEventKindsInFrontmatter =
       options.includeConversationEventKindsInFrontmatter ?? false;
     this.frontmatterParticipantUsername = options.frontmatterParticipantUsername
@@ -284,6 +316,7 @@ export class RecordingPipeline implements RecordingPipelineLike {
       recordingId,
       provider: input.provider,
       sessionId: input.sessionId,
+      ...(input.workspaceAlias ? { workspaceAlias: input.workspaceAlias } : {}),
       outputPath,
       startedAt: nowIso,
       lastWriteAt: nowIso,
@@ -535,12 +568,18 @@ export class RecordingPipeline implements RecordingPipelineLike {
   getMarkdownFrontmatterSettings(): {
     includeFrontmatter: boolean;
     includeUpdatedInFrontmatter: boolean;
+    includeSessionIds: boolean;
+    includeWorkspaceIds: boolean;
+    includeRecordingIds: boolean;
     includeConversationEventKinds: boolean;
     participantUsername?: string;
   } {
     return {
       includeFrontmatter: this.includeFrontmatterInMarkdownRecordings,
       includeUpdatedInFrontmatter: this.includeUpdatedInFrontmatter,
+      includeSessionIds: this.includeSessionIdsInFrontmatter,
+      includeWorkspaceIds: this.includeWorkspaceIdsInFrontmatter,
+      includeRecordingIds: this.includeRecordingIdsInFrontmatter,
       includeConversationEventKinds:
         this.includeConversationEventKindsInFrontmatter,
       participantUsername: this.frontmatterParticipantUsername,
@@ -650,17 +689,27 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const includeUpdatedInFrontmatter =
       options.outputOverrides?.includeUpdatedInFrontmatter ??
         this.includeUpdatedInFrontmatter;
+    const includeSessionIds = options.outputOverrides?.includeSessionIds ??
+      this.includeSessionIdsInFrontmatter;
+    const includeWorkspaceIds = options.outputOverrides?.includeWorkspaceIds ??
+      this.includeWorkspaceIdsInFrontmatter;
+    const includeRecordingIds = options.outputOverrides?.includeRecordingIds ??
+      this.includeRecordingIdsInFrontmatter;
     return {
       ...renderOptions,
       title: options.title,
       now: this.now,
       includeFrontmatter,
       includeUpdatedInFrontmatter,
-      frontmatterSessionIds: [options.sessionId],
-      ...(options.workspaceIds
+      ...(includeSessionIds
+        ? { frontmatterSessionIds: [options.sessionId] }
+        : {}),
+      ...(includeWorkspaceIds && options.workspaceIds
         ? { frontmatterWorkspaceIds: options.workspaceIds }
         : {}),
-      ...(frontmatterRecordingCycleIds ? { frontmatterRecordingCycleIds } : {}),
+      ...(includeRecordingIds && frontmatterRecordingCycleIds
+        ? { frontmatterRecordingCycleIds }
+        : {}),
       ...(frontmatterConversationEventKinds
         ? { frontmatterConversationEventKinds }
         : {}),

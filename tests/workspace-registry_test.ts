@@ -2,6 +2,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  DefaultWorkspaceConfigFileStore,
   loadWorkspaceConfigOverrides,
   type RegisteredWorkspace,
   WorkspaceCatalog,
@@ -152,10 +153,18 @@ Deno.test(
       );
       assertEquals(first.filenameTemplate, "{provider}-{sessionShortId}.md");
       assertEquals(first.writerFeatureFlags.writerIncludeCommentary, true);
+      assertEquals(first.writerFeatureFlags.writerIncludeToolResults, false);
+      assertEquals(first.writerFeatureFlags.writerIncludeDecisionPrompt, true);
+      assertEquals(first.writerFeatureFlags.writerIncludeDecisionOptions, true);
+      assertEquals(
+        first.writerFeatureFlags.writerIncludeDecisionSelection,
+        true,
+      );
       assertEquals(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
       );
+      assertEquals(first.markdownFrontmatter.includeSessionIds, true);
 
       const firstStat = await Deno.stat(configPath);
       const firstMtimeMs = firstStat.mtime?.getTime() ?? Date.now();
@@ -166,6 +175,8 @@ Deno.test(
           'filenameTemplate: "{provider}.md"',
           "workspaceFeatureFlags:",
           "  writerIncludeCommentary: false",
+          "  writerIncludeToolResults: true",
+          "  writerIncludeDecisionSelection: false",
         ].join("\n") + "\n",
       );
       await Deno.utime(
@@ -181,6 +192,11 @@ Deno.test(
       );
       assertEquals(second.filenameTemplate, "{provider}.md");
       assertEquals(second.writerFeatureFlags.writerIncludeCommentary, false);
+      assertEquals(second.writerFeatureFlags.writerIncludeToolResults, true);
+      assertEquals(
+        second.writerFeatureFlags.writerIncludeDecisionSelection,
+        false,
+      );
     });
   },
 );
@@ -255,4 +271,179 @@ Deno.test("loadWorkspaceConfigOverrides rejects legacy featureFlags", async () =
       "Unsupported workspace config key 'featureFlags'",
     );
   });
+});
+
+Deno.test("loadWorkspaceConfigOverrides accepts local and IANA filenameTemplateTimezone values", async () => {
+  await withTestTempDir(
+    "workspace-profile-timezone-valid-",
+    async (tempDir) => {
+      const workspaceRoot = join(tempDir, "Timezone.Proj");
+      const configPath = join(
+        workspaceRoot,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'filenameTemplateTimezone: "local"',
+        ].join("\n") + "\n",
+      );
+      const localLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(localLoaded.filenameTemplateTimezone, "local");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'filenameTemplateTimezone: "America/Los_Angeles"',
+        ].join("\n") + "\n",
+      );
+      const ianaLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(ianaLoaded.filenameTemplateTimezone, "America/Los_Angeles");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'filenameTemplateTimezone: "US/Pacific"',
+        ].join("\n") + "\n",
+      );
+      const aliasLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(aliasLoaded.filenameTemplateTimezone, "US/Pacific");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "conv.{YYYY}.{YY}-{MM}-{DD}_{HH}{mm}-{provider}.md"',
+          'filenameTemplateTimezone: "America/Los_Angeles"',
+        ].join("\n") + "\n",
+      );
+      const componentsLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(
+        componentsLoaded.filenameTemplate,
+        "conv.{YYYY}.{YY}-{MM}-{DD}_{HH}{mm}-{provider}.md",
+      );
+    },
+  );
+});
+
+Deno.test("loadWorkspaceConfigOverrides rejects invalid filenameTemplateTimezone", async () => {
+  await withTestTempDir(
+    "workspace-profile-timezone-invalid-",
+    async (tempDir) => {
+      const workspaceRoot = join(tempDir, "Timezone.Invalid");
+      const configPath = join(
+        workspaceRoot,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'filenameTemplateTimezone: "Mars/Olympus_Mons"',
+        ].join("\n") + "\n",
+      );
+
+      await assertRejects(
+        () => loadWorkspaceConfigOverrides(configPath),
+        Error,
+        "filenameTemplateTimezone must be",
+      );
+    },
+  );
+});
+
+Deno.test("WorkspaceProfileResolver defaults filenameTemplateTimezone to local when missing", async () => {
+  await withTestTempDir(
+    "workspace-profile-timezone-default-",
+    async (tempDir) => {
+      const workspaceRoot = join(tempDir, "Timezone.Default");
+      const configPath = join(
+        workspaceRoot,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}-{sessionShortId}.md"',
+        ].join("\n") + "\n",
+      );
+
+      const workspace = makeWorkspace({
+        workspaceId: "ws-timezone-default",
+        alias: "Timezone.Default",
+        workspaceRoot,
+        configPath,
+      });
+      const resolver = new WorkspaceProfileResolver();
+      const profile = await resolver.resolveForCommand(workspace);
+      assertEquals(profile.filenameTemplateTimezone, "local");
+    },
+  );
+});
+
+Deno.test("loadWorkspaceConfigOverrides rejects removed and unknown filename template tokens", async () => {
+  await withTestTempDir(
+    "workspace-profile-template-tokens-",
+    async (tempDir) => {
+      const workspaceRoot = join(tempDir, "Token.Proj");
+      const configPath = join(
+        workspaceRoot,
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      );
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}-{timestampUtc}.md"',
+        ].join("\n") + "\n",
+      );
+      await assertRejects(
+        () => loadWorkspaceConfigOverrides(configPath),
+        Error,
+        "is no longer supported",
+      );
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}-{unknownToken}.md"',
+        ].join("\n") + "\n",
+      );
+      await assertRejects(
+        () => loadWorkspaceConfigOverrides(configPath),
+        Error,
+        "is unsupported",
+      );
+    },
+  );
+});
+
+Deno.test("DefaultWorkspaceConfigFileStore allowMissing keeps filenameTemplateTimezone-only templates", async () => {
+  await withTestTempDir(
+    "workspace-default-template-timezone-",
+    async (tempDir) => {
+      const configPath = join(tempDir, "default-kato-workspace-config.yaml");
+      await Deno.writeTextFile(configPath, 'filenameTemplateTimezone: "UTC"\n');
+
+      const store = new DefaultWorkspaceConfigFileStore(configPath);
+      const loaded = await store.load({ allowMissing: true });
+      assertExists(loaded);
+      assertEquals(loaded.filenameTemplateTimezone, "UTC");
+    },
+  );
 });

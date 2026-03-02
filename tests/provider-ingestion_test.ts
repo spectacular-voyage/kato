@@ -584,6 +584,213 @@ Deno.test("FileProviderIngestionRunner recovers first-user snippet when resuming
   });
 });
 
+Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction marker and preserves existing realtime timestamps", async () => {
+  await withTempDir(
+    "provider-ingestion-codex-compaction-replay-",
+    async (dir) => {
+      const sessionFile = join(dir, "session-codex-compaction.jsonl");
+      await Deno.writeTextFile(
+        sessionFile,
+        [
+          JSON.stringify({
+            type: "session_meta",
+            payload: { id: "session-codex-compaction", source: "chat" },
+          }),
+          JSON.stringify({
+            type: "event_msg",
+            payload: {
+              type: "agent_message",
+              message: "p".repeat(12_000),
+            },
+          }),
+          JSON.stringify({
+            type: "compacted",
+            payload: {
+              replacement_history: [{
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "old context" }],
+              }],
+            },
+          }),
+          "x".repeat(4096),
+        ].join("\n") + "\n",
+      );
+      const stateRoot = join(dir, ".kato");
+      const stateStore = new PersistentSessionStateStore({
+        katoDir: stateRoot,
+        now: () => new Date("2026-02-26T10:00:00.000Z"),
+        makeSessionId: () => "session-codex-compaction-uuid",
+      });
+      const metadata = await stateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "session-codex-compaction",
+        sourceFilePath: sessionFile,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      metadata.ingestCursor = { kind: "byte-offset", value: 15_000 };
+      await stateStore.saveSessionMetadata(metadata);
+
+      const store = new InMemorySessionSnapshotStore();
+      store.upsert({
+        provider: "codex",
+        sessionId: "session-codex-compaction",
+        cursor: { kind: "byte-offset", value: 15_000 },
+        events: [{
+          eventId: "existing-first",
+          provider: "codex",
+          sessionId: "session-codex-compaction",
+          timestamp: "2026-02-26T10:00:00.000Z",
+          kind: "message.user",
+          role: "user",
+          content: "first message",
+          source: {
+            providerEventType: "event_msg.user_message",
+            rawCursor: { kind: "byte-offset", value: 25_010 },
+          },
+        } as ConversationEvent],
+      });
+      const parseOffsets: number[] = [];
+      const runner = new FileProviderIngestionRunner({
+        provider: "codex",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        sessionStateStore: new PersistentSessionStateStore({
+          katoDir: stateRoot,
+          now: () => new Date("2026-02-26T10:00:00.000Z"),
+          makeSessionId: () => "session-codex-compaction-uuid",
+        }),
+        autoGenerateSnapshots: false,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-codex-compaction",
+            filePath: sessionFile,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          parseOffsets.push(fromOffset);
+          return (async function* () {
+            if (fromOffset === 15_000) {
+              yield {
+                event: {
+                  ...makeEvent(
+                    "resume-only",
+                    "2026-02-26T10:00:00.000Z",
+                  ),
+                  provider: "codex",
+                  sessionId: "session-codex-compaction",
+                  kind: "message.user",
+                  role: "user",
+                  content: "should-not-be-read",
+                  source: {
+                    providerEventType: "event_msg.user_message",
+                    rawCursor: { kind: "byte-offset", value: 26_100 },
+                  },
+                } as ConversationEvent,
+                cursor: { kind: "byte-offset" as const, value: 15_050 },
+              };
+              return;
+            }
+            if (fromOffset > 0 && fromOffset < 15_000) {
+              yield {
+                event: {
+                  ...makeEvent(
+                    "replay-duplicate-first",
+                    "2026-02-26T10:00:10.000Z",
+                  ),
+                  provider: "codex",
+                  sessionId: "session-codex-compaction",
+                  kind: "message.user",
+                  role: "user",
+                  content: "first message",
+                  source: {
+                    providerEventType: "event_msg.user_message",
+                    rawCursor: { kind: "byte-offset", value: fromOffset + 100 },
+                  },
+                } as ConversationEvent,
+                cursor: { kind: "byte-offset" as const, value: 27_000 },
+              };
+              yield {
+                event: {
+                  ...makeEvent(
+                    "replay-capture",
+                    "2026-02-26T10:00:01.000Z",
+                  ),
+                  provider: "codex",
+                  sessionId: "session-codex-compaction",
+                  kind: "message.user",
+                  role: "user",
+                  content: "::capture-k",
+                  source: {
+                    providerEventType: "event_msg.user_message",
+                    rawCursor: { kind: "byte-offset", value: fromOffset + 200 },
+                  },
+                } as ConversationEvent,
+                cursor: { kind: "byte-offset" as const, value: 28_000 },
+              };
+            }
+          })();
+        },
+      });
+
+      await runner.start();
+      await runner.poll();
+      await runner.stop();
+
+      assert(parseOffsets.length >= 1);
+      assert(parseOffsets[0]! > 0);
+      assert(parseOffsets[0]! < 15_000);
+      assert(parseOffsets.includes(0));
+      const snapshot = store.get("session-codex-compaction");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.map((event) => event.eventId), [
+        "existing-first",
+        "replay-capture",
+      ]);
+      assertEquals(snapshot.events[0]?.timestamp, "2026-02-26T10:00:00.000Z");
+      assertEquals(snapshot.cursor, { kind: "byte-offset", value: 28_000 });
+
+      const reloadedStateStore = new PersistentSessionStateStore({
+        katoDir: stateRoot,
+        now: () => new Date("2026-02-26T10:00:00.000Z"),
+        makeSessionId: () => "session-codex-compaction-uuid",
+      });
+      const reloadedMetadata = await reloadedStateStore
+        .getOrCreateSessionMetadata(
+          {
+            provider: "codex",
+            providerSessionId: "session-codex-compaction",
+            sourceFilePath: sessionFile,
+            initialCursor: { kind: "byte-offset", value: 0 },
+          },
+        );
+      assertEquals(reloadedMetadata.ingestCursor, {
+        kind: "byte-offset",
+        value: 28_000,
+      });
+      assertEquals(
+        typeof reloadedMetadata.ingestAnchor?.messageId === "string",
+        true,
+      );
+      assertEquals(
+        reloadedMetadata.ingestAnchor?.messageId?.startsWith(
+          "codex-compacted:",
+        ),
+        true,
+      );
+      assertEquals(
+        typeof reloadedMetadata.ingestAnchor?.payloadHash === "string",
+        true,
+      );
+    },
+  );
+});
+
 Deno.test("FileProviderIngestionRunner does not repeatedly retry snippet recovery after an empty result", async () => {
   await withTempDir(
     "provider-ingestion-snippet-recover-sentinel-",

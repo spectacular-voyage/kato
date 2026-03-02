@@ -71,6 +71,7 @@ export type {
   DaemonControlIndexV1,
   DaemonControlSessionIndexEntryV1,
   RecordingDesiredState,
+  SessionCommandCursorAnchorV1,
   SessionIngestAnchorV1,
   SessionMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,

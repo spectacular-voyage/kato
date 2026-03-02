@@ -118,9 +118,20 @@ interface CodexSessionMeta {
   source: string;
 }
 
+interface CodexCompactionAnchor {
+  lineEnd: number;
+  anchor: SessionIngestAnchorV1;
+}
+
+interface MergeEventsOptions {
+  ignoreTimestamp?: boolean;
+  ignoreCursor?: boolean;
+}
+
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
 const MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES = 16 * 1024 * 1024;
+const CODEX_COMPACTION_BACKTRACK_BYTES = 4 * 1024;
 type ProviderReadOperation = "stat" | "readDir" | "open";
 
 class ProviderIngestionReadDeniedError extends Error {
@@ -422,6 +433,100 @@ async function readCodexSessionMeta(
   };
 }
 
+async function readLatestCodexCompactionAnchor(
+  filePath: string,
+): Promise<CodexCompactionAnchor | undefined> {
+  let file: Deno.FsFile | undefined;
+  let lineEnd = 0;
+  let latest: CodexCompactionAnchor | undefined;
+  const decoder = new TextDecoder();
+
+  const processLine = (
+    lineBytes: Uint8Array,
+    hasTrailingNewline: boolean,
+  ): void => {
+    const line = decoder.decode(lineBytes);
+    lineEnd += lineBytes.length + (hasTrailingNewline ? 1 : 0);
+    if (!line.includes('"type":"compacted"')) {
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (!isRecordValue(parsed) || parsed["type"] !== "compacted") {
+      return;
+    }
+    latest = {
+      lineEnd,
+      anchor: {
+        messageId: `codex-compacted:${lineEnd}`,
+        payloadHash: hashStringFNV1a(line),
+      },
+    };
+  };
+
+  try {
+    file = await Deno.open(filePath, { read: true });
+    const reader = file.readable.getReader();
+    let pending = new Uint8Array(0);
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (!value || value.length === 0) {
+          continue;
+        }
+        const chunk = pending.length === 0 ? value : (() => {
+          const combined = new Uint8Array(pending.length + value.length);
+          combined.set(pending);
+          combined.set(value, pending.length);
+          return combined;
+        })();
+        let lineStart = 0;
+        for (let i = 0; i < chunk.length; i += 1) {
+          if (chunk[i] !== 0x0a) {
+            continue;
+          }
+          processLine(chunk.subarray(lineStart, i), true);
+          lineStart = i + 1;
+        }
+        pending = lineStart === 0 ? chunk : chunk.subarray(lineStart);
+        if (pending.length > 0 && pending.buffer === chunk.buffer) {
+          pending = pending.slice();
+        }
+      }
+      if (pending.length > 0) {
+        processLine(pending, false);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.PermissionDenied) {
+      throw new ProviderIngestionReadDeniedError("open", filePath, error);
+    }
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    throw error;
+  } finally {
+    if (file) {
+      try {
+        file.close();
+      } catch {
+        // file.readable may already close the file once the stream drains
+      }
+    }
+  }
+
+  return latest;
+}
+
 async function discoverCodexSessions(
   roots: string[],
 ): Promise<ProviderSessionFile[]> {
@@ -603,21 +708,31 @@ function serializeCursor(cursor: ProviderCursor | undefined): string {
   return `${cursor.kind}:${String(cursor.value)}`;
 }
 
-function resolveStableCursorComponent(event: ConversationEvent): string {
+function resolveStableCursorComponent(
+  event: ConversationEvent,
+  options: MergeEventsOptions = {},
+): string {
   if (isNonEmptyString(event.turnId)) {
     return `turn:${event.turnId}`;
   }
   if (isNonEmptyString(event.source.providerEventId)) {
     return "";
   }
+  if (options.ignoreCursor) {
+    return "";
+  }
   return serializeCursor(event.source.rawCursor);
 }
 
-function eventSignature(event: ConversationEvent): string {
-  const stableCursorComponent = resolveStableCursorComponent(event);
+function eventSignature(
+  event: ConversationEvent,
+  options: MergeEventsOptions = {},
+): string {
+  const stableCursorComponent = resolveStableCursorComponent(event, options);
+  const timestamp = options.ignoreTimestamp ? "" : event.timestamp ?? "";
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""
-  }\0${event.timestamp ?? ""}\0${stableCursorComponent}`;
+  }\0${timestamp}\0${stableCursorComponent}`;
   switch (event.kind) {
     case "message.user":
     case "message.assistant":
@@ -643,13 +758,16 @@ function eventSignature(event: ConversationEvent): string {
 function mergeEvents(
   existingEvents: ConversationEvent[],
   incomingEvents: ConversationEvent[],
+  options: MergeEventsOptions = {},
 ): { mergedEvents: ConversationEvent[]; droppedEvents: number } {
-  const signatures = new Set(existingEvents.map(eventSignature));
+  const signatures = new Set(
+    existingEvents.map((event) => eventSignature(event, options)),
+  );
   const mergedEvents = [...existingEvents];
   let droppedEvents = 0;
 
   for (const event of incomingEvents) {
-    const signature = eventSignature(event);
+    const signature = eventSignature(event, options);
     if (signatures.has(signature)) {
       droppedEvents += 1;
       continue;
@@ -1194,6 +1312,61 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     };
 
     let replayedFromStart = false;
+    let codexCompactionBacktrack = false;
+    let codexCompactionMergeOptions: MergeEventsOptions | undefined;
+    let codexCompactionAnchor: SessionIngestAnchorV1 | undefined;
+    if (
+      this.provider === "codex" &&
+      stateMetadata &&
+      existingCursor?.kind === "byte-offset" &&
+      fromOffset > 0
+    ) {
+      let latestCompactionAnchor: CodexCompactionAnchor | undefined;
+      try {
+        latestCompactionAnchor = await readLatestCodexCompactionAnchor(
+          session.filePath,
+        );
+      } catch (error) {
+        if (await this.handleReadDenied(error, "open", session.filePath)) {
+          return { updated: false, eventsObserved: 0 };
+        }
+        throw error;
+      }
+      codexCompactionAnchor = latestCompactionAnchor?.anchor;
+      if (
+        latestCompactionAnchor &&
+        latestCompactionAnchor.lineEnd <= fromOffset &&
+        !anchorsEqual(stateMetadata.ingestAnchor, latestCompactionAnchor.anchor)
+      ) {
+        const previousOffset = fromOffset;
+        const backtrackedOffset = Math.max(
+          0,
+          latestCompactionAnchor.lineEnd - CODEX_COMPACTION_BACKTRACK_BYTES,
+        );
+        fromOffset = backtrackedOffset;
+        existingCursor = makeByteOffsetCursor(backtrackedOffset);
+        stateMetadata.ingestCursor = existingCursor;
+        this.setCursor(sessionId, existingCursor, session.filePath);
+        codexCompactionBacktrack = true;
+        codexCompactionMergeOptions = {
+          ignoreTimestamp: true,
+          ignoreCursor: true,
+        };
+        await this.operationalLogger.warn(
+          "provider.ingestion.codex.compaction_backtrack",
+          "Codex compaction marker detected before cursor; backing up cursor with dedupe",
+          {
+            provider: this.provider,
+            sessionId,
+            filePath: session.filePath,
+            previousCursor: previousOffset,
+            compactionCursor: latestCompactionAnchor.lineEnd,
+            backtrackedCursor: backtrackedOffset,
+          },
+        );
+      }
+    }
+
     if (
       this.provider === "gemini" &&
       stateMetadata &&
@@ -1445,7 +1618,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let snippetOverride = cachedSnippet ?? undefined;
     if (
       cachedSnippet === undefined &&
-      this.provider === "codex" &&
       fromOffset > 0
     ) {
       if ((fileStat.size ?? 0) > MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES) {
@@ -1503,8 +1675,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               droppedEvents: appendResult.droppedAsDuplicate,
               reason: replayedFromStart
                 ? "duplicate-session-twin-anchor-replay"
+                : codexCompactionBacktrack
+                ? "duplicate-session-twin-codex-compaction-backtrack"
                 : "duplicate-session-twin",
               replayedFromStart,
+              codexCompactionBacktrack,
             },
           );
         }
@@ -1524,8 +1699,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
 
       let anchorChanged = false;
+      let nextAnchor: SessionIngestAnchorV1 | undefined = stateMetadata
+        .ingestAnchor;
       if (this.provider === "gemini" && latestCursor.kind === "item-index") {
-        let nextAnchor: SessionIngestAnchorV1 | undefined;
+        nextAnchor = undefined;
         const latestIndex = resolveItemIndex(latestCursor);
         if (latestIndex > 0) {
           try {
@@ -1542,10 +1719,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             }
           }
         }
-        if (!anchorsEqual(stateMetadata.ingestAnchor, nextAnchor)) {
-          stateMetadata.ingestAnchor = nextAnchor;
-          anchorChanged = true;
-        }
+      } else if (this.provider === "codex") {
+        nextAnchor = codexCompactionAnchor;
+      }
+      if (!anchorsEqual(stateMetadata.ingestAnchor, nextAnchor)) {
+        stateMetadata.ingestAnchor = nextAnchor;
+        anchorChanged = true;
       }
 
       const cursorChanged = !cursorsEqual(
@@ -1634,19 +1813,26 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             });
           }
         } else if (incomingEvents.length > 0 || currentSnapshot) {
-          const existingEvents = currentSnapshot?.provider === this.provider
-            ? currentSnapshot.events
-            : [];
-          const merged = mergeEvents(existingEvents, incomingEvents);
-          if (merged.droppedEvents > 0) {
+          const merged = mergeEvents(
+            currentSnapshot?.provider === this.provider
+              ? currentSnapshot.events
+              : [],
+            incomingEvents,
+            codexCompactionMergeOptions,
+          );
+          const mergedEvents = merged.mergedEvents;
+          const droppedEvents = merged.droppedEvents;
+          if (droppedEvents > 0) {
             await this.operationalLogger.debug(
               "provider.ingestion.events_dropped",
               "Provider ingestion dropped duplicate events",
               {
                 provider: this.provider,
                 sessionId,
-                droppedEvents: merged.droppedEvents,
-                reason: "duplicate-event",
+                droppedEvents,
+                reason: codexCompactionBacktrack
+                  ? "duplicate-codex-compaction-backtrack"
+                  : "duplicate-event",
               },
             );
           }
@@ -1654,7 +1840,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             provider: this.provider,
             sessionId,
             cursor: latestCursor,
-            events: merged.mergedEvents,
+            events: mergedEvents,
             fileModifiedAtMs,
             ...(snippetOverride ? { snippetOverride } : {}),
           });
@@ -1672,20 +1858,25 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       return { updated: false, eventsObserved: 0 };
     }
 
-    const existingEvents = currentSnapshot?.provider === this.provider
-      ? currentSnapshot.events
-      : [];
-    const merged = mergeEvents(existingEvents, incomingEvents);
+    const merged = mergeEvents(
+      currentSnapshot?.provider === this.provider ? currentSnapshot.events : [],
+      incomingEvents,
+      codexCompactionMergeOptions,
+    );
+    const mergedEvents = merged.mergedEvents;
+    const droppedEvents = merged.droppedEvents;
 
-    if (merged.droppedEvents > 0) {
+    if (droppedEvents > 0) {
       await this.operationalLogger.debug(
         "provider.ingestion.events_dropped",
         "Provider ingestion dropped duplicate events",
         {
           provider: this.provider,
           sessionId,
-          droppedEvents: merged.droppedEvents,
-          reason: "duplicate-event",
+          droppedEvents,
+          reason: codexCompactionBacktrack
+            ? "duplicate-codex-compaction-backtrack"
+            : "duplicate-event",
         },
       );
     }
@@ -1694,7 +1885,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       provider: this.provider,
       sessionId,
       cursor: latestCursor,
-      events: merged.mergedEvents,
+      events: mergedEvents,
       fileModifiedAtMs,
       ...(snippetOverride ? { snippetOverride } : {}),
     });
