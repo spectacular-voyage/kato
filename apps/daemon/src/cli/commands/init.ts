@@ -1,6 +1,10 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import type { RuntimeConfig } from "@kato/shared";
-import type { RuntimeConfigStoreLike } from "../../config/mod.ts";
+import {
+  createDefaultUserConfig,
+  type RuntimeConfigStoreLike,
+  type UserConfigStoreLike,
+} from "../../config/mod.ts";
 import {
   DefaultWorkspaceConfigFileStore,
   resolveDefaultWorkspaceTemplateConfigPath,
@@ -11,11 +15,14 @@ export interface EnsureGlobalConfigInitializationResult {
   runtimeConfigPath: string;
   defaultWorkspaceConfigCreated: boolean;
   defaultWorkspaceConfigPath: string;
+  userConfigCreated: boolean;
+  userConfigPath: string;
 }
 
 export async function ensureGlobalConfigInitialized(
   options: {
     configStore: RuntimeConfigStoreLike;
+    userConfigStore: UserConfigStoreLike;
     defaultRuntimeConfig: RuntimeConfig;
     runtimeConfigPath: string;
   },
@@ -28,12 +35,17 @@ export async function ensureGlobalConfigInitialized(
   );
   const defaultWorkspaceResult = await defaultWorkspaceConfigStore
     .ensureInitialized();
+  const userConfigResult = await options.userConfigStore.ensureInitialized(
+    createDefaultUserConfig(),
+  );
 
   return {
     runtimeConfigCreated: runtimeResult.created,
     runtimeConfigPath: runtimeResult.path,
     defaultWorkspaceConfigCreated: defaultWorkspaceResult.created,
     defaultWorkspaceConfigPath: defaultWorkspaceResult.path,
+    userConfigCreated: userConfigResult.created,
+    userConfigPath: userConfigResult.path,
   };
 }
 
@@ -42,6 +54,7 @@ export async function runInitCommand(
 ): Promise<void> {
   const result = await ensureGlobalConfigInitialized({
     configStore: ctx.configStore,
+    userConfigStore: ctx.resolveUserConfigStore(),
     defaultRuntimeConfig: ctx.defaultRuntimeConfig,
     runtimeConfigPath: ctx.runtime.configPath,
   });
@@ -56,6 +69,8 @@ export async function runInitCommand(
       runtimeConfigCreated: result.runtimeConfigCreated,
       defaultWorkspaceConfigPath: result.defaultWorkspaceConfigPath,
       defaultWorkspaceConfigCreated: result.defaultWorkspaceConfigCreated,
+      userConfigPath: result.userConfigPath,
+      userConfigCreated: result.userConfigCreated,
     },
   );
   await ctx.auditLogger.command("init", {
@@ -63,6 +78,8 @@ export async function runInitCommand(
     runtimeConfigCreated: result.runtimeConfigCreated,
     defaultWorkspaceConfigPath: result.defaultWorkspaceConfigPath,
     defaultWorkspaceConfigCreated: result.defaultWorkspaceConfigCreated,
+    userConfigPath: result.userConfigPath,
+    userConfigCreated: result.userConfigCreated,
   });
 
   ctx.runtime.writeStdout(
@@ -77,6 +94,11 @@ export async function runInitCommand(
           ? "created default workspace config at"
           : "default workspace config already exists at"
       } ${result.defaultWorkspaceConfigPath}`,
+      `${
+        result.userConfigCreated
+          ? "created user config at"
+          : "user config already exists at"
+      } ${result.userConfigPath}`,
     ].join("\n") + "\n",
   );
 }

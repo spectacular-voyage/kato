@@ -56,7 +56,6 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
   "includeFrontmatterInMarkdownRecordings",
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
-  "defaultParticipantUsername",
   "includeSessionIds",
   "includeWorkspaceIds",
   "includeRecordingIds",
@@ -456,7 +455,6 @@ export function createDefaultWorkspaceMarkdownFrontmatterConfig(
     includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ?? false,
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ?? false,
-    defaultParticipantUsername: overrides.defaultParticipantUsername ?? "",
     includeSessionIds: overrides.includeSessionIds ?? true,
     includeWorkspaceIds: overrides.includeWorkspaceIds ?? true,
     includeRecordingIds: overrides.includeRecordingIds ?? true,
@@ -669,15 +667,6 @@ function parseWorkspaceMarkdownFrontmatter(
   for (const key of WORKSPACE_MARKDOWN_FRONTMATTER_KEYS) {
     const rawValue = value[key];
     if (rawValue === undefined) {
-      continue;
-    }
-    if (key === "defaultParticipantUsername") {
-      if (typeof rawValue !== "string") {
-        throw new Error(
-          `markdownFrontmatter.${key} must be a string: ${configPath}`,
-        );
-      }
-      overrides.defaultParticipantUsername = rawValue;
       continue;
     }
     if (typeof rawValue !== "boolean") {
@@ -894,7 +883,6 @@ export function createWorkspaceConfigScaffold(): string {
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",
     "  addParticipantUsernameToFrontmatter: false",
-    '  defaultParticipantUsername: ""',
     "  includeSessionIds: true",
     "  includeWorkspaceIds: true",
     "  includeRecordingIds: true",

@@ -21,7 +21,7 @@ import {
 } from "../utils/env.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
-const CONFIG_FILENAME = "kato-config.yaml";
+const CONFIG_FILENAME = "kato-daemon-config.yaml";
 const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
 const DEFAULT_EXPORT_TIMEZONE = "local";
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
@@ -38,7 +38,6 @@ const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
   "includeFrontmatterInMarkdownRecordings",
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
-  "defaultParticipantUsername",
   "includeSessionIds",
   "includeWorkspaceIds",
   "includeRecordingIds",
@@ -281,7 +280,6 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     includeFrontmatterInMarkdownRecordings: true,
     includeUpdatedInFrontmatter: false,
     addParticipantUsernameToFrontmatter: false,
-    defaultParticipantUsername: "",
     includeSessionIds: true,
     includeWorkspaceIds: true,
     includeRecordingIds: true,
@@ -300,8 +298,6 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ??
         defaults.addParticipantUsernameToFrontmatter,
-    defaultParticipantUsername: overrides.defaultParticipantUsername ??
-      defaults.defaultParticipantUsername,
     includeSessionIds: overrides.includeSessionIds ??
       defaults.includeSessionIds,
     includeWorkspaceIds: overrides.includeWorkspaceIds ??
@@ -376,12 +372,7 @@ function parseRuntimeMarkdownFrontmatterConfig(
     if (candidate === undefined) {
       continue;
     }
-    if (key === "defaultParticipantUsername") {
-      if (typeof candidate !== "string") {
-        return undefined;
-      }
-      resolved.defaultParticipantUsername = candidate;
-    } else if (key === "includeFrontmatterInMarkdownRecordings") {
+    if (key === "includeFrontmatterInMarkdownRecordings") {
       if (typeof candidate !== "boolean") {
         return undefined;
       }

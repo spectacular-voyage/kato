@@ -135,7 +135,7 @@ Rules:
 
 Default paths:
 
-- Global runtime config: `~/.kato/kato-config.yaml`
+- Global runtime config: `~/.kato/kato-daemon-config.yaml`
 - Default workspace template: `~/.kato/default-kato-workspace-config.yaml`
 - Workspace registry: `~/.kato/workspace-registry.json`
 - Status: `~/.kato/runtime/status.json`
@@ -146,14 +146,14 @@ Default paths:
 - Workspace-local config: `<workspace>/kato-workspace-config.yaml`
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
-`~/.kato/kato-config.yaml` is the daemon/global config plus plain CLI
+`~/.kato/kato-daemon-config.yaml` is the daemon/global config plus plain CLI
 non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml` is
 only the template used by `kato workspace init`. Workspace-local runtime output
 settings belong in `<workspace>/kato-workspace-config.yaml`.
 
 ## Runtime Config
 
-Default `~/.kato/kato-config.yaml` shape:
+Default `~/.kato/kato-daemon-config.yaml` shape:
 
 ```yaml
 schemaVersion: 1
@@ -179,7 +179,6 @@ exportMarkdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
-  defaultParticipantUsername: ""
   includeSessionIds: true
   includeWorkspaceIds: true
   includeRecordingIds: true
@@ -202,8 +201,9 @@ daemonMaxMemoryMb: 500
 Notes:
 
 - Runtime config is validated fail-closed at startup.
-- `kato init` creates both `~/.kato/kato-config.yaml` and
-  `~/.kato/default-kato-workspace-config.yaml`.
+- `kato init` creates both `~/.kato/kato-daemon-config.yaml` and
+  `~/.kato/default-kato-workspace-config.yaml`, plus
+  `~/.kato/kato-user-config.yaml`.
 - `providerSessionRoots` controls provider ingestion discovery roots and daemon
   read-scope narrowing.
 - `globalAutoGenerateSnapshots` controls default SessionTwin generation
@@ -213,9 +213,9 @@ Notes:
   provider (`claude`, `codex`, `gemini`).
 - `cleanSessionStatesOnShutdown=true` deletes persisted `*.twin.jsonl` files at
   daemon shutdown while retaining session metadata/index.
-- `exportTimezone` controls heading timestamp rendering for plain (non-workspace)
-  `kato export ...` output. Allowed values are `"local"`, `"UTC"`, or a valid
-  IANA timezone such as `"America/Los_Angeles"`.
+- `exportTimezone` controls heading timestamp rendering for plain
+  (non-workspace) `kato export ...` output. Allowed values are `"local"`,
+  `"UTC"`, or a valid IANA timezone such as `"America/Los_Angeles"`.
 - `exportMarkdownFrontmatter` and `exportFeatureFlags` apply only to plain
   `kato export ...` requests that are not scoped to a registered workspace.
 - `daemonFeatureFlags` currently controls:
@@ -224,10 +224,8 @@ Notes:
 - `exportMarkdownFrontmatter` controls plain CLI export markdown frontmatter:
   - `includeFrontmatterInMarkdownRecordings` (default `true`)
   - `includeUpdatedInFrontmatter` (default `false`)
-  - `addParticipantUsernameToFrontmatter` (default `false`)
-  - `defaultParticipantUsername` preferred username when username inclusion is
-    enabled. Fallback order is: `defaultParticipantUsername` ->
-    `USER`/`USERNAME` env vars -> home-directory basename.
+  - `addParticipantUsernameToFrontmatter` (default `false`) participant
+    usernames are resolved explicitly from `~/.kato/kato-user-config.yaml` only.
   - `includeSessionIds` to include `kato-sessionIds` (default `true`)
   - `includeWorkspaceIds` to include `kato-workspaceIds` (default `true`)
   - `includeRecordingIds` to include `kato-recordingIds` (default `true`)
@@ -244,6 +242,11 @@ Notes:
   - `writerItalicizeUserMessages`
 - Workspace runtime formatting lives only in workspace config
   (`markdownFrontmatter` and `workspaceFeatureFlags`).
+- User participant resolution is explicit-only (no env/OS fallback):
+  - if `excludeMeFromParticipantList=true`, user participant is omitted
+  - else use `workspaceUsernames[workspaceId]` when present
+  - else use `defaultUsername` when non-empty
+  - else user participant is omitted
 - Missing provider root keys in legacy configs are backfilled with defaults
   (including `gemini`).
 - Missing `logging` config in legacy files is backfilled to:
@@ -276,7 +279,6 @@ markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
-  defaultParticipantUsername: ""
   includeSessionIds: true
   includeWorkspaceIds: true
   includeRecordingIds: true
@@ -290,6 +292,16 @@ workspaceFeatureFlags:
   writerIncludeDecisionOptions: true
   writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
+```
+
+Default `~/.kato/kato-user-config.yaml`:
+
+```yaml
+schemaVersion: 1
+participants:
+  defaultUsername: ""
+  workspaceUsernames: {}
+  excludeMeFromParticipantList: true
 ```
 
 Supported `filenameTemplate` tokens:

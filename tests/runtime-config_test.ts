@@ -20,7 +20,7 @@ function makeSandboxRoot(): string {
 Deno.test("RuntimeConfigFileStore initializes missing config atomically", async () => {
   const root = makeSandboxRoot();
   const runtimeDir = join(root, "runtime");
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const defaultConfig = createDefaultRuntimeConfig({
     runtimeDir,
     statusPath: join(runtimeDir, "status.json"),
@@ -58,7 +58,7 @@ Deno.test("RuntimeConfigFileStore initializes missing config atomically", async 
 
 Deno.test("RuntimeConfigFileStore rejects unsupported schema", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const store = new RuntimeConfigFileStore(configPath);
 
   try {
@@ -105,7 +105,7 @@ Deno.test("RuntimeConfigFileStore rejects non-yaml config path", async () => {
 
 Deno.test("RuntimeConfigFileStore rejects invalid YAML", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const store = new RuntimeConfigFileStore(configPath);
 
   try {
@@ -123,7 +123,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid YAML", async () => {
 
 Deno.test("RuntimeConfigFileStore supports YAML comments", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -155,7 +155,7 @@ Deno.test("RuntimeConfigFileStore supports YAML comments", async () => {
 
 Deno.test("RuntimeConfigFileStore backfills default feature flags and provider roots for missing optional sections", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -199,7 +199,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
 
 Deno.test("RuntimeConfigFileStore rejects unknown exportMarkdownFrontmatter keys", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -217,7 +217,6 @@ Deno.test("RuntimeConfigFileStore rejects unknown exportMarkdownFrontmatter keys
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: false,
           addParticipantUsernameToFrontmatter: false,
-          defaultParticipantUsername: "",
           includeConversationEventKinds: false,
           extra: true,
         },
@@ -236,7 +235,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown exportMarkdownFrontmatter keys
 
 Deno.test("RuntimeConfigFileStore rejects invalid exportMarkdownFrontmatter value types", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -254,7 +253,6 @@ Deno.test("RuntimeConfigFileStore rejects invalid exportMarkdownFrontmatter valu
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: "false",
           addParticipantUsernameToFrontmatter: false,
-          defaultParticipantUsername: "",
           includeConversationEventKinds: false,
         },
       }),
@@ -272,7 +270,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid exportMarkdownFrontmatter valu
 
 Deno.test("RuntimeConfigFileStore accepts exportMarkdownFrontmatter overrides", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -290,7 +288,6 @@ Deno.test("RuntimeConfigFileStore accepts exportMarkdownFrontmatter overrides", 
           includeFrontmatterInMarkdownRecordings: false,
           includeUpdatedInFrontmatter: true,
           addParticipantUsernameToFrontmatter: true,
-          defaultParticipantUsername: "alice",
           includeSessionIds: false,
           includeWorkspaceIds: false,
           includeRecordingIds: true,
@@ -304,7 +301,6 @@ Deno.test("RuntimeConfigFileStore accepts exportMarkdownFrontmatter overrides", 
       includeFrontmatterInMarkdownRecordings: false,
       includeUpdatedInFrontmatter: true,
       addParticipantUsernameToFrontmatter: true,
-      defaultParticipantUsername: "alice",
       includeSessionIds: false,
       includeWorkspaceIds: false,
       includeRecordingIds: true,
@@ -317,7 +313,7 @@ Deno.test("RuntimeConfigFileStore accepts exportMarkdownFrontmatter overrides", 
 
 Deno.test("RuntimeConfigFileStore rejects unknown daemon feature flag keys", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -350,7 +346,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown daemon feature flag keys", asy
 
 Deno.test("RuntimeConfigFileStore rejects legacy top-level featureFlags", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -382,7 +378,7 @@ Deno.test("RuntimeConfigFileStore rejects legacy top-level featureFlags", async 
 
 Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -415,7 +411,7 @@ Deno.test("RuntimeConfigFileStore rejects unknown logging keys", async () => {
 
 Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -449,7 +445,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid providerSessionRoots", async (
 
 Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merges defaults", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
   const claudeOverride = join(root, "claude-only-root");
@@ -483,7 +479,7 @@ Deno.test("RuntimeConfigFileStore accepts partial providerSessionRoots and merge
 
 Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -516,7 +512,7 @@ Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => 
 
 Deno.test("RuntimeConfigFileStore accepts valid exportTimezone overrides", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -543,7 +539,7 @@ Deno.test("RuntimeConfigFileStore accepts valid exportTimezone overrides", async
 
 Deno.test("RuntimeConfigFileStore rejects invalid exportTimezone", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -573,7 +569,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid exportTimezone", async () => {
 
 Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -605,7 +601,7 @@ Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
 
 Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -631,7 +627,7 @@ Deno.test("RuntimeConfigFileStore defaults daemonMaxMemoryMb to 500", async () =
 
 Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -658,7 +654,7 @@ Deno.test("RuntimeConfigFileStore accepts valid daemonMaxMemoryMb", async () => 
 
 Deno.test("RuntimeConfigFileStore rejects invalid daemonMaxMemoryMb", async () => {
   const root = makeSandboxRoot();
-  const configPath = join(root, "kato-config.yaml");
+  const configPath = join(root, "kato-daemon-config.yaml");
   const runtimeDir = join(root, "runtime");
   const store = new RuntimeConfigFileStore(configPath);
 
@@ -755,9 +751,9 @@ Deno.test("createDefaultRuntimeConfig derives katoDir from runtimeDir", () => {
   assertEquals(config.katoDir, ".kato");
 });
 
-Deno.test("resolveDefaultConfigPath defaults to kato-config.yaml beside runtime dir", () => {
+Deno.test("resolveDefaultConfigPath defaults to kato-daemon-config.yaml beside runtime dir", () => {
   const resolved = resolveDefaultConfigPath(".kato/runtime");
-  assertEquals(resolved, ".kato/kato-config.yaml");
+  assertEquals(resolved, ".kato/kato-daemon-config.yaml");
 });
 
 Deno.test("createDefaultRuntimeConfig accepts explicit katoDir override", () => {

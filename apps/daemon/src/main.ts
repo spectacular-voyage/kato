@@ -3,13 +3,19 @@ import type {
   ExportFeatureFlags,
   MarkdownFrontmatterConfig,
   RuntimeConfig,
+  UserConfig,
 } from "@kato/shared";
-import { basename, dirname, join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { runDaemonCli } from "./cli/mod.ts";
 import {
+  createDefaultUserConfig,
   resolveDefaultConfigPath,
+  resolveDefaultUserConfigPath,
+  resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
+  UserConfigFileStore,
+  type UserConfigStoreLike,
 } from "./config/mod.ts";
 import {
   bootstrapOpenFeature,
@@ -34,7 +40,7 @@ import {
   StructuredLogger,
 } from "./observability/mod.ts";
 import { WritePathPolicyGate } from "./policy/mod.ts";
-import { readOptionalEnv, resolveHomeDir } from "./utils/env.ts";
+import { readOptionalEnv } from "./utils/env.ts";
 import { resolveExportsLogPath } from "./utils/exports_log.ts";
 import {
   createDefaultWorkspaceMarkdownFrontmatterConfig,
@@ -51,6 +57,7 @@ export interface RunDaemonSubprocessOptions {
   runtimeDir?: string;
   now?: () => Date;
   configStore?: RuntimeConfigStoreLike;
+  userConfigStore?: UserConfigStoreLike;
   runtimeLoop?: typeof runDaemonRuntimeLoop;
   writeStderr?: (text: string) => void;
 }
@@ -119,46 +126,38 @@ function resolveLogLevels(runtimeConfig: RuntimeConfig): {
   };
 }
 
-function normalizeFrontmatterParticipantUsername(
-  value: string | undefined,
-): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9._-]/g, "");
-  return normalized.length > 0 ? normalized : undefined;
-}
+async function loadUserConfigForRuntime(
+  explicitStore?: UserConfigStoreLike,
+): Promise<UserConfig> {
+  const store = explicitStore ??
+    (() => {
+      try {
+        return new UserConfigFileStore(resolveDefaultUserConfigPath());
+      } catch {
+        return undefined;
+      }
+    })();
 
-function resolveFrontmatterParticipantUsername(
-  markdownFrontmatter: MarkdownFrontmatterConfig,
-): string | undefined {
-  if (!markdownFrontmatter.addParticipantUsernameToFrontmatter) {
-    return undefined;
+  if (!store) {
+    return createDefaultUserConfig();
   }
-  const configured = normalizeFrontmatterParticipantUsername(
-    markdownFrontmatter.defaultParticipantUsername,
-  );
-  if (configured) {
-    return configured;
+
+  try {
+    return await store.load();
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return createDefaultUserConfig();
+    }
+    throw error;
   }
-  const envUser = normalizeFrontmatterParticipantUsername(
-    readOptionalEnv("USER") ?? readOptionalEnv("USERNAME"),
-  );
-  if (envUser) {
-    return envUser;
-  }
-  const home = resolveHomeDir();
-  return normalizeFrontmatterParticipantUsername(
-    home ? basename(home) : undefined,
-  );
 }
 
 function buildOutputOverrides(options: {
   markdownFrontmatter: MarkdownFrontmatterConfig;
   featureFlags: ExportFeatureFlags;
   includeSystemEvents: boolean;
+  userConfig: UserConfig;
+  workspaceId?: string;
   exportTimezone?: string;
 }): RecordingOutputOverrides {
   return {
@@ -172,7 +171,11 @@ function buildOutputOverrides(options: {
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
     participantUsername: resolveFrontmatterParticipantUsername(
-      options.markdownFrontmatter,
+      {
+        markdownFrontmatter: options.markdownFrontmatter,
+        userConfig: options.userConfig,
+        workspaceId: options.workspaceId,
+      },
     ),
     renderOptions: {
       includeCommentary: options.featureFlags.writerIncludeCommentary,
@@ -227,6 +230,27 @@ export async function runDaemonSubprocess(
     );
     writeStderr(
       `Daemon startup failed: unable to load runtime config at ${configPath}: ${errorMessage}\n`,
+    );
+    return 1;
+  }
+
+  let userConfig: UserConfig;
+  try {
+    userConfig = await loadUserConfigForRuntime(options.userConfigStore);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await logBestEffortStartupError(
+      runtimeConfig.runtimeDir,
+      now(),
+      "daemon.startup.user_config_load_failed",
+      "Daemon startup failed while loading user config",
+      {
+        error: errorMessage,
+        severity: "critical",
+      },
+    );
+    writeStderr(
+      `Daemon startup failed: unable to load user config: ${errorMessage}\n`,
     );
     return 1;
   }
@@ -329,7 +353,10 @@ export async function runDaemonSubprocess(
     includeConversationEventKindsInFrontmatter:
       workspaceFrontmatterDefaults.includeConversationEventKinds,
     frontmatterParticipantUsername: resolveFrontmatterParticipantUsername(
-      workspaceFrontmatterDefaults,
+      {
+        markdownFrontmatter: workspaceFrontmatterDefaults,
+        userConfig,
+      },
     ),
     defaultRenderOptions: {
       includeCommentary: workspaceWriterDefaults.writerIncludeCommentary,
@@ -384,8 +411,10 @@ export async function runDaemonSubprocess(
         markdownFrontmatter: runtimeConfig.exportMarkdownFrontmatter,
         featureFlags: runtimeConfig.exportFeatureFlags,
         includeSystemEvents: featureSettings.captureIncludeSystemEvents,
+        userConfig,
         exportTimezone: runtimeConfig.exportTimezone,
       }),
+      userConfig,
       workspaceRegistryStore: new WorkspaceRegistryFileStore(
         resolveDefaultWorkspaceRegistryPath(
           katoDir,

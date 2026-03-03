@@ -72,16 +72,23 @@ export {
 } from "./orchestrator/mod.ts";
 export type {
   EnsureRuntimeConfigResult,
+  EnsureUserConfigResult,
   RuntimeConfigStoreLike,
+  UserConfigStoreLike,
 } from "./config/mod.ts";
 export {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultUserConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
+  resolveDefaultUserConfigPath,
+  resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
+  UserConfigFileStore,
+  validateAndNormalizeParticipantUsername,
 } from "./config/mod.ts";
 export type {
   InChatControlCommand,

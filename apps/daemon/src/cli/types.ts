@@ -11,7 +11,8 @@ export type DaemonCliCommandName =
   | "workspace-list"
   | "workspace-unregister"
   | "export"
-  | "clean";
+  | "clean"
+  | "user";
 
 export type DaemonCliCommand =
   | { name: "init" }
@@ -35,6 +36,33 @@ export type DaemonCliCommand =
     dryRun: boolean;
     recordingsDays?: number;
     sessionsDays?: number;
+  }
+  | {
+    name: "user-init";
+  }
+  | {
+    name: "user-map-set";
+    selector: string;
+    username: string;
+  }
+  | {
+    name: "user-map-list";
+    asJson: boolean;
+  }
+  | {
+    name: "user-map-delete";
+    selector: string;
+  }
+  | {
+    name: "user-default-set";
+    username: string;
+  }
+  | {
+    name: "user-default-clear";
+  }
+  | {
+    name: "user-exclude-me";
+    value: boolean;
   };
 
 export type DaemonCliIntent =

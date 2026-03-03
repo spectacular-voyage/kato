@@ -6,7 +6,6 @@ markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: true
   addParticipantUsernameToFrontmatter: true
-  defaultParticipantUsername: "djradon"
   includeSessionIds: true
   includeWorkspaceIds: true
   includeRecordingIds: true

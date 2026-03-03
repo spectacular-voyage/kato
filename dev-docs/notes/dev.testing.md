@@ -16,15 +16,15 @@ packaging, prefer a compiled binary with explicitly scoped permissions.
 
 ## Filesystem Space for Tests
 
-`.test-tmp/` is the designated scratch directory for tests that need to touch the
-real filesystem (e.g. creating config files, writing outputs). It is listed in
-`.gitignore` so artifacts left behind do not pollute the repo or diff.
+`.test-tmp/` is the designated scratch directory for tests that need to touch
+the real filesystem (e.g. creating config files, writing outputs). It is listed
+in `.gitignore` so artifacts left behind do not pollute the repo or diff.
 
 Use it any time a test must write to an actual path instead of an in-memory
-store. Prefer `makeTestTempDir("my-test-prefix-")` from `tests/test_temp.ts`
-to get a unique subdirectory under `.test-tmp/` that can be removed in a
-`finally` block. If you hard-code a path (e.g. for tests that don't need
-isolation), use `.test-tmp/` as the parent so it stays out of `.kato/`.
+store. Prefer `makeTestTempDir("my-test-prefix-")` from `tests/test_temp.ts` to
+get a unique subdirectory under `.test-tmp/` that can be removed in a `finally`
+block. If you hard-code a path (e.g. for tests that don't need isolation), use
+`.test-tmp/` as the parent so it stays out of `.kato/`.
 
 ## Test Levels
 
@@ -72,19 +72,21 @@ Expected:
 - Output contains either:
   - `created runtime config at ...`, or
   - `runtime config already exists at ...`
-- `~/.kato/kato-config.yaml` exists.
+- `~/.kato/kato-daemon-config.yaml` exists.
+- `~/.kato/default-kato-workspace-config.yaml` exists.
+- `~/.kato/kato-user-config.yaml` exists.
 
 ### 2) Configure provider roots and seed fixture
 
 ```bash
-deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/kato-config.yaml`; const raw=await Deno.readTextFile(path); const cfg=parse(raw); if(typeof cfg!=="object" || cfg===null || Array.isArray(cfg)) throw new Error("invalid yaml config"); (cfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, `${stringify(cfg).trimEnd()}\n`);'
+deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/kato-daemon-config.yaml`; const raw=await Deno.readTextFile(path); const cfg=parse(raw); if(typeof cfg!=="object" || cfg===null || Array.isArray(cfg)) throw new Error("invalid yaml config"); (cfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, `${stringify(cfg).trimEnd()}\n`);'
 mkdir -p ~/.kato/test-provider/codex
 cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```
 
 Expected:
 
-- `~/.kato/kato-config.yaml` includes `providerSessionRoots`.
+- `~/.kato/kato-daemon-config.yaml` includes `providerSessionRoots`.
 - `~/.kato/test-provider/codex/smoke-codex.jsonl` exists.
 
 ### 3) Start daemon
@@ -171,7 +173,8 @@ Expected:
 
 ### 8) Fail-closed config check (unknown feature flag)
 
-1. Edit `~/.kato/kato-config.yaml` and add an unknown key under `featureFlags`, e.g.:
+1. Edit `~/.kato/kato-daemon-config.yaml` and add an unknown key under
+   `featureFlags`, e.g.:
    - `futureFlagThatDoesNotExist: true`
 2. Run:
 
@@ -201,8 +204,8 @@ Expected:
 1. `Runtime config not found ... Run kato init first`:
    - Run `deno run -A apps/daemon/src/main.ts init`.
 2. `Runtime config file has unsupported schema`:
-   - Inspect `~/.kato/kato-config.yaml` for invalid shape/unknown `featureFlags`
-     keys.
+   - Inspect `~/.kato/kato-daemon-config.yaml` for invalid shape/unknown
+     `featureFlags` keys.
 3. `Export path denied by policy`:
    - Use an output path within configured `allowedWriteRoots`.
 4. Status appears running right after failed start:

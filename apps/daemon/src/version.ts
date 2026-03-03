@@ -1,4 +1,4 @@
-import denoConfig from "../../../deno.json" with { type: "json" };
+import denoConfig from "../deno.json" with { type: "json" };
 
 function readVersion(config: unknown): string {
   if (

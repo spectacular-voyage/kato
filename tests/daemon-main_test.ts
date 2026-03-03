@@ -4,10 +4,12 @@ import type { RuntimeConfig } from "@kato/shared";
 import {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultUserConfig,
   DEFAULT_WORKSPACE_REGISTRY_FILENAME,
   runDaemonSubprocess,
   type RunDaemonSubprocessOptions,
   type RuntimeConfigStoreLike,
+  type UserConfigStoreLike,
 } from "../apps/daemon/src/mod.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
@@ -39,6 +41,60 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
   };
 }
 
+function makeUserConfigStore(
+  initial = createDefaultUserConfig(),
+): UserConfigStoreLike {
+  let state = {
+    schemaVersion: initial.schemaVersion,
+    participants: {
+      defaultUsername: initial.participants.defaultUsername,
+      workspaceUsernames: { ...initial.participants.workspaceUsernames },
+      excludeMeFromParticipantList:
+        initial.participants.excludeMeFromParticipantList,
+    },
+  };
+  return {
+    load() {
+      return Promise.resolve({
+        schemaVersion: state.schemaVersion,
+        participants: {
+          defaultUsername: state.participants.defaultUsername,
+          workspaceUsernames: { ...state.participants.workspaceUsernames },
+          excludeMeFromParticipantList:
+            state.participants.excludeMeFromParticipantList,
+        },
+      });
+    },
+    ensureInitialized() {
+      return Promise.resolve({
+        created: false,
+        path: ".test-tmp/kato-user-config.yaml",
+        config: {
+          schemaVersion: state.schemaVersion,
+          participants: {
+            defaultUsername: state.participants.defaultUsername,
+            workspaceUsernames: { ...state.participants.workspaceUsernames },
+            excludeMeFromParticipantList:
+              state.participants.excludeMeFromParticipantList,
+          },
+        },
+      });
+    },
+    save(config) {
+      state = {
+        schemaVersion: config.schemaVersion,
+        participants: {
+          defaultUsername: config.participants.defaultUsername,
+          workspaceUsernames: { ...config.participants.workspaceUsernames },
+          excludeMeFromParticipantList:
+            config.participants.excludeMeFromParticipantList,
+        },
+      };
+      return Promise.resolve();
+    },
+  };
+}
+
 Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded", async () => {
   const stderr: string[] = [];
   const runtimeDir = await makeTestTempDir("daemon-main-config-load-fail-");
@@ -55,6 +111,7 @@ Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded
     const options: RunDaemonSubprocessOptions = {
       runtimeDir,
       configStore,
+      userConfigStore: makeUserConfigStore(),
       writeStderr(text: string) {
         stderr.push(text);
       },
@@ -101,6 +158,7 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
 
   const exitCode = await runDaemonSubprocess({
     configStore,
+    userConfigStore: makeUserConfigStore(),
     writeStderr(text: string) {
       stderr.push(text);
     },
@@ -138,6 +196,7 @@ Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overri
   const captured: Array<string | undefined> = [];
   const exitCode = await runDaemonSubprocess({
     configStore,
+    userConfigStore: makeUserConfigStore(),
     runtimeLoop(options = {}) {
       captured.push(
         options.defaultCliExportOutputOverrides?.renderOptions
@@ -149,6 +208,74 @@ Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overri
 
   assertEquals(exitCode, 0);
   assertEquals(captured, ["UTC"]);
+});
+
+Deno.test("runDaemonSubprocess plain CLI export uses default user participant username", async () => {
+  const config = makeRuntimeConfig();
+  config.exportMarkdownFrontmatter.addParticipantUsernameToFrontmatter = true;
+  const configStore: RuntimeConfigStoreLike = {
+    load() {
+      return Promise.resolve(config);
+    },
+    ensureInitialized() {
+      throw new Error("not used");
+    },
+  };
+
+  const captured: Array<string | undefined> = [];
+  const exitCode = await runDaemonSubprocess({
+    configStore,
+    userConfigStore: makeUserConfigStore(
+      createDefaultUserConfig({
+        defaultUsername: "Default.User",
+        workspaceUsernames: {},
+        excludeMeFromParticipantList: false,
+      }),
+    ),
+    runtimeLoop(options = {}) {
+      captured.push(
+        options.defaultCliExportOutputOverrides?.participantUsername,
+      );
+      return Promise.resolve();
+    },
+  });
+
+  assertEquals(exitCode, 0);
+  assertEquals(captured, ["Default.User"]);
+});
+
+Deno.test("runDaemonSubprocess plain CLI export omits user participant when no explicit username exists", async () => {
+  const config = makeRuntimeConfig();
+  config.exportMarkdownFrontmatter.addParticipantUsernameToFrontmatter = true;
+  const configStore: RuntimeConfigStoreLike = {
+    load() {
+      return Promise.resolve(config);
+    },
+    ensureInitialized() {
+      throw new Error("not used");
+    },
+  };
+
+  const captured: Array<string | undefined> = [];
+  const exitCode = await runDaemonSubprocess({
+    configStore,
+    userConfigStore: makeUserConfigStore(
+      createDefaultUserConfig({
+        defaultUsername: "",
+        workspaceUsernames: {},
+        excludeMeFromParticipantList: false,
+      }),
+    ),
+    runtimeLoop(options = {}) {
+      captured.push(
+        options.defaultCliExportOutputOverrides?.participantUsername,
+      );
+      return Promise.resolve();
+    },
+  });
+
+  assertEquals(exitCode, 0);
+  assertEquals(captured, [undefined]);
 });
 
 Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log files", async () => {
@@ -167,6 +294,7 @@ Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log 
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       runtimeLoop(options = {}) {
         return Promise.all([
           options.operationalLogger?.info(
@@ -216,6 +344,7 @@ Deno.test("runDaemonSubprocess respects configured logger min levels", async () 
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       runtimeLoop(options = {}) {
         return Promise.all([
           options.operationalLogger?.info("test.info", "filtered"),
@@ -270,6 +399,7 @@ Deno.test("runDaemonSubprocess applies log-level env overrides", async () => {
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       runtimeLoop(options = {}) {
         return Promise.all([
           options.operationalLogger?.info("test.operational.info", "allowed"),
@@ -323,6 +453,7 @@ Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", 
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       writeStderr(text: string) {
         stderr.push(text);
       },
@@ -366,6 +497,7 @@ Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state p
     const observedMetadataPaths: string[] = [];
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       runtimeLoop(options = {}) {
         const store = options.sessionStateStore;
         if (!store) {
@@ -409,6 +541,7 @@ Deno.test("runDaemonSubprocess falls back to runtimeDir parent when runtimeConfi
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      userConfigStore: makeUserConfigStore(),
       runtimeLoop(options = {}) {
         if (!options.workspaceRegistryStore) {
           throw new Error("workspaceRegistryStore should be defined");
