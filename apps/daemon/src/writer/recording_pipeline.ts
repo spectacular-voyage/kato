@@ -28,6 +28,7 @@ export type RecordingRenderOptionOverrides = Pick<
   | "includeDecisionSelection"
   | "italicizeUserMessages"
   | "includeSystemEvents"
+  | "headingTimestampTimezone"
 >;
 
 export interface RecordingOutputOverrides {
@@ -379,15 +380,18 @@ export class RecordingPipeline implements RecordingPipelineLike {
     const writeResult = await this.writeEventsForExport(
       outputPath,
       input.events,
-      this.makeWriterOptions({
-        provider: input.provider,
-        sessionId: input.sessionId,
-        events: input.events,
-        title: input.title,
-        recordingCycleIds: input.recordingCycleIds,
-        workspaceIds: input.workspaceIds,
-        outputOverrides: input.outputOverrides,
-      }),
+      {
+        ...this.makeWriterOptions({
+          provider: input.provider,
+          sessionId: input.sessionId,
+          events: input.events,
+          title: input.title,
+          recordingCycleIds: input.recordingCycleIds,
+          workspaceIds: input.workspaceIds,
+          outputOverrides: input.outputOverrides,
+        }),
+        requireCreateNew: true,
+      },
       format,
     );
 
@@ -601,7 +605,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
       return await this.jsonlWriter.writeEvents(
         outputPath,
         events,
-        "append",
+        {
+          mode: "append",
+          requireCreateNew: writerOptions.requireCreateNew,
+        },
       );
     }
     return await this.writer.appendEvents(outputPath, events, writerOptions);

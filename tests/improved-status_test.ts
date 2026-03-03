@@ -7,7 +7,9 @@ import {
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import {
+  getStatusRecentErrorKey,
   isLiveExitKey,
+  isLiveFlushKey,
   renderStatusText,
   type StatusRecentError,
   type WorkspaceStatusSummary,
@@ -80,8 +82,16 @@ Deno.test("isLiveExitKey: q, Q, and Ctrl+C exit live mode", () => {
 });
 
 Deno.test("isLiveExitKey: non-exit keys do not exit live mode", () => {
+  assertEquals(isLiveExitKey(102), false);
   assertEquals(isLiveExitKey(10), false);
   assertEquals(isLiveExitKey(32), false);
+});
+
+Deno.test("isLiveFlushKey: f and F trigger live error flush", () => {
+  assertEquals(isLiveFlushKey(102), true);
+  assertEquals(isLiveFlushKey(70), true);
+  assertEquals(isLiveFlushKey(113), false);
+  assertEquals(isLiveFlushKey(3), false);
 });
 
 // ─── renderStatusText ─────────────────────────────────────────────────────────
@@ -132,6 +142,35 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
+
+Deno.test(
+  "renderStatusText: no recent errors renders only the section heading",
+  () => {
+    const sessions: DaemonSessionStatus[] = [{
+      provider: "claude",
+      sessionId: "recent-errors-empty",
+      snippet: "status",
+      updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      stale: false,
+      recordings: [{
+        workspaceAlias: "k",
+        outputPath: "/home/user/notes.md",
+        startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+        lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      }],
+    }];
+    const out = renderStatusText(makeSnapshot(sessions), {
+      showAll: false,
+      now: NOW,
+      stale: false,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "Recent Errors (0)");
+    assertEquals(out.includes("Recent Errors (0)\n\n"), false);
+    assertEquals(out.includes("Recent Errors (0)\n  (none)"), false);
+  },
+);
 
 Deno.test("renderStatusText: active session shown with bullet marker", () => {
   const sessions: DaemonSessionStatus[] = [{
@@ -249,6 +288,54 @@ Deno.test("renderStatusText: recent errors section renders warn/error records", 
   assertStringIncludes(out, "capture destination already exists");
 });
 
+Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "provider.ingestion.read_denied",
+    message: "permission denied",
+    source: "log",
+  }, {
+    timestamp: "2026-02-24T09:59:00.000Z",
+    level: "error",
+    channel: "security-audit",
+    event: "recording.command.failed",
+    message: "capture destination already exists",
+    source: "log",
+  }];
+  const suppressedRecentErrorKeys = new Set<string>([
+    getStatusRecentErrorKey(recentErrors[0]),
+  ]);
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    suppressedRecentErrorKeys,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "Recent Errors (1)");
+  assertEquals(out.includes("provider.ingestion.read_denied"), false);
+  assertStringIncludes(out, "ERROR audit recording.command.failed");
+});
+
+Deno.test("getStatusRecentErrorKey: workspace errors ignore timestamp", () => {
+  const first: StatusRecentError = {
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "workspace.config.invalid",
+    message: "Broken.Proj (ws-invalid): invalid workspace configuration",
+    source: "workspace",
+  };
+  const second: StatusRecentError = {
+    ...first,
+    timestamp: "2026-02-24T10:03:00.000Z",
+  };
+  assertEquals(getStatusRecentErrorKey(first), getStatusRecentErrorKey(second));
+});
+
 Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Errors", () => {
   const workspaceStatus: WorkspaceStatusSummary = {
     activeCount: 0,
@@ -276,6 +363,118 @@ Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Err
     "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
   );
 });
+
+Deno.test(
+  "renderStatusText: duplicate workspace/log recent errors are deduped",
+  () => {
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 1,
+      rows: [{
+        workspaceId: "ws-invalid",
+        alias: "Broken.Proj",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "Unsupported workspace config key 'featureFlags'",
+      }],
+    };
+    const recentErrors: StatusRecentError[] = [{
+      timestamp: "2026-02-24T09:59:30.000Z",
+      level: "error",
+      channel: "operational",
+      event: "workspace.config.invalid",
+      message:
+        "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+      source: "log",
+    }];
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      workspaceStatus,
+      recentErrors,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "Recent Errors (1)");
+    assertEquals(
+      out.split(
+        "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+      ).length - 1,
+      1,
+    );
+  },
+);
+
+Deno.test(
+  "renderStatusText: invalid workspace aliases in derived errors use a safe placeholder",
+  () => {
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 1,
+      rows: [{
+        workspaceId: "ws-invalid",
+        alias: " \u001b[31m\u0007\u001b[0m ",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "invalid workspace alias",
+      }],
+    };
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      workspaceStatus,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(
+      out,
+      "<redacted-alias> (ws-invalid): invalid workspace alias",
+    );
+    assertEquals(out.includes("\u001b["), false);
+  },
+);
+
+Deno.test(
+  "renderStatusText: keeps at least one log-backed recent error when derived errors are newer",
+  () => {
+    const recentErrors: StatusRecentError[] = [{
+      timestamp: "2026-02-24T09:59:30.000Z",
+      level: "error",
+      channel: "operational",
+      event: "provider.ingestion.read_denied",
+      message: "permission denied",
+    }];
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 12,
+      rows: Array.from({ length: 12 }, (_, index) => ({
+        workspaceId: `ws-invalid-${index + 1}`,
+        alias: `Broken-${index + 1}`,
+        workspaceRoot: `/workspaces/Broken-${index + 1}`,
+        configPath: `/workspaces/Broken-${
+          index + 1
+        }/kato-workspace-config.yaml`,
+        valid: false,
+        invalidReason: `invalid workspace ${index + 1}`,
+      })),
+    };
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      recentErrors,
+      workspaceStatus,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(
+      out,
+      "ERROR operational provider.ingestion.read_denied",
+    );
+    assertStringIncludes(out, "permission denied");
+  },
+);
 
 Deno.test("renderStatusText: missing lastEventAt omits last event segment", () => {
   const sessions: DaemonSessionStatus[] = [{

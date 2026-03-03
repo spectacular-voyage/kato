@@ -9,6 +9,11 @@ import {
   readWorkspaceConfigWorkspaceId,
 } from "../../workspace/mod.ts";
 import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
+import {
+  loadSuppressedRecentErrorKeys,
+  resolveStatusErrorCursorPath,
+  saveSuppressedRecentErrorKeys,
+} from "./status_error_cursor.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -17,6 +22,7 @@ const MIN_TERMINAL_WIDTH = 48;
 const TWO_COLUMN_MIN_WIDTH = 96;
 const COLUMN_GAP = 2;
 const MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH = 80;
+const REDACTED_WORKSPACE_ALIAS = "<redacted-alias>";
 const RECENT_ERRORS_LIMIT = 8;
 const RECENT_ERRORS_TAIL_BYTES = 2 * 1024 * 1024;
 const OPERATIONAL_LOG_FILENAME = "operational.jsonl";
@@ -24,6 +30,8 @@ const SECURITY_AUDIT_LOG_FILENAME = "security-audit.jsonl";
 const KEY_CTRL_C = 3;
 const KEY_LOWER_Q = 113;
 const KEY_UPPER_Q = 81;
+const KEY_LOWER_F = 102;
+const KEY_UPPER_F = 70;
 const ANSI_ESCAPE = String.fromCharCode(0x1b);
 const ANSI_OSC_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
@@ -56,6 +64,7 @@ export interface StatusRecentError {
   channel: "operational" | "security-audit";
   event: string;
   message: string;
+  source?: "log" | "workspace";
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -113,6 +122,10 @@ function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
   const normalized = sanitizeInlineText(withoutControl);
   if (normalized.length === 0) return undefined;
   return normalized.slice(0, MAX_WORKSPACE_ALIAS_DISPLAY_LENGTH);
+}
+
+function resolveDisplayWorkspaceAlias(alias: string | undefined): string {
+  return sanitizeWorkspaceAlias(alias) ?? REDACTED_WORKSPACE_ALIAS;
 }
 
 function truncate(text: string, width: number): string {
@@ -325,6 +338,7 @@ function parseStatusRecentError(
     message: typeof message === "string" && message.trim().length > 0
       ? sanitizeInlineText(message)
       : "no message",
+    source: "log",
   };
 }
 
@@ -396,6 +410,7 @@ function deriveWorkspaceStatusErrors(
       channel: "operational",
       event: "workspace.status.unavailable",
       message: sanitizeInlineText(workspaceStatus.unavailableReason),
+      source: "workspace",
     });
     return errors;
   }
@@ -407,7 +422,7 @@ function deriveWorkspaceStatusErrors(
     const reason = sanitizeInlineText(
       row.invalidReason ?? "invalid workspace configuration",
     );
-    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const alias = resolveDisplayWorkspaceAlias(row.alias);
     const reasonLower = reason.toLowerCase();
     const event = reasonLower.includes("permission denied")
       ? "workspace.config.permission_denied"
@@ -418,6 +433,7 @@ function deriveWorkspaceStatusErrors(
       channel: "operational",
       event,
       message: `${alias} (${row.workspaceId}): ${reason}`,
+      source: "workspace",
     });
   }
 
@@ -428,6 +444,92 @@ export function isLiveExitKey(keyByte: number): boolean {
   return keyByte === KEY_CTRL_C ||
     keyByte === KEY_LOWER_Q ||
     keyByte === KEY_UPPER_Q;
+}
+
+export function isLiveFlushKey(keyByte: number): boolean {
+  return keyByte === KEY_LOWER_F || keyByte === KEY_UPPER_F;
+}
+
+export function getStatusRecentErrorKey(error: StatusRecentError): string {
+  const event = sanitizeInlineText(error.event);
+  const message = sanitizeInlineText(error.message);
+  const base = `${error.level}|${error.channel}|${event}|${message}`;
+  if (error.source === "workspace") {
+    // Workspace-derived rows are synthetic "current state" errors, so keep
+    // the key stable across refreshes to suppress until the state changes.
+    return `workspace|${base}`;
+  }
+  return `log|${error.timestamp}|${base}`;
+}
+
+function getRecentErrorDedupeKey(error: StatusRecentError): string {
+  const event = sanitizeInlineText(error.event);
+  const message = sanitizeInlineText(error.message);
+  return `${error.level}|${error.channel}|${event}|${message}`;
+}
+
+function dedupeRecentErrors(errors: StatusRecentError[]): StatusRecentError[] {
+  const seen = new Set<string>();
+  const deduped: StatusRecentError[] = [];
+  for (const error of errors) {
+    const key = getRecentErrorDedupeKey(error);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(error);
+  }
+  return deduped;
+}
+
+function collectRecentErrors(
+  now: Date,
+  workspaceStatus: WorkspaceStatusSummary | undefined,
+  logRecentErrors: StatusRecentError[] | undefined,
+): StatusRecentError[] {
+  const sortedLogErrors = [...(logRecentErrors ?? [])]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const reservedLogSlots = Math.min(
+    sortedLogErrors.length,
+    Math.max(1, Math.floor(RECENT_ERRORS_LIMIT * 0.3)),
+  );
+  const reservedLogErrors = sortedLogErrors.slice(0, reservedLogSlots);
+  const remainingErrors = [
+    ...deriveWorkspaceStatusErrors(workspaceStatus, now),
+    ...sortedLogErrors.slice(reservedLogSlots),
+  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
+  return dedupeRecentErrors([...reservedLogErrors, ...remainingErrors])
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, RECENT_ERRORS_LIMIT);
+}
+
+function reconcileSuppressedRecentErrorKeys(
+  suppressedRecentErrorKeys: Set<string>,
+  currentRecentErrorKeys: ReadonlySet<string>,
+): boolean {
+  let changed = false;
+  for (const key of [...suppressedRecentErrorKeys]) {
+    if (currentRecentErrorKeys.has(key)) {
+      continue;
+    }
+    suppressedRecentErrorKeys.delete(key);
+    changed = true;
+  }
+  return changed;
+}
+
+async function persistSuppressedRecentErrorKeysBestEffort(
+  cursorPath: string,
+  suppressedRecentErrorKeys: ReadonlySet<string>,
+  now: Date,
+): Promise<void> {
+  try {
+    await saveSuppressedRecentErrorKeys(cursorPath, suppressedRecentErrorKeys, now);
+  } catch {
+    // Best-effort persistence: keep live output responsive even if cursor
+    // writes fail due to transient filesystem issues.
+  }
 }
 
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
@@ -646,7 +748,7 @@ function renderWorkspaceSection(
 
   for (const row of workspaceStatus.rows) {
     const marker = row.valid ? "●" : "○";
-    const alias = sanitizeWorkspaceAlias(row.alias) ?? row.alias;
+    const alias = resolveDisplayWorkspaceAlias(row.alias);
     const statusLabel = row.valid
       ? "valid"
       : `invalid: ${row.invalidReason ?? "unknown error"}`;
@@ -694,6 +796,7 @@ export function renderStatusText(
     workspaceStatus?: WorkspaceStatusSummary;
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
+    suppressedRecentErrorKeys?: ReadonlySet<string>;
   },
 ): string {
   const { showAll, now, stale } = opts;
@@ -701,11 +804,16 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
-  const recentErrors = [
-    ...(opts.recentErrors ?? []),
-    ...deriveWorkspaceStatusErrors(opts.workspaceStatus, now),
-  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, RECENT_ERRORS_LIMIT);
+  const recentErrors = collectRecentErrors(
+    now,
+    opts.workspaceStatus,
+    opts.recentErrors,
+  );
+  const visibleRecentErrors = opts.suppressedRecentErrorKeys
+    ? recentErrors.filter((error) =>
+      !opts.suppressedRecentErrorKeys?.has(getStatusRecentErrorKey(error))
+    )
+    : recentErrors;
 
   const daemonText = snapshot.daemonRunning
     ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
@@ -757,21 +865,18 @@ export function renderStatusText(
     lines.push(divider);
   }
 
-  lines.push(`Recent Errors (${recentErrors.length})`);
-  lines.push("");
-  if (recentErrors.length === 0) {
-    lines.push("  (none)");
-  } else {
-    for (const recentError of recentErrors) {
+  lines.push(`Recent Errors (${visibleRecentErrors.length})`);
+  if (visibleRecentErrors.length > 0) {
+    lines.push("");
+    for (const recentError of visibleRecentErrors) {
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
-      const detail =
-        `[${formatLocalTimestamp(recentError.timestamp)}] ${
-          recentError.level.toUpperCase()
-        } ${channel} ${sanitizeInlineText(recentError.event)} · ${
-          sanitizeInlineText(recentError.message)
-        }`;
+      const detail = `[${
+        formatLocalTimestamp(recentError.timestamp)
+      }] ${recentError.level.toUpperCase()} ${channel} ${
+        sanitizeInlineText(recentError.event)
+      } · ${sanitizeInlineText(recentError.message)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
     }
   }
@@ -822,6 +927,13 @@ async function runLiveMode(
   }
 
   let shouldExit = false;
+  let flushRecentErrorsRequested = false;
+  const statusErrorCursorPath = resolveStatusErrorCursorPath(
+    ctx.runtime.runtimeDir,
+  );
+  const suppressedRecentErrorKeys = await loadSuppressedRecentErrorKeys(
+    statusErrorCursorPath,
+  );
 
   const onSigint = () => {
     shouldExit = true;
@@ -839,6 +951,9 @@ async function runLiveMode(
       if (isLiveExitKey(stdinBuf[0])) {
         shouldExit = true;
         break;
+      }
+      if (isLiveFlushKey(stdinBuf[0])) {
+        flushRecentErrorsRequested = true;
       }
     }
   };
@@ -858,6 +973,32 @@ async function runLiveMode(
       ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
+      const currentRecentErrorKeys = new Set(
+        collectRecentErrors(now, workspaceStatus, recentErrors).map((error) =>
+          getStatusRecentErrorKey(error)
+        ),
+      );
+      let shouldPersistSuppressedKeys = false;
+      if (flushRecentErrorsRequested) {
+        suppressedRecentErrorKeys.clear();
+        for (const key of currentRecentErrorKeys) {
+          suppressedRecentErrorKeys.add(key);
+        }
+        flushRecentErrorsRequested = false;
+        shouldPersistSuppressedKeys = true;
+      } else if (suppressedRecentErrorKeys.size > 0) {
+        shouldPersistSuppressedKeys = reconcileSuppressedRecentErrorKeys(
+          suppressedRecentErrorKeys,
+          currentRecentErrorKeys,
+        );
+      }
+      if (shouldPersistSuppressedKeys) {
+        await persistSuppressedRecentErrorKeysBestEffort(
+          statusErrorCursorPath,
+          suppressedRecentErrorKeys,
+          now,
+        );
+      }
 
       const body = renderStatusText(snapshot, {
         showAll: true,
@@ -867,13 +1008,16 @@ async function runLiveMode(
         terminalWidth,
         workspaceStatus,
         recentErrors,
+        suppressedRecentErrorKeys,
       });
 
       // Clear screen and draw
       ctx.runtime.writeStdout("\x1B[2J\x1B[H");
       ctx.runtime.writeStdout(`${body}\n`);
       ctx.runtime.writeStdout(`\n${"─".repeat(terminalWidth)}\n`);
-      ctx.runtime.writeStdout("Press q or Ctrl+C to exit\n");
+      ctx.runtime.writeStdout(
+        "Press q or Ctrl+C to exit · press f to flush errors (persisted)\n",
+      );
 
       // Sleep with early exit check
       const start = Date.now();
@@ -908,11 +1052,39 @@ export async function runStatusCommand(
     await ctx.statusStore.load(),
     now,
   );
+  const statusErrorCursorPath = resolveStatusErrorCursorPath(
+    ctx.runtime.runtimeDir,
+  );
   const workspaceStatus = asJson
     ? undefined
     : await loadWorkspaceStatusSummary(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
+  const suppressedRecentErrorKeys = asJson
+    ? undefined
+    : await loadSuppressedRecentErrorKeys(statusErrorCursorPath);
+  if (
+    !asJson &&
+    suppressedRecentErrorKeys &&
+    suppressedRecentErrorKeys.size > 0
+  ) {
+    const currentRecentErrorKeys = new Set(
+      collectRecentErrors(now, workspaceStatus, recentErrors).map((error) =>
+        getStatusRecentErrorKey(error)
+      ),
+    );
+    const changed = reconcileSuppressedRecentErrorKeys(
+      suppressedRecentErrorKeys,
+      currentRecentErrorKeys,
+    );
+    if (changed) {
+      await persistSuppressedRecentErrorKeysBestEffort(
+        statusErrorCursorPath,
+        suppressedRecentErrorKeys,
+        now,
+      );
+    }
+  }
 
   await ctx.operationalLogger.info(
     "daemon.status",
@@ -948,6 +1120,7 @@ export async function runStatusCommand(
       workspaceStatus,
       showWorkspaceDetails: true,
       recentErrors,
+      suppressedRecentErrorKeys,
     }) + "\n",
   );
 }

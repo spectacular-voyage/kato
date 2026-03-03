@@ -738,12 +738,39 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(rendered, "# Assistant_2026-02-22_0200_00_Tool-search");
+    assertMatch(
+      rendered,
+      /^# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-search$/m,
+    );
     assertStringIncludes(rendered, "search internet for weather");
-    assertEquals(rendered.includes("\"q\": \"weather sf\""), false);
+    assertEquals(rendered.includes('"q": "weather sf"'), false);
     assertEquals(rendered.includes("result-content"), false);
   },
 );
+
+Deno.test("renderEventsToMarkdown respects headingTimestampTimezone", () => {
+  const assistant = makeEvent(
+    "assistant-heading-tz",
+    "message.assistant",
+    "Done.",
+    "2026-02-22T10:00:00.000Z",
+  );
+
+  const renderedUtc = renderEventsToMarkdown([assistant], {
+    includeFrontmatter: false,
+    headingTimestampTimezone: "UTC",
+  });
+  const renderedLosAngeles = renderEventsToMarkdown([assistant], {
+    includeFrontmatter: false,
+    headingTimestampTimezone: "America/Los_Angeles",
+  });
+
+  assertStringIncludes(renderedUtc, "# Assistant_2026-02-22_1000_00");
+  assertStringIncludes(
+    renderedLosAngeles,
+    "# Assistant_2026-02-22_0200_00",
+  );
+});
 
 Deno.test(
   "renderEventsToMarkdown uses latest assistant model for tool call headings",
@@ -770,7 +797,8 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-heading-model",
       name: "exec_command",
-      description: "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+      description:
+        "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
       source: {
         providerEventType: "tool_call",
         providerEventId: "tc-heading-model",
@@ -784,13 +812,136 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(
+    assertMatch(
       rendered,
-      "# gpt-5.3-codex_2026-03-02_0222_09_Tool-exec_command",
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
     );
     assertStringIncludes(
       rendered,
       "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown keeps latest model heading for tool calls when assistant events omit model",
+  () => {
+    const assistantWithModel: ConversationEvent = {
+      eventId: "assistant-tool-heading-with-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Preparing command.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-with-model",
+      },
+    } as unknown as ConversationEvent;
+    const assistantWithoutModel: ConversationEvent = {
+      eventId: "assistant-tool-heading-without-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:09.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "Continuing plan.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-tool-heading-without-model",
+      },
+    } as unknown as ConversationEvent;
+    const toolCall: ConversationEvent = {
+      eventId: "tc-heading-stable-model",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:10.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-stable-model",
+      name: "exec_command",
+      description: 'rg -n "Tool-exec_command" -S',
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-stable-model",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [assistantWithModel, assistantWithoutModel, toolCall],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: true,
+        includeToolResults: false,
+        includeThinking: false,
+      },
+    );
+
+    assertMatch(
+      rendered,
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
+    );
+    assertEquals(
+      /# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command/.test(
+        rendered,
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown infers tool call heading model when tool calls precede assistant messages",
+  () => {
+    const toolCallBeforeAssistant: ConversationEvent = {
+      eventId: "tc-heading-before-assistant",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:07.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-heading-before-assistant",
+      name: "exec_command",
+      description: "sed -n '1,120p' apps/daemon/src/writer/markdown_writer.ts",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tc-heading-before-assistant",
+      },
+    } as unknown as ConversationEvent;
+    const assistantWithModel: ConversationEvent = {
+      eventId: "assistant-heading-after-tool",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-03-02T10:22:08.000Z",
+      kind: "message.assistant",
+      role: "assistant",
+      model: "gpt-5.3-codex",
+      content: "Inspecting file now.",
+      source: {
+        providerEventType: "assistant",
+        providerEventId: "assistant-heading-after-tool",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [toolCallBeforeAssistant, assistantWithModel],
+      {
+        includeFrontmatter: false,
+        includeToolCalls: true,
+        includeToolResults: false,
+        includeThinking: false,
+      },
+    );
+
+    assertMatch(
+      rendered,
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
+    );
+    assertEquals(
+      /# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command/.test(
+        rendered,
+      ),
+      false,
     );
   },
 );
@@ -1086,11 +1237,12 @@ Deno.test(
 
     const rendered = renderEventsToMarkdown([questionnairePrompt], {
       includeFrontmatter: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-plan-mode-capture-round",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-plan-mode-capture-round",
     );
     assertStringIncludes(
       rendered,
@@ -1147,11 +1299,12 @@ Deno.test(
 
     const rendered = renderEventsToMarkdown([questionnaireDecision], {
       includeFrontmatter: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-line-policy",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-decision-line-policy",
     );
     assertStringIncludes(rendered, "## Prompt");
     assertStringIncludes(
@@ -1169,6 +1322,68 @@ Deno.test(
       "Show both (Recommended)",
     );
     assertEquals(rendered.includes("*Status: accepted"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown reuses questionnaire context across dash/underscore key variants",
+  () => {
+    const proposedDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-proposed-separator-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-proposed-separator-1",
+      decisionKey: "decision-line-policy",
+      summary: "Which output format should we use?",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-1"],
+      metadata: {
+        options: [{
+          label: "Markdown",
+          description: "Use markdown output.",
+        }],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-proposed-separator-1",
+      },
+    } as unknown as ConversationEvent;
+    const acceptedDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-accepted-separator-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:01:00.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-accepted-separator-1",
+      decisionKey: "decision_line_policy",
+      summary: "Markdown",
+      status: "accepted",
+      decidedBy: "user",
+      basisEventIds: ["tool-result-1"],
+      metadata: {
+        providerQuestionId: "decision_line_policy",
+      },
+      source: {
+        providerEventType:
+          "response_item.function_call_output.request_user_input",
+        providerEventId: "decision-questionnaire-accepted-separator-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown(
+      [proposedDecision, acceptedDecision],
+      { includeFrontmatter: false },
+    );
+
+    assertStringIncludes(rendered, "## Prompt");
+    assertStringIncludes(rendered, "Which output format should we use?");
+    assertStringIncludes(rendered, "## Options");
+    assertStringIncludes(rendered, "- Markdown: Use markdown output.");
+    assertStringIncludes(rendered, "## User Selection");
+    assertStringIncludes(rendered, "Markdown");
   },
 );
 
@@ -1204,11 +1419,12 @@ Deno.test(
       includeFrontmatter: false,
       includeDecisionPrompt: true,
       includeDecisionOptions: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-options-visibility",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-decision-options-visibility",
     );
     assertStringIncludes(rendered, "## Prompt");
     assertStringIncludes(rendered, "Which output format should we use?");

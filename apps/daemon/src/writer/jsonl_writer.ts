@@ -5,13 +5,36 @@ import type {
   MarkdownWriteResult,
 } from "./markdown_writer.ts";
 
+export interface JsonlWriteOptions {
+  mode: "overwrite" | "append";
+  requireCreateNew?: boolean;
+}
+
 export class JsonlConversationWriter {
+  private async assertOutputDoesNotExist(outputPath: string): Promise<void> {
+    try {
+      await Deno.stat(outputPath);
+      throw new Deno.errors.AlreadyExists(
+        `Capture destination already exists: ${outputPath}`,
+      );
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
+
   async writeEvents(
     outputPath: string,
     events: ConversationEvent[],
-    mode: "overwrite" | "append",
+    options: JsonlWriteOptions,
   ): Promise<MarkdownWriteResult> {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
+    const mode = options.mode;
+    const requireCreateNew = options.requireCreateNew === true;
+    if (requireCreateNew) {
+      await this.assertOutputDoesNotExist(outputPath);
+    }
 
     const lines = events.map((event) => JSON.stringify(event)).join("\n");
     const content = lines.length > 0 ? `${lines}\n` : "";
@@ -25,7 +48,11 @@ export class JsonlConversationWriter {
           deduped: false,
         };
       }
-      await Deno.writeTextFile(outputPath, content);
+      if (requireCreateNew) {
+        await Deno.writeTextFile(outputPath, content, { createNew: true });
+      } else {
+        await Deno.writeTextFile(outputPath, content);
+      }
       return {
         mode: "overwrite" as ConversationWriteMode,
         outputPath,
@@ -44,10 +71,17 @@ export class JsonlConversationWriter {
       };
     }
 
-    await Deno.writeTextFile(outputPath, content, {
-      append: true,
-      create: true,
-    });
+    if (requireCreateNew) {
+      await Deno.writeTextFile(outputPath, content, {
+        append: true,
+        createNew: true,
+      });
+    } else {
+      await Deno.writeTextFile(outputPath, content, {
+        append: true,
+        create: true,
+      });
+    }
 
     return {
       mode: "append" as ConversationWriteMode,

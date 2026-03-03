@@ -123,6 +123,34 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
   assertEquals(stderr.length, 0);
 });
 
+Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overrides", async () => {
+  const config = makeRuntimeConfig();
+  config.exportTimezone = "UTC";
+  const configStore: RuntimeConfigStoreLike = {
+    load() {
+      return Promise.resolve(config);
+    },
+    ensureInitialized() {
+      throw new Error("not used");
+    },
+  };
+
+  const captured: Array<string | undefined> = [];
+  const exitCode = await runDaemonSubprocess({
+    configStore,
+    runtimeLoop(options = {}) {
+      captured.push(
+        options.defaultCliExportOutputOverrides?.renderOptions
+          ?.headingTimestampTimezone,
+      );
+      return Promise.resolve();
+    },
+  });
+
+  assertEquals(exitCode, 0);
+  assertEquals(captured, ["UTC"]);
+});
+
 Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log files", async () => {
   const runtimeDir = await makeTestTempDir("daemon-main-logs-");
 

@@ -53,6 +53,7 @@ export interface RuntimeConfig {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
+  exportTimezone?: string;
   providerSessionRoots: ProviderSessionRoots;
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;

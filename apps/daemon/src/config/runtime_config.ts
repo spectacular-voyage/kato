@@ -23,6 +23,7 @@ import {
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "kato-config.yaml";
 const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
+const DEFAULT_EXPORT_TIMEZONE = "local";
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
   "debug",
   "info",
@@ -50,6 +51,7 @@ const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
   "statusPath",
   "controlPath",
   "allowedWriteRoots",
+  "exportTimezone",
   "providerSessionRoots",
   "globalAutoGenerateSnapshots",
   "providerAutoGenerateSnapshots",
@@ -221,6 +223,38 @@ function normalizeRuntimeLogLevel(
 ): RuntimeLogLevel | undefined {
   const normalized = value.trim().toLowerCase();
   return isRuntimeLogLevel(normalized) ? normalized : undefined;
+}
+
+function isValidIanaTimezone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function parseExportTimezone(value: unknown): string | undefined {
+  if (value === undefined) {
+    return DEFAULT_EXPORT_TIMEZONE;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed === DEFAULT_EXPORT_TIMEZONE || trimmed === "UTC") {
+    return trimmed;
+  }
+  if (!isValidIanaTimezone(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 export function createDefaultRuntimeLoggingConfig(
@@ -638,6 +672,10 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!providerAutoGenerateSnapshots) {
     return undefined;
   }
+  const exportTimezone = parseExportTimezone(value["exportTimezone"]);
+  if (!exportTimezone) {
+    return undefined;
+  }
   const globalAutoGenerateSnapshots = value["globalAutoGenerateSnapshots"] ===
       undefined
     ? false
@@ -669,6 +707,7 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     statusPath,
     controlPath,
     allowedWriteRoots: allowedWriteRoots.map((root) => expandHomePath(root)),
+    exportTimezone,
     providerSessionRoots,
     globalAutoGenerateSnapshots,
     providerAutoGenerateSnapshots,
@@ -699,6 +738,7 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     statusPath: config.statusPath,
     controlPath: config.controlPath,
     allowedWriteRoots: [...config.allowedWriteRoots],
+    exportTimezone: config.exportTimezone ?? DEFAULT_EXPORT_TIMEZONE,
     providerSessionRoots: cloneProviderSessionRoots(
       config.providerSessionRoots,
     ),
@@ -730,6 +770,7 @@ export function createDefaultRuntimeConfig(options: {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
+  exportTimezone?: string;
   providerSessionRoots?: Partial<ProviderSessionRoots>;
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
@@ -799,6 +840,12 @@ export function createDefaultRuntimeConfig(options: {
   ) {
     throw new Error("daemonMaxMemoryMb must be a positive integer");
   }
+  const resolvedExportTimezone = parseExportTimezone(options.exportTimezone);
+  if (!resolvedExportTimezone) {
+    throw new Error(
+      'exportTimezone must be "local", "UTC", or a valid IANA timezone',
+    );
+  }
 
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
@@ -809,6 +856,7 @@ export function createDefaultRuntimeConfig(options: {
     allowedWriteRoots: options.allowedWriteRoots.map((root) =>
       serializePath(root)
     ),
+    exportTimezone: resolvedExportTimezone,
     providerSessionRoots: {
       claude: providerSessionRoots.claude.map((root) => serializePath(root)),
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),

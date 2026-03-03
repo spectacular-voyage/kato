@@ -423,3 +423,22 @@ Deno.test("codex parser keeps non request_user_input tool events unchanged", asy
     assertStringIncludes(execToolResult.event.result, "ok");
   }
 });
+
+Deno.test("codex parser emits granular provider event types for tool calls and results", async () => {
+  const results = await collectEvents(
+    FIXTURE_REQUEST_USER_INPUT,
+    undefined,
+    { provider: "codex", sessionId: "sess-rui-001" },
+  );
+
+  const eventTypes = new Set(
+    results.map((result) => result.event.source.providerEventType),
+  );
+
+  assert(eventTypes.has("response_item.function_call.request_user_input"));
+  assert(eventTypes.has("response_item.function_call.exec_command"));
+  assert(
+    eventTypes.has("response_item.function_call_output.request_user_input"),
+  );
+  assert(eventTypes.has("response_item.function_call_output.exec_command"));
+});

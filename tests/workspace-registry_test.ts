@@ -273,7 +273,7 @@ Deno.test("loadWorkspaceConfigOverrides rejects legacy featureFlags", async () =
   });
 });
 
-Deno.test("loadWorkspaceConfigOverrides accepts local and IANA filenameTemplateTimezone values", async () => {
+Deno.test("loadWorkspaceConfigOverrides accepts local and IANA workspaceTimezone values", async () => {
   await withTestTempDir(
     "workspace-profile-timezone-valid-",
     async (tempDir) => {
@@ -289,40 +289,51 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA filenameTemplateT
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
-          'filenameTemplateTimezone: "local"',
+          'workspaceTimezone: "local"',
         ].join("\n") + "\n",
       );
       const localLoaded = await loadWorkspaceConfigOverrides(configPath);
-      assertEquals(localLoaded.filenameTemplateTimezone, "local");
+      assertEquals(localLoaded.workspaceTimezone, "local");
 
       await Deno.writeTextFile(
         configPath,
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
-          'filenameTemplateTimezone: "America/Los_Angeles"',
+          'workspaceTimezone: "UTC"',
+        ].join("\n") + "\n",
+      );
+      const utcLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(utcLoaded.workspaceTimezone, "UTC");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'workspaceTimezone: "America/Los_Angeles"',
         ].join("\n") + "\n",
       );
       const ianaLoaded = await loadWorkspaceConfigOverrides(configPath);
-      assertEquals(ianaLoaded.filenameTemplateTimezone, "America/Los_Angeles");
+      assertEquals(ianaLoaded.workspaceTimezone, "America/Los_Angeles");
 
       await Deno.writeTextFile(
         configPath,
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
-          'filenameTemplateTimezone: "US/Pacific"',
+          'workspaceTimezone: "US/Pacific"',
         ].join("\n") + "\n",
       );
       const aliasLoaded = await loadWorkspaceConfigOverrides(configPath);
-      assertEquals(aliasLoaded.filenameTemplateTimezone, "US/Pacific");
+      assertEquals(aliasLoaded.workspaceTimezone, "US/Pacific");
 
       await Deno.writeTextFile(
         configPath,
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "conv.{YYYY}.{YY}-{MM}-{DD}_{HH}{mm}-{provider}.md"',
-          'filenameTemplateTimezone: "America/Los_Angeles"',
+          'workspaceTimezone: "America/Los_Angeles"',
         ].join("\n") + "\n",
       );
       const componentsLoaded = await loadWorkspaceConfigOverrides(configPath);
@@ -334,7 +345,7 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA filenameTemplateT
   );
 });
 
-Deno.test("loadWorkspaceConfigOverrides rejects invalid filenameTemplateTimezone", async () => {
+Deno.test("loadWorkspaceConfigOverrides rejects invalid workspaceTimezone", async () => {
   await withTestTempDir(
     "workspace-profile-timezone-invalid-",
     async (tempDir) => {
@@ -349,20 +360,51 @@ Deno.test("loadWorkspaceConfigOverrides rejects invalid filenameTemplateTimezone
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
-          'filenameTemplateTimezone: "Mars/Olympus_Mons"',
+          'workspaceTimezone: "Mars/Olympus_Mons"',
         ].join("\n") + "\n",
       );
 
       await assertRejects(
         () => loadWorkspaceConfigOverrides(configPath),
         Error,
-        "filenameTemplateTimezone must be",
+        "workspaceTimezone must be",
       );
     },
   );
 });
 
-Deno.test("WorkspaceProfileResolver defaults filenameTemplateTimezone to local when missing", async () => {
+Deno.test(
+  "loadWorkspaceConfigOverrides rejects legacy filenameTemplateTimezone key",
+  async () => {
+    await withTestTempDir(
+      "workspace-profile-timezone-legacy-key-",
+      async (tempDir) => {
+        const workspaceRoot = join(tempDir, "Timezone.Legacy.Key");
+        const configPath = join(
+          workspaceRoot,
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        );
+        await Deno.mkdir(workspaceRoot, { recursive: true });
+        await Deno.writeTextFile(
+          configPath,
+          [
+            "defaultOutputDir: notes",
+            'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+            'filenameTemplateTimezone: "UTC"',
+          ].join("\n") + "\n",
+        );
+
+        await assertRejects(
+          () => loadWorkspaceConfigOverrides(configPath),
+          Error,
+          "Unsupported workspace config key 'filenameTemplateTimezone'",
+        );
+      },
+    );
+  },
+);
+
+Deno.test("WorkspaceProfileResolver defaults workspaceTimezone to local when missing", async () => {
   await withTestTempDir(
     "workspace-profile-timezone-default-",
     async (tempDir) => {
@@ -388,7 +430,7 @@ Deno.test("WorkspaceProfileResolver defaults filenameTemplateTimezone to local w
       });
       const resolver = new WorkspaceProfileResolver();
       const profile = await resolver.resolveForCommand(workspace);
-      assertEquals(profile.filenameTemplateTimezone, "local");
+      assertEquals(profile.workspaceTimezone, "local");
     },
   );
 });
@@ -433,17 +475,17 @@ Deno.test("loadWorkspaceConfigOverrides rejects removed and unknown filename tem
   );
 });
 
-Deno.test("DefaultWorkspaceConfigFileStore allowMissing keeps filenameTemplateTimezone-only templates", async () => {
+Deno.test("DefaultWorkspaceConfigFileStore allowMissing keeps workspaceTimezone-only templates", async () => {
   await withTestTempDir(
     "workspace-default-template-timezone-",
     async (tempDir) => {
       const configPath = join(tempDir, "default-kato-workspace-config.yaml");
-      await Deno.writeTextFile(configPath, 'filenameTemplateTimezone: "UTC"\n');
+      await Deno.writeTextFile(configPath, 'workspaceTimezone: "UTC"\n');
 
       const store = new DefaultWorkspaceConfigFileStore(configPath);
       const loaded = await store.load({ allowMissing: true });
       assertExists(loaded);
-      assertEquals(loaded.filenameTemplateTimezone, "UTC");
+      assertEquals(loaded.workspaceTimezone, "UTC");
     },
   );
 });

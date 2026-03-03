@@ -171,6 +171,7 @@ providerSessionRoots:
 globalAutoGenerateSnapshots: false
 providerAutoGenerateSnapshots: {}
 cleanSessionStatesOnShutdown: false
+exportTimezone: local
 daemonFeatureFlags:
   daemonExportEnabled: true
   captureIncludeSystemEvents: false
@@ -212,6 +213,9 @@ Notes:
   provider (`claude`, `codex`, `gemini`).
 - `cleanSessionStatesOnShutdown=true` deletes persisted `*.twin.jsonl` files at
   daemon shutdown while retaining session metadata/index.
+- `exportTimezone` controls heading timestamp rendering for plain (non-workspace)
+  `kato export ...` output. Allowed values are `"local"`, `"UTC"`, or a valid
+  IANA timezone such as `"America/Los_Angeles"`.
 - `exportMarkdownFrontmatter` and `exportFeatureFlags` apply only to plain
   `kato export ...` requests that are not scoped to a registered workspace.
 - `daemonFeatureFlags` currently controls:
@@ -267,7 +271,7 @@ except only the workspace-local file may include `workspaceId`:
 ```yaml
 defaultOutputDir: "."
 filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"
-filenameTemplateTimezone: "local"
+workspaceTimezone: "local"
 markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
@@ -293,17 +297,17 @@ Supported `filenameTemplate` tokens:
 - `{provider}`: provider slug (for example `codex`)
 - `{sessionId}`: full session id slug
 - `{sessionShortId}`: first 8 chars of session id (slugged)
-- `{YYYY}`: 4-digit year in `filenameTemplateTimezone`
-- `{YY}`: 2-digit year in `filenameTemplateTimezone`
-- `{MM}`: 2-digit month in `filenameTemplateTimezone`
-- `{DD}`: 2-digit day in `filenameTemplateTimezone`
-- `{HH}`: 24-hour clock hour in `filenameTemplateTimezone`
-- `{mm}`: 2-digit minute in `filenameTemplateTimezone`
-- `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `filenameTemplateTimezone`
+- `{YYYY}`: 4-digit year in `workspaceTimezone`
+- `{YY}`: 2-digit year in `workspaceTimezone`
+- `{MM}`: 2-digit month in `workspaceTimezone`
+- `{DD}`: 2-digit day in `workspaceTimezone`
+- `{HH}`: 24-hour clock hour in `workspaceTimezone`
+- `{mm}`: 2-digit minute in `workspaceTimezone`
+- `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `workspaceTimezone`
 - `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
   then command-time snippet extraction, then `conversation`)
 
-`filenameTemplateTimezone` accepts:
+`workspaceTimezone` accepts:
 
 - `"local"`: daemon process local timezone
 - `"UTC"`

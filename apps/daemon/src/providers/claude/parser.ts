@@ -304,7 +304,10 @@ export async function* parseClaudeEvents(
         if (answerPairs.length > 0) {
           let decisionIndex = 0;
           for (const [key, value] of answerPairs) {
-            const normalizedAnswerKey = normalizeDecisionKey(key, decisionIndex);
+            const normalizedAnswerKey = normalizeDecisionKey(
+              key,
+              decisionIndex,
+            );
             const questionEntry = questions.find((question) =>
               String(question["id"] ?? "") === key ||
               String(question["question"] ?? "") === key ||
@@ -319,10 +322,16 @@ export async function* parseClaudeEvents(
             const questionId = questionEntry
               ? String(questionEntry["id"] ?? "").trim()
               : "";
-            const providerQuestionId = questionId.length > 0 ? questionId : key;
             const questionHeader = questionEntry
-              ? String(questionEntry["header"] ?? "")
+              ? String(questionEntry["header"] ?? "").trim()
               : "";
+            const providerQuestionId = questionId.length > 0
+              ? questionId
+              : questionEntry
+              ? (questionText.trim().length > 0
+                ? questionText.trim()
+                : (questionHeader.length > 0 ? questionHeader : key))
+              : key;
             const options = questionEntry
               ? asQuestionList(questionEntry["options"]).map((option) => ({
                 label: String(option["label"] ?? ""),

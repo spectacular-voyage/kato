@@ -11,6 +11,17 @@ interface PendingRequestUserInputCall {
   questions: Array<Record<string, unknown>>;
 }
 
+function toProviderEventTypeSegment(value: string): string {
+  return value.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function withProviderEventSubtype(base: string, subtype: string): string {
+  const normalizedSubtype = toProviderEventTypeSegment(subtype);
+  return `${base}.${normalizedSubtype}`;
+}
+
 function stripIdePreamble(text: string): string {
   const marker = "## My request for Codex:\n";
   const idx = text.indexOf(marker);
@@ -200,6 +211,7 @@ export async function* parseCodexEvents(
     string,
     PendingRequestUserInputCall
   >();
+  const pendingToolCallNames = new Map<string, string>();
 
   function makeBase(
     kind: ConversationEvent["kind"],
@@ -421,6 +433,9 @@ export async function* parseCodexEvents(
               questions,
             });
           }
+          if (callId.length > 0) {
+            pendingToolCallNames.set(callId, name);
+          }
 
           if (lineEnd <= fromOffset) {
             break;
@@ -430,7 +445,7 @@ export async function* parseCodexEvents(
             makeEventId(sessionId, lineEnd, "tool.call");
           const base = makeBase(
             "tool.call",
-            "response_item.function_call",
+            withProviderEventSubtype("response_item.function_call", name),
             lineEnd,
           );
           yield {
@@ -503,8 +518,12 @@ export async function* parseCodexEvents(
           const pending = callId.length > 0
             ? pendingRequestUserInputCalls.get(callId)
             : undefined;
+          const pendingToolCallName = callId.length > 0
+            ? pendingToolCallNames.get(callId)
+            : undefined;
           if (callId.length > 0) {
             pendingRequestUserInputCalls.delete(callId);
+            pendingToolCallNames.delete(callId);
           }
           const parsedAnswers = extractRequestUserInputAnswers(output);
 
@@ -517,7 +536,12 @@ export async function* parseCodexEvents(
             : JSON.stringify(output);
           const base = makeBase(
             "tool.result",
-            "response_item.function_call_output",
+            pendingToolCallName
+              ? withProviderEventSubtype(
+                "response_item.function_call_output",
+                pendingToolCallName,
+              )
+              : "response_item.function_call_output",
             lineEnd,
           );
           yield {

@@ -42,7 +42,9 @@ export interface MarkdownRenderOptions {
   italicizeUserMessages?: boolean;
   includeSystemEvents?: boolean;
   truncateToolResults?: number;
+  requireCreateNew?: boolean;
   speakerNames?: MarkdownSpeakerNames;
+  headingTimestampTimezone?: string;
 }
 
 export interface ConversationWriterLike {
@@ -58,11 +60,17 @@ export interface ConversationWriterLike {
   ): Promise<MarkdownWriteResult>;
 }
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
+function readDatePart(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): string {
+  return parts.find((part) => part.type === type)?.value ?? "";
 }
 
-function formatHeadingTimestamp(timestamp: string | undefined): string {
+function formatHeadingTimestamp(
+  timestamp: string | undefined,
+  headingTimestampTimezone: string | undefined,
+): string {
   if (!timestamp) {
     return "unknown-time";
   }
@@ -70,19 +78,52 @@ function formatHeadingTimestamp(timestamp: string | undefined): string {
   if (Number.isNaN(date.getTime())) {
     return "unknown-time";
   }
+  const baseFormatterOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  } as const;
 
-  return [
-    date.getFullYear(),
-    "-",
-    pad2(date.getMonth() + 1),
-    "-",
-    pad2(date.getDate()),
-    "_",
-    pad2(date.getHours()),
-    pad2(date.getMinutes()),
-    "_",
-    pad2(date.getSeconds()),
-  ].join("");
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      ...baseFormatterOptions,
+      ...(headingTimestampTimezone &&
+          headingTimestampTimezone !== "local"
+        ? { timeZone: headingTimestampTimezone }
+        : {}),
+    });
+    parts = formatter.formatToParts(date);
+  } catch (error) {
+    if (!(error instanceof RangeError)) {
+      throw error;
+    }
+    parts = new Intl.DateTimeFormat("en-CA", baseFormatterOptions)
+      .formatToParts(date);
+  }
+
+  const year = readDatePart(parts, "year");
+  const month = readDatePart(parts, "month");
+  const day = readDatePart(parts, "day");
+  const hour = readDatePart(parts, "hour");
+  const minute = readDatePart(parts, "minute");
+  const second = readDatePart(parts, "second");
+  if (
+    year.length === 0 ||
+    month.length === 0 ||
+    day.length === 0 ||
+    hour.length === 0 ||
+    minute.length === 0 ||
+    second.length === 0
+  ) {
+    return "unknown-time";
+  }
+
+  return `${year}-${month}-${day}_${hour}${minute}_${second}`;
 }
 
 function formatModelName(model: string): string {
@@ -109,6 +150,22 @@ function resolveLastAssistantSpeaker(
   }
   if (lastAssistantSpeaker.trim().length > 0) {
     return lastAssistantSpeaker;
+  }
+  return speakerNames?.assistant ?? "Assistant";
+}
+
+function resolveInitialAssistantSpeaker(
+  events: ConversationEvent[],
+  speakerNames: MarkdownSpeakerNames | undefined,
+): string {
+  for (const event of events) {
+    if (event.kind !== "message.assistant") {
+      continue;
+    }
+    const normalizedModel = event.model?.trim();
+    if (normalizedModel && normalizedModel.length > 0) {
+      return formatModelName(normalizedModel);
+    }
   }
   return speakerNames?.assistant ?? "Assistant";
 }
@@ -172,7 +229,10 @@ function splitAcceptedDecisionSummary(
 
 function normalizeDecisionContextKey(value: string | undefined): string | null {
   if (!value) return null;
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  const normalized = value.trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -201,6 +261,7 @@ function isMessageEvent(event: ConversationEvent): event is MessageEvent {
 function formatMessageHeading(
   event: MessageEvent,
   speakerNames: MarkdownSpeakerNames | undefined,
+  headingTimestampTimezone: string | undefined,
 ): string {
   let speaker: string;
   if (event.kind === "message.user") {
@@ -211,7 +272,9 @@ function formatMessageHeading(
     const model = "model" in event ? event.model : undefined;
     speaker = resolveAssistantSpeaker(model, speakerNames);
   }
-  return `# ${speaker}_${formatHeadingTimestamp(event.timestamp)}`;
+  return `# ${speaker}_${
+    formatHeadingTimestamp(event.timestamp, headingTimestampTimezone)
+  }`;
 }
 
 function makeEventSignature(event: ConversationEvent): string {
@@ -279,7 +342,10 @@ export function renderEventsToMarkdown(
 
   let lastRole: string | undefined;
   let lastSignature: string | undefined;
-  let lastAssistantSpeaker = options.speakerNames?.assistant ?? "Assistant";
+  let lastAssistantSpeaker = resolveInitialAssistantSpeaker(
+    events,
+    options.speakerNames,
+  );
 
   // Pass 2: Render events in sequence.
   for (let i = 0; i < events.length; i++) {
@@ -352,7 +418,11 @@ export function renderEventsToMarkdown(
       const messageParts: string[] = [];
       if (includeHeading) {
         messageParts.push(
-          formatMessageHeading(event, options.speakerNames),
+          formatMessageHeading(
+            event,
+            options.speakerNames,
+            options.headingTimestampTimezone,
+          ),
           "",
         );
       }
@@ -362,7 +432,12 @@ export function renderEventsToMarkdown(
       if (!includeToolCalls) continue;
 
       const callParts: string[] = [
-        `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-${event.name}`,
+        `# ${lastAssistantSpeaker}_${
+          formatHeadingTimestamp(
+            event.timestamp,
+            options.headingTimestampTimezone,
+          )
+        }_Tool-${event.name}`,
       ];
       if (event.description?.trim().length) {
         callParts.push("", event.description);
@@ -429,12 +504,16 @@ export function renderEventsToMarkdown(
           ? splitAcceptedDecisionSummary(event.summary)
           : { prompt: event.summary.trim() };
         const contextKeys = new Set<string>();
-        const decisionKeyContext = normalizeDecisionContextKey(event.decisionKey);
+        const decisionKeyContext = normalizeDecisionContextKey(
+          event.decisionKey,
+        );
         if (decisionKeyContext) contextKeys.add(decisionKeyContext);
         const providerQuestionIdContext = normalizeDecisionContextKey(
           providerQuestionId,
         );
-        if (providerQuestionIdContext) contextKeys.add(providerQuestionIdContext);
+        if (providerQuestionIdContext) {
+          contextKeys.add(providerQuestionIdContext);
+        }
         const promptContext = normalizeDecisionContextKey(parsedSummary.prompt);
         if (promptContext) contextKeys.add(promptContext);
 
@@ -446,7 +525,9 @@ export function renderEventsToMarkdown(
           if (!storedPrompt && existing.prompt) {
             storedPrompt = existing.prompt;
           }
-          if (storedOptionLines.length === 0 && existing.optionLines.length > 0) {
+          if (
+            storedOptionLines.length === 0 && existing.optionLines.length > 0
+          ) {
             storedOptionLines = existing.optionLines;
           }
         }
@@ -472,10 +553,12 @@ export function renderEventsToMarkdown(
           }
         }
 
-        const decisionHeading =
-          `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-decision-${
-            resolveDecisionHeadingSegment(event.decisionKey)
-          }`;
+        const decisionHeading = `# ${lastAssistantSpeaker}_${
+          formatHeadingTimestamp(
+            event.timestamp,
+            options.headingTimestampTimezone,
+          )
+        }_Tool-decision-${resolveDecisionHeadingSegment(event.decisionKey)}`;
         const decisionParts = [decisionHeading];
         if (includeDecisionPrompt && prompt && prompt.length > 0) {
           decisionParts.push("", "## Prompt", "", prompt);
@@ -593,6 +676,31 @@ async function readExistingFile(
   }
 }
 
+async function writeTextFileCreateNew(
+  filePath: string,
+  content: string,
+): Promise<void> {
+  const file = await Deno.open(filePath, {
+    write: true,
+    createNew: true,
+  });
+  try {
+    const buffer = new TextEncoder().encode(content);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesWritten = await file.write(buffer.subarray(offset));
+      if (bytesWritten <= 0) {
+        throw new Error(
+          `Unable to write all bytes for ${filePath}; write() returned ${bytesWritten}`,
+        );
+      }
+      offset += bytesWritten;
+    }
+  } finally {
+    file.close();
+  }
+}
+
 export class MarkdownConversationWriter implements ConversationWriterLike {
   async appendEvents(
     outputPath: string,
@@ -601,7 +709,12 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
   ): Promise<MarkdownWriteResult> {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
 
-    const existing = await readExistingFile(outputPath);
+    let existing = await readExistingFile(outputPath);
+    if (options.requireCreateNew && existing.exists) {
+      throw new Deno.errors.AlreadyExists(
+        `Capture destination already exists: ${outputPath}`,
+      );
+    }
     const includeFrontmatter = options.includeFrontmatter !== false;
     if (!existing.exists) {
       const title = options.title ?? basename(outputPath, ".md");
@@ -611,13 +724,23 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         title,
       });
       const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
-      await Deno.writeTextFile(outputPath, content);
-      return {
-        mode: "create",
-        outputPath,
-        wrote: true,
-        deduped: false,
-      };
+      try {
+        await writeTextFileCreateNew(outputPath, content);
+        return {
+          mode: "create",
+          outputPath,
+          wrote: true,
+          deduped: false,
+        };
+      } catch (error) {
+        if (
+          !(error instanceof Deno.errors.AlreadyExists) ||
+          options.requireCreateNew
+        ) {
+          throw error;
+        }
+        existing = await readExistingFile(outputPath);
+      }
     }
 
     const existingFrontmatterView = splitExistingFrontmatter(existing.content);

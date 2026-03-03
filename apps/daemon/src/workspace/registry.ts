@@ -20,7 +20,7 @@ export const DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME =
 export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
   "{timestampHumane}-{snippetSlug}-{provider}.md";
-export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE = "local";
+export const DEFAULT_WORKSPACE_TIMEZONE = "local";
 
 const FILENAME_TEMPLATE_TOKEN_PATTERN = /\{([A-Za-z0-9]+)\}/g;
 const ALLOWED_FILENAME_TEMPLATE_TOKENS = new Set([
@@ -66,14 +66,14 @@ const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceId",
   "defaultOutputDir",
   "filenameTemplate",
-  "filenameTemplateTimezone",
+  "workspaceTimezone",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
 const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
   "defaultOutputDir",
   "filenameTemplate",
-  "filenameTemplateTimezone",
+  "workspaceTimezone",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
@@ -119,7 +119,7 @@ export interface WorkspaceCatalogLike {
 export interface WorkspaceConfigOverrides {
   defaultOutputDir?: string;
   filenameTemplate?: string;
-  filenameTemplateTimezone?: string;
+  workspaceTimezone?: string;
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -131,7 +131,7 @@ export interface ResolvedWorkspaceProfile {
   configPath: string;
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
-  filenameTemplateTimezone: string;
+  workspaceTimezone: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
@@ -403,7 +403,7 @@ function isValidIanaTimezone(timeZone: string): boolean {
   }
 }
 
-function parseFilenameTemplateTimezone(
+function parseWorkspaceTimezone(
   value: unknown,
   configPath: string,
 ): string | undefined {
@@ -413,18 +413,18 @@ function parseFilenameTemplateTimezone(
   const trimmed = trimOptionalString(value);
   if (!trimmed) {
     throw new Error(
-      `filenameTemplateTimezone must be a non-empty string: ${configPath}`,
+      `workspaceTimezone must be a non-empty string: ${configPath}`,
     );
   }
   if (
-    trimmed === DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE ||
+    trimmed === DEFAULT_WORKSPACE_TIMEZONE ||
     trimmed === "UTC"
   ) {
     return trimmed;
   }
   if (!isValidIanaTimezone(trimmed)) {
     throw new Error(
-      `filenameTemplateTimezone must be \"local\", \"UTC\", or a valid IANA timezone: ${configPath}`,
+      `workspaceTimezone must be \"local\", \"UTC\", or a valid IANA timezone: ${configPath}`,
     );
   }
   return trimmed;
@@ -615,8 +615,8 @@ async function loadWorkspaceConfigLikeOverrides(
     validateFilenameTemplateTokens(filenameTemplate, configPath);
   }
 
-  const filenameTemplateTimezone = parseFilenameTemplateTimezone(
-    parsed["filenameTemplateTimezone"],
+  const workspaceTimezone = parseWorkspaceTimezone(
+    parsed["workspaceTimezone"],
     configPath,
   );
 
@@ -634,7 +634,7 @@ async function loadWorkspaceConfigLikeOverrides(
       ? { defaultOutputDir: trimOptionalString(defaultOutputDirRaw) }
       : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
-    ...(filenameTemplateTimezone ? { filenameTemplateTimezone } : {}),
+    ...(workspaceTimezone ? { workspaceTimezone } : {}),
     ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
     writerFeatureFlags,
   };
@@ -766,8 +766,8 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       resolvedDefaultOutputDir,
       filenameTemplate: overrides.filenameTemplate ??
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
-      filenameTemplateTimezone: overrides.filenameTemplateTimezone ??
-        DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE,
+      workspaceTimezone: overrides.workspaceTimezone ??
+        DEFAULT_WORKSPACE_TIMEZONE,
       markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
       writerFeatureFlags: resolveWriterFeatureFlags(overrides),
     };
@@ -812,7 +812,7 @@ export class DefaultWorkspaceConfigFileStore {
       options.allowMissing &&
       loaded.defaultOutputDir === undefined &&
       loaded.filenameTemplate === undefined &&
-      loaded.filenameTemplateTimezone === undefined &&
+      loaded.workspaceTimezone === undefined &&
       loaded.markdownFrontmatter === undefined &&
       Object.keys(loaded.writerFeatureFlags).length === 0
     ) {
@@ -889,7 +889,7 @@ export function createWorkspaceConfigScaffold(): string {
   return [
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
-    `filenameTemplateTimezone: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE_TIMEZONE}"`,
+    `workspaceTimezone: "${DEFAULT_WORKSPACE_TIMEZONE}"`,
     "markdownFrontmatter:",
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",
