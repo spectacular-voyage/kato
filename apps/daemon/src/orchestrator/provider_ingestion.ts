@@ -130,7 +130,6 @@ interface MergeEventsOptions {
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
-const MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES = 16 * 1024 * 1024;
 const CODEX_COMPACTION_BACKTRACK_BYTES = 4 * 1024;
 type ProviderReadOperation = "stat" | "readDir" | "open";
 
@@ -813,7 +812,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly cursors = new Map<string, ProviderCursor>();
   private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
-  private readonly sourceSnippetBySessionId = new Map<string, string | null>();
   private nextDiscoveryAtMs = 0;
   private needsDiscovery = true;
   private started = false;
@@ -1013,41 +1011,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     return false;
   }
 
-  private async recoverFirstUserSnippetFromSource(
-    sessionId: string,
-    filePath: string,
-  ): Promise<string | undefined> {
-    try {
-      for await (
-        const { event } of this.parseEvents(
-          filePath,
-          0,
-          { provider: this.provider, sessionId },
-        )
-      ) {
-        if (event.kind !== "message.user") continue;
-        const snippet = extractSnippet([event]);
-        if (snippet) return snippet;
-      }
-      return undefined;
-    } catch (error) {
-      if (await this.handleReadDenied(error, "open", filePath)) {
-        return undefined;
-      }
-      await this.operationalLogger.warn(
-        "provider.ingestion.snippet.recover_failed",
-        "Failed to recover first-user snippet from source",
-        {
-          provider: this.provider,
-          sessionId,
-          filePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-      return undefined;
-    }
-  }
-
   private async discoverAndTrackSessions(): Promise<void> {
     let discovered: ProviderSessionFile[];
     try {
@@ -1087,7 +1050,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.sessionByFilePath.delete(current.filePath);
           this.cursors.delete(session.sessionId);
           this.cursorSourcePaths.delete(session.sessionId);
-          this.sourceSnippetBySessionId.delete(session.sessionId);
         }
         if (
           filePathChanged ||
@@ -1105,7 +1067,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.sessionByFilePath.delete(existing.filePath);
         this.cursors.delete(sessionId);
         this.cursorSourcePaths.delete(sessionId);
-        this.sourceSnippetBySessionId.delete(sessionId);
       }
     }
 
@@ -1614,32 +1575,22 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
-    const cachedSnippet = this.sourceSnippetBySessionId.get(sessionId);
-    let snippetOverride = cachedSnippet ?? undefined;
+    let snippetOverride = stateMetadata?.snippet;
     if (
-      cachedSnippet === undefined &&
-      fromOffset > 0
+      !snippetOverride && isNonEmptyString(currentSnapshot?.metadata.snippet)
     ) {
-      if ((fileStat.size ?? 0) > MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES) {
-        this.sourceSnippetBySessionId.set(sessionId, null);
-        await this.operationalLogger.debug(
-          "provider.ingestion.snippet.recover_skipped",
-          "Skipped first-user snippet recovery due to source file size",
-          {
-            provider: this.provider,
-            sessionId,
-            filePath: session.filePath,
-            fileSizeBytes: fileStat.size ?? 0,
-            maxFileSizeBytes: MAX_SNIPPET_RECOVERY_FILE_SIZE_BYTES,
-          },
-        );
-      } else {
-        snippetOverride = await this.recoverFirstUserSnippetFromSource(
-          sessionId,
-          session.filePath,
-        );
-        this.sourceSnippetBySessionId.set(sessionId, snippetOverride ?? null);
-      }
+      snippetOverride = currentSnapshot.metadata.snippet;
+    }
+    if (!snippetOverride && fromOffset === 0) {
+      snippetOverride = extractSnippet(incomingEvents);
+    }
+    let snippetChanged = Boolean(
+      stateMetadata &&
+        snippetOverride &&
+        stateMetadata.snippet !== snippetOverride,
+    );
+    if (snippetChanged && stateMetadata) {
+      stateMetadata.snippet = snippetOverride;
     }
 
     if (stateMetadata && this.sessionStateStore) {
@@ -1696,6 +1647,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             initialCursor: latestCursor,
           },
         );
+        if (
+          snippetOverride &&
+          stateMetadata.snippet !== snippetOverride
+        ) {
+          stateMetadata.snippet = snippetOverride;
+          snippetChanged = true;
+        }
       }
 
       let anchorChanged = false;
@@ -1736,7 +1694,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const sourceFileChanged =
         stateMetadata.sourceFilePath !== session.filePath;
       if (
-        cursorChanged || fileMtimeChanged || sourceFileChanged || anchorChanged
+        cursorChanged ||
+        fileMtimeChanged ||
+        sourceFileChanged ||
+        anchorChanged ||
+        snippetChanged
       ) {
         stateMetadata.ingestCursor = latestCursor;
         stateMetadata.lastObservedMtimeMs = fileModifiedAtMs;
@@ -1744,12 +1706,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         await this.sessionStateStore.saveSessionMetadata(stateMetadata);
       }
 
+      const snapshotSnippetMismatch = snippetOverride !== undefined &&
+        currentSnapshot?.metadata.snippet !== snippetOverride;
       const shouldHydrateSnapshot = appendedTwinCount > 0 ||
         !currentSnapshot ||
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
-        anchorChanged;
+        anchorChanged ||
+        snapshotSnippetMismatch;
 
       if (shouldHydrateSnapshot) {
         if (shouldAppendTwin) {

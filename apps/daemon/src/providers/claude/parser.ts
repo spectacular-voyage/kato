@@ -304,7 +304,10 @@ export async function* parseClaudeEvents(
         if (answerPairs.length > 0) {
           let decisionIndex = 0;
           for (const [key, value] of answerPairs) {
-            const normalizedAnswerKey = normalizeDecisionKey(key, decisionIndex);
+            const normalizedAnswerKey = normalizeDecisionKey(
+              key,
+              decisionIndex,
+            );
             const questionEntry = questions.find((question) =>
               String(question["id"] ?? "") === key ||
               String(question["question"] ?? "") === key ||

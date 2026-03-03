@@ -437,6 +437,8 @@ Deno.test("codex parser emits granular provider event types for tool calls and r
 
   assert(eventTypes.has("response_item.function_call.request_user_input"));
   assert(eventTypes.has("response_item.function_call.exec_command"));
-  assert(eventTypes.has("response_item.function_call_output.request_user_input"));
+  assert(
+    eventTypes.has("response_item.function_call_output.request_user_input"),
+  );
   assert(eventTypes.has("response_item.function_call_output.exec_command"));
 });

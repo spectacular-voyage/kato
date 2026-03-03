@@ -74,6 +74,7 @@ export interface SessionMetadataV1 {
   createdAt: string;
   updatedAt: string;
   sourceFilePath: string;
+  snippet?: string;
   lastObservedMtimeMs?: number;
   ingestCursor: ProviderCursor;
   ingestAnchor?: SessionIngestAnchorV1;
@@ -303,6 +304,12 @@ export function isSessionMetadataV1(
     !isNonEmptyString(value["updatedAt"]) ||
     !isNonEmptyString(value["sourceFilePath"]) ||
     !isNonEmptyString(value["twinPath"])
+  ) {
+    return false;
+  }
+  if (
+    value["snippet"] !== undefined &&
+    !isNonEmptyString(value["snippet"])
   ) {
     return false;
   }
