@@ -47,7 +47,8 @@ Supported commands:
 - `--version` / `-V`
   - Print the CLI version.
 - `init`
-  - Create missing daemon/shared/CLI/user config and default workspace template files.
+  - Create missing daemon/shared/CLI/user config and default workspace template
+    files.
 - `start`
   - Start daemon in detached background mode.
   - CLI returns success only after daemon heartbeat acknowledges startup.
@@ -72,6 +73,9 @@ Supported commands:
     `<dir>/kato-workspace-config.yaml`.
   - If `<dir>` is omitted, Kato searches nearest ancestors from the current
     working directory.
+  - Adds the workspace root to shared `allowedWriteRoots` when missing.
+  - Running daemon permissions remain startup-bound; restart to apply newly
+    added write roots.
 - `workspace list`
   - Show registered workspace aliases.
 - `workspace unregister <alias-or-id>`
@@ -87,10 +91,12 @@ Supported commands:
   - `--logs` flushes daemon runtime logs and export history.
   - `--all` is an alias for `--logs`.
   - `--sessions <days>` removes persisted session artifacts
-    (`~/.kato/shared/sessions/*.meta.json`, `*.twin.jsonl`) older than
-    `<days>`.
+    (`~/.kato/shared/sessions/*.meta.json`, `*.twin.jsonl`) older than `<days>`.
   - `--sessions` refuses to run while daemon status is actively running.
   - `--recordings` is currently an accepted placeholder.
+- `user <init|map|default|exclude-me>`
+  - Manage participant username settings in `~/.kato/kato-user-config.yaml`.
+  - `user map` manages workspace-specific username mappings.
 
 Usage help:
 
@@ -162,7 +168,8 @@ Default paths:
 - Shared config: `~/.kato/shared/kato-shared-config.yaml`
 - CLI config: `~/.kato/cli/kato-cli-config.yaml`
 - User config: `~/.kato/kato-user-config.yaml`
-- Default workspace template: `~/.kato/shared/default-kato-workspace-config.yaml`
+- Default workspace template:
+  `~/.kato/shared/default-kato-workspace-config.yaml`
 - Workspace registry: `~/.kato/shared/workspace-registry.json`
 - Status: `~/.kato/shared/status.json`
 - Control queue: `~/.kato/shared/ipc/daemon-control.json`
@@ -240,7 +247,8 @@ logging:
 Notes:
 
 - Config stores are validated fail-closed.
-- `kato init` creates daemon/shared/cli/user config files plus workspace template.
+- `kato init` creates daemon/shared/cli/user config files plus workspace
+  template.
 - `providerSessionRoots` controls ingestion discovery and daemon read-scope
   narrowing.
 - `allowedWriteRoots` now lives in shared config and gates user-requested output
@@ -293,6 +301,29 @@ participants:
   excludeMeFromParticipantList: true
 ```
 
+## User Workspace Mapping
+
+User-to-workspace username mapping is configured in
+`~/.kato/kato-user-config.yaml` (`participants.workspaceUsernames`) and managed
+by CLI commands:
+
+```bash
+deno run -A apps/cli/src/main.ts user init
+deno run -A apps/cli/src/main.ts user map set <workspace-alias-or-id> <username>
+deno run -A apps/cli/src/main.ts user map list
+deno run -A apps/cli/src/main.ts user map delete <workspace-alias-or-id>
+deno run -A apps/cli/src/main.ts user default set <username>
+deno run -A apps/cli/src/main.ts user default clear
+deno run -A apps/cli/src/main.ts user exclude-me <true|false>
+```
+
+Participant username precedence for frontmatter is:
+
+1. If `excludeMeFromParticipantList` is `true`, no username is emitted.
+2. If a workspace-specific mapping exists for the resolved `workspaceId`, use
+   that mapped username.
+3. Otherwise, use `defaultUsername` when non-empty.
+
 Supported `filenameTemplate` tokens:
 
 - `{provider}`: provider slug (for example `codex`)
@@ -323,8 +354,8 @@ Working now:
 - Detached daemon launcher and heartbeat/status snapshots
 - Provider ingestion for `claude`, `codex`, and `gemini` with persisted ingest
   cursors
-- Persistent SessionTwin state (`~/.kato/shared/sessions/*.twin.jsonl`) and per-session
-  metadata (`*.meta.json`)
+- Persistent SessionTwin state (`~/.kato/shared/sessions/*.twin.jsonl`) and
+  per-session metadata (`*.meta.json`)
 - Restart-safe session/recording state (including per-recording write cursors)
 - Provider-backed export pipeline (`markdown` default, `jsonl` optional)
 - Structured operational/audit logging via LogLayer adapter with JSONL parity

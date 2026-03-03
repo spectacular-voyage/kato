@@ -8,6 +8,7 @@ import { dirname } from "@std/path";
 import {
   type CliConfigStoreLike,
   createDefaultUserConfig,
+  expandHomePath,
   type RuntimeConfigStoreLike,
   type SharedBehaviorConfigStoreLike,
   type UserConfigStoreLike,
@@ -77,6 +78,9 @@ export async function ensureGlobalConfigInitialized(
 export async function runInitCommand(
   ctx: DaemonCliCommandContext,
 ): Promise<void> {
+  const resolvedKatoDir = expandHomePath(
+    ctx.runtimeConfig.katoDir ?? dirname(ctx.runtimeConfig.runtimeDir),
+  );
   const result = await ensureGlobalConfigInitialized({
     configStore: ctx.configStore,
     sharedConfigStore: ctx.sharedConfigStore,
@@ -85,7 +89,7 @@ export async function runInitCommand(
     defaultRuntimeConfig: ctx.defaultRuntimeConfig,
     defaultSharedConfig: ctx.defaultSharedConfig,
     defaultCliConfig: ctx.defaultCliConfig,
-    katoDir: ctx.runtimeConfig.katoDir ?? dirname(ctx.runtimeConfig.runtimeDir),
+    katoDir: resolvedKatoDir,
   });
 
   await ctx.operationalLogger.info(

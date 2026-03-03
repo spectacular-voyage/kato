@@ -54,6 +54,7 @@ export interface SharedBehaviorConfigStoreLike {
   ensureInitialized(
     defaultConfig: SharedBehaviorConfig,
   ): Promise<EnsureSharedBehaviorConfigResult>;
+  save(config: SharedBehaviorConfig): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -343,5 +344,14 @@ export class SharedBehaviorConfigFileStore
       config: clonedDefault,
       path: this.configPath,
     };
+  }
+
+  async save(config: SharedBehaviorConfig): Promise<void> {
+    if (!isYamlConfigPath(this.configPath)) {
+      throw new Error("Shared behavior config path must end with .yaml");
+    }
+    const cloned = cloneConfig(config);
+    const serialized = stringifyYaml(cloned).trimEnd() + "\n";
+    await writeTextAtomically(this.configPath, serialized);
   }
 }

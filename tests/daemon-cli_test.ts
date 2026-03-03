@@ -656,6 +656,14 @@ Deno.test("cli parser accepts user commands", () => {
   assertEquals(excludeMe.command.value, false);
 });
 
+Deno.test("cli parser treats top-level user help flags as help", () => {
+  const longHelp = parseDaemonCliArgs(["user", "--help"]);
+  assertEquals(longHelp, { kind: "help", topic: "user" });
+
+  const shortHelp = parseDaemonCliArgs(["user", "-h"]);
+  assertEquals(shortHelp, { kind: "help", topic: "user" });
+});
+
 Deno.test("runDaemonCli prints version without loading config", async () => {
   const harness = makeRuntimeHarness(".kato/test-runtime");
 
@@ -1344,7 +1352,20 @@ Deno.test(
       assertEquals(registerCode, 0);
       assertStringIncludes(
         registerHarness.stdout.join(""),
-        "warning: the running daemon may still deny writes for this workspace until `kato restart` expands allowedWriteRoots",
+        "updated shared config: added workspace root to allowedWriteRoots",
+      );
+      assertStringIncludes(
+        registerHarness.stdout.join(""),
+        "warning: the running daemon may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
+      );
+      const sharedConfigPath = join(
+        dirname(runtimeDir),
+        "shared",
+        "kato-shared-config.yaml",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(sharedConfigPath),
+        workspaceDir,
       );
     } finally {
       await removePathIfPresent(tempDir);
@@ -1675,13 +1696,19 @@ Deno.test("runDaemonCli user commands manage user participant settings", async (
   }
 });
 
-Deno.test("runDaemonCli user map set/delete fail for unknown workspace selectors", async () => {
+Deno.test("runDaemonCli user map set fails unknown selector while delete supports stale workspace ids", async () => {
   const tempDir = await makeTestTempDir("daemon-cli-user-unknown-workspace-");
   try {
     const runtimeDir = join(tempDir, "runtime");
     const katoDir = join(tempDir, ".kato");
     await Deno.mkdir(runtimeDir, { recursive: true });
     await Deno.mkdir(katoDir, { recursive: true });
+    const staleWorkspaceId = "missing-workspace";
+    const initialUserConfig = createDefaultUserConfig({
+      workspaceUsernames: {
+        [staleWorkspaceId]: "alice",
+      },
+    });
 
     const defaultRuntimeConfig: RuntimeConfig = {
       ...makeDefaultRuntimeConfig(runtimeDir),
@@ -1691,7 +1718,9 @@ Deno.test("runDaemonCli user map set/delete fail for unknown workspace selectors
     const { store: configStore } = makeInMemoryConfigStore(
       defaultRuntimeConfig,
     );
-    const { store: userConfigStore } = makeInMemoryUserConfigStore();
+    const { store: userConfigStore, snapshot } = makeInMemoryUserConfigStore(
+      initialUserConfig,
+    );
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
 
@@ -1712,7 +1741,7 @@ Deno.test("runDaemonCli user map set/delete fail for unknown workspace selectors
 
     const deleteHarness = makeRuntimeHarness(runtimeDir);
     const deleteCode = await runDaemonCli(
-      ["user", "map", "delete", "missing-workspace"],
+      ["user", "map", "delete", staleWorkspaceId],
       {
         runtime: deleteHarness.runtime,
         defaultRuntimeConfig,
@@ -1722,8 +1751,36 @@ Deno.test("runDaemonCli user map set/delete fail for unknown workspace selectors
         controlStore: controlStore.store,
       },
     );
-    assertEquals(deleteCode, 1);
-    assertStringIncludes(deleteHarness.stderr.join(""), "Workspace not found");
+    assertEquals(deleteCode, 0);
+    assertStringIncludes(
+      deleteHarness.stdout.join(""),
+      `user mapping deleted: ${staleWorkspaceId} (${staleWorkspaceId})`,
+    );
+    assertEquals(
+      Object.hasOwn(
+        snapshot().participants.workspaceUsernames,
+        staleWorkspaceId,
+      ),
+      false,
+    );
+
+    const missingDeleteHarness = makeRuntimeHarness(runtimeDir);
+    const missingDeleteCode = await runDaemonCli(
+      ["user", "map", "delete", staleWorkspaceId],
+      {
+        runtime: missingDeleteHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      },
+    );
+    assertEquals(missingDeleteCode, 0);
+    assertStringIncludes(
+      missingDeleteHarness.stdout.join(""),
+      `user mapping already absent: ${staleWorkspaceId} (${staleWorkspaceId})`,
+    );
   } finally {
     await removePathIfPresent(tempDir);
   }

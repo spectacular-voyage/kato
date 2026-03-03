@@ -481,10 +481,16 @@ function parseUserInit(rest: string[]): DaemonCliIntent {
 
 function parseUser(rest: string[]): DaemonCliIntent {
   const [subcommand, ...subRest] = rest;
+  const usage = "Usage: kato user <init|map|default|exclude-me> [options]";
   if (!subcommand) {
-    throw new CliUsageError(
-      "Usage: kato user <init|map|default|exclude-me> [options]",
-    );
+    throw new CliUsageError(usage);
+  }
+
+  if (subcommand === "--help" || subcommand === "-h") {
+    if (subRest.length > 0) {
+      throw new CliUsageError(usage);
+    }
+    return { kind: "help", topic: "user" };
   }
 
   if (subcommand === "init") {

@@ -76,6 +76,11 @@ async function resolveWorkspaceBySelector(
   };
 }
 
+function isWorkspaceSelectorNotFoundError(error: unknown): boolean {
+  return error instanceof Error &&
+    error.message.startsWith("Workspace not found:");
+}
+
 function buildUserMapListEntries(
   config: UserConfig,
   workspaceAliasesById: Map<string, string>,
@@ -195,14 +200,26 @@ export async function runUserMapDeleteCommand(
   ctx: DaemonCliCommandContext,
   selector: string,
 ): Promise<void> {
-  const workspace = await resolveWorkspaceBySelector(ctx, selector);
+  const trimmedSelector = resolveSelector(selector);
+  let workspaceId = trimmedSelector;
+  let workspaceAlias = trimmedSelector;
+  try {
+    const workspace = await resolveWorkspaceBySelector(ctx, trimmedSelector);
+    workspaceId = workspace.workspaceId;
+    workspaceAlias = workspace.alias;
+  } catch (error) {
+    if (!isWorkspaceSelectorNotFoundError(error)) {
+      throw error;
+    }
+  }
+
   const { config } = await loadInitializedUserConfig(ctx);
   const nextConfig = cloneUserConfig(config);
   const deleted = Object.hasOwn(
     nextConfig.participants.workspaceUsernames,
-    workspace.workspaceId,
+    workspaceId,
   );
-  delete nextConfig.participants.workspaceUsernames[workspace.workspaceId];
+  delete nextConfig.participants.workspaceUsernames[workspaceId];
   await ctx.resolveUserConfigStore().save(nextConfig);
 
   await ctx.operationalLogger.info(
@@ -211,21 +228,21 @@ export async function runUserMapDeleteCommand(
       ? "Deleted user workspace username mapping"
       : "User workspace username mapping already absent",
     {
-      workspaceId: workspace.workspaceId,
-      workspaceAlias: workspace.alias,
+      workspaceId,
+      workspaceAlias,
       deleted,
     },
   );
   await ctx.auditLogger.command("user-map-delete", {
-    workspaceId: workspace.workspaceId,
-    workspaceAlias: workspace.alias,
+    workspaceId,
+    workspaceAlias,
     deleted,
   });
 
   ctx.runtime.writeStdout(
     `${
       deleted ? "user mapping deleted" : "user mapping already absent"
-    }: ${workspace.alias} (${workspace.workspaceId})\n`,
+    }: ${workspaceAlias} (${workspaceId})\n`,
   );
 }
 

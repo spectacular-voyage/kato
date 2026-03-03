@@ -79,7 +79,7 @@ function makeSharedConfig(
 function makeSharedConfigStore(
   initial: SharedBehaviorConfig = makeSharedConfig(),
 ): RunDaemonSubprocessOptions["sharedConfigStore"] {
-  const state = cloneSharedConfig(initial);
+  let state = cloneSharedConfig(initial);
   return {
     load() {
       return Promise.resolve(cloneSharedConfig(state));
@@ -90,6 +90,10 @@ function makeSharedConfigStore(
         path: ".test-tmp/kato-shared-config.yaml",
         config: cloneSharedConfig(state),
       });
+    },
+    save(config) {
+      state = cloneSharedConfig(config);
+      return Promise.resolve();
     },
   };
 }

@@ -20,6 +20,15 @@ function readWorkspaceUsername(
   userConfig: UserConfig,
   workspaceId: string,
 ): string | undefined {
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      userConfig.participants.workspaceUsernames,
+      workspaceId,
+    )
+  ) {
+    return undefined;
+  }
+
   const mapped = userConfig.participants.workspaceUsernames[workspaceId];
   if (mapped === undefined) {
     return undefined;

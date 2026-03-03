@@ -38,6 +38,20 @@ function isYamlConfigPath(path: string): boolean {
   return path.trim().toLowerCase().endsWith(".yaml");
 }
 
+function createUserConfigSchemaError(
+  subject: "User config file" | "User config",
+  detail: string,
+): Error {
+  return new Error(
+    `${subject} has unsupported schema. ${detail} ` +
+      "Expected UserConfig with schemaVersion: 1 and participants: UserParticipantsConfig. " +
+      "UserParticipantsConfig requires defaultUsername (string), workspaceUsernames (Record<string, string>), " +
+      "and excludeMeFromParticipantList (boolean). " +
+      "Migration guidance: unknown keys or a missing schemaVersion require migrating to this shape " +
+      "(or reinitialize with `kato user init`).",
+  );
+}
+
 function countCodePoints(value: string): number {
   return Array.from(value).length;
 }
@@ -82,27 +96,38 @@ export function validateAndNormalizeParticipantUsername(
   return trimmed;
 }
 
-function parseParticipants(value: unknown): UserParticipantsConfig | undefined {
+function parseParticipants(value: unknown): UserParticipantsConfig {
   if (!isRecord(value)) {
-    return undefined;
+    throw new Error(
+      "UserConfig.participants must be an object matching UserParticipantsConfig",
+    );
   }
 
-  for (const key of Object.keys(value)) {
-    if (!USER_PARTICIPANTS_KEYS.includes(key as UserParticipantsKey)) {
-      return undefined;
-    }
+  const unknownParticipantKeys = Object.keys(value).filter((key) =>
+    !USER_PARTICIPANTS_KEYS.includes(key as UserParticipantsKey)
+  );
+  if (unknownParticipantKeys.length > 0) {
+    throw new Error(
+      `Unknown UserParticipantsConfig keys: ${unknownParticipantKeys.join(", ")}`,
+    );
   }
 
   const defaultUsernameRaw = value["defaultUsername"];
   const workspaceUsernamesRaw = value["workspaceUsernames"];
   const excludeMeRaw = value["excludeMeFromParticipantList"];
 
-  if (
-    typeof defaultUsernameRaw !== "string" ||
-    !isRecord(workspaceUsernamesRaw) ||
-    typeof excludeMeRaw !== "boolean"
-  ) {
-    return undefined;
+  if (typeof defaultUsernameRaw !== "string") {
+    throw new Error("UserParticipantsConfig.defaultUsername must be a string");
+  }
+  if (!isRecord(workspaceUsernamesRaw)) {
+    throw new Error(
+      "UserParticipantsConfig.workspaceUsernames must be an object map",
+    );
+  }
+  if (typeof excludeMeRaw !== "boolean") {
+    throw new Error(
+      "UserParticipantsConfig.excludeMeFromParticipantList must be a boolean",
+    );
   }
 
   const workspaceUsernames: Record<string, string> = {};
@@ -110,32 +135,27 @@ function parseParticipants(value: unknown): UserParticipantsConfig | undefined {
     const [workspaceIdRaw, usernameRaw] of Object.entries(workspaceUsernamesRaw)
   ) {
     if (typeof usernameRaw !== "string") {
-      return undefined;
+      throw new Error(
+        `UserParticipantsConfig.workspaceUsernames[${workspaceIdRaw}] must be a string`,
+      );
     }
     const workspaceId = workspaceIdRaw.trim();
     if (workspaceId.length === 0) {
-      return undefined;
-    }
-    try {
-      workspaceUsernames[workspaceId] = validateAndNormalizeParticipantUsername(
-        usernameRaw,
-        `participants.workspaceUsernames[${workspaceId}]`,
+      throw new Error(
+        "UserParticipantsConfig.workspaceUsernames keys must be non-empty strings",
       );
-    } catch {
-      return undefined;
     }
+    workspaceUsernames[workspaceId] = validateAndNormalizeParticipantUsername(
+      usernameRaw,
+      `participants.workspaceUsernames[${workspaceId}]`,
+    );
   }
 
-  let defaultUsername = "";
-  try {
-    defaultUsername = validateAndNormalizeParticipantUsername(
-      defaultUsernameRaw,
-      "participants.defaultUsername",
-      { allowEmpty: true },
-    );
-  } catch {
-    return undefined;
-  }
+  const defaultUsername = validateAndNormalizeParticipantUsername(
+    defaultUsernameRaw,
+    "participants.defaultUsername",
+    { allowEmpty: true },
+  );
 
   return {
     defaultUsername,
@@ -144,30 +164,43 @@ function parseParticipants(value: unknown): UserParticipantsConfig | undefined {
   };
 }
 
-function parseUserConfig(value: unknown): UserConfig | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  for (const key of Object.keys(value)) {
-    if (!USER_CONFIG_KEYS.includes(key as UserConfigKey)) {
-      return undefined;
+function parseUserConfig(
+  value: unknown,
+  subject: "User config file" | "User config" = "User config file",
+): UserConfig {
+  try {
+    if (!isRecord(value)) {
+      throw new Error("Expected a top-level object for UserConfig");
     }
-  }
 
-  if (value["schemaVersion"] !== USER_CONFIG_SCHEMA_VERSION) {
-    return undefined;
-  }
+    const unknownConfigKeys = Object.keys(value).filter((key) =>
+      !USER_CONFIG_KEYS.includes(key as UserConfigKey)
+    );
+    if (unknownConfigKeys.length > 0) {
+      throw new Error(`Unknown UserConfig keys: ${unknownConfigKeys.join(", ")}`);
+    }
 
-  const participants = parseParticipants(value["participants"]);
-  if (!participants) {
-    return undefined;
-  }
+    const schemaVersion = value["schemaVersion"];
+    if (schemaVersion !== USER_CONFIG_SCHEMA_VERSION) {
+      if (schemaVersion === undefined) {
+        throw new Error("Missing required UserConfig.schemaVersion");
+      }
+      throw new Error(
+        `Unsupported UserConfig.schemaVersion: ${String(schemaVersion)}`,
+      );
+    }
 
-  return {
-    schemaVersion: USER_CONFIG_SCHEMA_VERSION,
-    participants,
-  };
+    const participants = parseParticipants(value["participants"]);
+    return {
+      schemaVersion: USER_CONFIG_SCHEMA_VERSION,
+      participants,
+    };
+  } catch (error) {
+    const detail = error instanceof Error
+      ? error.message
+      : "Unable to parse UserConfig";
+    throw createUserConfigSchemaError(subject, detail);
+  }
 }
 
 function cloneUserConfig(config: UserConfig): UserConfig {
@@ -229,11 +262,7 @@ export class UserConfigFileStore implements UserConfigStoreLike {
       throw new Error("User config file contains invalid YAML");
     }
 
-    const config = parseUserConfig(parsed);
-    if (!config) {
-      throw new Error("User config file has unsupported schema");
-    }
-
+    const config = parseUserConfig(parsed, "User config file");
     return cloneUserConfig(config);
   }
 
@@ -275,10 +304,7 @@ export class UserConfigFileStore implements UserConfigStoreLike {
       throw new Error("User config path must end with .yaml");
     }
 
-    const parsed = parseUserConfig(config as unknown);
-    if (!parsed) {
-      throw new Error("User config has unsupported schema");
-    }
+    const parsed = parseUserConfig(config as unknown, "User config");
 
     await writeTextAtomically(
       this.configPath,

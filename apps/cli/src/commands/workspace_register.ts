@@ -1,9 +1,11 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
   ensureWorkspaceConfigWorkspaceId,
+  isPathWithinRoots,
   readWorkspaceConfigWorkspaceId,
   type RegisteredWorkspace,
 } from "@kato/runtime";
+import type { SharedBehaviorConfig } from "@kato/shared";
 import {
   findWorkspaceByRoot,
   formatWorkspaceEntry,
@@ -22,6 +24,32 @@ function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
     registeredAt: entry.registeredAt,
     ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
   };
+}
+
+function cloneSharedConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
+  return {
+    schemaVersion: config.schemaVersion,
+    allowedWriteRoots: [...config.allowedWriteRoots],
+    exportTimezone: config.exportTimezone,
+    exportMarkdownFrontmatter: { ...config.exportMarkdownFrontmatter },
+    exportFeatureFlags: { ...config.exportFeatureFlags },
+  };
+}
+
+async function ensureWorkspaceRootWriteCoverage(
+  ctx: DaemonCliCommandContext,
+  workspaceRoot: string,
+): Promise<boolean> {
+  if (isPathWithinRoots(workspaceRoot, ctx.sharedConfig.allowedWriteRoots)) {
+    return false;
+  }
+
+  const nextSharedConfig = cloneSharedConfig(ctx.sharedConfig);
+  nextSharedConfig.allowedWriteRoots.push(workspaceRoot);
+  await ctx.sharedConfigStore.save(nextSharedConfig);
+  ctx.sharedConfig = nextSharedConfig;
+  ctx.runtime.allowedWriteRoots = [...nextSharedConfig.allowedWriteRoots];
+  return true;
 }
 
 export async function runWorkspaceRegisterCommand(
@@ -121,6 +149,14 @@ export async function runWorkspaceRegisterCommand(
     target.configPath,
     finalEntry.workspaceId,
   );
+  const runningDaemonMayDenyWrites = shouldWarnWriteRootCoverage(
+    ctx,
+    finalEntry.workspaceRoot,
+  );
+  const sharedWriteRootsUpdated = await ensureWorkspaceRootWriteCoverage(
+    ctx,
+    finalEntry.workspaceRoot,
+  );
 
   await ctx.operationalLogger.info(
     created
@@ -141,6 +177,8 @@ export async function runWorkspaceRegisterCommand(
       created,
       changed,
       restartRequired,
+      sharedWriteRootsUpdated,
+      runningDaemonMayDenyWrites,
     },
   );
   await ctx.auditLogger.command("workspace-register", {
@@ -151,6 +189,8 @@ export async function runWorkspaceRegisterCommand(
     created,
     changed,
     restartRequired,
+    sharedWriteRootsUpdated,
+    runningDaemonMayDenyWrites,
   });
 
   const lines = [
@@ -166,11 +206,15 @@ export async function runWorkspaceRegisterCommand(
     lines.push(
       "restart required before alias/root/config-path changes are used by the running daemon",
     );
-  } else if (
-    created && shouldWarnWriteRootCoverage(ctx, finalEntry.workspaceRoot)
-  ) {
+  }
+  if (sharedWriteRootsUpdated) {
     lines.push(
-      "warning: the running daemon may still deny writes for this workspace until `kato restart` expands allowedWriteRoots",
+      "updated shared config: added workspace root to allowedWriteRoots",
+    );
+  }
+  if (runningDaemonMayDenyWrites) {
+    lines.push(
+      "warning: the running daemon may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
     );
   }
   ctx.runtime.writeStdout(`${lines.join("\n")}\n`);
