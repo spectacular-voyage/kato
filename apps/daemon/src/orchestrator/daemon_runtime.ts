@@ -72,6 +72,7 @@ import {
   resolveFrontmatterParticipantUsername,
 } from "../config/mod.ts";
 import { DAEMON_APP_VERSION } from "../version.ts";
+import { isRecord } from "../../../runtime/src/config/file_store_utils.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -3416,10 +3417,6 @@ interface HandleControlRequestOptions {
   now: () => Date;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readString(value: unknown): string | undefined {

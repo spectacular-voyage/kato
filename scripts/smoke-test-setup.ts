@@ -24,7 +24,17 @@ async function updateYamlConfig(
   label: string,
   update: (config: Record<string, unknown>) => void,
 ): Promise<void> {
-  const raw = await Deno.readTextFile(path);
+  let raw: string;
+  try {
+    raw = await Deno.readTextFile(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new Error(
+        `Missing ${label} config at ${path}. Run \`kato init\` first.`,
+      );
+    }
+    throw error;
+  }
   const parsed = parse(raw);
   const config = asConfigRecord(parsed, label);
   update(config);

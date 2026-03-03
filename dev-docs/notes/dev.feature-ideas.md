@@ -2,13 +2,11 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ""
-updated: 1772563885354
+updated: 1772581026659
 created: 1771724652182
 ---
 
-- thinking and tools use should use, as default, the settings in config
-  (defaults/general/workspace) but allow per-session overrids, maybe by adding
-  flags to the "::" commands
+- thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overrids, maybe by adding flags to the '::' commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
 - support for kimi, copilot, etc

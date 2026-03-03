@@ -7,7 +7,7 @@ updated: 1772576982834
 participants: [user.djradon@users.noreply.github.com, codex.gpt-5.3-codex]
 kato-sessionIds: [019cb5d0-3021-7992-9c48-2cc2d21ee037]
 kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [297b2559-01f3-4e92-b659-965d1085fe0b]
+kato-recordingIds: [297b2559-01f3-4e92-b659-965d1085fe0b, cefa84d4-7e2a-44ce-9b36-ecadb21a9463]
 conversationEventKinds: [message.user, message.assistant, thinking, tool.call, tool.result]
 ---
 
@@ -611,3 +611,45 @@ Validation:
 - `deno check apps/daemon/src/config/mod.ts apps/daemon/src/mod.ts apps/daemon/src/orchestrator/daemon_runtime.ts apps/daemon/src/main.ts` passed.
 
 If VS Code still shows the old diagnostics, run “Deno: Restart Language Server” once to clear stale analysis.
+
+# User_2026-03-03_1539_07
+
+::record-k
+
+**Acknowledging resume command and continuing**
+
+# gpt-5.3-codex_2026-03-03_1539_11
+
+Resuming and finishing the remaining two fixes now (`daemon_runtime.ts` and `scripts/smoke-test-setup.ts`), then I’ll run `deno check` on the touched files.
+
+**Planning targeted runtime tests**
+
+**Testing individual filters separately**
+
+**Gathering line numbers for report**
+
+**Preparing concise final summary**
+
+# gpt-5.3-codex_2026-03-03_1540_06
+
+Verified all three comments against current code; all were still valid, and I fixed each one.
+
+1. `router.ts` canonical `katoDir` usage
+- Updated `effectiveKatoDir` to use canonical `runtimeKatoDir` first, then fallback.
+- Change: [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts:408)
+
+2. `daemon_runtime.ts` duplicate `isRecord`
+- Removed the local `isRecord` function.
+- Imported shared `isRecord` from runtime config utils.
+- Changes: [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:75), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:3422)
+
+3. `scripts/smoke-test-setup.ts` missing-file handling
+- Wrapped `Deno.readTextFile` in `try/catch`.
+- Added clear NotFound error with path and `kato init` guidance.
+- Change: [smoke-test-setup.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-test-setup.ts:22)
+
+Validation run:
+- `deno check apps/cli/src/router.ts apps/daemon/src/orchestrator/daemon_runtime.ts scripts/smoke-test-setup.ts`
+- `deno test tests/daemon-main_test.ts` (all passed)
+- `deno test tests/daemon-cli_test.ts --filter "runDaemonCli workspace commands use the persisted runtime config when it exists"` (passed)
+- `deno test tests/daemon-cli_test.ts --filter "runDaemonCli workspace register warns when workspace root is outside current allowedWriteRoots"` (passed)
