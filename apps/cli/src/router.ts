@@ -405,8 +405,7 @@ export async function runDaemonCli(
     }
   }
 
-  const effectiveKatoDir = runtimeKatoDir ??
-    (runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir));
+  const effectiveKatoDir = runtimeKatoDir;
   const effectiveRuntime: DaemonCliRuntime = {
     ...runtime,
     runtimeDir: runtimeConfig.runtimeDir,

@@ -653,3 +653,95 @@ Validation run:
 - `deno test tests/daemon-main_test.ts` (all passed)
 - `deno test tests/daemon-cli_test.ts --filter "runDaemonCli workspace commands use the persisted runtime config when it exists"` (passed)
 - `deno test tests/daemon-cli_test.ts --filter "runDaemonCli workspace register warns when workspace root is outside current allowedWriteRoots"` (passed)
+
+# User_2026-03-03_1547_05
+
+Anything we need to address before I merge the PR?
+
+**Assessing readiness with git status**
+
+# gpt-5.3-codex_2026-03-03_1547_15
+
+I’ll do a quick pre-merge gate: check current diff scope, run repo checks/tests, and call out anything blocking vs optional cleanup.
+
+**Verifying only docs changed before merge**
+
+# gpt-5.3-codex_2026-03-03_1547_22
+
+Current working tree only has two doc files modified, so I’m running core checks anyway to confirm there are no hidden regressions before merge.
+
+**Reviewing documentation changes**
+
+**Confirming single leftover doc note**
+
+**Verifying test and format status**
+
+# gpt-5.3-codex_2026-03-03_1547_51
+
+I’ve confirmed check/test passed; I’ll run full `deno task ci` once so you have an exact merge gate signal (fmt/lint/check/test).
+
+**Checking post-CI status**
+
+**Summarizing final review notes**
+
+# gpt-5.3-codex_2026-03-03_1548_16
+
+No blockers on code quality/reliability.
+
+I ran full `deno task ci` (`fmt` + `lint` + `check --frozen` + `test --frozen`) and it passed: `370 passed, 0 failed`.
+
+One pre-merge item:
+- You still have an uncommitted local change in [conv.2026.2026-03-03_1429-coderabbit-feedback-for-cli-daemon-separation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-03_1429-coderabbit-feedback-for-cli-daemon-separation-codex.md).  
+  Decide whether to include that conversation-log update in the PR or drop it.
+
+# User_2026-03-03_1549_33
+
+Verify each finding against the current code and only fix it if needed.
+
+Nitpick comments:
+In `@apps/cli/src/router.ts`:
+- Around line 408-409: Remove the redundant fallback when computing
+effectiveKatoDir: since runtimeKatoDir is already resolved by
+resolveRuntimeKatoDir(...), simplify the assignment to just use runtimeKatoDir
+and drop the nullish fallback that references runtimeConfig.katoDir and
+dirname(runtimeConfig.runtimeDir); update the code that defines effectiveKatoDir
+(symbol: effectiveKatoDir) to rely solely on runtimeKatoDir (resolved via
+resolveRuntimeKatoDir) to improve clarity.
+
+**Simplifying redundant fallback logic**
+
+# gpt-5.3-codex_2026-03-03_1549_39
+
+I’ll verify whether `runtimeKatoDir` is guaranteed and simplify `effectiveKatoDir` only if the fallback is provably redundant. Then I’ll run a quick check on `router.ts`.
+
+**Simplifying patch and running type check**
+
+# gpt-5.3-codex_2026-03-03_1549_46
+
+The finding is valid: `resolveRuntimeKatoDir` already returns a concrete string, so the fallback is unreachable. I’m simplifying `effectiveKatoDir` to use only `runtimeKatoDir`.
+
+# gpt-5.3-codex_2026-03-03_1549_49
+
+I’ve applied the simplification; running a quick type check on `router.ts` to confirm no fallout.
+
+# gpt-5.3-codex_2026-03-03_1549_55
+
+Valid nitpick, and fixed.
+
+- `runtimeKatoDir` is already resolved via `resolveRuntimeKatoDir(...): string`, so the fallback was redundant.
+- Simplified:
+  - [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts:408)
+
+From:
+```ts
+const effectiveKatoDir = runtimeKatoDir ??
+  (runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir));
+```
+
+To:
+```ts
+const effectiveKatoDir = runtimeKatoDir;
+```
+
+Validation:
+- `deno check apps/cli/src/router.ts` passed.
