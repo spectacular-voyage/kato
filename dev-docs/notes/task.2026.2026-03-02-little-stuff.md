@@ -108,3 +108,11 @@ deno task ci
 - [ ] Add Dependabot for GitHub Actions.
 - [ ] Add coverage artifact generation and patch coverage gate.
 - [ ] Add binary distribution workflow(s) with scoped `deno compile` permissions.
+
+## Follow-Up (March 3, 2026)
+
+- Gemini support was revalidated in a real VS Code session:
+  - new chat snippet `test12345` was ingested into Kato status/session metadata
+  - Gemini `::capture-k` command application was observed in operational logs
+- No additional implementation work is required for this item in `v0.2.0`
+  scope; deeper investigation is deferred.

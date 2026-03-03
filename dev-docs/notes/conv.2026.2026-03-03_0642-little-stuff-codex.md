@@ -1328,3 +1328,379 @@ Moved the release content out of `README.md` and into the dev note.
   - [task.2026.2026-03-02-little-stuff.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-02-little-stuff.md#L100)
 
 No code behavior changed in this step; I did not rerun the test suite after this doc-only move.
+
+# User_2026-03-03_0752_07
+
+OKay, so I guess we're ready to release-bump?
+
+Can we add the current version number to the status output, at the top next to "kato", so "kato (v0.2.0)" -- I don't want to have to change the version in more than one place ideally, but when we move to binary releases I don't know if we can just pull from deno.json
+
+**Planning version display update**
+
+# gpt-5.3-codex_2026-03-03_0752_25
+
+I’ll add the daemon version into status header rendering (`kato (vX.Y.Z)`), sourced from the existing single version loader so you don’t maintain multiple version strings. I’m checking the status renderer and its tests first, then I’ll patch and run the relevant suite.
+
+# gpt-5.3-codex_2026-03-03_0752_25_Tool-exec_command
+
+sed -n '1,320p' apps/daemon/src/cli/commands/status.ts
+
+# gpt-5.3-codex_2026-03-03_0752_25_Tool-exec_command
+
+sed -n '1,220p' apps/daemon/src/version.ts && sed -n '1,220p' apps/daemon/deno.json && sed -n '1,220p' deno.json
+
+# gpt-5.3-codex_2026-03-03_0752_25_Tool-exec_command
+
+rg -n "kato|header|status" tests/improved-status_test.ts tests/daemon-cli_test.ts apps/daemon/src/cli/commands/status.ts
+
+**Locating header-related code**
+
+# Assistant_2026-03-03_0752_28_Tool-exec_command
+
+sed -n '640,940p' apps/daemon/src/cli/commands/status.ts
+
+**Consolidating version import to root deno.json**
+
+# Assistant_2026-03-03_0752_43_Tool-exec_command
+
+sed -n '1,120p' apps/web/src/version.ts && sed -n '1,120p' apps/web/deno.json
+
+# Assistant_2026-03-03_0752_43_Tool-exec_command
+
+sed -n '120,220p' tests/improved-status_test.ts
+
+# Assistant_2026-03-03_0752_43_Tool-exec_command
+
+rg -n "kato  ·  daemon|renderStatusText\(|kato \(v" tests/improved-status_test.ts tests/daemon-cli_test.ts
+
+**Unifying version source**
+
+# gpt-5.3-codex_2026-03-03_0753_00
+
+I found the key issue: daemon/web version constants were still reading app-local `apps/*/deno.json` files, not the root `deno.json`. I’m patching that to use a single source of truth and wiring status header to show `kato (v<version>)`.
+
+**Inspecting import differences**
+
+# Assistant_2026-03-03_0753_23_Tool-exec_command
+
+sed -n '1,60p' tests/improved-status_test.ts
+
+**Applying targeted patch at line 141**
+
+**Checking for header-dependent tests**
+
+# Assistant_2026-03-03_0753_32_Tool-exec_command
+
+rg -n "kato  ·  daemon|kato \(v\$\{DAEMON_APP_VERSION\}\)|kato \(v" tests/improved-status_test.ts apps/daemon/src/cli/commands/status.ts
+
+**Running targeted tests with version update**
+
+# gpt-5.3-codex_2026-03-03_0753_37
+
+I’ve finished patching status + version sourcing. I’m running `deno task test` now to validate both the new status header and the version-source change across daemon/web tests.
+
+# Assistant_2026-03-03_0753_38_Tool-exec_command
+
+deno task test
+
+# gpt-5.3-codex_2026-03-03_0753_55
+
+I’ve wired status to show the shared version and shifted both app version readers to the root `deno.json`; I’m now polling the test run to confirm everything passes end-to-end.
+
+# gpt-5.3-codex_2026-03-03_0753_55_Tool-write_stdin
+
+**Running quick code check**
+
+# gpt-5.3-codex_2026-03-03_0753_59
+
+Unit tests passed with the new status header assertion. I’m running `deno task check` next to confirm type-check/build validation after the version-source change.
+
+# Assistant_2026-03-03_0754_01_Tool-exec_command
+
+deno task check
+
+# gpt-5.3-codex_2026-03-03_0754_03
+
+Type-check is still running through the full tree; I’ll confirm the final exit status once it completes.
+
+# Assistant_2026-03-03_0754_04_Tool-write_stdin
+
+**Deciding to run full CI**
+
+# gpt-5.3-codex_2026-03-03_0754_09
+
+`deno task check` passed. I’m running `deno task ci` now so fmt/lint/check/test all validate under the repo’s full quality gate.
+
+# gpt-5.3-codex_2026-03-03_0754_09_Tool-exec_command
+
+deno task ci
+
+**Implementing completion polling**
+
+# gpt-5.3-codex_2026-03-03_0754_13
+
+`ci` has completed fmt/lint/check and is in the frozen test phase now; I’m waiting on final pass/fail.
+
+# gpt-5.3-codex_2026-03-03_0754_13_Tool-write_stdin
+
+# gpt-5.3-codex_2026-03-03_0754_19
+
+Test execution is still in progress; I’m polling to capture the final `ci` result.
+
+# gpt-5.3-codex_2026-03-03_0754_19_Tool-write_stdin
+
+**Preparing final completion check**
+
+# gpt-5.3-codex_2026-03-03_0754_29
+
+CI tests are nearly done; I’m polling once more for the final completion line and exit code.
+
+# gpt-5.3-codex_2026-03-03_0754_29_Tool-write_stdin
+
+**Planning parallel git status and file inspection**
+
+# gpt-5.3-codex_2026-03-03_0754_35
+
+I’m collecting a quick diff snapshot now so I can report exactly what changed and point you to precise lines.
+
+# gpt-5.3-codex_2026-03-03_0754_35_Tool-exec_command
+
+git status --short
+
+# gpt-5.3-codex_2026-03-03_0754_35_Tool-exec_command
+
+git diff -- apps/daemon/src/version.ts apps/web/src/version.ts apps/daemon/src/cli/commands/status.ts tests/improved-status_test.ts
+
+**Planning absolute paths with line numbers**
+
+# gpt-5.3-codex_2026-03-03_0754_40
+
+I confirmed the diff; next I’m grabbing exact line numbers so you can jump directly to each change.
+
+# gpt-5.3-codex_2026-03-03_0754_40_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/commands/status.ts | sed -n '1,30p;865,885p'
+
+# gpt-5.3-codex_2026-03-03_0754_40_Tool-exec_command
+
+nl -ba apps/daemon/src/version.ts | sed -n '1,30p'
+
+# gpt-5.3-codex_2026-03-03_0754_40_Tool-exec_command
+
+nl -ba apps/web/src/version.ts | sed -n '1,30p'
+
+# gpt-5.3-codex_2026-03-03_0754_40_Tool-exec_command
+
+nl -ba tests/improved-status_test.ts | sed -n '1,35p;130,150p'
+
+**Summarizing version update and binary plan**
+
+# gpt-5.3-codex_2026-03-03_0755_00
+
+Implemented. `status` now shows the app version in the header, and version is sourced from one place (root `deno.json`).
+
+- Header format changed to `kato (vX.Y.Z)  ·  daemon: ...` in [apps/daemon/src/cli/commands/status.ts:6](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:6) and [apps/daemon/src/cli/commands/status.ts:876](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:876)
+- Daemon version source switched to root config in [apps/daemon/src/version.ts:1](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/version.ts:1)
+- Web version source also switched to root config in [apps/web/src/version.ts:1](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/version.ts:1)
+- Status test updated in [tests/improved-status_test.ts:17](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts:17) and [tests/improved-status_test.ts:142](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts:142)
+
+Validation:
+- `deno task test` passed (`370 passed, 0 failed`)
+- `deno task check` passed
+- `deno task ci` passed (fmt/lint/check/test)
+
+For your binary-release concern: this approach is still fine with `deno compile` because the JSON import is resolved at build time, so the binary gets the same root version value without a second manual version file.
+
+# User_2026-03-03_0755_03
+
+Oh, also, remove the second "daemon: running (pid: 97046)" from the status display
+
+**Acknowledging duplicate daemon removal**
+
+# gpt-5.3-codex_2026-03-03_0755_09
+
+I’ll remove the redundant daemon status line from the detailed section while keeping the top header line, then update any tests that assert the old output. I’m checking `status.ts` and status-related tests now.
+
+# gpt-5.3-codex_2026-03-03_0755_09_Tool-exec_command
+
+rg -n "daemonText|daemon:|renderTopSummarySection|renderStatusText" apps/daemon/src/cli/commands/status.ts tests/improved-status_test.ts tests -g '*status*'
+
+# gpt-5.3-codex_2026-03-03_0755_09_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/commands/status.ts | sed -n '820,980p'
+
+# gpt-5.3-codex_2026-03-03_0755_09_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/commands/status.ts | sed -n '980,1180p'
+
+**Inspecting renderTopSummarySection duplication**
+
+# Assistant_2026-03-03_0755_11_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/commands/status.ts | sed -n '600,760p'
+
+**Adjusting summary and tests for daemon removal**
+
+# Assistant_2026-03-03_0755_15_Tool-exec_command
+
+nl -ba tests/improved-status_test.ts | sed -n '700,740p'
+
+# Assistant_2026-03-03_0755_15_Tool-exec_command
+
+rg -n "daemon: running|daemon:" tests/improved-status_test.ts tests/*status*
+
+**Searching for duplicate daemon tests**
+
+# Assistant_2026-03-03_0755_17_Tool-exec_command
+
+rg -n "daemon: running|kato \(v\$\{DAEMON_APP_VERSION\}\)|kato \(v" tests
+
+**Planning removal of duplicate daemon line**
+
+# gpt-5.3-codex_2026-03-03_0755_29
+
+I found the duplication: the top summary block has its own `daemon:` row in wide mode in addition to the header line. I’m removing that row and tightening the wide-layout test to assert only one `daemon:` occurrence.
+
+**Refactoring test assertions for output lines**
+
+**Planning targeted test run**
+
+# gpt-5.3-codex_2026-03-03_0755_43
+
+I’ve applied the code and test changes. I’m running the status-focused test file first to confirm the rendering behavior before I run the broader check if needed.
+
+# Assistant_2026-03-03_0755_44_Tool-exec_command
+
+deno test --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE tests/improved-status_test.ts
+
+**Planning event polling**
+
+# Assistant_2026-03-03_0755_53_Tool-write_stdin
+
+**Running quick type check**
+
+# gpt-5.3-codex_2026-03-03_0756_00
+
+The focused status test suite passed. I’ll run `deno task check` to ensure the broader type-check/build remains clean after removing the summary field.
+
+# gpt-5.3-codex_2026-03-03_0756_00_Tool-exec_command
+
+deno task check
+
+# Assistant_2026-03-03_0756_02_Tool-write_stdin
+
+**Preparing final change summary**
+
+# gpt-5.3-codex_2026-03-03_0756_08
+
+Type-check passed. I’m grabbing final line references and then I’ll summarize exactly what changed in the status output.
+
+# gpt-5.3-codex_2026-03-03_0756_08_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/commands/status.ts | sed -n '625,680p;872,890p'
+
+# gpt-5.3-codex_2026-03-03_0756_08_Tool-exec_command
+
+nl -ba tests/improved-status_test.ts | sed -n '711,730p'
+
+**Summarizing removal of duplicate row**
+
+# gpt-5.3-codex_2026-03-03_0756_15
+
+Done. I removed the duplicate daemon line from the status body, so `daemon: running (pid: ...)` now appears only in the top header line.
+
+Changes:
+- Removed `daemon:` from the wide top-summary rows in [status.ts:625](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:625) and [status.ts:647](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:647)
+- Kept header line unchanged at [status.ts:874](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:874)
+- Updated test to assert exactly one `daemon:` line in wide output at [improved-status_test.ts:711](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts:711)
+
+Validation:
+- `deno test ... tests/improved-status_test.ts` passed
+- `deno task check` passed
+
+# User_2026-03-03_0759_10
+
+Will the version check work in a binary distribution?
+
+**Confirming Deno JSON import in compile**
+
+# gpt-5.3-codex_2026-03-03_0759_25
+
+I’m going to verify this concretely by checking how version is loaded and, if feasible, doing a quick local compile smoke test to confirm the binary reports the same version.
+
+# gpt-5.3-codex_2026-03-03_0759_25_Tool-exec_command
+
+cat deno.json
+
+# gpt-5.3-codex_2026-03-03_0759_25_Tool-exec_command
+
+rg -n "DAEMON_APP_VERSION|--version|readVersion|deno\.json" apps/daemon/src -g '*.ts'
+
+**Planning Deno compile smoke test**
+
+# gpt-5.3-codex_2026-03-03_0759_34
+
+The version path is static-imported from root `deno.json`, which is a good sign for compiled binaries; I’m running a quick `deno compile` + `--version` smoke test to confirm behavior.
+
+# Assistant_2026-03-03_0759_35_Tool-exec_command
+
+deno compile --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE --output /tmp/kato-compile-smoke main.ts
+
+**Planning polling mechanism**
+
+# Assistant_2026-03-03_0759_37_Tool-write_stdin
+
+**Clarifying version check and compile caveats**
+
+# gpt-5.3-codex_2026-03-03_0759_46
+
+Compile smoke couldn’t complete because this environment can’t reach `dl.deno.land`, so I’m validating from code path and compile semantics instead and then I’ll give you a direct yes/no with caveats.
+
+# gpt-5.3-codex_2026-03-03_0759_46_Tool-exec_command
+
+nl -ba apps/daemon/src/version.ts | sed -n '1,24p'
+
+# gpt-5.3-codex_2026-03-03_0759_46_Tool-exec_command
+
+nl -ba apps/daemon/src/cli/router.ts | sed -n '188,205p'
+
+**Clarifying Deno compile semantics**
+
+# gpt-5.3-codex_2026-03-03_0759_55
+
+Yes, for a `deno compile` binary this will work.
+
+- The version is loaded via a static JSON import in [version.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/version.ts:1), so it is resolved at build time.
+- `--version` prints that constant from [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/router.ts:199).
+- In a compiled binary, that value is embedded; the binary does not need `deno.json` present at runtime.
+
+One caveat: `deno.json` must exist at compile time (build environment). I couldn’t run a full compile smoke test here because this sandbox can’t reach `dl.deno.land`, but the code path is correct for binary distribution.
+
+# User_2026-03-03_0800_16
+
+can you compose a commit message please?
+
+**Planning commit message composition**
+
+# gpt-5.3-codex_2026-03-03_0800_20
+
+I’ll draft a concise commit message that matches the exact changes we made (version surfacing + status cleanup + shared version source + tests). I’m checking the current diff to make sure wording is accurate.
+
+# Assistant_2026-03-03_0800_22_Tool-exec_command
+
+git diff --name-only
+
+**Crafting final commit message**
+
+# gpt-5.3-codex_2026-03-03_0800_43
+
+```text
+chore(release): prep v0.2.0 source-only + status version polish
+
+- use root `deno.json` as the single source of truth for app version
+  (daemon and web readers now import from repo root)
+- surface version in status header as `kato (vX.Y.Z)`
+- remove the duplicate `daemon:` line from the status summary block
+- update status tests to cover new header format and single daemon line
+- update release/runbook and planning notes for v0.2.0 scope
+```

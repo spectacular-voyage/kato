@@ -3,6 +3,7 @@ import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import { DAEMON_APP_VERSION } from "../../version.ts";
 import type { RegisteredWorkspace } from "../../workspace/mod.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -624,14 +625,13 @@ function normalizeSnapshotForStatusDisplay(
 function renderTopSummarySection(
   snapshot: DaemonStatusSnapshot,
   opts: {
-    daemonText: string;
     activeCount: number;
     staleCount: number;
     width: number;
     recordingSummary: DaemonStatusSnapshot["recordings"];
   },
 ): string[] {
-  const { daemonText, activeCount, staleCount, width, recordingSummary } = opts;
+  const { activeCount, staleCount, width, recordingSummary } = opts;
   const memoryLines = buildMemoryLines(snapshot);
   const recordingLine =
     `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale sessions`;
@@ -645,7 +645,6 @@ function renderTopSummarySection(
   }
 
   const leftLines = [
-    `daemon: ${daemonText}`,
     `recordings: ${recordingSummary.activeRecordings} active`,
     `sessions: ${activeCount} active, ${staleCount} stale`,
   ];
@@ -872,14 +871,13 @@ export function renderStatusText(
   const refreshedAt = now.toTimeString().slice(0, 8);
   lines.push(
     truncate(
-      `kato  ·  daemon: ${daemonText}  ·  refreshed ${refreshedAt}`,
+      `kato (v${DAEMON_APP_VERSION})  ·  daemon: ${daemonText}  ·  refreshed ${refreshedAt}`,
       width,
     ),
   );
   lines.push(divider);
   lines.push(
     ...renderTopSummarySection(snapshot, {
-      daemonText,
       activeCount,
       staleCount,
       width,

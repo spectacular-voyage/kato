@@ -1312,3 +1312,461 @@ For this pass, what diagnostic surface should we implement for Gemini/VS Code st
 - Docs + task-note only (Recommended): Update the task note/README troubleshooting with exact paths, stale behavior, and supported transcript sources; no runtime/CLI code changes.
 - Add lightweight runtime logs: Keep status output unchanged, but add operational warning events for Gemini discovery edge cases using existing daemon-visible paths.
 - Add new CLI diagnostic command: Implement a dedicated command (for example `kato doctor gemini`) that probes known paths and prints actionable findings.
+
+# Assistant_2026-03-03_0737_38_Tool-decision-gemini-diag-scope
+
+## Prompt
+
+For this pass, what diagnostic surface should we implement for Gemini/VS Code storage?
+
+## User Selection
+
+Docs + task-note only (Recommended)
+
+**Designing detailed docs-only plan**
+
+# User_2026-03-03_0740_27
+
+Remove "Clarify why a live Gemini conversation can be “missing” from default status (stale filtering) even when ingestion has occurred." -- stale filtering is not an issue. Gemini CLI shows up, Gemini vscode -- we can't find where the files are stored.
+
+**Revising plan to remove stale filtering**
+
+# User_2026-03-03_0741_05
+
+FYI, I issued ::capture-k in my gemini chat but id didn't trigger a recording to start. 
+
+Don't write anything except end-user-facing documentation to README.md
+
+**Adapting plan for docs-only update**
+
+# gpt-5.3-codex_2026-03-03_0741_15
+
+I’m incorporating this new constraint as hard scope: if we implement, changes will be limited to end-user-facing `README.md` text only. I’ll quickly confirm how `::capture-k` is currently parsed so the README guidance is technically accurate.
+
+# gpt-5.3-codex_2026-03-03_0741_15_Tool-exec_command
+
+rg -n "capture-k|::capture|capture k|alias|command" apps shared tests -g'*.ts'
+
+# gpt-5.3-codex_2026-03-03_0741_15_Tool-exec_command
+
+rg -n "capture-k|::capture-k|capture-k" dev-docs README.md -g'*.md'
+
+# gpt-5.3-codex_2026-03-03_0741_15_Tool-exec_command
+
+rg -n "user.kato-command|command parser|capture" apps/daemon/src -g'*.ts'
+
+**Inspecting Gemini parser for command detection**
+
+# gpt-5.3-codex_2026-03-03_0741_20
+
+I found a likely hotspot: Gemini parser has explicit logic for preserving command-like lines from raw content. I’m opening that path plus command detection grammar to verify whether `::capture-k` should be recognized from Gemini messages.
+
+# gpt-5.3-codex_2026-03-03_0741_20_Tool-exec_command
+
+nl -ba apps/daemon/src/providers/gemini/parser.ts | sed -n '1,340p'
+
+# gpt-5.3-codex_2026-03-03_0741_20_Tool-exec_command
+
+nl -ba apps/daemon/src/policy/command_detection.ts | sed -n '1,280p'
+
+# gpt-5.3-codex_2026-03-03_0741_20_Tool-exec_command
+
+nl -ba apps/daemon/src/orchestrator/daemon_runtime.ts | sed -n '1988,2168p'
+
+**Inspecting runtime logs for failures**
+
+# gpt-5.3-codex_2026-03-03_0741_26
+
+The command grammar and runtime path both support `::capture-k` in principle. I’m checking your operational/audit logs around the Gemini attempt to extract the exact failure reason so README troubleshooting can be precise.
+
+# gpt-5.3-codex_2026-03-03_0741_26_Tool-exec_command
+
+rg -n "recording\.command\.(applied|failed)|recording\.capture|provider.*gemini|workspace.*k|command\.processing_failed|command\.ignored" /home/djradon/.kato/runtime/logs/operational.jsonl -S | tail -n 240
+
+# gpt-5.3-codex_2026-03-03_0741_26_Tool-exec_command
+
+rg -n "recording\.command\.(applied|failed)|recording\.capture|command\.processing_failed" /home/djradon/.kato/runtime/logs/security-audit.jsonl -S | tail -n 120
+
+# gpt-5.3-codex_2026-03-03_0741_26_Tool-exec_command
+
+rg -n "capture-k|::capture-k|gemini" /home/djradon/.kato/sessions/gemini:*.twin.jsonl -S | tail -n 120
+
+**Searching Gemini sessions for commands**
+
+# gpt-5.3-codex_2026-03-03_0741_38
+
+I need one more data point: whether `::capture-k` actually appears in the Gemini session JSON content Kato reads. I’m scanning the current `~/.gemini/tmp` session files for that literal command now.
+
+# gpt-5.3-codex_2026-03-03_0741_38_Tool-exec_command
+
+rg -n "::capture-k|::capture-|::record-k|::record-|::stop-k|::export-k" /home/djradon/.gemini/tmp -g 'session-*.json' -S | tail -n 120
+
+# gpt-5.3-codex_2026-03-03_0741_38_Tool-exec_command
+
+find /home/djradon/.gemini/tmp -type f -name 'session-*.json' -printf '%TY-%Tm-%Td %TH:%TM:%TS %p\n' | sort | tail -n 20
+
+# gpt-5.3-codex_2026-03-03_0741_38_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T15-20-c34fc28f.json /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T14-51-c34fc28f.json; do echo "=== $f"; rg -n "::capture|::record|::export|::stop" "$f" -S || true; done
+
+**Examining session for command lines**
+
+# gpt-5.3-codex_2026-03-03_0741_49
+
+The quick scan shows no literal `::capture-k` in current Gemini session payloads; matches were only quoted tool output text. I’m extracting user message text from the latest Gemini files to confirm whether the command line ever reached provider logs.
+
+# gpt-5.3-codex_2026-03-03_0741_49_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T15-20-c34fc28f.json /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T14-51-c34fc28f.json /home/djradon/.gemini/tmp/4fcca3320e91da963f1b71363dd41a742b30a8a832b07d4e28c760c510335fd4/chats/session-2026-03-03T15-34-bb5c45aa.json; do echo "=== $f"; jq -r '.messages[] | select(.type=="user") | ((.displayContent // .content) | tostring)' "$f" | sed -n '1,80p'; done
+
+# gpt-5.3-codex_2026-03-03_0741_49_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T15-20-c34fc28f.json /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T14-51-c34fc28f.json /home/djradon/.gemini/tmp/4fcca3320e91da963f1b71363dd41a742b30a8a832b07d4e28c760c510335fd4/chats/session-2026-03-03T15-34-bb5c45aa.json; do echo "=== $f"; jq -r '.messages[] | select(.type=="user") | ((.displayContent // .content) | tostring)' "$f" | rg -n "::capture|::record|::export|::stop" -S || true; done
+
+# gpt-5.3-codex_2026-03-03_0741_49_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T15-20-c34fc28f.json /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T14-51-c34fc28f.json /home/djradon/.gemini/tmp/4fcca3320e91da963f1b71363dd41a742b30a8a832b07d4e28c760c510335fd4/chats/session-2026-03-03T15-34-bb5c45aa.json; do echo "=== $f"; jq -r '.messages[] | select(.type=="user") | (.content | tostring)' "$f" | rg -n "::capture|::record|::export|::stop" -S || true; done
+
+**Verifying command presence across session files**
+
+# gpt-5.3-codex_2026-03-03_0741_58
+
+This confirms the command did not appear in the Gemini transcript files we currently ingest, which explains why no recording command fired. I’m checking VS Code Gemini checkpoint artifacts for `::capture-k` as the likely alternate storage path.
+
+# gpt-5.3-codex_2026-03-03_0741_58_Tool-exec_command
+
+rg -n "::capture-k|::capture-|::record-k|::record-|::export-k|::stop-k" /home/djradon/.vscode-server/data/User/globalStorage/google.geminicodeassist/chat_checkpoint_files -S | tail -n 120
+
+# gpt-5.3-codex_2026-03-03_0741_58_Tool-exec_command
+
+find /home/djradon/.vscode-server/data/User/globalStorage/google.geminicodeassist/chat_checkpoint_files -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS %p\n' | sort | tail -n 30
+
+# gpt-5.3-codex_2026-03-03_0741_58_Tool-exec_command
+
+find /home/djradon/.vscode-server/data/User/workspaceStorage -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS %p\n' 2>/dev/null | sort | tail -n 40
+
+**Inspecting global storage files**
+
+# gpt-5.3-codex_2026-03-03_0742_03
+
+No recent Gemini checkpoint writes are visible in this VS Code server profile. I’m inspecting the full extension globalStorage directory tree to see if chats are now persisted under a different filename/location than `chat_checkpoint_files`.
+
+# Assistant_2026-03-03_0742_05_Tool-exec_command
+
+find /home/djradon/.vscode-server/data/User/globalStorage/google.geminicodeassist -maxdepth 4 -printf '%TY-%Tm-%Td %TH:%TM:%TS %y %p\n' | sort | tail -n 200
+
+**Planning README command docs**
+
+# gpt-5.3-codex_2026-03-03_0742_11
+
+I now have a concrete finding you can share with users: on this machine, `::capture-k` does not appear in the Gemini session JSON that Kato ingests, so command processing never runs for that Gemini chat. I’m checking where README currently documents in-chat commands so the plan can add the right user-facing caveat in one place.
+
+# gpt-5.3-codex_2026-03-03_0742_11_Tool-exec_command
+
+rg -n "::record|::capture|in-chat|control command|workspace alias|capture" README.md -S
+
+# gpt-5.3-codex_2026-03-03_0742_11_Tool-exec_command
+
+nl -ba README.md | sed -n '1,140p'
+
+# gpt-5.3-codex_2026-03-03_0742_11_Tool-exec_command
+
+nl -ba README.md | sed -n '140,260p'
+
+**Finalizing README-only plan**
+
+# User_2026-03-03_0745_27
+
+Let's do more meta-planning here. I started a new vscode gemini chat, test12345, and it got picked up as a session!
+
+**Planning verification steps**
+
+# gpt-5.3-codex_2026-03-03_0745_41
+
+I’ll treat this as a key new signal and re-baseline the plan around it. First I’m verifying exactly where `test12345` showed up (`status`, Gemini source file path, and twin metadata) so we can narrow the remaining unknowns.
+
+# gpt-5.3-codex_2026-03-03_0745_41_Tool-exec_command
+
+deno run -A apps/daemon/src/main.ts status --all --json | sed -n '1,260p'
+
+# gpt-5.3-codex_2026-03-03_0745_41_Tool-exec_command
+
+rg -n "test12345" /home/djradon/.gemini/tmp -g 'session-*.json' -S | tail -n 80
+
+# gpt-5.3-codex_2026-03-03_0745_41_Tool-exec_command
+
+rg -n "test12345" /home/djradon/.kato/sessions/gemini:*.twin.jsonl /home/djradon/.kato/sessions/gemini:*.meta.json -S | tail -n 120
+
+**Proposing meta-planning update**
+
+# gpt-5.3-codex_2026-03-03_0745_54
+
+Strong signal: `test12345` proves VS Code Gemini can write to `~/.gemini/tmp` and Kato can ingest it. I’m now narrowing the remaining problem to command extraction (`::capture-k`) by checking whether any Gemini events were logged as command-applied/failed.
+
+# gpt-5.3-codex_2026-03-03_0745_54_Tool-exec_command
+
+rg -n '"event":"recording\.command\.(applied|failed)".*"provider":"gemini"' /home/djradon/.kato/runtime/logs/operational.jsonl -S | tail -n 120
+
+# gpt-5.3-codex_2026-03-03_0745_54_Tool-exec_command
+
+rg -n '"event":"recording\.command\.(applied|failed)".*"provider":"gemini"' /home/djradon/.kato/runtime/logs/security-audit.jsonl -S | tail -n 120
+
+# gpt-5.3-codex_2026-03-03_0745_54_Tool-exec_command
+
+rg -n '"kind":"user\.kato-command".*"provider":"gemini"|"session"\:\{"provider"\:"gemini"' /home/djradon/.kato/sessions/gemini:*.twin.jsonl -S | tail -n 200
+
+**Confirming command presence and planning diagnostics**
+
+# gpt-5.3-codex_2026-03-03_0746_15
+
+I found an important correction: Gemini command handling does work in at least one VS Code-backed session (`::capture-k` was parsed and applied at 2026-03-03 15:44:27 UTC). I’m checking whether your `test12345` session has multiple backing files and whether the command landed in a different one.
+
+# gpt-5.3-codex_2026-03-03_0746_15_Tool-exec_command
+
+rg -n "65ad1ca8-6568-4281-903d-75cfecd02508|3c4b65da-fc7f-42dd-8fa6-a7544e4a41fd|test12345|::capture-k" /home/djradon/.gemini/tmp -g 'session-*.json' -S | sed -n '1,200p'
+
+# gpt-5.3-codex_2026-03-03_0746_15_Tool-exec_command
+
+rg -n "::capture-k|::capture-" /home/djradon/.kato/sessions/gemini:*.twin.jsonl -S | sed -n '1,120p'
+
+# gpt-5.3-codex_2026-03-03_0746_15_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/4fcca3320e91da963f1b71363dd41a742b30a8a832b07d4e28c760c510335fd4/chats/session-2026-03-03T15-44-65ad1ca8.json; do echo "=== $f"; jq -r '{sessionId, lastUpdated, updatedAt, messageCount:(.messages|length), lastTwo:(.messages|.[-2:]|map({id,type,timestamp,content,displayContent}))}' "$f"; done
+
+# gpt-5.3-codex_2026-03-03_0746_15_Tool-exec_command
+
+for f in /home/djradon/.gemini/tmp/kato/chats/session-2026-03-03T14-51-c34fc28f.json; do echo "=== $f"; jq -r '.messages[] | select(.id=="2b361205-47a0-489c-a29c-fc8efb223ec3")' "$f"; done
+
+**Proposing updated README plan**
+
+# User_2026-03-03_0747_02
+
+incredibly, gemini recording now seems to work!
+
+**Updating plan with user input**
+
+# gpt-5.3-codex_2026-03-03_0747_16
+
+This materially changes the plan baseline: Gemini ingestion and `::capture-k` command handling are now both observed working in your environment. I’ll pivot the plan to closure/stabilization, but I need one decision on scope before I finalize it.
+
+# Assistant_2026-03-03_0747_19_Tool-request_user_input
+
+# Assistant_2026-03-03_0747_19_Tool-decision-gemini-next-scope
+
+## Prompt
+
+Given Gemini recording now works, what should this task focus on next?
+
+## Options
+
+- Close out with README notes (Recommended): Document the working state and a short verification checklist in README, then consider the Gemini-support task complete.
+- Keep monitoring safeguards: Add README guidance plus a reproducible smoke checklist to catch regressions in future sessions.
+- Investigate root-cause history: Do a deeper postmortem to explain why behavior appeared flaky across sessions before closing the task.
+
+# Assistant_2026-03-03_0748_38_Tool-decision-gemini-next-scope
+
+## Prompt
+
+Given Gemini recording now works, what should this task focus on next?
+
+## User Selection
+
+Don't put anything in README, all developer-oriented notes go in dev-docs/notes. We can defer the investigation for now.
+
+**Proposing deferred investigation plan**
+
+# User_2026-03-03_0757_35
+
+PLEASE IMPLEMENT THIS PLAN:
+# Gemini Support Closure (Dev Notes Only)
+
+## Summary
+- Treat Gemini support as currently working based on live evidence from **March 3, 2026**:
+  - VS Code Gemini chat (`test12345`) was ingested.
+  - Gemini `::capture-k` command was applied in logs.
+- Do not update `README.md`.
+- Record state and closure notes only in `dev-docs/notes`.
+- Defer deeper root-cause investigation.
+
+## Public APIs/Interfaces/Types
+- No runtime/CLI/config/schema changes.
+- No code changes.
+- Documentation updates only under `dev-docs/notes`.
+
+## Implementation Plan
+1. Update [task.2026.2026-02-26-fix-gemini-support.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md):
+   - Add “Current Verified State (March 3, 2026)” with concrete evidence:
+     - `test12345` session ingested from `~/.gemini/tmp/.../chats/session-*.json`.
+     - Gemini command application observed in operational logs (`recording.command.applied`, `command: capture`).
+   - Mark previously open “not picked up” assumptions as resolved.
+   - Add explicit note: postmortem/investigation deferred.
+2. Add/append a short entry to [task.2026.2026-03-02-little-stuff.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-02-little-stuff.md):
+   - “Gemini support revalidated in real VS Code session.”
+3. Update [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md):
+   - Add a lightweight Gemini smoke-check subsection (operator-facing, internal docs):
+     - Start Gemini chat in VS Code.
+     - Confirm `status --all --json` shows Gemini session.
+     - Confirm command apply/capture events in operational logs.
+4. If appropriate in your note taxonomy, move or mirror outcome to a `completed.*` note for Gemini-support closure.
+
+## Test Cases and Scenarios
+1. Manual smoke validation records a Gemini session with recent `lastEventAt` in status JSON.
+2. Operational log contains Gemini `recording.command.applied` and/or `recording.capture` for the tested session.
+3. No `README.md` changes in diff.
+4. All new wording in `dev-docs/notes` uses concrete timestamps and file paths.
+
+## Assumptions and Defaults
+- Scope is documentation-only in `dev-docs/notes`.
+- README changes are explicitly out of scope.
+- Root-cause investigation of earlier flaky behavior is deferred to a separate task.
+
+**Planning task note update**
+
+# gpt-5.3-codex_2026-03-03_0757_44
+
+I’m implementing this now as docs-only changes under `dev-docs/notes`, with no code or README edits. First I’ll load the three target notes and align them to the verified March 3, 2026 evidence before patching.
+
+# gpt-5.3-codex_2026-03-03_0757_44_Tool-exec_command
+
+nl -ba dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md | sed -n '1,260p'
+
+# gpt-5.3-codex_2026-03-03_0757_44_Tool-exec_command
+
+nl -ba dev-docs/notes/task.2026.2026-03-02-little-stuff.md | sed -n '1,260p'
+
+# gpt-5.3-codex_2026-03-03_0757_44_Tool-exec_command
+
+nl -ba dev-docs/notes/dev.release-runbook.md | sed -n '1,320p'
+
+# gpt-5.3-codex_2026-03-03_0757_44_Tool-exec_command
+
+ls -1 dev-docs/notes | rg '^completed\.' | tail -n 40
+
+**Gathering detailed Gemini status updates**
+
+# gpt-5.3-codex_2026-03-03_0758_01
+
+I’ve got the current note contents and live evidence, and next I’ll patch the three docs to reflect Gemini closure status with exact March 3, 2026 timestamps/paths. I’ll also add a small `completed.*` closure note so the taxonomy stays consistent.
+
+**Assessing multi-file patch approach**
+
+# Assistant_2026-03-03_0758_04_Tool-exec_command
+
+nl -ba dev-docs/notes/completed.2026.2026-03-03-status-and-filename-nicities.md | sed -n '1,260p'
+
+**Planning comprehensive note rewrite**
+
+# gpt-5.3-codex_2026-03-03_0758_50
+
+I’ve updated the Gemini support task note with concrete March 3 evidence and marked the prior “not picked up” assumptions as resolved. Next I’ll add the short little-stuff note entry and the release-runbook smoke section.
+
+**Adding completion note file**
+
+**Verifying timestamp format and accuracy**
+
+# Assistant_2026-03-03_0759_18_Tool-exec_command
+
+date +%s%3N
+
+**Deciding frontmatter timestamp update**
+
+# gpt-5.3-codex_2026-03-03_0759_21
+
+I’ve added a dedicated `completed.*` closure note as well. I’ll do a quick consistency pass (timestamps/diff scope) and then share exactly what changed.
+
+**Verifying file contents**
+
+# Assistant_2026-03-03_0759_33_Tool-exec_command
+
+nl -ba dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md | sed -n '1,280p'
+
+# Assistant_2026-03-03_0759_33_Tool-exec_command
+
+nl -ba dev-docs/notes/task.2026.2026-03-02-little-stuff.md | sed -n '96,190p'
+
+# Assistant_2026-03-03_0759_33_Tool-exec_command
+
+nl -ba dev-docs/notes/dev.release-runbook.md | sed -n '1,260p'
+
+# Assistant_2026-03-03_0759_33_Tool-exec_command
+
+nl -ba dev-docs/notes/completed.2026.2026-03-03-gemini-support-closure.md | sed -n '1,220p'
+
+# Assistant_2026-03-03_0759_33_Tool-exec_command
+
+git status --short
+
+**Acknowledging user request and verifying implementation**
+
+# gpt-5.3-codex_2026-03-03_0759_54
+
+Implementing the docs-only Gemini closure plan now. I’m going to inspect the three target notes plus current git diff, then apply only the `dev-docs/notes` updates and verify `README.md` stays untouched.
+
+**Running git status and file checks**
+
+# Assistant_2026-03-03_0759_58_Tool-exec_command
+
+git status --short
+
+# Assistant_2026-03-03_0759_58_Tool-exec_command
+
+sed -n '1,260p' dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md
+
+# Assistant_2026-03-03_0759_58_Tool-exec_command
+
+sed -n '1,260p' dev-docs/notes/task.2026.2026-03-02-little-stuff.md
+
+# Assistant_2026-03-03_0759_58_Tool-exec_command
+
+sed -n '1,320p' dev-docs/notes/dev.release-runbook.md
+
+# Assistant_2026-03-03_0759_58_Tool-exec_command
+
+ls -1 dev-docs/notes | rg '^completed\..*gemini.*closure' || true
+
+**Verifying plan completion and edits**
+
+# gpt-5.3-codex_2026-03-03_0800_03
+
+I’ve verified the target notes are already updated in line with your plan. I’ll quickly confirm the closure note content and that `README.md` is not changed, then I’ll summarize exactly what landed.
+
+# gpt-5.3-codex_2026-03-03_0800_03_Tool-exec_command
+
+sed -n '1,240p' dev-docs/notes/completed.2026.2026-03-03-gemini-support-closure.md
+
+# gpt-5.3-codex_2026-03-03_0800_03_Tool-exec_command
+
+git status --short README.md
+
+# gpt-5.3-codex_2026-03-03_0800_03_Tool-exec_command
+
+rg -n "stale filtering|missing" dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md dev-docs/notes/dev.release-runbook.md dev-docs/notes/task.2026.2026-03-02-little-stuff.md
+
+**Confirming implementation and file changes**
+
+# Assistant_2026-03-03_0800_11_Tool-exec_command
+
+git diff -- dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md dev-docs/notes/task.2026.2026-03-02-little-stuff.md dev-docs/notes/dev.release-runbook.md dev-docs/notes/completed.2026.2026-03-03-gemini-support-closure.md
+
+# Assistant_2026-03-03_0800_11_Tool-exec_command
+
+git diff --name-only | rg '^README.md$' || true
+
+**Preparing final implementation summary**
+
+# gpt-5.3-codex_2026-03-03_0800_22
+
+Plan implemented as requested with docs-only updates under `dev-docs/notes`.
+
+- Updated Gemini closure/task note with March 3, 2026 verified evidence and deferred postmortem:
+  - [task.2026.2026-02-26-fix-gemini-support.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-26-fix-gemini-support.md)
+- Appended revalidation follow-up to little-stuff note:
+  - [task.2026.2026-03-02-little-stuff.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-02-little-stuff.md)
+- Added internal Gemini smoke-check steps to release runbook:
+  - [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md)
+- Added closure outcome note in `completed.*` taxonomy:
+  - [completed.2026.2026-03-03-gemini-support-closure.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/completed.2026.2026-03-03-gemini-support-closure.md)
+
+Validation checks:
+- `README.md` is unchanged.
+- No runtime/CLI/config/schema/code changes were made for this request.

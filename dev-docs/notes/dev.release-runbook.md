@@ -60,6 +60,35 @@ git push origin v0.2.0
 - [ ] GitHub release exists from `v0.2.0`.
 - [ ] Release notes mention binaries are deferred.
 
+### Gemini Smoke Check (Internal)
+
+Use this lightweight check to confirm Gemini ingestion and in-chat command
+handling before release cut:
+
+1. Start/continue a Gemini chat in VS Code.
+2. Run:
+
+```bash
+deno run -A apps/daemon/src/main.ts status --all --json
+```
+
+Confirm a `gemini` session appears with recent `lastEventAt`.
+
+3. Issue `::capture-<alias>` in the Gemini chat (for example `::capture-k`).
+4. Run:
+
+```bash
+rg -n "recording.command.(applied|failed)|recording.capture" ~/.kato/runtime/logs/operational.jsonl -S
+```
+
+Confirm at least one Gemini command-handling event is present:
+
+- success path:
+  - `recording.command.applied` (with `provider: "gemini"`)
+  - and/or `recording.capture`
+- failure path:
+  - `recording.command.failed` with actionable error details
+
 ## Immediate Follow-Up Hardening (Post-v0.2.0)
 
 - [ ] Enable branch protection on `main` requiring CI checks.

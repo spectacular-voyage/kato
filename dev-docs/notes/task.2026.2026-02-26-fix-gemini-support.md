@@ -8,105 +8,58 @@ created: 1772170471633
 
 ## Context
 
-Kato's Gemini provider ingestion currently works by recursively scanning configured roots (typically `~/.gemini/tmp`) for `session-*.json` files and then deduping by `sessionId`.
+This task started as a Gemini ingestion recovery track after behavior changes in
+Gemini temp directory layout (hash- and slug-based project IDs under
+`~/.gemini/tmp`).
 
-Historically, Gemini stored project temp data under hash-based directories:
+## Current Verified State (March 3, 2026)
 
-- `~/.gemini/tmp/<project-hash>/chats/session-*.json`
+Gemini support is currently working in this environment.
 
-During troubleshooting on February 26-27, 2026, we confirmed Gemini now also uses project-slug directories (for example `kato`) via a registry/migration model:
+- `deno run -A apps/daemon/src/main.ts status --all --json` at
+  `2026-03-03T15:45:35.631Z` showed Gemini as active:
+  - `providers.gemini.activeSessions = 2`
+  - session snippet `test12345` present with
+    `sessionId: 3c4b65da-fc7f-42dd-8fa6-a7544e4a41fd`
+    and `lastEventAt: 2026-03-03T15:44:36.795Z`
+- `test12345` source transcript was ingested from:
+  - `/home/djradon/.gemini/tmp/4fcca3320e91da963f1b71363dd41a742b30a8a832b07d4e28c760c510335fd4/chats/session-2026-03-03T15-44-65ad1ca8.json`
+- Gemini in-chat command handling was observed as applied:
+  - operational log event `recording.command.applied`
+  - timestamp `2026-03-03T15:44:27.228Z`
+  - `provider: "gemini"`
+  - `command: "capture"`
+  - output path
+    `/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-03_0744-where-does-the-gemini-cli-store-its-conversations-now-wher-gemini.md`
 
-- `~/.gemini/tmp/<project-slug>/chats/session-*.json`
-- `~/.gemini/projects.json` maps project root -> slug
+## Resolved Assumptions
 
-Important nuance:
+- Resolved: "Gemini VS Code chats are not getting picked up."
+- Resolved: "Gemini `::capture-k` is not being recognized by Kato."
 
-- Session JSON payloads still include `projectHash`, even when files are now under slug directories.
-- During migration, both hash and slug copies can coexist for the same `sessionId`.
+Both have now been observed working with live runtime evidence from March 3,
+2026.
 
-## What Changed (Issue Summary)
+## Implementation Status Snapshot
 
-### Old behavior assumption
+Implemented in code/tests:
 
-Kato and human operators often expected Gemini temp paths to be hash-only. This assumption is now outdated.
+- recursive Gemini session discovery under configured roots
+- layout-agnostic handling for hash/slug project folder IDs
+- deterministic dedupe ranking (payload `lastUpdated`, then layout preference,
+  then mtime/path)
+- duplicate Gemini discovery coverage in
+  `tests/provider-ingestion_test.ts`
 
-### New storage behavior
+Deferred for future hardening (not blocking current functionality):
 
-Gemini CLI core now supports a project registry and short project IDs (slugs). Temp and history folders can be slug-based, with migration from old hash folders.
+- startup/operator warnings for overly narrow Gemini root config
+- optional migration diagnostics and deeper postmortem of earlier transient
+  behavior
 
-### Why this matters for Kato
+## Disposition
 
-If both old (hash) and new (slug) copies exist:
+This task is treated as functionally resolved as of March 3, 2026.
 
-- Kato may see duplicate session files for one `sessionId`.
-- Naive file-level ordering (for example mtime-only) can choose an unintended source.
-- Path changes for the same session can look like "new source file", potentially impacting cursor continuity if not handled carefully.
-
-This can cause flaky command detection/capture behavior, replay noise, or confusing status for active Gemini sessions.
-
-## Proposed Solution
-
-### Design principle
-
-Treat the immediate directory under `~/.gemini/tmp` as an opaque project identifier. Do not infer semantics from hash-vs-slug naming.
-
-### Discovery and dedupe strategy
-
-- [ ] Continue recursive discovery under configured Gemini roots; do not narrow to hash patterns.
-- [ ] For each discovered `session-*.json`, parse and retain:
-  - `sessionId`
-  - `lastUpdated` (from JSON payload, when present)
-  - `projectHash` (informational)
-  - `filePath`
-  - `layoutType` (`hash`, `slug`, `unknown`; derived only for tie-breaking/telemetry)
-- [ ] For duplicates sharing `sessionId`, choose canonical source deterministically:
-  - primary: newest parsed `lastUpdated`
-  - secondary: prefer slug-path over hash-path (migration target preference)
-  - tertiary: filesystem mtime
-  - final tie-breaker: lexical `filePath` (stable deterministic fallback)
-
-### Cursor and state continuity
-
-- [ ] If the winning source path changes for the same `provider+sessionId`, attempt continuity rather than unconditional reset.
-- [ ] Preserve Gemini anchor/cursor continuity using existing item-index/anchor logic; reset only when anchor validation fails.
-- [ ] Add explicit operational logs for path migration events (hash -> slug, slug -> hash, unknown transitions).
-
-### Config and operator ergonomics
-
-- [ ] Add warnings when `providerSessionRoots.gemini` is configured to a specific child (`.../tmp/<id>`) instead of the parent `.../tmp`.
-- [ ] Document that Gemini may store sessions under either hash or slug project IDs, and both can temporarily coexist.
-
-### Test coverage
-
-- [ ] Add fixture/test cases with duplicate hash+slug files for same `sessionId`.
-- [ ] Add tests for deterministic winner selection using `lastUpdated`.
-- [ ] Add tests for source-path migration without losing command detection continuity.
-- [ ] Add regression test ensuring no hash-only assumptions remain in discovery.
-
-## Risks
-
-- Risk: Choosing wrong duplicate source during migration.
-  Mitigation: deterministic ranking with `lastUpdated` first, stable tie-breakers, and explicit logging.
-
-- Risk: Replay or missed events when source path changes.
-  Mitigation: preserve cursor/anchor where possible; reset only after anchor mismatch confirmation.
-
-- Risk: Mixed client ecosystems (older extension/build still hash-only; newer builds slug-based).
-  Mitigation: keep discovery layout-agnostic and recursive under parent root.
-
-- Risk: Operator misconfiguration to overly narrow roots.
-  Mitigation: startup warnings and docs updates.
-
-## Open Questions
-
-- [ ] Should we always prefer slug path over hash path in ties, or only when parsed payload timestamps are equal?
-- [ ] Should `projectHash` be used only as metadata, or should we surface it in status output for debugging?
-- [ ] Do we need a one-time migration health command (for example, diagnostics showing hash+slug duplicates and winner decisions)?
-- [ ] Should we treat `~/.gemini/history` as discovery input for active ingestion, or keep it out-of-scope for now?
-
-## Acceptance Criteria
-
-- [ ] Active Gemini sessions are ingested reliably whether temp layout is hash-based, slug-based, or both.
-- [ ] Duplicate hash+slug session files produce exactly one canonical tracked session per `sessionId`.
-- [ ] Command detection/capture behavior remains stable across layout transitions.
-- [ ] Docs clearly describe supported Gemini storage layouts and recommended root configuration.
+Deeper root-cause investigation of earlier flaky behavior is explicitly
+deferred.

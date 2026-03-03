@@ -14,6 +14,7 @@ import {
   type StatusRecentError,
   type WorkspaceStatusSummary,
 } from "../apps/daemon/src/cli/commands/status.ts";
+import { DAEMON_APP_VERSION } from "../apps/daemon/src/version.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
 // ─── Parser tests ─────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "kato  ·  daemon:");
+  assertStringIncludes(out, `kato (v${DAEMON_APP_VERSION})  ·  daemon:`);
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -716,9 +717,12 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
   });
   assertStringIncludes(out, "daemon: running");
   assertStringIncludes(out, "memory:");
+  const daemonLineCount =
+    out.split("\n").filter((line) => line.includes("daemon: ")).length;
+  assertEquals(daemonLineCount, 1);
   assert(
     out.split("\n").some((line) =>
-      line.includes("daemon: running") && line.includes("memory:")
+      line.includes("recordings:") && line.includes("memory:")
     ),
   );
 });
