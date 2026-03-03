@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ''
-updated: 1772468798595
+updated: 1772563885354
 created: 1771724652182
 ---
 
@@ -20,4 +20,4 @@ created: 1771724652182
 - support flag in in-chat comments, e.g. to start including thinking or tool use
 - folder-based session-state and twin files (maybe just by year? or probably year-month)
 - instead of "User_unknown-time" headings, we could number sequentially, or use the event IDs
-
+- allow error messaging and optional silent failure if the user triggers a recording/export using an unexpected alias
