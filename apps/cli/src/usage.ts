@@ -98,7 +98,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Usage: kato clean [--all|--logs|--recordings <days>|--sessions <days>] [--dry-run]",
     "",
     "Runs cleanup in CLI.",
-    "--logs flushes runtime logs plus ~/.kato/exports.jsonl.",
+    "--logs flushes daemon runtime logs plus ~/.kato/daemon/exports.jsonl.",
     "--all is an alias for --logs.",
     "--sessions deletes persisted session twins/metadata older than <days>.",
     "--sessions refuses to run while daemon status is actively running.",

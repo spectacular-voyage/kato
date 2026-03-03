@@ -23,7 +23,7 @@ This document is implementation-facing and should align with `dev.security-basel
 ## Process Topology (Reference)
 
 ```text
-CLI (kato start/stop/status)
+CLI (`apps/cli`, e.g. `kato start/stop/status`)
   |
   v
 Launcher Process (short-lived)
@@ -58,7 +58,7 @@ Orchestrator Daemon (long-lived)
 - Owns `pid` and lock lifecycle.
 - Supervises provider and writer workers.
 - Applies command policy and destination allowlist decisions.
-- Persists `state.json` and security audit log.
+- Persists shared status/session state and daemon security audit log.
 
 ### Provider parser workers
 
@@ -150,9 +150,9 @@ Writes must be atomic (temp + rename pattern).
 
 Current implementation note:
 
-- `~/.kato/daemon-control.json` is a rebuildable cache index.
-- `~/.kato/sessions/*.meta.json` is authoritative session metadata.
-- `~/.kato/sessions/*.twin.jsonl` is the durable canonical event log.
+- `~/.kato/shared/daemon-control.json` is a rebuildable cache index.
+- `~/.kato/shared/sessions/*.meta.json` is authoritative session metadata.
+- `~/.kato/shared/sessions/*.twin.jsonl` is the durable canonical event log.
 
 ## Failure and Recovery Model
 

@@ -15,10 +15,10 @@ Prerequisites:
 
 - Deno 2.x
 
-Run CLI commands through the daemon entry point (source/dev invocation):
+Run CLI commands through the CLI entry point (source/dev invocation):
 
 ```bash
-deno run -A apps/daemon/src/main.ts <command> [options]
+deno run -A apps/cli/src/main.ts <command> [options]
 ```
 
 `-A` grants broad permissions and is intended for local
@@ -29,15 +29,15 @@ paths.
 First run:
 
 ```bash
-deno run -A apps/daemon/src/main.ts init
-deno run -A apps/daemon/src/main.ts start
-deno run -A apps/daemon/src/main.ts status
+deno run -A apps/cli/src/main.ts init
+deno run -A apps/cli/src/main.ts start
+deno run -A apps/cli/src/main.ts status
 ```
 
 Stop:
 
 ```bash
-deno run -A apps/daemon/src/main.ts stop
+deno run -A apps/cli/src/main.ts stop
 ```
 
 ## Command Reference
@@ -45,9 +45,9 @@ deno run -A apps/daemon/src/main.ts stop
 Supported commands:
 
 - `--version` / `-V`
-  - Print the daemon CLI version.
+  - Print the CLI version.
 - `init`
-  - Create default runtime config if missing.
+  - Create missing daemon/shared/CLI/user config and default workspace template files.
 - `start`
   - Start daemon in detached background mode.
   - CLI returns success only after daemon heartbeat acknowledges startup.
@@ -82,25 +82,48 @@ Supported commands:
   - `--format jsonl` / `-f jsonl`: emit one canonical `ConversationEvent` JSON
     object per line.
   - When `--output` is omitted, the daemon chooses a default path.
-- `clean [--all|--recordings <days>|--sessions <days>] [--dry-run]`
+- `clean [--all|--logs|--recordings <days>|--sessions <days>] [--dry-run]`
   - Run cleanup immediately in the CLI.
-  - `--all` flushes runtime logs.
+  - `--logs` flushes daemon runtime logs and export history.
+  - `--all` is an alias for `--logs`.
   - `--sessions <days>` removes persisted session artifacts
-    (`~/.kato/sessions/*.meta.json`, `*.twin.jsonl`) older than `<days>`.
+    (`~/.kato/shared/sessions/*.meta.json`, `*.twin.jsonl`) older than
+    `<days>`.
   - `--sessions` refuses to run while daemon status is actively running.
   - `--recordings` is currently an accepted placeholder.
 
 Usage help:
 
 ```bash
-deno run -A apps/daemon/src/main.ts help
-deno run -A apps/daemon/src/main.ts help start
-deno run -A apps/daemon/src/main.ts --version
+deno run -A apps/cli/src/main.ts help
+deno run -A apps/cli/src/main.ts help start
+deno run -A apps/cli/src/main.ts --version
 ```
 
 Workspace registration changes are visible to a running daemon for new
 alias-scoped commands without a restart. Changes to an already-registered
 workspace's alias, root, or config path are restart-bound.
+
+## Manual Migration (Pre-Separation -> Current Layout)
+
+If you have older single-root files from before CLI/daemon separation, migrate
+once with:
+
+```bash
+mkdir -p ~/.kato/shared/ipc ~/.kato/shared/sessions ~/.kato/daemon ~/.kato/cli
+mv ~/.kato/kato-daemon-config.yaml ~/.kato/daemon/kato-daemon-config.yaml
+mv ~/.kato/workspace-registry.json ~/.kato/shared/workspace-registry.json
+mv ~/.kato/default-kato-workspace-config.yaml ~/.kato/shared/default-kato-workspace-config.yaml
+mv ~/.kato/sessions/* ~/.kato/shared/sessions/
+mv ~/.kato/daemon-control.json ~/.kato/shared/daemon-control.json
+mv ~/.kato/runtime/status.json ~/.kato/shared/status.json
+mv ~/.kato/runtime/control.json ~/.kato/shared/ipc/daemon-control.json
+deno run -A apps/cli/src/main.ts init
+deno run -A apps/cli/src/main.ts restart
+```
+
+This migration is intentionally manual and hard-break; there is no compatibility
+auto-move logic in runtime code.
 
 ## In-Chat Control Commands
 
@@ -135,32 +158,32 @@ Rules:
 
 Default paths:
 
-- Global runtime config: `~/.kato/kato-daemon-config.yaml`
-- Default workspace template: `~/.kato/default-kato-workspace-config.yaml`
-- Workspace registry: `~/.kato/workspace-registry.json`
-- Status: `~/.kato/runtime/status.json`
-- Control queue: `~/.kato/runtime/control.json`
-- Daemon session index cache: `~/.kato/daemon-control.json`
-- Session metadata + twins: `~/.kato/sessions/*.meta.json` and
-  `~/.kato/sessions/*.twin.jsonl`
+- Daemon config: `~/.kato/daemon/kato-daemon-config.yaml`
+- Shared config: `~/.kato/shared/kato-shared-config.yaml`
+- CLI config: `~/.kato/cli/kato-cli-config.yaml`
+- User config: `~/.kato/kato-user-config.yaml`
+- Default workspace template: `~/.kato/shared/default-kato-workspace-config.yaml`
+- Workspace registry: `~/.kato/shared/workspace-registry.json`
+- Status: `~/.kato/shared/status.json`
+- Control queue: `~/.kato/shared/ipc/daemon-control.json`
+- Daemon session index cache: `~/.kato/shared/daemon-control.json`
+- Session metadata + twins: `~/.kato/shared/sessions/*.meta.json` and
+  `~/.kato/shared/sessions/*.twin.jsonl`
 - Workspace-local config: `<workspace>/kato-workspace-config.yaml`
 
-Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
-`~/.kato/kato-daemon-config.yaml` is the daemon/global config plus plain CLI
-non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml` is
-only the template used by `kato workspace init`. Workspace-local runtime output
-settings belong in `<workspace>/kato-workspace-config.yaml`.
+Session metadata is authoritative; `shared/daemon-control.json` is a rebuildable
+cache index. `kato-daemon-config.yaml` is daemon-only process config.
+`kato-shared-config.yaml` owns shared policy and plain export defaults.
+`kato-cli-config.yaml` is CLI-local settings (currently logging).
 
 ## Runtime Config
 
-Default `~/.kato/kato-daemon-config.yaml` shape:
+Default `~/.kato/daemon/kato-daemon-config.yaml` shape:
 
 ```yaml
 schemaVersion: 1
-runtimeDir: ~/.kato/runtime
-statusPath: ~/.kato/runtime/status.json
-controlPath: ~/.kato/runtime/control.json
-allowedWriteRoots: []
+runtimeDir: ~/.kato/daemon
+katoDir: ~/.kato
 providerSessionRoots:
   claude:
     - ~/.claude/projects
@@ -171,10 +194,21 @@ providerSessionRoots:
 globalAutoGenerateSnapshots: false
 providerAutoGenerateSnapshots: {}
 cleanSessionStatesOnShutdown: false
-exportTimezone: local
 daemonFeatureFlags:
   daemonExportEnabled: true
   captureIncludeSystemEvents: false
+logging:
+  operationalLevel: info
+  auditLevel: info
+daemonMaxMemoryMb: 500
+```
+
+Default `~/.kato/shared/kato-shared-config.yaml` shape:
+
+```yaml
+schemaVersion: 1
+allowedWriteRoots: []
+exportTimezone: local
 exportMarkdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
@@ -192,84 +226,39 @@ exportFeatureFlags:
   writerIncludeDecisionOptions: true
   writerIncludeDecisionSelection: true
   writerItalicizeUserMessages: false
+```
+
+Default `~/.kato/cli/kato-cli-config.yaml`:
+
+```yaml
+schemaVersion: 1
 logging:
   operationalLevel: info
   auditLevel: info
-daemonMaxMemoryMb: 500
 ```
 
 Notes:
 
-- Runtime config is validated fail-closed at startup.
-- `kato init` creates both `~/.kato/kato-daemon-config.yaml` and
-  `~/.kato/default-kato-workspace-config.yaml`, plus
-  `~/.kato/kato-user-config.yaml`.
-- `providerSessionRoots` controls provider ingestion discovery roots and daemon
-  read-scope narrowing.
-- `globalAutoGenerateSnapshots` controls default SessionTwin generation
-  behavior. `false` means twins are generated while recordings are active (or
-  on-demand).
-- `providerAutoGenerateSnapshots` can override `globalAutoGenerateSnapshots` per
-  provider (`claude`, `codex`, `gemini`).
-- `cleanSessionStatesOnShutdown=true` deletes persisted `*.twin.jsonl` files at
-  daemon shutdown while retaining session metadata/index.
-- `exportTimezone` controls heading timestamp rendering for plain
-  (non-workspace) `kato export ...` output. Allowed values are `"local"`,
-  `"UTC"`, or a valid IANA timezone such as `"America/Los_Angeles"`.
-- `exportMarkdownFrontmatter` and `exportFeatureFlags` apply only to plain
-  `kato export ...` requests that are not scoped to a registered workspace.
-- `daemonFeatureFlags` currently controls:
-  - `daemonExportEnabled`
-  - `captureIncludeSystemEvents`
-- `exportMarkdownFrontmatter` controls plain CLI export markdown frontmatter:
-  - `includeFrontmatterInMarkdownRecordings` (default `true`)
-  - `includeUpdatedInFrontmatter` (default `false`)
-  - `addParticipantUsernameToFrontmatter` (default `false`) participant
-    usernames are resolved explicitly from `~/.kato/kato-user-config.yaml` only.
-  - `includeSessionIds` to include `kato-sessionIds` (default `true`)
-  - `includeWorkspaceIds` to include `kato-workspaceIds` (default `true`)
-  - `includeRecordingIds` to include `kato-recordingIds` (default `true`)
-  - `includeConversationEventKinds` to add `conversationEventKinds` from all
-    observed `ConversationEvent.kind` values (default `false`)
-- `exportFeatureFlags` currently controls:
-  - `writerIncludeCommentary`
-  - `writerIncludeThinking`
-  - `writerIncludeToolCalls`
-  - `writerIncludeToolResults`
-  - `writerIncludeDecisionPrompt`
-  - `writerIncludeDecisionOptions`
-  - `writerIncludeDecisionSelection`
-  - `writerItalicizeUserMessages`
-- Workspace runtime formatting lives only in workspace config
-  (`markdownFrontmatter` and `workspaceFeatureFlags`).
-- User participant resolution is explicit-only (no env/OS fallback):
-  - if `excludeMeFromParticipantList=true`, user participant is omitted
-  - else use `workspaceUsernames[workspaceId]` when present
-  - else use `defaultUsername` when non-empty
-  - else user participant is omitted
-- Missing provider root keys in legacy configs are backfilled with defaults
-  (including `gemini`).
-- Missing `logging` config in legacy files is backfilled to:
-  - `operationalLevel: "info"`
-  - `auditLevel: "info"`
-- Runtime log level precedence is:
-  - `KATO_LOGGING_OPERATIONAL_LEVEL` / `KATO_LOGGING_AUDIT_LEVEL` env override
-  - `runtimeConfig.logging`
-- `daemonMaxMemoryMb` is the global in-memory snapshot budget.
-- `KATO_DAEMON_MAX_MEMORY_MB` is used only when generating a default config
-  (`init`/auto-init). Precedence for generated config is: explicit value > env
-  var > `500`.
-- `allowedWriteRoots` gates user-requested output paths (`record`, `capture`,
-  `export`), not daemon-owned runtime artifacts (`status.json`, `control.json`,
-  runtime logs).
-- Unknown `daemonFeatureFlags`, `exportFeatureFlags`, and
-  `exportMarkdownFrontmatter` keys are rejected.
-- Older daemon builds may fail to start with newer config files containing
-  additional flags.
+- Config stores are validated fail-closed.
+- `kato init` creates daemon/shared/cli/user config files plus workspace template.
+- `providerSessionRoots` controls ingestion discovery and daemon read-scope
+  narrowing.
+- `allowedWriteRoots` now lives in shared config and gates user-requested output
+  paths (`record`, `capture`, `export`).
+- `exportTimezone`, `exportMarkdownFrontmatter`, and `exportFeatureFlags` now
+  live in shared config and define plain (non-workspace) export defaults.
+- Export defaults are daemon-applied runtime contracts: CLI sends resolved
+  values when available, and daemon falls back to shared config values when
+  payload fields are missing.
+- Workspace runtime formatting still lives in workspace config
+  (`markdownFrontmatter`, `workspaceFeatureFlags`).
+- Daemon runtime log-level precedence remains:
+  - `KATO_LOGGING_OPERATIONAL_LEVEL` / `KATO_LOGGING_AUDIT_LEVEL`
+  - config file values
 
-Default `~/.kato/default-kato-workspace-config.yaml` and
-`<workspace>/kato-workspace-config.yaml` share the same runtime output shape,
-except only the workspace-local file may include `workspaceId`:
+Default `~/.kato/shared/default-kato-workspace-config.yaml` and
+`<workspace>/kato-workspace-config.yaml` share the same runtime output shape.
+Only the workspace-local file may include `workspaceId`:
 
 ```yaml
 defaultOutputDir: "."
@@ -334,7 +323,7 @@ Working now:
 - Detached daemon launcher and heartbeat/status snapshots
 - Provider ingestion for `claude`, `codex`, and `gemini` with persisted ingest
   cursors
-- Persistent SessionTwin state (`~/.kato/sessions/*.twin.jsonl`) and per-session
+- Persistent SessionTwin state (`~/.kato/shared/sessions/*.twin.jsonl`) and per-session
   metadata (`*.meta.json`)
 - Restart-safe session/recording state (including per-recording write cursors)
 - Provider-backed export pipeline (`markdown` default, `jsonl` optional)

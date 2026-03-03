@@ -1,5 +1,6 @@
-import { dirname, fromFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import type { ProviderSessionRoots } from "@kato/shared";
+import { resolveHomeDir } from "../utils/env.ts";
 
 export interface DaemonProcessLauncherLike {
   launchDetached(): Promise<number>;
@@ -16,6 +17,21 @@ export interface DaemonLauncherRuntime {
 
 function resolveDaemonMainPath(): string {
   return fromFileUrl(new URL("../../../daemon/src/main.ts", import.meta.url));
+}
+
+function resolveWorkspaceSourceRoot(daemonMainPath: string): string {
+  // daemonMainPath is expected at <workspace>/apps/daemon/src/main.ts.
+  // The detached subprocess needs read access to source modules imported from
+  // apps/runtime and shared, so include workspace root in --allow-read.
+  return dirname(dirname(dirname(dirname(daemonMainPath))));
+}
+
+function resolveUserConfigDir(): string | undefined {
+  const home = resolveHomeDir();
+  if (!home) {
+    return undefined;
+  }
+  return join(home, ".kato");
 }
 
 type DenoCommandOptions = ConstructorParameters<typeof Deno.Command>[1];
@@ -35,6 +51,8 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
   ) {}
 
   launchDetached(): Promise<number> {
+    const workspaceSourceRoot = resolveWorkspaceSourceRoot(this.daemonMainPath);
+    const userConfigDir = resolveUserConfigDir();
     const writeRoots = new Set<string>([
       ...(this.runtime.allowedWriteRoots ?? []),
       this.runtime.runtimeDir,
@@ -44,6 +62,10 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
     ]);
     const readRoots = new Set<string>([
       ...writeRoots,
+      this.daemonMainPath,
+      dirname(this.daemonMainPath),
+      workspaceSourceRoot,
+      ...(userConfigDir ? [userConfigDir] : []),
       ...(this.runtime.providerSessionRoots?.claude ?? []),
       ...(this.runtime.providerSessionRoots?.codex ?? []),
       ...(this.runtime.providerSessionRoots?.gemini ?? []),

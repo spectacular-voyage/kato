@@ -119,26 +119,41 @@ User config remains:
 - [x] Daemon behavior on missing payload fields:
 - [x] Fallback to daemon-loaded shared config values.
 - [x] If shared config is invalid or unavailable, fail closed with explicit command error.
-- [ ] Document that behavior defaults are daemon-applied contracts, not CLI-only presentation.
+- [x] Document that behavior defaults are daemon-applied contracts, not CLI-only presentation.
 
 ## Migration Plan (Hard Break, Manual)
 Provide documented one-time migration commands:
 
-- [ ] Create directories:
-- [ ] `~/.kato/shared`
-- [ ] `~/.kato/shared/ipc`
-- [ ] `~/.kato/shared/sessions`
-- [ ] `~/.kato/daemon`
-- [ ] `~/.kato/cli`
-- [ ] Move files:
-- [ ] `~/.kato/kato-daemon-config.yaml` -> `~/.kato/daemon/kato-daemon-config.yaml`
-- [ ] `~/.kato/workspace-registry.json` -> `~/.kato/shared/workspace-registry.json`
-- [ ] `~/.kato/default-kato-workspace-config.yaml` -> `~/.kato/shared/default-kato-workspace-config.yaml`
-- [ ] Existing session state directory -> `~/.kato/shared/sessions/`.
-- [ ] Current status/control files -> shared paths.
-- [ ] Regenerate missing new files:
-- [ ] `kato init` scaffolds shared and CLI config files if absent.
-- [ ] Restart daemon after migration.
+- [x] Create directories:
+- [x] `~/.kato/shared`
+- [x] `~/.kato/shared/ipc`
+- [x] `~/.kato/shared/sessions`
+- [x] `~/.kato/daemon`
+- [x] `~/.kato/cli`
+- [x] Move files:
+- [x] `~/.kato/kato-daemon-config.yaml` -> `~/.kato/daemon/kato-daemon-config.yaml`
+- [x] `~/.kato/workspace-registry.json` -> `~/.kato/shared/workspace-registry.json`
+- [x] `~/.kato/default-kato-workspace-config.yaml` -> `~/.kato/shared/default-kato-workspace-config.yaml`
+- [x] Existing session state directory -> `~/.kato/shared/sessions/`.
+- [x] Current status/control files -> shared paths.
+- [x] Regenerate missing new files:
+- [x] `kato init` scaffolds shared and CLI config files if absent.
+- [x] Restart daemon after migration.
+
+Suggested one-time migration command sequence (also documented in `README.md`):
+
+```bash
+mkdir -p ~/.kato/shared/ipc ~/.kato/shared/sessions ~/.kato/daemon ~/.kato/cli
+mv ~/.kato/kato-daemon-config.yaml ~/.kato/daemon/kato-daemon-config.yaml
+mv ~/.kato/workspace-registry.json ~/.kato/shared/workspace-registry.json
+mv ~/.kato/default-kato-workspace-config.yaml ~/.kato/shared/default-kato-workspace-config.yaml
+mv ~/.kato/sessions/* ~/.kato/shared/sessions/
+mv ~/.kato/daemon-control.json ~/.kato/shared/daemon-control.json
+mv ~/.kato/runtime/status.json ~/.kato/shared/status.json
+mv ~/.kato/runtime/control.json ~/.kato/shared/ipc/daemon-control.json
+deno run -A apps/cli/src/main.ts init
+deno run -A apps/cli/src/main.ts restart
+```
 
 No legacy fallback, no auto-move logic, no dual-read window.
 
@@ -154,7 +169,7 @@ No legacy fallback, no auto-move logic, no dual-read window.
 - [x] Add daemon version to status snapshot and update status rendering.
 - [x] Update launcher for daemon-only entrypoint.
 - [x] Update init scaffolding for daemon/shared/cli/user files.
-- [ ] Update docs/runbooks/README/task notes.
+- [x] Update docs/runbooks/README/task notes.
 
 ## Test Cases and Scenarios
 - [x] Config parsing and validation:

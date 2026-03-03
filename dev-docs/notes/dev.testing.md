@@ -2,14 +2,14 @@
 id: kclfduln80f7td4hcfuszi4
 title: Testing
 desc: ""
-updated: 1771811926065
+updated: 1772573000000
 created: 1771811926065
 ---
 
 ## Purpose
 
 This note tracks practical testing workflows for Kato, including a repeatable
-MVP smoke test.
+MVP smoke test under the current CLI/daemon split.
 
 All `deno run -A ...` commands below are source/dev invocations. For production
 packaging, prefer a compiled binary with explicitly scoped permissions.
@@ -23,7 +23,7 @@ in `.gitignore` so artifacts left behind do not pollute the repo or diff.
 Use it any time a test must write to an actual path instead of an in-memory
 store. Prefer `makeTestTempDir("my-test-prefix-")` from `tests/test_temp.ts` to
 get a unique subdirectory under `.test-tmp/` that can be removed in a `finally`
-block. If you hard-code a path (e.g. for tests that don't need isolation), use
+block. If you hard-code a path (e.g. for tests that do not need isolation), use
 `.test-tmp/` as the parent so it stays out of `.kato/`.
 
 ## Test Levels
@@ -39,8 +39,8 @@ block. If you hard-code a path (e.g. for tests that don't need isolation), use
 This runbook validates currently implemented MVP slices:
 
 - CLI command surface (`init`, `start`, `stop`, `status`, `export`, `clean`)
-- runtime config bootstrap and fail-closed loading
-- detached daemon start/stop and status files
+- daemon/shared config bootstrap and fail-closed loading
+- detached daemon start/stop and shared control/status files
 - control queue request enqueue behavior
 - provider ingestion from configured session roots
 - provider-backed export output (`kato export <session-id>`)
@@ -61,52 +61,52 @@ Expected:
 
 - `~/.kato/` removed if present.
 
-### 1) Initialize runtime config
+### 1) Initialize config
 
 ```bash
-deno run -A apps/daemon/src/main.ts init
+deno run -A apps/cli/src/main.ts init
 ```
 
 Expected:
 
-- Output contains either:
-  - `created runtime config at ...`, or
-  - `runtime config already exists at ...`
-- `~/.kato/kato-daemon-config.yaml` exists.
-- `~/.kato/default-kato-workspace-config.yaml` exists.
-- `~/.kato/kato-user-config.yaml` exists.
+- Output contains created/already-exists lines for:
+  - runtime config (`~/.kato/daemon/kato-daemon-config.yaml`)
+  - shared config (`~/.kato/shared/kato-shared-config.yaml`)
+  - CLI config (`~/.kato/cli/kato-cli-config.yaml`)
+  - default workspace config (`~/.kato/shared/default-kato-workspace-config.yaml`)
+  - user config (`~/.kato/kato-user-config.yaml`)
 
-### 2) Configure provider roots and seed fixture
+### 2) Configure provider roots, write roots, and seed fixture
 
 ```bash
-deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const path=`${home}/.kato/kato-daemon-config.yaml`; const raw=await Deno.readTextFile(path); const cfg=parse(raw); if(typeof cfg!=="object" || cfg===null || Array.isArray(cfg)) throw new Error("invalid yaml config"); (cfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(path, `${stringify(cfg).trimEnd()}\n`);'
-mkdir -p ~/.kato/test-provider/codex
+deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const daemonPath=`${home}/.kato/daemon/kato-daemon-config.yaml`; const sharedPath=`${home}/.kato/shared/kato-shared-config.yaml`; const daemonRaw=await Deno.readTextFile(daemonPath); const daemonCfg=parse(daemonRaw); if(typeof daemonCfg!=="object" || daemonCfg===null || Array.isArray(daemonCfg)) throw new Error("invalid daemon yaml config"); (daemonCfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(daemonPath, `${stringify(daemonCfg).trimEnd()}\n`); const sharedRaw=await Deno.readTextFile(sharedPath); const sharedCfg=parse(sharedRaw); if(typeof sharedCfg!=="object" || sharedCfg===null || Array.isArray(sharedCfg)) throw new Error("invalid shared yaml config"); (sharedCfg as Record<string, unknown>).allowedWriteRoots=[`${home}/.kato/test-output`]; await Deno.writeTextFile(sharedPath, `${stringify(sharedCfg).trimEnd()}\n`);'
+mkdir -p ~/.kato/test-provider/codex ~/.kato/test-output
 cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```
 
 Expected:
 
-- `~/.kato/kato-daemon-config.yaml` includes `providerSessionRoots`.
+- `~/.kato/daemon/kato-daemon-config.yaml` includes `providerSessionRoots`.
+- `~/.kato/shared/kato-shared-config.yaml` includes `allowedWriteRoots`.
 - `~/.kato/test-provider/codex/smoke-codex.jsonl` exists.
 
 ### 3) Start daemon
 
 ```bash
-deno run -A apps/daemon/src/main.ts start
+deno run -A apps/cli/src/main.ts start
 ```
 
 Expected:
 
-- Output contains:
-  - `kato daemon started in background (pid: ...)`
-- `~/.kato/runtime/status.json` exists and eventually reports
+- Output contains `kato daemon started in background (pid: ...)`.
+- `~/.kato/shared/status.json` exists and eventually reports
   `daemonRunning: true`.
 
 ### 4) Check status
 
 ```bash
-deno run -A apps/daemon/src/main.ts status
-deno run -A apps/daemon/src/main.ts status --json
+deno run -A apps/cli/src/main.ts status
+deno run -A apps/cli/src/main.ts status --json
 ```
 
 Expected:
@@ -118,13 +118,13 @@ Expected:
   - `heartbeatAt`
   - `recordings`
 
-### 5) Verify provider ingestion + real export
+### 5) Verify provider ingestion + markdown export
 
 ```bash
-deno run -A apps/daemon/src/main.ts status --json
-deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output ~/.kato/runtime/smoke-export.md
+deno run -A apps/cli/src/main.ts status --json
+deno run -A apps/cli/src/main.ts export sess-vscode-001 --output ~/.kato/test-output/smoke-export.md
 sleep 2
-cat ~/.kato/runtime/smoke-export.md
+cat ~/.kato/test-output/smoke-export.md
 ```
 
 Expected:
@@ -138,9 +138,9 @@ Expected:
 ### 5b) Verify JSONL export format
 
 ```bash
-deno run -A apps/daemon/src/main.ts export sess-vscode-001 --output ~/.kato/runtime/smoke-export.jsonl --format jsonl
+deno run -A apps/cli/src/main.ts export sess-vscode-001 --output ~/.kato/test-output/smoke-export.jsonl --format jsonl
 sleep 2
-head -1 ~/.kato/runtime/smoke-export.jsonl | deno eval -A 'const line=await new Response(Deno.stdin).text(); const e=JSON.parse(line); console.log(e.kind, e.eventId);'
+head -1 ~/.kato/test-output/smoke-export.jsonl | deno eval -A 'const line=await new Response(Deno.stdin).text(); const e=JSON.parse(line); console.log(e.kind, e.eventId);'
 ```
 
 Expected:
@@ -151,7 +151,7 @@ Expected:
 ### 6) Run clean (CLI-owned)
 
 ```bash
-deno run -A apps/daemon/src/main.ts clean --all --dry-run
+deno run -A apps/cli/src/main.ts clean --all --dry-run
 ```
 
 Expected:
@@ -163,7 +163,7 @@ Expected:
 ### 7) Stop daemon
 
 ```bash
-deno run -A apps/daemon/src/main.ts stop
+deno run -A apps/cli/src/main.ts stop
 ```
 
 Expected:
@@ -171,15 +171,15 @@ Expected:
 - Output indicates stop queued or stale status reset path.
 - `status` eventually reports daemon not running.
 
-### 8) Fail-closed config check (unknown feature flag)
+### 8) Fail-closed config check (unknown daemon feature flag)
 
-1. Edit `~/.kato/kato-daemon-config.yaml` and add an unknown key under
-   `featureFlags`, e.g.:
+1. Edit `~/.kato/daemon/kato-daemon-config.yaml` and add an unknown key under
+   `daemonFeatureFlags`, for example:
    - `futureFlagThatDoesNotExist: true`
 2. Run:
 
 ```bash
-deno run -A apps/daemon/src/main.ts start
+deno run -A apps/cli/src/main.ts start
 ```
 
 Expected:
@@ -202,11 +202,12 @@ Expected:
 ## Troubleshooting
 
 1. `Runtime config not found ... Run kato init first`:
-   - Run `deno run -A apps/daemon/src/main.ts init`.
+   - Run `deno run -A apps/cli/src/main.ts init`.
 2. `Runtime config file has unsupported schema`:
-   - Inspect `~/.kato/kato-daemon-config.yaml` for invalid shape/unknown
-     `featureFlags` keys.
+   - Inspect `~/.kato/daemon/kato-daemon-config.yaml` for invalid shape/unknown
+     `daemonFeatureFlags` keys.
 3. `Export path denied by policy`:
-   - Use an output path within configured `allowedWriteRoots`.
+   - Add the target parent directory to
+     `~/.kato/shared/kato-shared-config.yaml` -> `allowedWriteRoots`.
 4. Status appears running right after failed start:
    - Known MVP limitation; wait for stale-heartbeat window or run `stop`.
