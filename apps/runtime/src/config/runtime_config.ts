@@ -77,6 +77,9 @@ const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> =
     "codex",
     "gemini",
   ];
+const DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS: Readonly<
+  ProviderAutoGenerateSnapshots
+> = { codex: true };
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -312,7 +315,7 @@ function parseProviderAutoGenerateSnapshots(
   value: unknown,
 ): ProviderAutoGenerateSnapshots | undefined {
   if (value === undefined) {
-    return {};
+    return { ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS };
   }
   if (!isRecord(value)) {
     return undefined;
@@ -328,7 +331,9 @@ function parseProviderAutoGenerateSnapshots(
     }
   }
 
-  const parsed: ProviderAutoGenerateSnapshots = {};
+  const parsed: ProviderAutoGenerateSnapshots = {
+    ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS,
+  };
   for (const key of PROVIDER_AUTO_SNAPSHOT_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
@@ -539,6 +544,7 @@ export function createDefaultRuntimeConfig(options: {
     },
     globalAutoGenerateSnapshots: options.globalAutoGenerateSnapshots ?? false,
     providerAutoGenerateSnapshots: {
+      ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS,
       ...(options.providerAutoGenerateSnapshots ?? {}),
     },
     cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,

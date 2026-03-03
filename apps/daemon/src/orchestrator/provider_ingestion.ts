@@ -1511,8 +1511,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const shouldAppendTwin = this.autoGenerateSnapshots ||
-        hasActiveRecordings(stateMetadata);
+      // Persist session twin history unconditionally when session state is
+      // enabled so missing twins are always rebuilt from source and stay
+      // capture-complete for command-time replay.
+      const shouldAppendTwin = true;
       if (shouldAppendTwin) {
         let twinExists = true;
         try {
@@ -1705,8 +1707,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     if (stateMetadata && this.sessionStateStore) {
-      const shouldAppendTwin = this.autoGenerateSnapshots ||
+      const legacyTwinHydrationEnabled = this.autoGenerateSnapshots ||
         hasActiveRecordings(stateMetadata);
+      // Persist session twin history unconditionally when session state is
+      // enabled so command-time capture can resolve from twin start.
+      const shouldAppendTwin = true;
       let appendedTwinCount = 0;
       let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
         [];
@@ -1826,9 +1831,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         sourceFileChanged ||
         anchorChanged ||
         snapshotSnippetMismatch;
+      const shouldHydrateFromTwin = legacyTwinHydrationEnabled ||
+        !currentSnapshot;
 
       if (shouldHydrateSnapshot) {
-        if (shouldAppendTwin) {
+        if (shouldHydrateFromTwin) {
           const existingSnapshotEvents =
             currentSnapshot?.provider === this.provider
               ? currentSnapshot.events

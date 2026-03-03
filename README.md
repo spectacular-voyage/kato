@@ -199,7 +199,8 @@ providerSessionRoots:
   gemini:
     - ~/.gemini/tmp
 globalAutoGenerateSnapshots: false
-providerAutoGenerateSnapshots: {}
+providerAutoGenerateSnapshots:
+  codex: true
 cleanSessionStatesOnShutdown: false
 daemonFeatureFlags:
   daemonExportEnabled: true

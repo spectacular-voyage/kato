@@ -853,6 +853,7 @@ export function renderStatusText(
   const lines: string[] = [];
 
   // Sessions section
+  const sessionsLoading = snapshot.sessions === undefined;
   const allSessions = snapshot.sessions ?? [];
   const activeCount = allSessions.filter((s) => !s.stale).length;
   const staleCount = allSessions.length - activeCount;
@@ -915,7 +916,9 @@ export function renderStatusText(
   lines.push("");
   if (displaySessions.length === 0) {
     lines.push(
-      showAll
+      sessionsLoading
+        ? "  (loading...)"
+        : showAll
         ? "  (none)"
         : `  (none active — run with --all to show ${staleCount} stale)`,
     );

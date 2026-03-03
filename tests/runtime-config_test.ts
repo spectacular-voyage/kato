@@ -38,7 +38,87 @@ Deno.test("RuntimeConfigFileStore initializes missing daemon config", async () =
       loaded.providerSessionRoots,
       defaultConfig.providerSessionRoots,
     );
+    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
     assertEquals(loaded.daemonFeatureFlags, defaultConfig.daemonFeatureFlags);
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore defaults missing providerAutoGenerateSnapshots to codex", async () => {
+  const root = makeSandboxRoot();
+  const runtimeDir = join(root, "daemon");
+  const configPath = join(runtimeDir, "kato-daemon-config.yaml");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        providerSessionRoots: {
+          claude: [],
+          codex: [],
+          gemini: [],
+        },
+        globalAutoGenerateSnapshots: false,
+        cleanSessionStatesOnShutdown: false,
+        daemonFeatureFlags: {
+          daemonExportEnabled: true,
+          captureIncludeSystemEvents: false,
+        },
+        logging: {
+          operationalLevel: "info",
+          auditLevel: "info",
+        },
+        daemonMaxMemoryMb: 500,
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateSnapshots is empty", async () => {
+  const root = makeSandboxRoot();
+  const runtimeDir = join(root, "daemon");
+  const configPath = join(runtimeDir, "kato-daemon-config.yaml");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        providerSessionRoots: {
+          claude: [],
+          codex: [],
+          gemini: [],
+        },
+        globalAutoGenerateSnapshots: false,
+        providerAutoGenerateSnapshots: {},
+        cleanSessionStatesOnShutdown: false,
+        daemonFeatureFlags: {
+          daemonExportEnabled: true,
+          captureIncludeSystemEvents: false,
+        },
+        logging: {
+          operationalLevel: "info",
+          auditLevel: "info",
+        },
+        daemonMaxMemoryMb: 500,
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
   } finally {
     await removePathIfPresent(root);
   }
