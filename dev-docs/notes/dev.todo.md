@@ -6,21 +6,31 @@ updated: 1772401876014
 created: 1771812869620
 ---
 
+## v0.2.0 Curation Status (2026-03-03)
+
+This backlog is curated for source-only `v0.2.0` with low code churn.
+
+- Completed stale items are explicitly closed.
+- Medium/high-churn items are explicitly deferred with rationale.
+- Follow-up hardening remains in place for post-`v0.2.0`.
+
 ## Event Schema Follow-ups (v2)
 
-- [ ] Add `request_user_input` Codex fixture under `tests/fixtures/` and add
+- [x] Add `request_user_input` Codex fixture under `tests/fixtures/` and add
       explicit questionnaire→decision event synthesis tests.
-- [ ] Add explicit cross-kind collision test: assert two events with same
+- [x] Add explicit cross-kind collision test: assert two events with same
       content/timestamp but different `kind` do NOT dedupe.
 - [ ] Add schema fail-closed check when persisted snapshot files are added
       (fail with `kato clean --all` remediation hint on v1 data).
 - [ ] Add `JsonlConversationWriter` to active recording pipeline (currently
       only markdown recordings are appended; JSONL write mode is export-only).
+      Deferred for post-`v0.2.0`: behavior expansion outside low-churn release scope.
 
 ## Runtime And Ingestion Follow-ups
 
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into
       `clean` command behavior.
+      Deferred for post-`v0.2.0`: medium implementation not release-critical.
 - [ ] Add permission-boundary tests that prove provider reads are denied outside
       `providerSessionRoots`.
 - [ ] Snapshot projection still keys in-memory reads by provider session id; harden
@@ -36,6 +46,7 @@ created: 1771812869620
 ## CLI And Runtime Hardening
 
 - [ ] Add `kato config validate` command for preflight runtime config checks.
+      Deferred for post-`v0.2.0`: useful hardening but out-of-scope for low-churn release.
 - [ ] Improve startup error UX for config/schema failures with actionable remediation hints.
 - [ ] Add workspace pre-persist verification and runtime re-verification status
       (`valid|invalid|unverified`) with explicit error reasons.
@@ -57,7 +68,9 @@ created: 1771812869620
 ## Testing And Packaging
 
 - [ ] Add production packaging guidance/scripts for `deno compile` with least-privilege permissions.
+      Deferred for post-`v0.2.0`: first release is intentionally source-only.
 - [ ] Add permission-profile smoke coverage for compiled/binary-style runtime.
+      Deferred for post-`v0.2.0`: binary release work is deferred.
 - [ ] Add migration tests for config evolution scenarios (older/newer config compatibility).
 
 ## Deferred Post-MVP Tracks

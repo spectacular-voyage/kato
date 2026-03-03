@@ -50,11 +50,44 @@ function normalizeSuppressedRecentErrorKeys(
   return [...normalized];
 }
 
-async function writeJsonAtomically(path: string, value: unknown): Promise<void> {
+async function writeJsonAtomically(
+  path: string,
+  value: unknown,
+): Promise<void> {
   await Deno.mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tmpPath, JSON.stringify(value, null, 2));
-  await Deno.rename(tmpPath, path);
+  let cleanupError: unknown = undefined;
+  try {
+    await Deno.writeTextFile(tmpPath, JSON.stringify(value, null, 2), {
+      createNew: true,
+    });
+    try {
+      await Deno.rename(tmpPath, path);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.AlreadyExists)) {
+        throw error;
+      }
+      try {
+        await Deno.remove(path);
+      } catch (removeError) {
+        if (!(removeError instanceof Deno.errors.NotFound)) {
+          throw removeError;
+        }
+      }
+      await Deno.rename(tmpPath, path);
+    }
+  } finally {
+    try {
+      await Deno.remove(tmpPath);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        cleanupError = error;
+      }
+    }
+  }
+  if (cleanupError) {
+    throw cleanupError;
+  }
 }
 
 export function resolveStatusErrorCursorPath(runtimeDir: string): string {

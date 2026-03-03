@@ -1,5 +1,7 @@
 # CODEX
 
+- The README.md file is for user-facing documentation. Keep anything developer-targeted in the dev-docs/notes/.
+- 
 - Primary developer guidance for this repository is in: `dev-docs/notes/dev.general-guidance.md`
   - Read that note before proposing or applying changes.
 

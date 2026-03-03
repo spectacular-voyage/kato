@@ -14,6 +14,7 @@ import {
   type StatusRecentError,
   type WorkspaceStatusSummary,
 } from "../apps/daemon/src/cli/commands/status.ts";
+import { DAEMON_APP_VERSION } from "../apps/daemon/src/version.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
 // ─── Parser tests ─────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, "kato  ·  daemon:");
+  assertStringIncludes(out, `kato (v${DAEMON_APP_VERSION})  ·  daemon:`);
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -407,6 +408,107 @@ Deno.test(
 );
 
 Deno.test(
+  "renderStatusText: dedupe runs before final truncation so recent errors stay full",
+  () => {
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 1,
+      rows: [{
+        workspaceId: "ws-invalid",
+        alias: "Broken.Proj",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "Unsupported workspace config key 'featureFlags'",
+      }],
+    };
+    const recentErrors: StatusRecentError[] = [
+      {
+        timestamp: "2026-02-24T09:59:07.000Z",
+        level: "error",
+        channel: "operational",
+        event: "provider.ingestion.read_denied",
+        message: "permission denied",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:06.000Z",
+        level: "error",
+        channel: "security-audit",
+        event: "recording.command.failed",
+        message: "capture destination denied by policy",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:05.000Z",
+        level: "error",
+        channel: "operational",
+        event: "workspace.config.invalid",
+        message:
+          "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:04.000Z",
+        level: "error",
+        channel: "operational",
+        event: "event-4",
+        message: "m4",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:03.000Z",
+        level: "error",
+        channel: "operational",
+        event: "event-5",
+        message: "m5",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:02.000Z",
+        level: "error",
+        channel: "operational",
+        event: "event-6",
+        message: "m6",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:01.000Z",
+        level: "error",
+        channel: "operational",
+        event: "event-7",
+        message: "m7",
+        source: "log",
+      },
+      {
+        timestamp: "2026-02-24T09:59:00.000Z",
+        level: "error",
+        channel: "operational",
+        event: "event-8",
+        message: "oldest-unique-marker",
+        source: "log",
+      },
+    ];
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      workspaceStatus,
+      recentErrors,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "Recent Errors (8)");
+    assertStringIncludes(out, "oldest-unique-marker");
+    assertEquals(
+      out.split(
+        "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+      ).length - 1,
+      1,
+    );
+  },
+);
+
+Deno.test(
   "renderStatusText: invalid workspace aliases in derived errors use a safe placeholder",
   () => {
     const workspaceStatus: WorkspaceStatusSummary = {
@@ -615,9 +717,12 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
   });
   assertStringIncludes(out, "daemon: running");
   assertStringIncludes(out, "memory:");
+  const daemonLineCount =
+    out.split("\n").filter((line) => line.includes("daemon: ")).length;
+  assertEquals(daemonLineCount, 1);
   assert(
     out.split("\n").some((line) =>
-      line.includes("daemon: running") && line.includes("memory:")
+      line.includes("recordings:") && line.includes("memory:")
     ),
   );
 });

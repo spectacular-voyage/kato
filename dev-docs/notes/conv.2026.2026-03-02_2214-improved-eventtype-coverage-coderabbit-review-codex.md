@@ -7,7 +7,7 @@ updated: 1772518452062
 participants: [user.djradon, codex.gpt-5.3-codex]
 kato-sessionIds: [019cb24c-5bb3-7af2-bbab-541232aa148f]
 kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [1f57918b-f3fd-4594-a8fc-a31326f5ee53]
+kato-recordingIds: [1f57918b-f3fd-4594-a8fc-a31326f5ee53, 57f837d3-1c74-4118-8201-278ee89daddd]
 conversationEventKinds: [message.assistant, message.user, thinking, tool.call, tool.result]
 ---
 
@@ -1261,3 +1261,527 @@ Current state looks healthy: sessions are being ingested and recordings are writ
 
 The `recording.append.failed` entries you saw are historical (from 2026-03-02 22:27 PST). If you want a clean status view, run:
 `deno run -A apps/daemon/src/main.ts clean --logs`
+
+# User_2026-03-02_2318_51
+
+::record-k
+
+(you can ignore that)
+
+Anything else before I merge this ton of code?
+
+**Preparing pre-merge checks summary**
+
+# gpt-5.3-codex_2026-03-02_2318_51
+
+I’ll do a quick pre-merge sweep on this patchset: check for stray/unrelated diffs, run lint/check on touched files, and flag anything risky before you merge.
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+git status --short
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/workspace-registry_test.ts tests/writer-markdown_test.ts
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+deno lint apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/workspace-registry_test.ts tests/writer-markdown_test.ts
+
+**Verifying uncommitted changes**
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+git status
+
+**Recommending pre-merge checks**
+
+Quick sweep is clean on touched files. I’m running the full gate (`deno task ci`) once so you have a merge-grade signal, then I’ll report anything failing.
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+deno task ci
+
+**Polling for command completion**
+
+`deno task ci` is still running and has passed fmt/lint/check plus a large chunk of tests so far. I’m polling until completion and will report final pass/fail.
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-write_stdin
+
+**Verifying clean git status**
+
+# gpt-5.3-codex_2026-03-02_2318_51_Tool-exec_command
+
+git status --short
+
+**Finalizing merge readiness response**
+
+No blockers from my side.
+
+I ran a full pre-merge gate and it passed:
+- `deno task ci` -> `fmt`, `lint`, `check`, and tests all green
+- Test summary: `358 passed, 0 failed`
+- Working tree is clean (`git status` shows nothing to commit)
+
+You can merge safely.
+
+# User_2026-03-02_2318_51
+
+Two more coderabbit issues:
+
+In `@apps/daemon/src/cli/commands/status.ts`:
+- Around line 492-499: The current logic builds remainingErrors (from
+deriveWorkspaceStatusErrors and sortedLogErrors) then slices to capacity before
+calling dedupeRecentErrors, which can drop distinct older errors if duplicates
+were removed; instead, combine reservedLogErrors with the full candidate list
+(the array created from deriveWorkspaceStatusErrors(workspaceStatus, now) and
+sortedLogErrors.slice(reservedLogSlots)), call dedupeRecentErrors on that
+combined array to remove duplicates first, then sort the deduped list by
+timestamp (Date.parse(...)) and finally slice to RECENT_ERRORS_LIMIT so you
+always fill the capacity with unique most-recent errors while still honoring
+reservedLogErrors presence.
+
+In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
+- Around line 1011-1028: The isAlreadyExistsError function flags errors too
+broadly by checking message.includes("already exists"); tighten it to only
+accept the known capture destination pattern. Update isAlreadyExistsError to
+keep the existing typed check (error instanceof Deno.errors.AlreadyExists) and
+the code/name checks, but change the message fallback to only return true when
+candidate.message is a string and matches the exact pattern "Capture destination
+already exists:" (e.g., startsWith or regex for /^Capture destination already
+exists:/) so unrelated errors with similar text won't be misclassified.
+
+**Planning targeted error handling patches**
+
+# Assistant_2026-03-02_2319_31_Tool-exec_command
+
+sed -n '1540,1665p' tests/daemon-runtime_test.ts
+
+# Assistant_2026-03-02_2319_37_Tool-exec_command
+
+sed -n '1665,1765p' tests/daemon-runtime_test.ts
+
+**Creating test for capture error handling**
+
+# gpt-5.3-codex_2026-03-02_2319_45
+
+I’m applying both fixes now: (1) change `collectRecentErrors` to dedupe before truncation, and (2) tighten `isAlreadyExistsError` message fallback to only the capture-destination pattern. Then I’ll add targeted regression tests.
+
+**Designing dedupe capacity test**
+
+# gpt-5.3-codex_2026-03-02_2320_09
+
+I’m adding two regression tests: one to prove recent-errors capacity stays filled after dedupe, and one to prove generic `"already exists"` messages no longer trigger capture retry.
+
+**Planning targeted tests and formatting**
+
+# gpt-5.3-codex_2026-03-02_2320_46
+
+Patches and regression tests are in. I’m running focused test files now (`improved-status` and `daemon-runtime` capture-filter) to verify behavior and catch any formatting/lint issues.
+
+# gpt-5.3-codex_2026-03-02_2320_46_Tool-exec_command
+
+deno test -A tests/improved-status_test.ts
+
+# gpt-5.3-codex_2026-03-02_2320_46_Tool-exec_command
+
+deno test -A tests/daemon-runtime_test.ts --filter "capture-<alias>|generic already-exists message"
+
+# gpt-5.3-codex_2026-03-02_2320_46_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/daemon-runtime_test.ts
+
+**Redesigning error deduplication to guarantee reserved logs**
+
+# gpt-5.3-codex_2026-03-02_2321_12
+
+I found one regression from the first pass: the existing “keep at least one log-backed error” test now fails. I’m adjusting `collectRecentErrors` to dedupe-before-truncate while still guaranteeing reserved log presence, then rerunning tests.
+
+**Refining test filters and runs**
+
+# Assistant_2026-03-02_2321_23_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/daemon-runtime_test.ts
+
+# Assistant_2026-03-02_2321_23_Tool-exec_command
+
+deno test -A tests/improved-status_test.ts
+
+# Assistant_2026-03-02_2321_23_Tool-exec_command
+
+deno test -A tests/daemon-runtime_test.ts --filter "generic already-exists|retries with next suffix when capture writer reports AlreadyExists"
+
+**Running filtered tests and applying formatting**
+
+# gpt-5.3-codex_2026-03-02_2321_32
+
+`improved-status` is green again. I still need one final formatting pass (`status.ts`) and a broader capture-filter test run to confirm the new daemon-runtime regression test executes.
+
+# gpt-5.3-codex_2026-03-02_2321_32_Tool-exec_command
+
+deno fmt apps/daemon/src/cli/commands/status.ts
+
+# gpt-5.3-codex_2026-03-02_2321_32_Tool-exec_command
+
+deno test -A tests/daemon-runtime_test.ts --filter "capture-<alias>"
+
+# gpt-5.3-codex_2026-03-02_2321_32_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/daemon-runtime_test.ts
+
+**Avoiding race with sequential formatting**
+
+# Assistant_2026-03-02_2321_41_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/daemon-runtime_test.ts
+
+**Considering targeted linting**
+
+# Assistant_2026-03-02_2321_45_Tool-exec_command
+
+deno lint apps/daemon/src/cli/commands/status.ts apps/daemon/src/orchestrator/daemon_runtime.ts tests/improved-status_test.ts tests/daemon-runtime_test.ts
+
+**Checking git status results**
+
+# Assistant_2026-03-02_2321_48_Tool-exec_command
+
+git status --short
+
+**Clarifying unchanged documentation scope**
+
+# Assistant_2026-03-02_2321_53_Tool-exec_command
+
+rg -n "collectRecentErrors\(|dedupeRecentErrors|reservedLogErrors|fallbackReservedError" apps/daemon/src/cli/commands/status.ts
+
+# Assistant_2026-03-02_2321_53_Tool-exec_command
+
+rg -n "isAlreadyExistsError|Capture destination already exists" apps/daemon/src/orchestrator/daemon_runtime.ts
+
+# Assistant_2026-03-02_2321_53_Tool-exec_command
+
+rg -n "dedupe runs before final truncation|duplicate workspace/log recent errors" tests/improved-status_test.ts
+
+# Assistant_2026-03-02_2321_53_Tool-exec_command
+
+rg -n "does not retry on generic already-exists message errors|retries with next suffix when capture writer reports AlreadyExists" tests/daemon-runtime_test.ts
+
+**Summarizing final implementation and test results**
+
+# gpt-5.3-codex_2026-03-02_2322_04
+
+Implemented both CodeRabbit items.
+
+1. `collectRecentErrors` now dedupes before final truncation and still preserves reserved log presence.
+- Updated logic in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:485).
+- Added/kept regression coverage in:
+  - [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts:410)
+  - [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts:368)
+
+2. `isAlreadyExistsError` fallback is now strict.
+- Message fallback only matches `^Capture destination already exists:` in
+  [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1011).
+- Added regression test that generic `"already exists"` message does not retry:
+  - [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:1201)
+
+Validation run:
+- `deno test -A tests/improved-status_test.ts` (pass)
+- `deno test -A tests/daemon-runtime_test.ts --filter "capture-<alias>"` (pass, includes new test)
+- `deno fmt --check ...` on touched files (pass)
+- `deno lint ...` on touched files (pass)
+
+Note: there is still an unrelated modified note file in your tree:
+- [conv.2026.2026-03-02_2214-improved-eventtype-coverage-coderabbit-review-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-02_2214-improved-eventtype-coverage-coderabbit-review-codex.md)
+
+# User_2026-03-02_2322_51
+
+One last one more:
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/daemon/src/cli/commands/status_error_cursor.ts`:
+- Around line 53-58: The writeJsonAtomically function should be hardened for
+platform rename failures: when creating the temp file use Deno.writeTextFile
+with createNew: true to avoid collisions; wrap the Deno.rename(tmpPath, path)
+call in try/catch to handle Deno.errors.AlreadyExists by removing the existing
+target (await Deno.remove(path)) and retrying the rename once; ensure the temp
+file is removed in a finally block to avoid orphans; alternatively replace the
+rename logic with `@std/fs/move`(..., { overwrite: true }) for a cross-platform
+move with overwrite.
+
+---
+
+Duplicate comments:
+In `@apps/daemon/src/cli/commands/status.ts`:
+- Around line 492-504: Summary: slicing remainingErrors before dedupe can drop
+unique recent errors; move the limit to after deduplication. Fix: stop
+pre-slicing remainingErrors (remove the .slice(0, Math.max(RECENT_ERRORS_LIMIT -
+reservedLogErrors.length, 0)) applied to remainingErrors) so remainingErrors is
+built from deriveWorkspaceStatusErrors(...) and
+sortedLogErrors.slice(reservedLogSlots) without truncation, then call
+dedupeRecentErrors([...reservedLogErrors, ...remainingErrors]), sort the result
+(Date.parse by timestamp) and only then .slice(0, RECENT_ERRORS_LIMIT) to
+enforce capacity; references: reservedLogSlots, reservedLogErrors,
+remainingErrors, deriveWorkspaceStatusErrors, sortedLogErrors,
+dedupeRecentErrors, RECENT_ERRORS_LIMIT.
+
+**Inspecting duplicate comments status files**
+
+# gpt-5.3-codex_2026-03-02_2322_59
+
+I’ll verify both findings directly in current source and only patch what’s still needed. I’m checking `status_error_cursor.ts` and the current `collectRecentErrors` logic first.
+
+# gpt-5.3-codex_2026-03-02_2322_59_Tool-exec_command
+
+sed -n '1,220p' apps/daemon/src/cli/commands/status_error_cursor.ts
+
+# Assistant_2026-03-02_2323_00_Tool-exec_command
+
+sed -n '460,550p' apps/daemon/src/cli/commands/status.ts
+
+**Planning atomic JSON write patch**
+
+# Assistant_2026-03-02_2323_07_Tool-exec_command
+
+rg -n "status_error_cursor|saveSuppressedRecentErrorKeys|loadSuppressedRecentErrorKeys|writeJsonAtomically|status-error-cursor" tests apps/daemon/src/cli/commands -S
+
+**Reviewing test coverage for new features**
+
+# Assistant_2026-03-02_2323_09_Tool-exec_command
+
+sed -n '1,220p' tests/status-error-cursor_test.ts
+
+**Implementing atomic JSON write and overwrite test**
+
+# gpt-5.3-codex_2026-03-02_2323_22
+
+The `status.ts` duplicate item is already satisfied in current code (no pre-slice before dedupe), so I won’t change that. I’m now patching `status_error_cursor.ts` for atomic-write hardening and adding a focused test.
+
+# gpt-5.3-codex_2026-03-02_2323_42
+
+Patch is in. I’m running focused formatting/lint/tests for `status_error_cursor` plus a quick `improved-status` run to reconfirm the duplicate comment remains covered.
+
+# gpt-5.3-codex_2026-03-02_2323_42_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status_error_cursor.ts tests/status-error-cursor_test.ts apps/daemon/src/cli/commands/status.ts
+
+# gpt-5.3-codex_2026-03-02_2323_42_Tool-exec_command
+
+deno lint apps/daemon/src/cli/commands/status_error_cursor.ts tests/status-error-cursor_test.ts apps/daemon/src/cli/commands/status.ts
+
+# gpt-5.3-codex_2026-03-02_2323_42_Tool-exec_command
+
+deno test -A tests/status-error-cursor_test.ts
+
+# gpt-5.3-codex_2026-03-02_2323_42_Tool-exec_command
+
+deno test -A tests/improved-status_test.ts --filter "dedupe runs before final truncation|keeps at least one log-backed"
+
+**Refactoring error handling in finally**
+
+# gpt-5.3-codex_2026-03-02_2323_54
+
+I hit a lint rule (`no-unsafe-finally`) from throwing inside `finally`. I’m adjusting the cleanup path to record any temp-file cleanup error and throw it after `finally`, then rerunning checks.
+
+# Assistant_2026-03-02_2324_02_Tool-exec_command
+
+deno fmt --check apps/daemon/src/cli/commands/status_error_cursor.ts tests/status-error-cursor_test.ts apps/daemon/src/cli/commands/status.ts
+
+# Assistant_2026-03-02_2324_02_Tool-exec_command
+
+deno lint apps/daemon/src/cli/commands/status_error_cursor.ts tests/status-error-cursor_test.ts apps/daemon/src/cli/commands/status.ts
+
+# Assistant_2026-03-02_2324_02_Tool-exec_command
+
+deno test -A tests/status-error-cursor_test.ts
+
+# Assistant_2026-03-02_2324_02_Tool-exec_command
+
+deno test -A tests/improved-status_test.ts --filter "dedupe runs before final truncation so recent errors stay full|keeps at least one log-backed recent error"
+
+**Planning full improved-status run**
+
+# Assistant_2026-03-02_2324_09_Tool-exec_command
+
+deno test -A tests/improved-status_test.ts
+
+**Summarizing verification and fixes**
+
+# Assistant_2026-03-02_2324_16_Tool-exec_command
+
+rg -n "writeJsonAtomically|createNew|Deno.rename|Deno.remove\(path\)|Deno.remove\(tmpPath\)" apps/daemon/src/cli/commands/status_error_cursor.ts
+
+# Assistant_2026-03-02_2324_16_Tool-exec_command
+
+rg -n "collectRecentErrors|remainingCandidates|dedupeRecentErrors|slice\(0, RECENT_ERRORS_LIMIT\)" apps/daemon/src/cli/commands/status.ts
+
+# Assistant_2026-03-02_2324_16_Tool-exec_command
+
+rg -n "overwrites existing cursor file without leaving temp files" tests/status-error-cursor_test.ts
+
+**Checking touched files**
+
+# Assistant_2026-03-02_2324_20_Tool-exec_command
+
+git status --short
+
+**Summarizing no new changes with passing tests**
+
+# gpt-5.3-codex_2026-03-02_2324_27
+
+Verified both findings against current code.
+
+1. `status_error_cursor.ts`: **Needed fix** and implemented.
+- Hardened atomic write in [status_error_cursor.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status_error_cursor.ts:53):
+  - temp write now uses `createNew: true`
+  - `rename` is wrapped; on `Deno.errors.AlreadyExists`, it removes target and retries rename once
+  - temp file cleanup runs in `finally` and ignores `NotFound`
+- Added regression test in [status-error-cursor_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts:90) to confirm overwrite works and no temp artifacts are left.
+
+2. `status.ts` duplicate comment: **Already fixed**, no additional change needed.
+- Current `collectRecentErrors` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/status.ts:485) already builds remaining candidates without pre-slicing, dedupes first, then sorts/slices to `RECENT_ERRORS_LIMIT`.
+
+Validation run:
+- `deno fmt --check` (targeted files) passed
+- `deno lint` (targeted files) passed
+- `deno test -A tests/status-error-cursor_test.ts` passed
+- `deno test -A tests/improved-status_test.ts` passed
+
+# User_2026-03-02_2326_54
+
+Forgot to ask, does export observe timezone preferences (filename and headings)?
+
+**Assessing export timezone handling**
+
+# gpt-5.3-codex_2026-03-02_2327_03
+
+I’ll verify this in code paths for both plain `kato export` and workspace `::export-<alias>`, then I’ll give you a crisp yes/no per filename and heading behavior.
+
+# gpt-5.3-codex_2026-03-02_2327_03_Tool-exec_command
+
+rg -n "exportTimezone|headingTimestampTimezone|workspaceTimezone|filenameTemplate|renderWorkspaceFilename|createOutputOverrides|exportSnapshot|::export|resolveWorkspaceCommandDestination" apps/daemon/src tests -S
+
+# gpt-5.3-codex_2026-03-02_2327_03_Tool-exec_command
+
+rg -n "runDaemonSubprocess wires exportTimezone|headingTimestampTimezone|workspaceTimezone|export" tests/daemon-main_test.ts tests/daemon-runtime_test.ts tests/workspace-registry_test.ts -S
+
+**Reviewing output override usage**
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '140,230p' apps/daemon/src/main.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '1128,1268p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '370,470p' apps/daemon/src/writer/recording_pipeline.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '540,740p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Inspecting export command parsing**
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '1,240p' apps/daemon/src/cli/commands/export.ts
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '3660,3825p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '2080,2195p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Inspecting writer options composition**
+
+# Assistant_2026-03-02_2327_20_Tool-exec_command
+
+sed -n '180,340p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Integrating timezone into writer options**
+
+# Assistant_2026-03-02_2327_24_Tool-exec_command
+
+sed -n '340,430p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Planning writer options placement**
+
+# Assistant_2026-03-02_2327_27_Tool-exec_command
+
+sed -n '520,700p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Inspecting CLI export output handling**
+
+# Assistant_2026-03-02_2327_31_Tool-exec_command
+
+rg -n "case \"export\"|command: \"export\"|outputPath|--output" apps/daemon/src/cli/parser.ts apps/daemon/src/cli/router.ts apps/daemon/src/cli/usage.ts apps/daemon/src/cli/types.ts -S
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '230,310p' apps/daemon/src/cli/parser.ts
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '70,120p' apps/daemon/src/cli/usage.ts
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '330,370p' apps/daemon/src/cli/router.ts
+
+**Analyzing export path and timezone handling**
+
+# Assistant_2026-03-02_2327_48_Tool-exec_command
+
+sed -n '350,420p' apps/daemon/src/main.ts
+
+**Inspecting timezone tests in export**
+
+# Assistant_2026-03-02_2327_52_Tool-exec_command
+
+sed -n '110,170p' tests/daemon-main_test.ts
+
+**Inspecting filename timezone tests**
+
+# Assistant_2026-03-02_2327_55_Tool-exec_command
+
+sed -n '7180,7375p' tests/daemon-runtime_test.ts
+
+**Inspecting timezone handling in headings**
+
+# Assistant_2026-03-02_2328_00_Tool-exec_command
+
+sed -n '40,120p' apps/daemon/src/writer/markdown_writer.ts
+
+**Inspecting default export timezone**
+
+# Assistant_2026-03-02_2328_04_Tool-exec_command
+
+rg -n "DEFAULT_EXPORT_TIMEZONE|exportTimezone" apps/daemon/src/config/runtime_config.ts | sed -n '1,140p'
+
+**Mapping export filename and timezone behavior**
+
+# Assistant_2026-03-02_2328_13_Tool-exec_command
+
+sed -n '3600,3695p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Summarizing export filename and timezone handling**
+
+# gpt-5.3-codex_2026-03-02_2328_31
+
+Short answer: **partly, depending on which export path you use**.
+
+1. `kato export <session-id> --output <path>` (plain CLI export)
+- **Heading timezone:** yes, from `exportTimezone` (default `local`), wired into `headingTimestampTimezone` in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:188).
+- **Filename timezone/template:** no. The filename is whatever path you pass; no template expansion for CLI export in [export.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/export.ts:8).
+
+2. `::export-<alias>` (workspace command)
+- **Heading timezone:** yes, uses workspace `workspaceTimezone` via output overrides in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1202).
+- **Filename timezone/template:** yes when destination is generated (no arg or directory arg), because filename rendering uses `workspaceTimezone` in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:563) through [resolveWorkspaceCommandDestination](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:659).
+- If you pass an explicit file path, filename timezone doesn’t apply (only heading timezone still does).
+
+Also: plain `kato export` without `--output` is currently treated as invalid later in runtime processing ([daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:3669)), so in practice you should provide `--output`.

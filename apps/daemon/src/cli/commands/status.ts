@@ -3,6 +3,7 @@ import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import { DAEMON_APP_VERSION } from "../../version.ts";
 import type { RegisteredWorkspace } from "../../workspace/mod.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -494,14 +495,40 @@ function collectRecentErrors(
     Math.max(1, Math.floor(RECENT_ERRORS_LIMIT * 0.3)),
   );
   const reservedLogErrors = sortedLogErrors.slice(0, reservedLogSlots);
-  const remainingErrors = [
+  const remainingCandidates = [
     ...deriveWorkspaceStatusErrors(workspaceStatus, now),
     ...sortedLogErrors.slice(reservedLogSlots),
-  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
-  return dedupeRecentErrors([...reservedLogErrors, ...remainingErrors])
+  ];
+  const dedupedCombined = dedupeRecentErrors([
+    ...reservedLogErrors,
+    ...remainingCandidates,
+  ]);
+  let limited = dedupedCombined
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
+  if (reservedLogErrors.length === 0 || limited.length === 0) {
+    return limited;
+  }
+  const reservedKeys = new Set(
+    reservedLogErrors.map((error) => getRecentErrorDedupeKey(error)),
+  );
+  const hasReservedError = limited.some((error) =>
+    reservedKeys.has(getRecentErrorDedupeKey(error))
+  );
+  if (hasReservedError) {
+    return limited;
+  }
+  const fallbackReservedError = dedupedCombined.find((error) =>
+    reservedKeys.has(getRecentErrorDedupeKey(error))
+  );
+  if (!fallbackReservedError) {
+    return limited;
+  }
+  limited = [
+    ...limited.slice(0, Math.max(RECENT_ERRORS_LIMIT - 1, 0)),
+    fallbackReservedError,
+  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return limited;
 }
 
 function reconcileSuppressedRecentErrorKeys(
@@ -525,7 +552,11 @@ async function persistSuppressedRecentErrorKeysBestEffort(
   now: Date,
 ): Promise<void> {
   try {
-    await saveSuppressedRecentErrorKeys(cursorPath, suppressedRecentErrorKeys, now);
+    await saveSuppressedRecentErrorKeys(
+      cursorPath,
+      suppressedRecentErrorKeys,
+      now,
+    );
   } catch {
     // Best-effort persistence: keep live output responsive even if cursor
     // writes fail due to transient filesystem issues.
@@ -594,14 +625,13 @@ function normalizeSnapshotForStatusDisplay(
 function renderTopSummarySection(
   snapshot: DaemonStatusSnapshot,
   opts: {
-    daemonText: string;
     activeCount: number;
     staleCount: number;
     width: number;
     recordingSummary: DaemonStatusSnapshot["recordings"];
   },
 ): string[] {
-  const { daemonText, activeCount, staleCount, width, recordingSummary } = opts;
+  const { activeCount, staleCount, width, recordingSummary } = opts;
   const memoryLines = buildMemoryLines(snapshot);
   const recordingLine =
     `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale sessions`;
@@ -615,7 +645,6 @@ function renderTopSummarySection(
   }
 
   const leftLines = [
-    `daemon: ${daemonText}`,
     `recordings: ${recordingSummary.activeRecordings} active`,
     `sessions: ${activeCount} active, ${staleCount} stale`,
   ];
@@ -842,14 +871,13 @@ export function renderStatusText(
   const refreshedAt = now.toTimeString().slice(0, 8);
   lines.push(
     truncate(
-      `kato  ·  daemon: ${daemonText}  ·  refreshed ${refreshedAt}`,
+      `kato (v${DAEMON_APP_VERSION})  ·  daemon: ${daemonText}  ·  refreshed ${refreshedAt}`,
       width,
     ),
   );
   lines.push(divider);
   lines.push(
     ...renderTopSummarySection(snapshot, {
-      daemonText,
       activeCount,
       staleCount,
       width,
