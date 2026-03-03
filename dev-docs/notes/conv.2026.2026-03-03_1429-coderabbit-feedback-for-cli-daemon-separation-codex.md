@@ -575,3 +575,39 @@ Validation run:
 - `deno test tests/provider-ingestion_test.ts`
 
 All passed.
+
+**Investigating missing exports**
+
+# gpt-5.3-codex_2026-03-03_1529_03
+
+You’re hitting a real compile break. I’m going to inspect the `config/mod.ts` export surface where those two symbols are being re-exported, then patch the mismatch directly and re-run `deno check` on the affected modules.
+
+**Diagnosing missing export error**
+
+**Analyzing import path confusion**
+
+**Replacing export star with explicit exports**
+
+# gpt-5.3-codex_2026-03-03_1530_03
+
+I can’t reproduce this via `deno check` locally, but the quickest robust fix is to replace the `export *` shim in `apps/daemon/src/config/mod.ts` with explicit re-exports so the language server has a concrete symbol table. I’m applying that now and rechecking daemon files.
+
+**Preparing concise patch summary**
+
+# gpt-5.3-codex_2026-03-03_1530_22
+
+Patched to remove the ambiguous re-export shim and make those symbols explicit.
+
+What I changed:
+- Replaced `export * from "../../../runtime/src/config/mod.ts";` with explicit named re-exports in:
+  - [apps/daemon/src/config/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/config/mod.ts)
+
+This now explicitly includes:
+- `createDefaultUserConfig`
+- `resolveFrontmatterParticipantUsername`
+- plus the rest of the config types/values daemon consumes.
+
+Validation:
+- `deno check apps/daemon/src/config/mod.ts apps/daemon/src/mod.ts apps/daemon/src/orchestrator/daemon_runtime.ts apps/daemon/src/main.ts` passed.
+
+If VS Code still shows the old diagnostics, run “Deno: Restart Language Server” once to clear stale analysis.
