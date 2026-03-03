@@ -457,6 +457,26 @@ export function getStatusRecentErrorKey(error: StatusRecentError): string {
   return `log|${error.timestamp}|${base}`;
 }
 
+function getRecentErrorDedupeKey(error: StatusRecentError): string {
+  const event = sanitizeInlineText(error.event);
+  const message = sanitizeInlineText(error.message);
+  return `${error.level}|${error.channel}|${event}|${message}`;
+}
+
+function dedupeRecentErrors(errors: StatusRecentError[]): StatusRecentError[] {
+  const seen = new Set<string>();
+  const deduped: StatusRecentError[] = [];
+  for (const error of errors) {
+    const key = getRecentErrorDedupeKey(error);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(error);
+  }
+  return deduped;
+}
+
 function collectRecentErrors(
   now: Date,
   workspaceStatus: WorkspaceStatusSummary | undefined,
@@ -474,7 +494,7 @@ function collectRecentErrors(
     ...sortedLogErrors.slice(reservedLogSlots),
   ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
-  return [...reservedLogErrors, ...remainingErrors]
+  return dedupeRecentErrors([...reservedLogErrors, ...remainingErrors])
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
 }

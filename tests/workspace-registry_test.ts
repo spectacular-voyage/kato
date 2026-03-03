@@ -300,6 +300,17 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA workspaceTimezone
         [
           "defaultOutputDir: notes",
           'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
+          'workspaceTimezone: "UTC"',
+        ].join("\n") + "\n",
+      );
+      const utcLoaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(utcLoaded.workspaceTimezone, "UTC");
+
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md"',
           'workspaceTimezone: "America/Los_Angeles"',
         ].join("\n") + "\n",
       );

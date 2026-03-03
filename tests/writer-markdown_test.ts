@@ -1237,11 +1237,12 @@ Deno.test(
 
     const rendered = renderEventsToMarkdown([questionnairePrompt], {
       includeFrontmatter: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-plan-mode-capture-round",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-plan-mode-capture-round",
     );
     assertStringIncludes(
       rendered,
@@ -1298,11 +1299,12 @@ Deno.test(
 
     const rendered = renderEventsToMarkdown([questionnaireDecision], {
       includeFrontmatter: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-line-policy",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-decision-line-policy",
     );
     assertStringIncludes(rendered, "## Prompt");
     assertStringIncludes(
@@ -1417,11 +1419,12 @@ Deno.test(
       includeFrontmatter: false,
       includeDecisionPrompt: true,
       includeDecisionOptions: false,
+      headingTimestampTimezone: "UTC",
     });
 
     assertStringIncludes(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-decision-decision-options-visibility",
+      "# Assistant_2026-02-22_1000_00_Tool-decision-decision-options-visibility",
     );
     assertStringIncludes(rendered, "## Prompt");
     assertStringIncludes(rendered, "Which output format should we use?");

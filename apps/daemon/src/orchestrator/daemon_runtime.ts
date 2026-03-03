@@ -1027,6 +1027,69 @@ function isAlreadyExistsError(error: unknown): boolean {
     candidate.message.toLowerCase().includes("already exists");
 }
 
+async function captureSnapshotWithRetries(options: {
+  recordingPipeline: RecordingPipelineLike;
+  provider: string;
+  sessionId: string;
+  targetPath: string;
+  events: ConversationEvent[];
+  title?: string;
+  workspaceId: string;
+  outputOverrides?: RecordingOutputOverrides;
+  allowGeneratedDestinationRetries: boolean;
+  resolveCycleIdForAttempt: (targetPath: string) => string;
+}): Promise<{ targetPath: string; captureCycleId: string }> {
+  let targetPath = options.targetPath;
+  let captureConflictRetries = 0;
+  while (true) {
+    const cycleIdForAttempt = options.resolveCycleIdForAttempt(targetPath);
+    try {
+      await assertCaptureDestinationDoesNotExist(targetPath);
+      await options.recordingPipeline.captureSnapshot({
+        provider: options.provider,
+        sessionId: options.sessionId,
+        targetPath,
+        events: options.events,
+        title: options.title,
+        recordingCycleIds: [cycleIdForAttempt],
+        workspaceIds: [options.workspaceId],
+        outputOverrides: options.outputOverrides,
+      });
+      return {
+        targetPath,
+        captureCycleId: cycleIdForAttempt,
+      };
+    } catch (error) {
+      if (
+        !options.allowGeneratedDestinationRetries ||
+        !isAlreadyExistsError(error)
+      ) {
+        throw error;
+      }
+      captureConflictRetries += 1;
+      if (captureConflictRetries > CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES) {
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
+        throw new Error(
+          `Capture destination conflict retries exceeded (${CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES}) for ${targetPath}: ${errorMessage}`,
+        );
+      }
+      if (CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS > 0) {
+        await sleep(CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS);
+      }
+      const nextTargetPath = await resolveUniqueNonExistingPath(targetPath);
+      targetPath = await validateDestinationPathForCommand(
+        options.recordingPipeline,
+        options.provider,
+        options.sessionId,
+        nextTargetPath,
+        "capture",
+      );
+    }
+  }
+}
+
 function resolveBindingForRetargetedWorkspacePath(options: {
   profile: ResolvedWorkspaceProfile;
   currentBinding: NonNullable<
@@ -1572,68 +1635,30 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
             { snapshotSnippet },
           );
-          let captureCycleId: string | undefined;
-          let captureConflictRetries = 0;
-          while (true) {
-            const destinationChangedForAttempt = !output ||
-              output.currentResolvedPath !== targetPath;
-            const currentCycleId = output?.activeRecordingCycleId;
-            const reuseActiveCycleId = !destinationChangedForAttempt &&
-              output?.desiredState === "on" &&
-              !!currentCycleId;
-            const cycleIdForAttempt = reuseActiveCycleId && currentCycleId
-              ? currentCycleId
-              : crypto.randomUUID();
-            try {
-              await assertCaptureDestinationDoesNotExist(targetPath);
-              await recordingPipeline.captureSnapshot({
-                provider,
-                sessionId: providerSessionId,
-                targetPath,
-                events: captureEvents,
-                title: captureTitle,
-                recordingCycleIds: [cycleIdForAttempt],
-                workspaceIds: [workspace.workspaceId],
-                outputOverrides,
-              });
-              captureCycleId = cycleIdForAttempt;
-              break;
-            } catch (error) {
-              if (
-                !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
-              ) {
-                throw error;
-              }
-              captureConflictRetries += 1;
-              if (
-                captureConflictRetries >
-                  CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES
-              ) {
-                const errorMessage = error instanceof Error
-                  ? error.message
-                  : String(error);
-                throw new Error(
-                  `Capture destination conflict retries exceeded (${CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES}) for ${targetPath}: ${errorMessage}`,
-                );
-              }
-              if (CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS > 0) {
-                await sleep(CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS);
-              }
-              const nextTargetPath = await resolveUniqueNonExistingPath(
-                targetPath,
-              );
-              targetPath = await validateDestinationPathForCommand(
-                recordingPipeline,
-                provider,
-                providerSessionId,
-                nextTargetPath,
-                "capture",
-              );
-            }
-          }
-          if (!captureCycleId) {
-            throw new Error("Unable to allocate capture recording cycle id");
-          }
+          const captureResult = await captureSnapshotWithRetries({
+            recordingPipeline,
+            provider,
+            sessionId: providerSessionId,
+            targetPath,
+            events: captureEvents,
+            title: captureTitle,
+            workspaceId: workspace.workspaceId,
+            outputOverrides,
+            allowGeneratedDestinationRetries: resolved.usesGeneratedFilename,
+            resolveCycleIdForAttempt: (targetPathForAttempt) => {
+              const destinationChangedForAttempt = !output ||
+                output.currentResolvedPath !== targetPathForAttempt;
+              const currentCycleId = output?.activeRecordingCycleId;
+              const reuseActiveCycleId = !destinationChangedForAttempt &&
+                output?.desiredState === "on" &&
+                !!currentCycleId;
+              return reuseActiveCycleId && currentCycleId
+                ? currentCycleId
+                : crypto.randomUUID();
+            },
+          });
+          targetPath = captureResult.targetPath;
+          const captureCycleId = captureResult.captureCycleId;
           loggedTargetPath = targetPath;
           const destinationChanged = !output ||
             output.currentResolvedPath !== targetPath;
@@ -2029,68 +2054,29 @@ async function applyControlCommandsForEvent(
             resolved.resolvedPath,
             "capture",
           );
-          let captureCycleId: string | undefined;
-          let captureConflictRetries = 0;
-          while (true) {
-            const destinationChangedForAttempt = !existingState ||
-              existingState.currentResolvedPath !== resolvedDestination;
-            const activeCycleIdForAttempt = existingState?.desiredState &&
-                existingState.recordingCycleId &&
-                !destinationChangedForAttempt
-              ? existingState.recordingCycleId
-              : undefined;
-            const cycleIdForAttempt = activeCycleIdForAttempt ??
-              crypto.randomUUID();
-            try {
-              await assertCaptureDestinationDoesNotExist(resolvedDestination);
-              await recordingPipeline.captureSnapshot({
-                provider,
-                sessionId,
-                targetPath: resolvedDestination,
-                events: boundarySnapshot,
-                title: recordingTitle,
-                recordingCycleIds: [cycleIdForAttempt],
-                workspaceIds: [workspace.workspaceId],
-                outputOverrides,
-              });
-              captureCycleId = cycleIdForAttempt;
-              break;
-            } catch (error) {
-              if (
-                !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
-              ) {
-                throw error;
-              }
-              captureConflictRetries += 1;
-              if (
-                captureConflictRetries >
-                  CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES
-              ) {
-                const errorMessage = error instanceof Error
-                  ? error.message
-                  : String(error);
-                throw new Error(
-                  `Capture destination conflict retries exceeded (${CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES}) for ${resolvedDestination}: ${errorMessage}`,
-                );
-              }
-              if (CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS > 0) {
-                await sleep(CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS);
-              }
-              const nextTargetPath = await resolveUniqueNonExistingPath(
-                resolvedDestination,
-              );
-              resolvedDestination = await validateDestinationPathForCommand(
-                recordingPipeline,
-                provider,
-                sessionId,
-                nextTargetPath,
-                "capture",
-              );
-            }
-          }
-          if (!captureCycleId) {
-            throw new Error("Unable to allocate capture recording cycle id");
-          }
+          const captureResult = await captureSnapshotWithRetries({
+            recordingPipeline,
+            provider,
+            sessionId,
+            targetPath: resolvedDestination,
+            events: boundarySnapshot,
+            title: recordingTitle,
+            workspaceId: workspace.workspaceId,
+            outputOverrides,
+            allowGeneratedDestinationRetries: resolved.usesGeneratedFilename,
+            resolveCycleIdForAttempt: (targetPathForAttempt) => {
+              const destinationChangedForAttempt = !existingState ||
+                existingState.currentResolvedPath !== targetPathForAttempt;
+              const activeCycleIdForAttempt = existingState?.desiredState &&
+                  existingState.recordingCycleId &&
+                  !destinationChangedForAttempt
+                ? existingState.recordingCycleId
+                : undefined;
+              return activeCycleIdForAttempt ?? crypto.randomUUID();
+            },
+          });
+          resolvedDestination = captureResult.targetPath;
+          const captureCycleId = captureResult.captureCycleId;
           loggedTargetPath = resolvedDestination;
           const state = existingState ?? {
             workspaceId: workspace.workspaceId,

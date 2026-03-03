@@ -336,6 +336,48 @@ Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Err
 });
 
 Deno.test(
+  "renderStatusText: duplicate workspace/log recent errors are deduped",
+  () => {
+    const workspaceStatus: WorkspaceStatusSummary = {
+      activeCount: 0,
+      invalidCount: 1,
+      rows: [{
+        workspaceId: "ws-invalid",
+        alias: "Broken.Proj",
+        workspaceRoot: "/workspaces/Broken.Proj",
+        configPath: "/workspaces/Broken.Proj/kato-workspace-config.yaml",
+        valid: false,
+        invalidReason: "Unsupported workspace config key 'featureFlags'",
+      }],
+    };
+    const recentErrors: StatusRecentError[] = [{
+      timestamp: "2026-02-24T09:59:30.000Z",
+      level: "error",
+      channel: "operational",
+      event: "workspace.config.invalid",
+      message:
+        "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+      source: "log",
+    }];
+    const out = renderStatusText(makeSnapshot([]), {
+      showAll: true,
+      now: NOW,
+      stale: false,
+      workspaceStatus,
+      recentErrors,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "Recent Errors (1)");
+    assertEquals(
+      out.split(
+        "Broken.Proj (ws-invalid): Unsupported workspace config key 'featureFlags'",
+      ).length - 1,
+      1,
+    );
+  },
+);
+
+Deno.test(
   "renderStatusText: invalid workspace aliases in derived errors use a safe placeholder",
   () => {
     const workspaceStatus: WorkspaceStatusSummary = {
