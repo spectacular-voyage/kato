@@ -2,19 +2,32 @@ import { CliUsageError } from "./errors.ts";
 import { parseDaemonCliArgs } from "./parser.ts";
 import { getCommandUsage, getGlobalUsage } from "./usage.ts";
 import type { DaemonCliRuntime } from "./types.ts";
-import { DAEMON_APP_VERSION } from "../version.ts";
-import type { RuntimeConfig } from "@kato/shared";
+import { CLI_APP_VERSION } from "./version.ts";
+import type {
+  CliConfig,
+  RuntimeConfig,
+  SharedBehaviorConfig,
+} from "@kato/shared";
+import { dirname, join } from "@std/path";
 import {
+  CliConfigFileStore,
+  type CliConfigStoreLike,
+  createDefaultCliConfig,
+  createDefaultSharedBehaviorConfig,
   DaemonControlRequestFileStore,
   type DaemonControlRequestStoreLike,
   type DaemonProcessLauncherLike,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   DenoDetachedDaemonLauncher,
+  resolveDefaultCliConfigPath,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
+  resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
-} from "../orchestrator/mod.ts";
+  SharedBehaviorConfigFileStore,
+  type SharedBehaviorConfigStoreLike,
+} from "@kato/runtime";
 import {
   createDefaultRuntimeConfig,
   resolveDefaultConfigPath,
@@ -23,16 +36,17 @@ import {
   type RuntimeConfigStoreLike,
   UserConfigFileStore,
   type UserConfigStoreLike,
-} from "../config/mod.ts";
+} from "@kato/runtime";
 import {
   WritePathPolicyGate,
   type WritePathPolicyGateLike,
-} from "../policy/mod.ts";
+} from "@kato/runtime";
 import {
   AuditLogger,
+  JsonLineFileSink,
   NoopSink,
   StructuredLogger,
-} from "../observability/mod.ts";
+} from "@kato/runtime";
 import {
   ensureGlobalConfigInitialized,
   runCleanCommand,
@@ -59,6 +73,10 @@ export interface RunDaemonCliOptions {
   runtime?: Partial<DaemonCliRuntime>;
   configStore?: RuntimeConfigStoreLike;
   defaultRuntimeConfig?: RuntimeConfig;
+  sharedConfigStore?: SharedBehaviorConfigStoreLike;
+  defaultSharedConfig?: SharedBehaviorConfig;
+  cliConfigStore?: CliConfigStoreLike;
+  defaultCliConfig?: CliConfig;
   statusStore?: DaemonStatusSnapshotStoreLike;
   controlStore?: DaemonControlRequestStoreLike;
   daemonLauncher?: DaemonProcessLauncherLike;
@@ -154,6 +172,23 @@ function resolveAutoInitOnStartDefault(): boolean {
   }
 }
 
+async function createCliLogSink(
+  path: string,
+): Promise<JsonLineFileSink | NoopSink> {
+  try {
+    await Deno.mkdir(dirname(path), { recursive: true });
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      return new NoopSink();
+    }
+    throw error;
+  }
+  return new JsonLineFileSink(path);
+}
+
 export async function runDaemonCli(
   args: string[],
   options: RunDaemonCliOptions = {},
@@ -171,32 +206,27 @@ export async function runDaemonCli(
     return cachedUserConfigStore;
   };
 
+  const defaultKatoDir = dirname(runtime.runtimeDir);
   const defaultRuntimeConfig = options.defaultRuntimeConfig ??
     createDefaultRuntimeConfig({
       runtimeDir: runtime.runtimeDir,
-      statusPath: runtime.statusPath,
-      controlPath: runtime.controlPath,
+      useHomeShorthand: true,
+    });
+  const defaultSharedConfig = options.defaultSharedConfig ??
+    createDefaultSharedBehaviorConfig({
       allowedWriteRoots: [],
       useHomeShorthand: true,
     });
+  const defaultCliConfig = options.defaultCliConfig ??
+    createDefaultCliConfig();
   const configStore = options.configStore ??
     new RuntimeConfigFileStore(runtime.configPath);
-
-  const operationalLogger = options.operationalLogger ??
-    new StructuredLogger([new NoopSink()], {
-      channel: "operational",
-      minLevel: "info",
-      now: runtime.now,
-    });
-
-  const auditLogger = options.auditLogger ??
-    new AuditLogger(
-      new StructuredLogger([new NoopSink()], {
-        channel: "security-audit",
-        minLevel: "info",
-        now: runtime.now,
-      }),
+  const sharedConfigStore = options.sharedConfigStore ??
+    new SharedBehaviorConfigFileStore(
+      resolveDefaultSharedConfigPath(defaultKatoDir),
     );
+  const cliConfigStore = options.cliConfigStore ??
+    new CliConfigFileStore(resolveDefaultCliConfigPath(defaultKatoDir));
 
   let intent;
   try {
@@ -216,12 +246,16 @@ export async function runDaemonCli(
   }
 
   if (intent.kind === "version") {
-    runtime.writeStdout(`kato ${DAEMON_APP_VERSION}\n`);
+    runtime.writeStdout(`kato ${CLI_APP_VERSION}\n`);
     return 0;
   }
 
   let runtimeConfig = defaultRuntimeConfig;
+  let sharedConfig = defaultSharedConfig;
+  let cliConfig = defaultCliConfig;
   let autoInitializedRuntimeConfigPath: string | undefined;
+  let autoInitializedSharedConfigPath: string | undefined;
+  let autoInitializedCliConfigPath: string | undefined;
   let autoInitializedDefaultWorkspaceConfigPath: string | undefined;
   let autoInitializedUserConfigPath: string | undefined;
   const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
@@ -249,12 +283,22 @@ export async function runDaemonCli(
         ) {
           const initialized = await ensureGlobalConfigInitialized({
             configStore,
+            sharedConfigStore,
+            cliConfigStore,
             userConfigStore: resolveUserConfigStore(),
             defaultRuntimeConfig,
-            runtimeConfigPath: runtime.configPath,
+            defaultSharedConfig,
+            defaultCliConfig,
+            katoDir: defaultKatoDir,
           });
           if (initialized.runtimeConfigCreated) {
             autoInitializedRuntimeConfigPath = initialized.runtimeConfigPath;
+          }
+          if (initialized.sharedConfigCreated) {
+            autoInitializedSharedConfigPath = initialized.sharedConfigPath;
+          }
+          if (initialized.cliConfigCreated) {
+            autoInitializedCliConfigPath = initialized.cliConfigPath;
           }
           if (initialized.defaultWorkspaceConfigCreated) {
             autoInitializedDefaultWorkspaceConfigPath =
@@ -277,13 +321,68 @@ export async function runDaemonCli(
       }
     }
   }
+  if (commandShouldTryLoadingRuntimeConfig) {
+    try {
+      sharedConfig = await sharedConfigStore.load();
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        try {
+          const sharedInitialized = await sharedConfigStore.ensureInitialized(
+            defaultSharedConfig,
+          );
+          sharedConfig = sharedInitialized.config;
+          if (sharedInitialized.created) {
+            autoInitializedSharedConfigPath = sharedInitialized.path;
+          }
+        } catch (innerError) {
+          if (
+            innerError instanceof Deno.errors.NotCapable ||
+            innerError instanceof Deno.errors.PermissionDenied
+          ) {
+            sharedConfig = defaultSharedConfig;
+          } else {
+            throw innerError;
+          }
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    try {
+      cliConfig = await cliConfigStore.load();
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        try {
+          const cliInitialized = await cliConfigStore.ensureInitialized(
+            defaultCliConfig,
+          );
+          cliConfig = cliInitialized.config;
+          if (cliInitialized.created) {
+            autoInitializedCliConfigPath = cliInitialized.path;
+          }
+        } catch (innerError) {
+          if (
+            innerError instanceof Deno.errors.NotCapable ||
+            innerError instanceof Deno.errors.PermissionDenied
+          ) {
+            cliConfig = defaultCliConfig;
+          } else {
+            throw innerError;
+          }
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
 
   const effectiveRuntime: DaemonCliRuntime = {
     ...runtime,
     runtimeDir: runtimeConfig.runtimeDir,
-    statusPath: runtimeConfig.statusPath,
-    controlPath: runtimeConfig.controlPath,
-    allowedWriteRoots: [...runtimeConfig.allowedWriteRoots],
+    statusPath: resolveDefaultStatusPath(runtimeConfig.runtimeDir),
+    controlPath: resolveDefaultControlPath(runtimeConfig.runtimeDir),
+    allowedWriteRoots: [...sharedConfig.allowedWriteRoots],
     providerSessionRoots: {
       claude: [...runtimeConfig.providerSessionRoots.claude],
       codex: [...runtimeConfig.providerSessionRoots.codex],
@@ -301,14 +400,48 @@ export async function runDaemonCli(
     new DenoDetachedDaemonLauncher(effectiveRuntime);
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
-      allowedRoots: runtimeConfig.allowedWriteRoots,
+      allowedRoots: sharedConfig.allowedWriteRoots,
     });
+  const effectiveKatoDir = runtimeConfig.katoDir ??
+    dirname(runtimeConfig.runtimeDir);
+  const cliOperationalLogPath = join(
+    effectiveKatoDir,
+    "cli",
+    "logs",
+    "operational.jsonl",
+  );
+  const cliAuditLogPath = join(
+    effectiveKatoDir,
+    "cli",
+    "logs",
+    "security-audit.jsonl",
+  );
+  const operationalLogger = options.operationalLogger ??
+    new StructuredLogger([await createCliLogSink(cliOperationalLogPath)], {
+      channel: "operational",
+      minLevel: cliConfig.logging.operationalLevel,
+      now: runtime.now,
+    });
+  const auditLogger = options.auditLogger ??
+    new AuditLogger(
+      new StructuredLogger([await createCliLogSink(cliAuditLogPath)], {
+        channel: "security-audit",
+        minLevel: cliConfig.logging.auditLevel,
+        now: runtime.now,
+      }),
+    );
 
   const commandContext = {
     runtime: effectiveRuntime,
     configStore,
+    sharedConfigStore,
+    cliConfigStore,
     runtimeConfig,
+    sharedConfig,
+    cliConfig,
     defaultRuntimeConfig,
+    defaultSharedConfig,
+    defaultCliConfig,
     statusStore,
     controlStore,
     daemonLauncher,
@@ -321,6 +454,8 @@ export async function runDaemonCli(
   if (
     (intent.command.name === "start" || intent.command.name === "restart") &&
     (autoInitializedRuntimeConfigPath ||
+      autoInitializedSharedConfigPath ||
+      autoInitializedCliConfigPath ||
       autoInitializedDefaultWorkspaceConfigPath ||
       autoInitializedUserConfigPath)
   ) {
@@ -329,6 +464,14 @@ export async function runDaemonCli(
       lines.push(
         `initialized runtime config at ${autoInitializedRuntimeConfigPath}`,
       );
+    }
+    if (autoInitializedSharedConfigPath) {
+      lines.push(
+        `initialized shared config at ${autoInitializedSharedConfigPath}`,
+      );
+    }
+    if (autoInitializedCliConfigPath) {
+      lines.push(`initialized CLI config at ${autoInitializedCliConfigPath}`);
     }
     if (autoInitializedDefaultWorkspaceConfigPath) {
       lines.push(

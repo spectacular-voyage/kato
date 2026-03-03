@@ -8,31 +8,46 @@ import {
 import { dirname, join } from "@std/path";
 import type {
   DaemonStatusSnapshot,
-  RuntimeConfig,
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
+  RuntimeConfig as DaemonRuntimeConfig,
   UserConfig,
 } from "@kato/shared";
 import {
-  CliUsageError,
   createDefaultDaemonFeatureFlags,
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
   createDefaultUserConfig,
-  DAEMON_APP_VERSION,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
   type DaemonControlRequestStoreLike,
   type DaemonProcessLauncherLike,
   type DaemonStatusSnapshotStoreLike,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
-  DEFAULT_WORKSPACE_REGISTRY_FILENAME,
-  parseDaemonCliArgs,
-  runDaemonCli,
+  resolveDefaultSessionsDir,
+  resolveDefaultWorkspaceRegistryPath,
+  resolveDefaultWorkspaceTemplateConfigPath,
   type RuntimeConfigStoreLike,
   UserConfigFileStore,
   type UserConfigStoreLike,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
+import {
+  CliUsageError,
+  parseDaemonCliArgs,
+  runDaemonCli,
+} from "../apps/cli/src/mod.ts";
+import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
+
+type RuntimeConfig = DaemonRuntimeConfig & {
+  statusPath: string;
+  controlPath: string;
+  allowedWriteRoots: string[];
+  exportTimezone?: string;
+  exportMarkdownFrontmatter: MarkdownFrontmatterConfig;
+  exportFeatureFlags: ExportFeatureFlags;
+};
 
 function makeRuntimeHarness(runtimeDir: string) {
   const stdout: string[] = [];
@@ -650,7 +665,7 @@ Deno.test("runDaemonCli prints version without loading config", async () => {
 
   assertEquals(code, 0);
   assertEquals(harness.stderr.join(""), "");
-  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+  assertStringIncludes(harness.stdout.join(""), `kato ${CLI_APP_VERSION}`);
 });
 
 Deno.test("runDaemonCli help includes version and tagline", async () => {
@@ -662,7 +677,7 @@ Deno.test("runDaemonCli help includes version and tagline", async () => {
 
   assertEquals(code, 0);
   assertEquals(harness.stderr.join(""), "");
-  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+  assertStringIncludes(harness.stdout.join(""), `kato ${CLI_APP_VERSION}`);
   assertStringIncludes(harness.stdout.join(""), "Own your AI conversations.");
   assertStringIncludes(
     harness.stdout.join(""),
@@ -679,7 +694,7 @@ Deno.test("runDaemonCli help topic includes version and tagline", async () => {
 
   assertEquals(code, 0);
   assertEquals(harness.stderr.join(""), "");
-  assertStringIncludes(harness.stdout.join(""), `kato ${DAEMON_APP_VERSION}`);
+  assertStringIncludes(harness.stdout.join(""), `kato ${CLI_APP_VERSION}`);
   assertStringIncludes(harness.stdout.join(""), "Own your AI conversations.");
   assertStringIncludes(harness.stdout.join(""), "Usage: kato start");
 });
@@ -715,7 +730,7 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
     );
     assertStringIncludes(
       harness.stdout.join(""),
-      `created default workspace config at ${runtimeDir}/default-kato-workspace-config.yaml`,
+      resolveDefaultWorkspaceTemplateConfigPath(dirname(runtimeDir)),
     );
     assertStringIncludes(
       harness.stdout.join(""),
@@ -759,7 +774,11 @@ Deno.test(
       const runtimeConfig = await Deno.readTextFile(
         join(runtimeDir, "kato-daemon-config.yaml"),
       );
-      assertStringIncludes(runtimeConfig, "allowedWriteRoots: []");
+      assertEquals(runtimeConfig.includes("allowedWriteRoots:"), false);
+      const sharedConfig = await Deno.readTextFile(
+        join(dirname(runtimeDir), "shared", "kato-shared-config.yaml"),
+      );
+      assertStringIncludes(sharedConfig, "allowedWriteRoots: []");
     } finally {
       await removePathIfPresent(runtimeDir);
     }
@@ -778,7 +797,7 @@ Deno.test(
         workspaceDir,
         DEFAULT_WORKSPACE_CONFIG_FILENAME,
       );
-      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
       await Deno.mkdir(workspaceDir, { recursive: true });
 
       const defaultRuntimeConfig: RuntimeConfig = {
@@ -941,7 +960,7 @@ Deno.test(
       const runtimeDir = join(tempDir, "runtime");
       const katoDir = join(tempDir, ".kato");
       const workspaceDir = join(tempDir, "explicit-target");
-      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
       await Deno.mkdir(workspaceDir, { recursive: true });
 
       const defaultRuntimeConfig: RuntimeConfig = {
@@ -1009,10 +1028,10 @@ Deno.test(
       );
       const validWorkspaceId = crypto.randomUUID();
       const invalidWorkspaceId = crypto.randomUUID();
-      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
 
       await Deno.mkdir(runtimeDir, { recursive: true });
-      await Deno.mkdir(katoDir, { recursive: true });
+      await Deno.mkdir(dirname(registryPath), { recursive: true });
       await Deno.mkdir(validWorkspaceDir, { recursive: true });
       await Deno.mkdir(invalidWorkspaceDir, { recursive: true });
 
@@ -1160,7 +1179,7 @@ Deno.test(
       const katoDir = join(tempDir, ".kato");
       const firstWorkspaceDir = join(tempDir, "workspace-one");
       const secondWorkspaceDir = join(tempDir, "workspace-two");
-      const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
       await Deno.mkdir(firstWorkspaceDir, { recursive: true });
       await Deno.mkdir(secondWorkspaceDir, { recursive: true });
 
@@ -1264,6 +1283,7 @@ Deno.test(
       const exitCode = await runDaemonCli([
         "workspace",
         "register",
+        ".",
         "--alias",
         "missing-config",
       ], {
@@ -1274,7 +1294,9 @@ Deno.test(
       assertEquals(exitCode, 1);
       assertStringIncludes(
         registerHarness.stderr.join(""),
-        "Command failed: No workspace config found. Run `kato workspace init` to create ./kato-workspace-config.yaml from the default template first.",
+        `Command failed: No workspace config found at ${
+          join(workspaceDir, DEFAULT_WORKSPACE_CONFIG_FILENAME)
+        }. Run \`kato workspace init .\` first.`,
       );
     } finally {
       await removePathIfPresent(tempDir);
@@ -1340,7 +1362,8 @@ Deno.test(
       const configuredKatoDir = join(tempDir, "configured-kato");
       const registryPath = join(
         configuredKatoDir,
-        DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+        "shared",
+        "workspace-registry.json",
       );
       await Deno.mkdir(workspaceDir, { recursive: true });
 
@@ -1389,7 +1412,7 @@ Deno.test(
       await assertRejects(
         () =>
           Deno.stat(
-            join(dirname(runtimeDir), DEFAULT_WORKSPACE_REGISTRY_FILENAME),
+            resolveDefaultWorkspaceRegistryPath(dirname(runtimeDir)),
           ),
         Deno.errors.NotFound,
       );
@@ -1459,9 +1482,9 @@ Deno.test("runDaemonCli user commands manage user participant settings", async (
   try {
     const runtimeDir = join(tempDir, "runtime");
     const katoDir = join(tempDir, ".kato");
-    const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+    const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
     await Deno.mkdir(runtimeDir, { recursive: true });
-    await Deno.mkdir(katoDir, { recursive: true });
+    await Deno.mkdir(dirname(registryPath), { recursive: true });
 
     const workspaceOneId = crypto.randomUUID();
     const workspaceTwoId = crypto.randomUUID();
@@ -2057,7 +2080,7 @@ Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts
     );
     const harness = makeRuntimeHarness(runtimeDir);
 
-    const sessionsDir = `${rootDir}/sessions`;
+    const sessionsDir = resolveDefaultSessionsDir(rootDir);
     await Deno.mkdir(sessionsDir, { recursive: true });
     const oldMetaPath = `${sessionsDir}/old.meta.json`;
     const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
@@ -2119,7 +2142,7 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
     );
     const harness = makeRuntimeHarness(runtimeDir);
 
-    const sessionsDir = `${rootDir}/sessions`;
+    const sessionsDir = resolveDefaultSessionsDir(rootDir);
     await Deno.mkdir(sessionsDir, { recursive: true });
     const oldMetaPath = `${sessionsDir}/old.meta.json`;
     const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;

@@ -4,8 +4,8 @@ import {
   PersistentSessionStateStore,
   resolveDefaultDaemonControlIndexPath,
   resolveDefaultSessionsDir,
-} from "../../orchestrator/mod.ts";
-import { resolveExportsLogPath } from "../../utils/exports_log.ts";
+} from "@kato/runtime";
+import { resolveExportsLogPath } from "@kato/runtime";
 import type { DaemonCliCommandContext } from "./context.ts";
 
 export interface CleanCommandOptions {
@@ -135,7 +135,7 @@ async function executeSessionCleanup(
 
   const nowMs = ctx.runtime.now().getTime();
   const olderThanMs = nowMs - (options.sessionsDays * 24 * 60 * 60 * 1000);
-  const katoDir = dirname(ctx.runtime.runtimeDir);
+  const katoDir = ctx.runtimeConfig.katoDir ?? dirname(ctx.runtime.runtimeDir);
   const sessionsDir = resolveDefaultSessionsDir(katoDir);
   const sessionStateStore = new PersistentSessionStateStore({
     daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(katoDir),

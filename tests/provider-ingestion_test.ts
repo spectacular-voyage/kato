@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import {
   AuditLogger,
@@ -1048,7 +1048,7 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
       provider: "test-provider",
       providerSessionId: "session-fail-closed",
     });
-    await Deno.mkdir(join(stateRoot, "sessions"), { recursive: true });
+    await Deno.mkdir(dirname(location.metadataPath), { recursive: true });
     await Deno.writeTextFile(
       location.metadataPath,
       JSON.stringify({

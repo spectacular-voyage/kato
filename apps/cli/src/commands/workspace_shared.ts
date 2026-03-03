@@ -11,7 +11,7 @@ import {
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
   WorkspaceRegistryFileStore,
-} from "../../workspace/mod.ts";
+} from "@kato/runtime";
 
 export function requireCliCwd(ctx: DaemonCliCommandContext): string {
   const cwd = ctx.runtime.cwdPath;
@@ -137,8 +137,10 @@ export function shouldWarnWriteRootCoverage(
 export async function loadWorkspaceTemplateScaffold(
   ctx: DaemonCliCommandContext,
 ): Promise<string> {
+  const katoDir = ctx.runtimeConfig.katoDir ??
+    dirname(ctx.runtimeConfig.runtimeDir);
   const templatePath = resolveDefaultWorkspaceTemplateConfigPath(
-    ctx.runtime.configPath,
+    katoDir,
   );
   const store = new DefaultWorkspaceConfigFileStore(templatePath);
   const loaded = await store.load({ allowMissing: true });

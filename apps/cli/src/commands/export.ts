@@ -1,8 +1,5 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import {
-  appendExportsLogEntry,
-  resolveExportsLogPath,
-} from "../../utils/exports_log.ts";
+import { appendExportsLogEntry, resolveExportsLogPath } from "@kato/runtime";
 
 export async function runExportCommand(
   ctx: DaemonCliCommandContext,
@@ -52,6 +49,11 @@ export async function runExportCommand(
       ...(outputPath ? { outputPath } : {}),
       ...(resolvedOutputPath ? { resolvedOutputPath } : {}),
       ...(format ? { format } : {}),
+      resolvedExportTimezone: ctx.sharedConfig.exportTimezone,
+      resolvedExportMarkdownFrontmatter: {
+        ...ctx.sharedConfig.exportMarkdownFrontmatter,
+      },
+      resolvedExportFeatureFlags: { ...ctx.sharedConfig.exportFeatureFlags },
       requestedByPid: ctx.runtime.pid,
     },
   });

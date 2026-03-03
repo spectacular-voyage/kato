@@ -1,6 +1,11 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
-import type { RuntimeConfig } from "@kato/shared";
+import type {
+  ExportFeatureFlags,
+  MarkdownFrontmatterConfig,
+  RuntimeConfig as DaemonRuntimeConfig,
+  SharedBehaviorConfig,
+} from "@kato/shared";
 import {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
@@ -13,13 +18,19 @@ import {
 } from "../apps/daemon/src/mod.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
+type RuntimeConfig = DaemonRuntimeConfig & {
+  statusPath?: string;
+  controlPath?: string;
+  allowedWriteRoots?: string[];
+  exportTimezone?: string;
+  exportMarkdownFrontmatter?: MarkdownFrontmatterConfig;
+  exportFeatureFlags?: ExportFeatureFlags;
+};
+
 function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
   return {
     schemaVersion: 1,
     runtimeDir,
-    statusPath: join(runtimeDir, "status.json"),
-    controlPath: join(runtimeDir, "control.json"),
-    allowedWriteRoots: [runtimeDir],
     providerSessionRoots: {
       claude: ["/sessions/claude"],
       codex: ["/sessions/codex"],
@@ -29,15 +40,57 @@ function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
       daemonExportEnabled: false,
       captureIncludeSystemEvents: false,
     },
-    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(),
-    exportFeatureFlags: createDefaultExportFeatureFlags({
-      writerItalicizeUserMessages: true,
-    }),
     logging: {
       operationalLevel: "info",
       auditLevel: "info",
     },
     daemonMaxMemoryMb: 200,
+  };
+}
+
+function cloneSharedConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
+  return {
+    schemaVersion: config.schemaVersion,
+    allowedWriteRoots: [...config.allowedWriteRoots],
+    exportTimezone: config.exportTimezone,
+    exportMarkdownFrontmatter: { ...config.exportMarkdownFrontmatter },
+    exportFeatureFlags: { ...config.exportFeatureFlags },
+  };
+}
+
+function makeSharedConfig(
+  overrides: Partial<SharedBehaviorConfig> = {},
+): SharedBehaviorConfig {
+  return {
+    schemaVersion: 1,
+    allowedWriteRoots: [...(overrides.allowedWriteRoots ?? ["."])],
+    exportTimezone: overrides.exportTimezone ?? "local",
+    exportMarkdownFrontmatter: {
+      ...createDefaultRuntimeMarkdownFrontmatterConfig(),
+      ...(overrides.exportMarkdownFrontmatter ?? {}),
+    },
+    exportFeatureFlags: {
+      ...createDefaultExportFeatureFlags({ writerItalicizeUserMessages: true }),
+      ...(overrides.exportFeatureFlags ?? {}),
+    },
+  };
+}
+
+function makeSharedConfigStore(
+  initial: SharedBehaviorConfig = makeSharedConfig(),
+): RunDaemonSubprocessOptions["sharedConfigStore"] {
+  const state = cloneSharedConfig(initial);
+  return {
+    load() {
+      return Promise.resolve(cloneSharedConfig(state));
+    },
+    ensureInitialized() {
+      return Promise.resolve({
+        created: false,
+        path: ".test-tmp/kato-shared-config.yaml",
+        config: cloneSharedConfig(state),
+      });
+    },
   };
 }
 
@@ -183,7 +236,6 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
 
 Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overrides", async () => {
   const config = makeRuntimeConfig();
-  config.exportTimezone = "UTC";
   const configStore: RuntimeConfigStoreLike = {
     load() {
       return Promise.resolve(config);
@@ -196,6 +248,9 @@ Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overri
   const captured: Array<string | undefined> = [];
   const exitCode = await runDaemonSubprocess({
     configStore,
+    sharedConfigStore: makeSharedConfigStore(
+      makeSharedConfig({ exportTimezone: "UTC" }),
+    ),
     userConfigStore: makeUserConfigStore(),
     runtimeLoop(options = {}) {
       captured.push(
@@ -212,7 +267,6 @@ Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overri
 
 Deno.test("runDaemonSubprocess plain CLI export uses default user participant username", async () => {
   const config = makeRuntimeConfig();
-  config.exportMarkdownFrontmatter.addParticipantUsernameToFrontmatter = true;
   const configStore: RuntimeConfigStoreLike = {
     load() {
       return Promise.resolve(config);
@@ -225,6 +279,14 @@ Deno.test("runDaemonSubprocess plain CLI export uses default user participant us
   const captured: Array<string | undefined> = [];
   const exitCode = await runDaemonSubprocess({
     configStore,
+    sharedConfigStore: makeSharedConfigStore(
+      makeSharedConfig({
+        exportMarkdownFrontmatter:
+          createDefaultRuntimeMarkdownFrontmatterConfig({
+            addParticipantUsernameToFrontmatter: true,
+          }),
+      }),
+    ),
     userConfigStore: makeUserConfigStore(
       createDefaultUserConfig({
         defaultUsername: "Default.User",
@@ -246,7 +308,6 @@ Deno.test("runDaemonSubprocess plain CLI export uses default user participant us
 
 Deno.test("runDaemonSubprocess plain CLI export omits user participant when no explicit username exists", async () => {
   const config = makeRuntimeConfig();
-  config.exportMarkdownFrontmatter.addParticipantUsernameToFrontmatter = true;
   const configStore: RuntimeConfigStoreLike = {
     load() {
       return Promise.resolve(config);
@@ -259,6 +320,14 @@ Deno.test("runDaemonSubprocess plain CLI export omits user participant when no e
   const captured: Array<string | undefined> = [];
   const exitCode = await runDaemonSubprocess({
     configStore,
+    sharedConfigStore: makeSharedConfigStore(
+      makeSharedConfig({
+        exportMarkdownFrontmatter:
+          createDefaultRuntimeMarkdownFrontmatterConfig({
+            addParticipantUsernameToFrontmatter: true,
+          }),
+      }),
+    ),
     userConfigStore: makeUserConfigStore(
       createDefaultUserConfig({
         defaultUsername: "",
@@ -515,7 +584,9 @@ Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state p
     assertEquals(exitCode, 0);
     assertEquals(observedMetadataPaths.length, 1);
     assertEquals(
-      observedMetadataPaths[0]?.startsWith(join(explicitKatoDir, "sessions")),
+      observedMetadataPaths[0]?.startsWith(
+        join(explicitKatoDir, "shared", "sessions"),
+      ),
       true,
     );
   } finally {
@@ -553,6 +624,7 @@ Deno.test("runDaemonSubprocess falls back to runtimeDir parent when runtimeConfi
     assertEquals(exitCode, 0);
     const fallbackRegistryPath = join(
       rootDir,
+      "shared",
       DEFAULT_WORKSPACE_REGISTRY_FILENAME,
     );
     const stat = await Deno.stat(fallbackRegistryPath);

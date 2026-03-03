@@ -17,6 +17,7 @@ export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
 export const DEFAULT_WORKSPACE_CONFIG_FILENAME = "kato-workspace-config.yaml";
 export const DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME =
   "default-kato-workspace-config.yaml";
+const DEFAULT_SHARED_DIRNAME = "shared";
 export const DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE = ".";
 export const DEFAULT_WORKSPACE_FILENAME_TEMPLATE =
   "{timestampHumane}-{snippetSlug}-{provider}.md";
@@ -214,14 +215,19 @@ async function writeTextAtomically(
 export function resolveDefaultWorkspaceRegistryPath(
   katoDir: string = resolveDefaultKatoDir(),
 ): string {
-  return join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+  return join(
+    katoDir,
+    DEFAULT_SHARED_DIRNAME,
+    DEFAULT_WORKSPACE_REGISTRY_FILENAME,
+  );
 }
 
 export function resolveDefaultWorkspaceTemplateConfigPath(
-  runtimeConfigPath: string,
+  katoDir: string = resolveDefaultKatoDir(),
 ): string {
   return join(
-    dirname(resolve(runtimeConfigPath)),
+    katoDir,
+    DEFAULT_SHARED_DIRNAME,
     DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME,
   );
 }

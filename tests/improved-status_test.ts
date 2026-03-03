@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
-import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
+import { CliUsageError, parseDaemonCliArgs } from "../apps/cli/src/mod.ts";
 import {
   getStatusRecentErrorKey,
   isLiveExitKey,
@@ -13,8 +13,8 @@ import {
   renderStatusText,
   type StatusRecentError,
   type WorkspaceStatusSummary,
-} from "../apps/daemon/src/cli/commands/status.ts";
-import { DAEMON_APP_VERSION } from "../apps/daemon/src/version.ts";
+} from "../apps/cli/src/commands/status.ts";
+import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
 // ─── Parser tests ─────────────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, `kato (v${DAEMON_APP_VERSION})  ·  daemon:`);
+  assertStringIncludes(out, `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon`);
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -715,10 +715,10 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     stale: false,
     terminalWidth: 120,
   });
-  assertStringIncludes(out, "daemon: running");
+  assertStringIncludes(out, "kato daemon");
   assertStringIncludes(out, "memory:");
   const daemonLineCount =
-    out.split("\n").filter((line) => line.includes("daemon: ")).length;
+    out.split("\n").filter((line) => line.includes("kato daemon")).length;
   assertEquals(daemonLineCount, 1);
   assert(
     out.split("\n").some((line) =>

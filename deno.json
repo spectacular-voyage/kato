@@ -18,6 +18,7 @@
     "@std/path": "jsr:@std/path@1",
     "@std/yaml": "jsr:@std/yaml@1",
     "loglayer": "npm:loglayer@9.1.0",
-    "@kato/shared": "./shared/src/mod.ts"
+    "@kato/shared": "./shared/src/mod.ts",
+    "@kato/runtime": "./apps/runtime/src/mod.ts"
   }
 }

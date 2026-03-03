@@ -3,7 +3,7 @@ import type { DaemonCliCommandContext } from "./context.ts";
 import {
   createDefaultUserConfig,
   validateAndNormalizeParticipantUsername,
-} from "../../config/mod.ts";
+} from "@kato/runtime";
 import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
 
 interface UserMapListEntry {

@@ -17,6 +17,7 @@ export type {
   WriterAppendEnvelope,
 } from "./contracts/ipc.ts";
 export type {
+  CliConfig,
   ConfigSource,
   DaemonFeatureFlags,
   ExportFeatureFlags,
@@ -27,6 +28,7 @@ export type {
   RuntimeConfigMetadata,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
+  SharedBehaviorConfig,
   UserConfig,
   UserParticipantsConfig,
 } from "./contracts/config.ts";

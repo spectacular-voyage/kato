@@ -11,6 +11,6 @@ Deno.test(function runtimeTest() {
 Deno.test(function workspaceLayoutTest() {
   assertEquals(
     describeWorkspaceLayout(),
-    "apps/daemon, apps/web, apps/cloud, shared/src",
+    "apps/cli, apps/daemon, apps/runtime, apps/web, apps/cloud, shared/src",
   );
 });

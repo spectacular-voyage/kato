@@ -3,7 +3,7 @@ import {
   ensureWorkspaceConfigWorkspaceId,
   readWorkspaceConfigWorkspaceId,
   type RegisteredWorkspace,
-} from "../../workspace/mod.ts";
+} from "@kato/runtime";
 import {
   findWorkspaceByRoot,
   formatWorkspaceEntry,

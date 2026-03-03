@@ -1,18 +1,29 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import type { RuntimeConfig } from "@kato/shared";
+import type {
+  CliConfig,
+  RuntimeConfig,
+  SharedBehaviorConfig,
+} from "@kato/shared";
+import { dirname } from "@std/path";
 import {
+  type CliConfigStoreLike,
   createDefaultUserConfig,
   type RuntimeConfigStoreLike,
+  type SharedBehaviorConfigStoreLike,
   type UserConfigStoreLike,
-} from "../../config/mod.ts";
+} from "@kato/runtime";
 import {
   DefaultWorkspaceConfigFileStore,
   resolveDefaultWorkspaceTemplateConfigPath,
-} from "../../workspace/mod.ts";
+} from "@kato/runtime";
 
 export interface EnsureGlobalConfigInitializationResult {
   runtimeConfigCreated: boolean;
   runtimeConfigPath: string;
+  sharedConfigCreated: boolean;
+  sharedConfigPath: string;
+  cliConfigCreated: boolean;
+  cliConfigPath: string;
   defaultWorkspaceConfigCreated: boolean;
   defaultWorkspaceConfigPath: string;
   userConfigCreated: boolean;
@@ -22,16 +33,26 @@ export interface EnsureGlobalConfigInitializationResult {
 export async function ensureGlobalConfigInitialized(
   options: {
     configStore: RuntimeConfigStoreLike;
+    sharedConfigStore: SharedBehaviorConfigStoreLike;
+    cliConfigStore: CliConfigStoreLike;
     userConfigStore: UserConfigStoreLike;
     defaultRuntimeConfig: RuntimeConfig;
-    runtimeConfigPath: string;
+    defaultSharedConfig: SharedBehaviorConfig;
+    defaultCliConfig: CliConfig;
+    katoDir: string;
   },
 ): Promise<EnsureGlobalConfigInitializationResult> {
   const runtimeResult = await options.configStore.ensureInitialized(
     options.defaultRuntimeConfig,
   );
+  const sharedResult = await options.sharedConfigStore.ensureInitialized(
+    options.defaultSharedConfig,
+  );
+  const cliResult = await options.cliConfigStore.ensureInitialized(
+    options.defaultCliConfig,
+  );
   const defaultWorkspaceConfigStore = new DefaultWorkspaceConfigFileStore(
-    resolveDefaultWorkspaceTemplateConfigPath(options.runtimeConfigPath),
+    resolveDefaultWorkspaceTemplateConfigPath(options.katoDir),
   );
   const defaultWorkspaceResult = await defaultWorkspaceConfigStore
     .ensureInitialized();
@@ -42,6 +63,10 @@ export async function ensureGlobalConfigInitialized(
   return {
     runtimeConfigCreated: runtimeResult.created,
     runtimeConfigPath: runtimeResult.path,
+    sharedConfigCreated: sharedResult.created,
+    sharedConfigPath: sharedResult.path,
+    cliConfigCreated: cliResult.created,
+    cliConfigPath: cliResult.path,
     defaultWorkspaceConfigCreated: defaultWorkspaceResult.created,
     defaultWorkspaceConfigPath: defaultWorkspaceResult.path,
     userConfigCreated: userConfigResult.created,
@@ -54,9 +79,13 @@ export async function runInitCommand(
 ): Promise<void> {
   const result = await ensureGlobalConfigInitialized({
     configStore: ctx.configStore,
+    sharedConfigStore: ctx.sharedConfigStore,
+    cliConfigStore: ctx.cliConfigStore,
     userConfigStore: ctx.resolveUserConfigStore(),
     defaultRuntimeConfig: ctx.defaultRuntimeConfig,
-    runtimeConfigPath: ctx.runtime.configPath,
+    defaultSharedConfig: ctx.defaultSharedConfig,
+    defaultCliConfig: ctx.defaultCliConfig,
+    katoDir: ctx.runtimeConfig.katoDir ?? dirname(ctx.runtimeConfig.runtimeDir),
   });
 
   await ctx.operationalLogger.info(
@@ -67,6 +96,10 @@ export async function runInitCommand(
     {
       runtimeConfigPath: result.runtimeConfigPath,
       runtimeConfigCreated: result.runtimeConfigCreated,
+      sharedConfigPath: result.sharedConfigPath,
+      sharedConfigCreated: result.sharedConfigCreated,
+      cliConfigPath: result.cliConfigPath,
+      cliConfigCreated: result.cliConfigCreated,
       defaultWorkspaceConfigPath: result.defaultWorkspaceConfigPath,
       defaultWorkspaceConfigCreated: result.defaultWorkspaceConfigCreated,
       userConfigPath: result.userConfigPath,
@@ -76,6 +109,10 @@ export async function runInitCommand(
   await ctx.auditLogger.command("init", {
     runtimeConfigPath: result.runtimeConfigPath,
     runtimeConfigCreated: result.runtimeConfigCreated,
+    sharedConfigPath: result.sharedConfigPath,
+    sharedConfigCreated: result.sharedConfigCreated,
+    cliConfigPath: result.cliConfigPath,
+    cliConfigCreated: result.cliConfigCreated,
     defaultWorkspaceConfigPath: result.defaultWorkspaceConfigPath,
     defaultWorkspaceConfigCreated: result.defaultWorkspaceConfigCreated,
     userConfigPath: result.userConfigPath,
@@ -89,6 +126,16 @@ export async function runInitCommand(
           ? "created runtime config at"
           : "runtime config already exists at"
       } ${result.runtimeConfigPath}`,
+      `${
+        result.sharedConfigCreated
+          ? "created shared config at"
+          : "shared config already exists at"
+      } ${result.sharedConfigPath}`,
+      `${
+        result.cliConfigCreated
+          ? "created CLI config at"
+          : "CLI config already exists at"
+      } ${result.cliConfigPath}`,
       `${
         result.defaultWorkspaceConfigCreated
           ? "created default workspace config at"

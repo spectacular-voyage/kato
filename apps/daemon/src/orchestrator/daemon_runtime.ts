@@ -71,6 +71,7 @@ import {
   createDefaultUserConfig,
   resolveFrontmatterParticipantUsername,
 } from "../config/mod.ts";
+import { DAEMON_APP_VERSION } from "../version.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -3008,7 +3009,12 @@ export async function runDaemonRuntimeLoop(
       : undefined);
 
   let snapshot = createDefaultStatusSnapshot(now());
-  snapshot = { ...snapshot, daemonRunning: true, daemonPid: pid };
+  snapshot = {
+    ...snapshot,
+    daemonRunning: true,
+    daemonPid: pid,
+    daemonVersion: DAEMON_APP_VERSION,
+  };
   await statusStore.save(snapshot);
   const processEventsFromMs = now().getTime();
 
@@ -3420,6 +3426,150 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function cloneOutputOverrides(
+  value: RecordingOutputOverrides | undefined,
+): RecordingOutputOverrides | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    ...(value.includeFrontmatter !== undefined
+      ? { includeFrontmatter: value.includeFrontmatter }
+      : {}),
+    ...(value.includeUpdatedInFrontmatter !== undefined
+      ? { includeUpdatedInFrontmatter: value.includeUpdatedInFrontmatter }
+      : {}),
+    ...(value.includeSessionIds !== undefined
+      ? { includeSessionIds: value.includeSessionIds }
+      : {}),
+    ...(value.includeWorkspaceIds !== undefined
+      ? { includeWorkspaceIds: value.includeWorkspaceIds }
+      : {}),
+    ...(value.includeRecordingIds !== undefined
+      ? { includeRecordingIds: value.includeRecordingIds }
+      : {}),
+    ...(value.includeConversationEventKinds !== undefined
+      ? { includeConversationEventKinds: value.includeConversationEventKinds }
+      : {}),
+    ...(value.participantUsername
+      ? { participantUsername: value.participantUsername }
+      : {}),
+    ...(value.renderOptions
+      ? { renderOptions: { ...value.renderOptions } }
+      : {}),
+  };
+}
+
+function resolveExportOutputOverrides(
+  payload: unknown,
+  fallback: RecordingOutputOverrides | undefined,
+): RecordingOutputOverrides | undefined {
+  const resolved = cloneOutputOverrides(fallback) ?? {};
+  if (!isRecord(payload)) {
+    return Object.keys(resolved).length > 0 ? resolved : undefined;
+  }
+
+  const frontmatter = payload["resolvedExportMarkdownFrontmatter"];
+  if (isRecord(frontmatter)) {
+    const includeFrontmatter = readBoolean(
+      frontmatter["includeFrontmatterInMarkdownRecordings"],
+    );
+    if (includeFrontmatter !== undefined) {
+      resolved.includeFrontmatter = includeFrontmatter;
+    }
+    const includeUpdated = readBoolean(
+      frontmatter["includeUpdatedInFrontmatter"],
+    );
+    if (includeUpdated !== undefined) {
+      resolved.includeUpdatedInFrontmatter = includeUpdated;
+    }
+    const includeSessionIds = readBoolean(frontmatter["includeSessionIds"]);
+    if (includeSessionIds !== undefined) {
+      resolved.includeSessionIds = includeSessionIds;
+    }
+    const includeWorkspaceIds = readBoolean(frontmatter["includeWorkspaceIds"]);
+    if (includeWorkspaceIds !== undefined) {
+      resolved.includeWorkspaceIds = includeWorkspaceIds;
+    }
+    const includeRecordingIds = readBoolean(frontmatter["includeRecordingIds"]);
+    if (includeRecordingIds !== undefined) {
+      resolved.includeRecordingIds = includeRecordingIds;
+    }
+    const includeKinds = readBoolean(
+      frontmatter["includeConversationEventKinds"],
+    );
+    if (includeKinds !== undefined) {
+      resolved.includeConversationEventKinds = includeKinds;
+    }
+  }
+
+  const featureFlags = payload["resolvedExportFeatureFlags"];
+  if (isRecord(featureFlags)) {
+    const renderOptions = { ...(resolved.renderOptions ?? {}) };
+    const includeCommentary = readBoolean(
+      featureFlags["writerIncludeCommentary"],
+    );
+    if (includeCommentary !== undefined) {
+      renderOptions.includeCommentary = includeCommentary;
+    }
+    const includeThinking = readBoolean(featureFlags["writerIncludeThinking"]);
+    if (includeThinking !== undefined) {
+      renderOptions.includeThinking = includeThinking;
+    }
+    const includeToolCalls = readBoolean(
+      featureFlags["writerIncludeToolCalls"],
+    );
+    if (includeToolCalls !== undefined) {
+      renderOptions.includeToolCalls = includeToolCalls;
+    }
+    const includeToolResults = readBoolean(
+      featureFlags["writerIncludeToolResults"],
+    );
+    if (includeToolResults !== undefined) {
+      renderOptions.includeToolResults = includeToolResults;
+    }
+    const includeDecisionPrompt = readBoolean(
+      featureFlags["writerIncludeDecisionPrompt"],
+    );
+    if (includeDecisionPrompt !== undefined) {
+      renderOptions.includeDecisionPrompt = includeDecisionPrompt;
+    }
+    const includeDecisionOptions = readBoolean(
+      featureFlags["writerIncludeDecisionOptions"],
+    );
+    if (includeDecisionOptions !== undefined) {
+      renderOptions.includeDecisionOptions = includeDecisionOptions;
+    }
+    const includeDecisionSelection = readBoolean(
+      featureFlags["writerIncludeDecisionSelection"],
+    );
+    if (includeDecisionSelection !== undefined) {
+      renderOptions.includeDecisionSelection = includeDecisionSelection;
+    }
+    const italicizeUserMessages = readBoolean(
+      featureFlags["writerItalicizeUserMessages"],
+    );
+    if (italicizeUserMessages !== undefined) {
+      renderOptions.italicizeUserMessages = italicizeUserMessages;
+    }
+    resolved.renderOptions = renderOptions;
+  }
+
+  const resolvedExportTimezone = readString(payload["resolvedExportTimezone"]);
+  if (resolvedExportTimezone) {
+    resolved.renderOptions = {
+      ...(resolved.renderOptions ?? {}),
+      headingTimestampTimezone: resolvedExportTimezone,
+    };
+  }
+
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
 type ExportSessionResolutionMatch =
   | "passthrough"
   | "provider_session_id"
@@ -3608,6 +3758,10 @@ async function handleControlRequest(
 
   if (request.command === "export") {
     const payload = request.payload;
+    const outputOverrides = resolveExportOutputOverrides(
+      payload,
+      defaultCliExportOutputOverrides,
+    );
     const sessionId = isRecord(payload)
       ? readString(payload["sessionId"])
       : undefined;
@@ -3785,9 +3939,7 @@ async function handleControlRequest(
           events: snapshotData.events,
           title: resolveConversationTitle(snapshotData.events, sessionId),
           ...(format ? { format } : {}),
-          ...(defaultCliExportOutputOverrides
-            ? { outputOverrides: defaultCliExportOutputOverrides }
-            : {}),
+          ...(outputOverrides ? { outputOverrides } : {}),
         });
         await recordExportSucceeded(
           snapshotProvider,

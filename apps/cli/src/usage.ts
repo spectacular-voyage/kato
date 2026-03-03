@@ -1,11 +1,11 @@
 import type { DaemonCliCommandName } from "./types.ts";
-import { DAEMON_APP_VERSION } from "../version.ts";
+import { CLI_APP_VERSION } from "./version.ts";
 
 const APP_TAGLINE = "Own your AI conversations.";
 
 function withAppHeader(usageBody: string): string {
   return [
-    `kato ${DAEMON_APP_VERSION}`,
+    `kato ${CLI_APP_VERSION}`,
     APP_TAGLINE,
     "",
     usageBody,
@@ -39,7 +39,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates ~/.kato/kato-daemon-config.yaml, ~/.kato/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
+    "Creates ~/.kato/daemon/kato-daemon-config.yaml, ~/.kato/shared/kato-shared-config.yaml, ~/.kato/cli/kato-cli-config.yaml, ~/.kato/shared/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",

@@ -2,13 +2,13 @@ import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
-import { DAEMON_APP_VERSION } from "../../version.ts";
-import type { RegisteredWorkspace } from "../../workspace/mod.ts";
+import { isStatusSnapshotStale } from "@kato/runtime";
+import { CLI_APP_VERSION } from "../version.ts";
+import type { RegisteredWorkspace } from "@kato/runtime";
 import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
-} from "../../workspace/mod.ts";
+} from "@kato/runtime";
 import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
 import {
   loadSuppressedRecentErrorKeys,
@@ -869,9 +869,10 @@ export function renderStatusText(
     : ` (${activeCount} active, ${staleCount} stale)`;
 
   const refreshedAt = now.toTimeString().slice(0, 8);
+  const daemonVersion = snapshot.daemonVersion ?? "unknown";
   lines.push(
     truncate(
-      `kato (v${DAEMON_APP_VERSION})  ·  daemon: ${daemonText}  ·  refreshed ${refreshedAt}`,
+      `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon (v${daemonVersion}): ${daemonText}  ·  refreshed ${refreshedAt}`,
       width,
     ),
   );

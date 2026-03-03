@@ -47,17 +47,11 @@ const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
   "schemaVersion",
   "runtimeDir",
   "katoDir",
-  "statusPath",
-  "controlPath",
-  "allowedWriteRoots",
-  "exportTimezone",
   "providerSessionRoots",
   "globalAutoGenerateSnapshots",
   "providerAutoGenerateSnapshots",
   "cleanSessionStatesOnShutdown",
   "daemonFeatureFlags",
-  "exportMarkdownFrontmatter",
-  "exportFeatureFlags",
   "logging",
   "daemonMaxMemoryMb",
 ];
@@ -595,17 +589,6 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   ) {
     return undefined;
   }
-  if (
-    typeof value["statusPath"] !== "string" || value["statusPath"].length === 0
-  ) {
-    return undefined;
-  }
-  if (
-    typeof value["controlPath"] !== "string" ||
-    value["controlPath"].length === 0
-  ) {
-    return undefined;
-  }
   const runtimeDir = expandHomePath(value["runtimeDir"]);
   let katoDir = dirname(runtimeDir);
   if ("katoDir" in value && value["katoDir"] !== undefined) {
@@ -617,17 +600,6 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     }
     katoDir = expandHomePath(value["katoDir"]);
   }
-  const statusPath = expandHomePath(value["statusPath"]);
-  const controlPath = expandHomePath(value["controlPath"]);
-  const allowedWriteRoots = value["allowedWriteRoots"];
-  if (
-    !Array.isArray(allowedWriteRoots) ||
-    allowedWriteRoots.some((root) =>
-      typeof root !== "string" || root.length === 0
-    )
-  ) {
-    return undefined;
-  }
 
   const daemonFeatureFlags = parseDaemonFeatureFlags(
     value["daemonFeatureFlags"],
@@ -635,20 +607,8 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!daemonFeatureFlags) {
     return undefined;
   }
-  const exportFeatureFlags = parseExportFeatureFlags(
-    value["exportFeatureFlags"],
-  );
-  if (!exportFeatureFlags) {
-    return undefined;
-  }
   const logging = parseRuntimeLoggingConfig(value["logging"]);
   if (!logging) {
-    return undefined;
-  }
-  const exportMarkdownFrontmatter = parseRuntimeMarkdownFrontmatterConfig(
-    value["exportMarkdownFrontmatter"],
-  );
-  if (!exportMarkdownFrontmatter) {
     return undefined;
   }
   const providerSessionRoots = parseProviderSessionRoots(
@@ -661,10 +621,6 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     value["providerAutoGenerateSnapshots"],
   );
   if (!providerAutoGenerateSnapshots) {
-    return undefined;
-  }
-  const exportTimezone = parseExportTimezone(value["exportTimezone"]);
-  if (!exportTimezone) {
     return undefined;
   }
   const globalAutoGenerateSnapshots = value["globalAutoGenerateSnapshots"] ===
@@ -695,17 +651,11 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
     runtimeDir,
     katoDir,
-    statusPath,
-    controlPath,
-    allowedWriteRoots: allowedWriteRoots.map((root) => expandHomePath(root)),
-    exportTimezone,
     providerSessionRoots,
     globalAutoGenerateSnapshots,
     providerAutoGenerateSnapshots,
     cleanSessionStatesOnShutdown,
     daemonFeatureFlags,
-    exportMarkdownFrontmatter,
-    exportFeatureFlags,
     logging,
     daemonMaxMemoryMb,
   };
@@ -726,10 +676,6 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     schemaVersion: config.schemaVersion,
     runtimeDir: config.runtimeDir,
     ...(config.katoDir ? { katoDir: config.katoDir } : {}),
-    statusPath: config.statusPath,
-    controlPath: config.controlPath,
-    allowedWriteRoots: [...config.allowedWriteRoots],
-    exportTimezone: config.exportTimezone ?? DEFAULT_EXPORT_TIMEZONE,
     providerSessionRoots: cloneProviderSessionRoots(
       config.providerSessionRoots,
     ),
@@ -739,12 +685,6 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     },
     cleanSessionStatesOnShutdown: config.cleanSessionStatesOnShutdown ?? false,
     daemonFeatureFlags: mergeDaemonFeatureFlags(config.daemonFeatureFlags),
-    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
-      config.exportMarkdownFrontmatter,
-    ),
-    exportFeatureFlags: createDefaultExportFeatureFlags(
-      config.exportFeatureFlags,
-    ),
     logging: { ...config.logging },
     daemonMaxMemoryMb: config.daemonMaxMemoryMb,
   };
@@ -752,23 +692,17 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
 
 export function resolveDefaultConfigPath(runtimeDir: string): string {
   return readOptionalEnv("KATO_CONFIG_PATH") ??
-    join(dirname(runtimeDir), CONFIG_FILENAME);
+    join(runtimeDir, CONFIG_FILENAME);
 }
 
 export function createDefaultRuntimeConfig(options: {
   runtimeDir: string;
   katoDir?: string;
-  statusPath: string;
-  controlPath: string;
-  allowedWriteRoots: string[];
-  exportTimezone?: string;
   providerSessionRoots?: Partial<ProviderSessionRoots>;
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
-  exportMarkdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   daemonFeatureFlags?: Partial<DaemonFeatureFlags>;
-  exportFeatureFlags?: Partial<ExportFeatureFlags>;
   logging?: Partial<RuntimeLoggingConfig>;
   daemonMaxMemoryMb?: number;
   useHomeShorthand?: boolean;
@@ -831,23 +765,11 @@ export function createDefaultRuntimeConfig(options: {
   ) {
     throw new Error("daemonMaxMemoryMb must be a positive integer");
   }
-  const resolvedExportTimezone = parseExportTimezone(options.exportTimezone);
-  if (!resolvedExportTimezone) {
-    throw new Error(
-      'exportTimezone must be "local", "UTC", or a valid IANA timezone',
-    );
-  }
 
   return {
     schemaVersion: DEFAULT_CONFIG_SCHEMA_VERSION,
     runtimeDir: serializePath(options.runtimeDir),
     katoDir: serializePath(options.katoDir ?? dirname(options.runtimeDir)),
-    statusPath: serializePath(options.statusPath),
-    controlPath: serializePath(options.controlPath),
-    allowedWriteRoots: options.allowedWriteRoots.map((root) =>
-      serializePath(root)
-    ),
-    exportTimezone: resolvedExportTimezone,
     providerSessionRoots: {
       claude: providerSessionRoots.claude.map((root) => serializePath(root)),
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),
@@ -859,12 +781,6 @@ export function createDefaultRuntimeConfig(options: {
     },
     cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,
     daemonFeatureFlags: mergeDaemonFeatureFlags(options.daemonFeatureFlags),
-    exportMarkdownFrontmatter: createDefaultRuntimeMarkdownFrontmatterConfig(
-      options.exportMarkdownFrontmatter,
-    ),
-    exportFeatureFlags: createDefaultExportFeatureFlags(
-      options.exportFeatureFlags,
-    ),
     logging: resolvedLogging,
     daemonMaxMemoryMb: resolvedDaemonMaxMemoryMb,
   };

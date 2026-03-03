@@ -1,5 +1,5 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import { isStatusSnapshotStale } from "@kato/runtime";
 
 export async function runStopCommand(
   ctx: DaemonCliCommandContext,

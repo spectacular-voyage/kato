@@ -1,5 +1,5 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isStatusSnapshotStale } from "../../orchestrator/mod.ts";
+import { isStatusSnapshotStale } from "@kato/runtime";
 
 const STARTUP_ACK_TIMEOUT_MS = 10_000;
 const STARTUP_ACK_POLL_INTERVAL_MS = 100;

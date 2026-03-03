@@ -3,17 +3,21 @@ import type {
   ExportFeatureFlags,
   MarkdownFrontmatterConfig,
   RuntimeConfig,
+  SharedBehaviorConfig,
   UserConfig,
 } from "@kato/shared";
 import { dirname, join } from "@std/path";
-import { runDaemonCli } from "./cli/mod.ts";
 import {
+  createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
   resolveDefaultConfigPath,
+  resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
+  SharedBehaviorConfigFileStore,
+  type SharedBehaviorConfigStoreLike,
   UserConfigFileStore,
   type UserConfigStoreLike,
 } from "./config/mod.ts";
@@ -28,9 +32,11 @@ import {
   DaemonStatusSnapshotFileStore,
   InMemorySessionSnapshotStore,
   PersistentSessionStateStore,
+  resolveDefaultControlPath,
   resolveDefaultDaemonControlIndexPath,
   resolveDefaultRuntimeDir,
   resolveDefaultSessionsDir,
+  resolveDefaultStatusPath,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
 import {
@@ -57,6 +63,7 @@ export interface RunDaemonSubprocessOptions {
   runtimeDir?: string;
   now?: () => Date;
   configStore?: RuntimeConfigStoreLike;
+  sharedConfigStore?: SharedBehaviorConfigStoreLike;
   userConfigStore?: UserConfigStoreLike;
   runtimeLoop?: typeof runDaemonRuntimeLoop;
   writeStderr?: (text: string) => void;
@@ -233,6 +240,46 @@ export async function runDaemonSubprocess(
     );
     return 1;
   }
+  const katoDir = typeof runtimeConfig.katoDir === "string" &&
+      runtimeConfig.katoDir.trim().length > 0
+    ? runtimeConfig.katoDir
+    : dirname(runtimeConfig.runtimeDir);
+  if (katoDir.trim().length === 0) {
+    throw new Error(
+      "Runtime config must provide a valid katoDir or runtimeDir",
+    );
+  }
+
+  const sharedConfigPath = resolveDefaultSharedConfigPath(katoDir);
+  const sharedConfigStore = options.sharedConfigStore ??
+    new SharedBehaviorConfigFileStore(sharedConfigPath);
+  let sharedConfig: SharedBehaviorConfig;
+  try {
+    const initialized = await sharedConfigStore.ensureInitialized(
+      createDefaultSharedBehaviorConfig({
+        allowedWriteRoots: [],
+        useHomeShorthand: true,
+      }),
+    );
+    sharedConfig = initialized.config;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await logBestEffortStartupError(
+      runtimeConfig.runtimeDir,
+      now(),
+      "daemon.startup.shared_config_load_failed",
+      "Daemon startup failed while loading shared config",
+      {
+        sharedConfigPath,
+        error: errorMessage,
+        severity: "critical",
+      },
+    );
+    writeStderr(
+      `Daemon startup failed: unable to load shared config at ${sharedConfigPath}: ${errorMessage}\n`,
+    );
+    return 1;
+  }
 
   let userConfig: UserConfig;
   try {
@@ -306,15 +353,6 @@ export async function runDaemonSubprocess(
     now,
     daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
   });
-  const katoDir = typeof runtimeConfig.katoDir === "string" &&
-      runtimeConfig.katoDir.trim().length > 0
-    ? runtimeConfig.katoDir
-    : dirname(runtimeConfig.runtimeDir);
-  if (katoDir.trim().length === 0) {
-    throw new Error(
-      "Runtime config must provide a valid katoDir or runtimeDir",
-    );
-  }
   const sessionStateStore = new PersistentSessionStateStore({
     daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(katoDir),
     sessionsDir: resolveDefaultSessionsDir(katoDir),
@@ -337,7 +375,7 @@ export async function runDaemonSubprocess(
   const workspaceWriterDefaults = createDefaultWorkspaceWriterFeatureFlags();
   const recordingPipeline = new RecordingPipeline({
     pathPolicyGate: new WritePathPolicyGate({
-      allowedRoots: runtimeConfig.allowedWriteRoots,
+      allowedRoots: sharedConfig.allowedWriteRoots,
     }),
     now,
     includeFrontmatterInMarkdownRecordings:
@@ -381,11 +419,11 @@ export async function runDaemonSubprocess(
   try {
     await runtimeLoop({
       statusStore: new DaemonStatusSnapshotFileStore(
-        runtimeConfig.statusPath,
+        resolveDefaultStatusPath(runtimeConfig.runtimeDir),
         now,
       ),
       controlStore: new DaemonControlRequestFileStore(
-        runtimeConfig.controlPath,
+        resolveDefaultControlPath(runtimeConfig.runtimeDir),
         now,
       ),
       recordingPipeline,
@@ -408,11 +446,11 @@ export async function runDaemonSubprocess(
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       daemonFeatureFlags: runtimeConfig.daemonFeatureFlags,
       defaultCliExportOutputOverrides: buildOutputOverrides({
-        markdownFrontmatter: runtimeConfig.exportMarkdownFrontmatter,
-        featureFlags: runtimeConfig.exportFeatureFlags,
+        markdownFrontmatter: sharedConfig.exportMarkdownFrontmatter,
+        featureFlags: sharedConfig.exportFeatureFlags,
         includeSystemEvents: featureSettings.captureIncludeSystemEvents,
         userConfig,
-        exportTimezone: runtimeConfig.exportTimezone,
+        exportTimezone: sharedConfig.exportTimezone,
       }),
       userConfig,
       workspaceRegistryStore: new WorkspaceRegistryFileStore(
@@ -437,11 +475,13 @@ export async function runDaemonSubprocess(
 }
 
 if (import.meta.main) {
-  if (Deno.args[0] === "__daemon-run") {
+  const mode = Deno.args[0];
+  if (mode === undefined || mode === "run" || mode === "__daemon-run") {
     const exitCode = await runDaemonSubprocess();
     Deno.exit(exitCode);
   }
-
-  const exitCode = await runDaemonCli(Deno.args);
-  Deno.exit(exitCode);
+  writeToStderr(
+    `Unsupported daemon command: ${mode}. Use \`deno run -A apps/daemon/src/main.ts run\`.\n`,
+  );
+  Deno.exit(2);
 }
