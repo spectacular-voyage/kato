@@ -247,9 +247,7 @@ export async function runDaemonSubprocess(
       },
     );
     writeStderr(
-      `Daemon startup failed: invalid logging level override: ${
-        errorMessage
-      }\n`,
+      `Daemon startup failed: invalid logging level override: ${errorMessage}\n`,
     );
     return 1;
   }

@@ -385,7 +385,9 @@ export function renderEventsToMarkdown(
       if (!includeToolCalls) continue;
 
       const callParts: string[] = [
-        `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-${event.name}`,
+        `# ${lastAssistantSpeaker}_${
+          formatHeadingTimestamp(event.timestamp)
+        }_Tool-${event.name}`,
       ];
       if (event.description?.trim().length) {
         callParts.push("", event.description);
@@ -452,12 +454,16 @@ export function renderEventsToMarkdown(
           ? splitAcceptedDecisionSummary(event.summary)
           : { prompt: event.summary.trim() };
         const contextKeys = new Set<string>();
-        const decisionKeyContext = normalizeDecisionContextKey(event.decisionKey);
+        const decisionKeyContext = normalizeDecisionContextKey(
+          event.decisionKey,
+        );
         if (decisionKeyContext) contextKeys.add(decisionKeyContext);
         const providerQuestionIdContext = normalizeDecisionContextKey(
           providerQuestionId,
         );
-        if (providerQuestionIdContext) contextKeys.add(providerQuestionIdContext);
+        if (providerQuestionIdContext) {
+          contextKeys.add(providerQuestionIdContext);
+        }
         const promptContext = normalizeDecisionContextKey(parsedSummary.prompt);
         if (promptContext) contextKeys.add(promptContext);
 
@@ -469,7 +475,9 @@ export function renderEventsToMarkdown(
           if (!storedPrompt && existing.prompt) {
             storedPrompt = existing.prompt;
           }
-          if (storedOptionLines.length === 0 && existing.optionLines.length > 0) {
+          if (
+            storedOptionLines.length === 0 && existing.optionLines.length > 0
+          ) {
             storedOptionLines = existing.optionLines;
           }
         }
@@ -495,10 +503,9 @@ export function renderEventsToMarkdown(
           }
         }
 
-        const decisionHeading =
-          `# ${lastAssistantSpeaker}_${formatHeadingTimestamp(event.timestamp)}_Tool-decision-${
-            resolveDecisionHeadingSegment(event.decisionKey)
-          }`;
+        const decisionHeading = `# ${lastAssistantSpeaker}_${
+          formatHeadingTimestamp(event.timestamp)
+        }_Tool-decision-${resolveDecisionHeadingSegment(event.decisionKey)}`;
         const decisionParts = [decisionHeading];
         if (includeDecisionPrompt && prompt && prompt.length > 0) {
           decisionParts.push("", "## Prompt", "", prompt);

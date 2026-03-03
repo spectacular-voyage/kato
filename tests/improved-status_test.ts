@@ -299,7 +299,10 @@ Deno.test(
       workspaceStatus,
       terminalWidth: 160,
     });
-    assertStringIncludes(out, "<redacted-alias> (ws-invalid): invalid workspace alias");
+    assertStringIncludes(
+      out,
+      "<redacted-alias> (ws-invalid): invalid workspace alias",
+    );
     assertEquals(out.includes("\u001b["), false);
   },
 );
@@ -321,8 +324,9 @@ Deno.test(
         workspaceId: `ws-invalid-${index + 1}`,
         alias: `Broken-${index + 1}`,
         workspaceRoot: `/workspaces/Broken-${index + 1}`,
-        configPath:
-          `/workspaces/Broken-${index + 1}/kato-workspace-config.yaml`,
+        configPath: `/workspaces/Broken-${
+          index + 1
+        }/kato-workspace-config.yaml`,
         valid: false,
         invalidReason: `invalid workspace ${index + 1}`,
       })),
@@ -335,7 +339,10 @@ Deno.test(
       workspaceStatus,
       terminalWidth: 160,
     });
-    assertStringIncludes(out, "ERROR operational provider.ingestion.read_denied");
+    assertStringIncludes(
+      out,
+      "ERROR operational provider.ingestion.read_denied",
+    );
     assertStringIncludes(out, "permission denied");
   },
 );

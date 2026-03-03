@@ -267,7 +267,10 @@ Deno.test(
               questions: [{
                 question: questionText,
                 header: questionHeader,
-                options: [{ label: "Markdown", description: "Write markdown." }],
+                options: [{
+                  label: "Markdown",
+                  description: "Write markdown.",
+                }],
               }],
             },
           }],
@@ -312,7 +315,10 @@ Deno.test(
       if (acceptedDecision.event.kind !== "decision") {
         throw new Error("expected accepted decision event");
       }
-      const metadata = acceptedDecision.event.metadata as Record<string, unknown>;
+      const metadata = acceptedDecision.event.metadata as Record<
+        string,
+        unknown
+      >;
       assertEquals(metadata["providerQuestionId"], questionText);
       assertEquals(metadata["header"], questionHeader);
     } finally {

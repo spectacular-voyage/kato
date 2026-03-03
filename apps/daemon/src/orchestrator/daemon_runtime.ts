@@ -1589,10 +1589,14 @@ async function applyPersistentControlCommandsForEvent(
               captureCycleId = cycleIdForAttempt;
               break;
             } catch (error) {
-              if (!resolved.usesGeneratedFilename || !isAlreadyExistsError(error)) {
+              if (
+                !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
+              ) {
                 throw error;
               }
-              const nextTargetPath = await resolveUniqueNonExistingPath(targetPath);
+              const nextTargetPath = await resolveUniqueNonExistingPath(
+                targetPath,
+              );
               targetPath = await validateDestinationPathForCommand(
                 recordingPipeline,
                 provider,
@@ -2026,7 +2030,9 @@ async function applyControlCommandsForEvent(
               captureCycleId = cycleIdForAttempt;
               break;
             } catch (error) {
-              if (!resolved.usesGeneratedFilename || !isAlreadyExistsError(error)) {
+              if (
+                !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
+              ) {
                 throw error;
               }
               const nextTargetPath = await resolveUniqueNonExistingPath(

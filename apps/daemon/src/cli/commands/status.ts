@@ -781,12 +781,11 @@ export function renderStatusText(
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
-      const detail =
-        `[${formatLocalTimestamp(recentError.timestamp)}] ${
-          recentError.level.toUpperCase()
-        } ${channel} ${sanitizeInlineText(recentError.event)} · ${
-          sanitizeInlineText(recentError.message)
-        }`;
+      const detail = `[${
+        formatLocalTimestamp(recentError.timestamp)
+      }] ${recentError.level.toUpperCase()} ${channel} ${
+        sanitizeInlineText(recentError.event)
+      } · ${sanitizeInlineText(recentError.message)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
     }
   }

@@ -124,9 +124,7 @@ export function projectSessionStatus(opts: {
         : {}),
       outputPath: recording.outputPath,
       startedAt: recording.startedAt,
-      ...(recording.restartedAt
-        ? { restartedAt: recording.restartedAt }
-        : {}),
+      ...(recording.restartedAt ? { restartedAt: recording.restartedAt } : {}),
       lastWriteAt: recording.lastWriteAt,
     }));
   }

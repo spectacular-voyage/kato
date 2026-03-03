@@ -738,9 +738,12 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(rendered, "# Assistant_2026-02-22_0200_00_Tool-search");
+    assertStringIncludes(
+      rendered,
+      "# Assistant_2026-02-22_0200_00_Tool-search",
+    );
     assertStringIncludes(rendered, "search internet for weather");
-    assertEquals(rendered.includes("\"q\": \"weather sf\""), false);
+    assertEquals(rendered.includes('"q": "weather sf"'), false);
     assertEquals(rendered.includes("result-content"), false);
   },
 );
@@ -770,7 +773,8 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-heading-model",
       name: "exec_command",
-      description: "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
+      description:
+        "sed -n '1680,1775p' apps/daemon/src/orchestrator/daemon_runtime.ts",
       source: {
         providerEventType: "tool_call",
         providerEventId: "tc-heading-model",
@@ -833,7 +837,7 @@ Deno.test(
       kind: "tool.call",
       toolCallId: "tool-heading-stable-model",
       name: "exec_command",
-      description: "rg -n \"Tool-exec_command\" -S",
+      description: 'rg -n "Tool-exec_command" -S',
       source: {
         providerEventType: "tool_call",
         providerEventId: "tc-heading-stable-model",
