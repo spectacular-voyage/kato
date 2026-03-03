@@ -441,7 +441,7 @@ export function createDefaultWorkspaceWriterFeatureFlags(
   return {
     writerIncludeCommentary: overrides.writerIncludeCommentary ?? true,
     writerIncludeThinking: overrides.writerIncludeThinking ?? true,
-    writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? true,
+    writerIncludeToolCalls: overrides.writerIncludeToolCalls ?? false,
     writerIncludeToolResults: overrides.writerIncludeToolResults ?? false,
     writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ?? true,
     writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
@@ -896,7 +896,7 @@ export function createWorkspaceConfigScaffold(): string {
     "workspaceFeatureFlags:",
     "  writerIncludeCommentary: true",
     "  writerIncludeThinking: true",
-    "  writerIncludeToolCalls: true",
+    "  writerIncludeToolCalls: false",
     "  writerIncludeToolResults: false",
     "  writerIncludeDecisionPrompt: true",
     "  writerIncludeDecisionOptions: true",

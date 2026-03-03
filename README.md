@@ -283,7 +283,7 @@ markdownFrontmatter:
 workspaceFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: true
-  writerIncludeToolCalls: true
+  writerIncludeToolCalls: false
   writerIncludeToolResults: false
   writerIncludeDecisionPrompt: true
   writerIncludeDecisionOptions: true
