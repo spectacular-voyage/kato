@@ -1024,7 +1024,7 @@ function isAlreadyExistsError(error: unknown): boolean {
     return true;
   }
   return typeof candidate.message === "string" &&
-    candidate.message.toLowerCase().includes("already exists");
+    /^Capture destination already exists:/.test(candidate.message);
 }
 
 async function captureSnapshotWithRetries(options: {

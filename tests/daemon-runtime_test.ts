@@ -1198,6 +1198,107 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> does not retry on generic already-exists message errors",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-capture-generic-already-exists-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const oldDestination = join(scenarioDir, "old.md");
+      let captureCalls = 0;
+      const sink = new CaptureSink();
+      const operationalLogger = new StructuredLogger([sink], {
+        channel: "operational",
+        minLevel: "debug",
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const auditLogger = new AuditLogger(
+        new StructuredLogger([sink], {
+          channel: "security-audit",
+          minLevel: "debug",
+          now: () => new Date("2026-02-22T10:00:00.000Z"),
+        }),
+      );
+
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-generic-message",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS}`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureCalls += 1;
+            if (captureCalls === 1) {
+              throw new Error(
+                `backend write target already exists: ${input.targetPath}`,
+              );
+            }
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        operationalLogger,
+        auditLogger,
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: oldDestination,
+                  desiredState: "on",
+                  writeCursor: 1,
+                  activeRecordingCycleId: "cycle-before-generic-error",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-before-generic-error",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      assertEquals(captureCalls, 1);
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(output.currentResolvedPath, oldDestination);
+      assertEquals(output.desiredState, "on");
+      assertEquals(
+        output.activeRecordingCycleId,
+        "cycle-before-generic-error",
+      );
+      assertEquals(output.recordingCycles.length, 1);
+      assert(
+        sink.records.some((record) =>
+          record.event === "recording.command.failed" &&
+          String(record.attributes?.["command"] ?? "") === "capture"
+        ),
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> prefers stored snapshot snippet for title",
   async () => {
     const scenarioDir = await makeWritableScenarioDir(

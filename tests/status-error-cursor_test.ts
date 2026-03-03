@@ -85,3 +85,38 @@ Deno.test("loadSuppressedRecentErrorKeys ignores malformed JSON", async () => {
     await removePathIfPresent(dir);
   }
 });
+
+Deno.test(
+  "saveSuppressedRecentErrorKeys overwrites existing cursor file without leaving temp files",
+  async () => {
+    const dir = await makeTestTempDir("status-error-cursor-overwrite-");
+    try {
+      const cursorPath = resolveStatusErrorCursorPath(dir);
+      await Deno.writeTextFile(
+        cursorPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          suppressedRecentErrorKeys: ["workspace|old"],
+        }),
+      );
+
+      await saveSuppressedRecentErrorKeys(
+        cursorPath,
+        new Set(["log|new"]),
+        new Date("2026-03-03T00:00:00.000Z"),
+      );
+
+      const loaded = await loadSuppressedRecentErrorKeys(cursorPath);
+      assertEquals([...loaded], ["log|new"]);
+
+      const tmpPrefix = `${cursorPath}.tmp-`;
+      for await (const entry of Deno.readDir(dir)) {
+        const entryPath = join(dir, entry.name);
+        assertEquals(entryPath.startsWith(tmpPrefix), false);
+      }
+    } finally {
+      await removePathIfPresent(dir);
+    }
+  },
+);
