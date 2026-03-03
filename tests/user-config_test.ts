@@ -78,6 +78,13 @@ Deno.test("UserConfigFileStore rejects unknown keys and invalid types", async ()
   try {
     const invalidDocuments = [
       [
+        "participants:",
+        '  defaultUsername: ""',
+        "  workspaceUsernames: {}",
+        "  excludeMeFromParticipantList: true",
+        "",
+      ].join("\n"),
+      [
         "schemaVersion: 1",
         "participants:",
         '  defaultUsername: ""',
@@ -115,10 +122,17 @@ Deno.test("UserConfigFileStore rejects unknown keys and invalid types", async ()
 
     for (const doc of invalidDocuments) {
       await Deno.writeTextFile(configPath, doc);
-      await assertRejects(
+      const error = await assertRejects(
         () => store.load(),
         Error,
         "unsupported schema",
+      );
+      assertStringIncludes(error.message, "UserConfig");
+      assertStringIncludes(error.message, "UserParticipantsConfig");
+      assertStringIncludes(error.message, "schemaVersion: 1");
+      assertStringIncludes(
+        error.message,
+        "unknown keys or a missing schemaVersion",
       );
     }
   } finally {

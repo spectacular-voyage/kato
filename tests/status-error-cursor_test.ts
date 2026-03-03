@@ -4,7 +4,7 @@ import {
   loadSuppressedRecentErrorKeys,
   resolveStatusErrorCursorPath,
   saveSuppressedRecentErrorKeys,
-} from "../apps/daemon/src/cli/commands/status_error_cursor.ts";
+} from "../apps/cli/src/commands/status_error_cursor.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 Deno.test("resolveStatusErrorCursorPath uses runtime dir", () => {

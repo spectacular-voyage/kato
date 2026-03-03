@@ -1,24 +1,28 @@
-export type {
-  EnsureRuntimeConfigResult,
-  RuntimeConfigStoreLike,
-} from "./runtime_config.ts";
 export {
+  CliConfigFileStore,
+  type CliConfigStoreLike,
+  createDefaultCliConfig,
   createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultSharedBehaviorConfig,
+  createDefaultUserConfig,
+  type EnsureCliConfigResult,
+  type EnsureRuntimeConfigResult,
+  type EnsureSharedBehaviorConfigResult,
+  type EnsureUserConfigResult,
+  resolveDefaultCliConfigPath,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
-  RuntimeConfigFileStore,
-} from "./runtime_config.ts";
-export { resolveFrontmatterParticipantUsername } from "./participant_username.ts";
-export type {
-  EnsureUserConfigResult,
-  UserConfigStoreLike,
-} from "./user_config.ts";
-export {
-  createDefaultUserConfig,
+  resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
+  resolveFrontmatterParticipantUsername,
+  RuntimeConfigFileStore,
+  type RuntimeConfigStoreLike,
+  SharedBehaviorConfigFileStore,
+  type SharedBehaviorConfigStoreLike,
   UserConfigFileStore,
+  type UserConfigStoreLike,
   validateAndNormalizeParticipantUsername,
-} from "./user_config.ts";
+} from "../../../runtime/src/config/mod.ts";

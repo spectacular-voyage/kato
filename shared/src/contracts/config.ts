@@ -56,27 +56,34 @@ export interface ProviderAutoGenerateSnapshots {
   gemini?: boolean;
 }
 
+export interface SharedBehaviorConfig {
+  schemaVersion: 1;
+  allowedWriteRoots: string[];
+  exportTimezone?: string;
+  exportMarkdownFrontmatter: MarkdownFrontmatterConfig;
+  exportFeatureFlags: ExportFeatureFlags;
+}
+
+export interface CliConfig {
+  schemaVersion: 1;
+  logging: RuntimeLoggingConfig;
+}
+
 export interface RuntimeConfig {
   schemaVersion: 1;
   runtimeDir: string;
   katoDir?: string;
-  statusPath: string;
-  controlPath: string;
-  allowedWriteRoots: string[];
-  exportTimezone?: string;
   providerSessionRoots: ProviderSessionRoots;
   globalAutoGenerateSnapshots?: boolean;
   providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
   cleanSessionStatesOnShutdown?: boolean;
   daemonFeatureFlags: DaemonFeatureFlags;
-  exportMarkdownFrontmatter: MarkdownFrontmatterConfig;
-  exportFeatureFlags: ExportFeatureFlags;
   logging: RuntimeLoggingConfig;
   daemonMaxMemoryMb: number;
 }
 
 export interface RuntimeConfigMetadata {
   configSource: ConfigSource;
-  statusSchemaVersion: 1;
+  statusSchemaVersion: 2;
   conversationSchemaVersion: 2;
 }

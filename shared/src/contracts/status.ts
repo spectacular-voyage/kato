@@ -60,6 +60,7 @@ export interface DaemonStatusSnapshot {
   heartbeatAt: string;
   daemonRunning: boolean;
   daemonPid?: number;
+  daemonVersion?: string;
   providers: ProviderStatus[];
   recordings: RecordingStatus;
   memory?: MemoryStatus;

@@ -2,20 +2,20 @@
 id: 5pwg2idztnftvedqh3sqc7f
 title: Codebase Overview
 desc: ""
-updated: 1771870480298
+updated: 1772569800000
 created: 1771787449702
 ---
 
 ## Purpose
 
-This note explains Kato's architecture at the component and subsystem level:
+This note explains Kato's current architecture after CLI/daemon separation:
 
-- each component's responsibilities
-- where state lives (source-of-truth boundaries)
-- how data and control move through the system
-- which modules depend on which others
+- process and package boundaries
+- ownership of config/state files
+- control/data flow between CLI and daemon
+- where to extend behavior safely
 
-For implementation constraints and security invariants, also see:
+Related notes:
 
 - [[dev.general-guidance]]
 - [[dev.security-baseline]]
@@ -23,368 +23,230 @@ For implementation constraints and security invariants, also see:
 
 ## Core Vocabulary
 
-- **Daemon**: long-running subprocess (`kato __daemon-run`) that ingests
-  provider logs, handles queued control commands, and updates runtime status.
-- **Provider**: external conversation source (currently `claude`, `codex`,
-  `gemini`) represented as session log files under configured roots.
-- **Session**: one provider conversation identified by a provider-specific
-  `providerSessionId`, plus a kato-generated `sessionId` UUID for daemon/status
-  targeting.
-- **SessionTwin**: kato-native canonical JSONL event stream per session
-  (`*.twin.jsonl`) used for durable replay/export/write-cursor tracking.
+- **CLI process**: short-lived command process (`apps/cli`) that parses user
+  intent and reads/writes config, status, and control-plane files.
+- **Daemon process**: long-running ingest/export orchestrator (`apps/daemon`)
+  launched by CLI and acknowledged via status heartbeat.
+- **Runtime library**: shared Deno implementation package (`apps/runtime`) used
+  by both CLI and daemon (stores, resolvers, policy, observability).
+- **Contracts library**: pure shared contracts (`shared/src`) used across app
+  boundaries.
+- **Control plane**: file-based IPC between CLI and daemon:
+  `~/.kato/shared/ipc/daemon-control.json` (requests) and
+  `~/.kato/shared/status.json` (status snapshot).
 - **Session metadata**: per-session durable state (`*.meta.json`) with ingest
-  cursor, dedupe fingerprints, command cursor, and recording state.
-- **ConversationEvent**: typed canonical event record (kind: `message.user`,
-  `message.assistant`, `tool.call`, `tool.result`, `thinking`, `decision`,
-  `provider.info`, etc.) with base fields `eventId`, `provider`, `sessionId`,
-  `timestamp`, `turnId?`, and `source` (provider-native identity).
-- **Runtime session snapshot**: normalized in-memory projection of SessionTwin
-  state (provider, cursor, `conversationSchemaVersion: 2`, bounded events list,
-  status metadata) used by status/export paths while daemon is running.
-- **Control plane**: filesystem IPC boundary between CLI and daemon:
-  `control.json` (requests) and `status.json` (daemon snapshot).
-- **Recording/writer pipeline**: module chain that converts event snapshots into
-  markdown or JSONL output and applies write policy checks.
-- **Policy layer**: command and path gates that enforce fail-closed behavior
-  before mutation actions.
+  cursor, dedupe fingerprints, command cursor, and recording bindings.
+- **SessionTwin**: canonical per-session event log (`*.twin.jsonl`) for replay
+  and durable cursor/write state.
+- **Runtime session snapshot**: bounded in-memory projection used by status,
+  in-chat command handling, and export.
 
 ## Monorepo Boundaries
 
-- `shared/src`: contracts used across app boundaries (`config`, `status`,
-  `messages`, `events`, `ipc`).
-- `apps/daemon/src`: the operational system (CLI + launcher + runtime).
-- `apps/web/src`: placeholder for read-only status surfaces.
-- `apps/cloud/src`: placeholder for centralized control/aggregation surfaces.
-- `tests`: contract and behavior tests mapped to daemon modules.
+- `apps/cli/src`: command parser/router and command handlers.
+- `apps/daemon/src`: daemon bootstrap + orchestrator + provider parsers.
+- `apps/runtime/src`: shared Deno runtime modules (config stores/path
+  resolvers/control-plane/policy/workspace/observability).
+- `shared/src`: contracts and projection utilities (`config`, `status`,
+  `session_state`, `events`, `messages`, `ipc`, etc.).
+- `apps/web/src`, `apps/cloud/src`: placeholders.
+- `tests`: behavior and contract coverage.
+
+## Default Filesystem Layout
+
+- `~/.kato/kato-user-config.yaml`
+- `~/.kato/shared/kato-shared-config.yaml`
+- `~/.kato/shared/status.json`
+- `~/.kato/shared/ipc/daemon-control.json`
+- `~/.kato/shared/daemon-control.json` (rebuildable session index cache)
+- `~/.kato/shared/sessions/*.meta.json`
+- `~/.kato/shared/sessions/*.twin.jsonl`
+- `~/.kato/shared/workspace-registry.json`
+- `~/.kato/shared/default-kato-workspace-config.yaml`
+- `~/.kato/daemon/kato-daemon-config.yaml`
+- `~/.kato/daemon/logs/operational.jsonl`
+- `~/.kato/daemon/logs/security-audit.jsonl`
+- `~/.kato/cli/kato-cli-config.yaml`
+- `~/.kato/cli/logs/operational.jsonl`
+- `~/.kato/cli/logs/security-audit.jsonl`
+
+Workspace-local config remains `<workspace>/kato-workspace-config.yaml`.
 
 ## Topology
 
 ```mermaid
 graph TD
   subgraph User
-    CLI[kato CLI]
+    U[User Shell]
   end
 
-  subgraph FS
-    CONFIG[~/.kato/kato-daemon-config.yaml]
-    WREG[~/.kato/workspace-registry.json]
-    WCFG[<workspace>/kato-workspace-config.yaml]
-    CONTROL[~/.kato/runtime/control.json]
-    STATUS[~/.kato/runtime/status.json]
-    SESSIONMETA[~/.kato/sessions/*.meta.json]
-    SESSIONTWIN[~/.kato/sessions/*.twin.jsonl]
-    DCTRL[~/.kato/daemon-control.json]
-    LOGS[provider session logs .jsonl/.json]
-    OUTPUT[exports .md]
-    OPLOG[operational.jsonl]
-    AUDIT[security-audit.jsonl]
+  subgraph CLIProcess[CLI Process apps/cli]
+    PARSE[parse args + route]
+    CMDS[command handlers]
+    LCH[detached launcher]
   end
 
-  subgraph Daemon Process
-    ROUTER[CLI Router + Commands]
-    LAUNCHER[Detached Launcher]
-    RUNTIME[runDaemonRuntimeLoop]
-    WORKSPACE[Workspace Registry + Profile Resolver]
-    INGEST[Provider Ingestion Runners]
-    PERSIST[PersistentSessionStateStore]
-    SNAPSHOT[InMemorySessionSnapshotStore]
-    WRITER[RecordingPipeline + MarkdownWriter/JsonlWriter]
-    POLICY[WritePathPolicyGate]
+  subgraph DaemonProcess[Daemon Process apps/daemon]
+    MAIN[runDaemonSubprocess]
+    LOOP[runDaemonRuntimeLoop]
+    INGEST[provider ingestion runners]
+    SNAP[session snapshot store]
+    PERSIST[persistent session state]
+    WRITE[recording pipeline]
   end
 
-  CLI --> ROUTER
-  ROUTER --> CONFIG
-  ROUTER --> WREG
-  ROUTER --> WCFG
-  ROUTER --> LAUNCHER
-  ROUTER --> CONTROL
-  ROUTER --> STATUS
+  subgraph FS[Filesystem ~/.kato]
+    DCFG[daemon/kato-daemon-config.yaml]
+    SHCFG[shared/kato-shared-config.yaml]
+    CCFG[cli/kato-cli-config.yaml]
+    UCFG[kato-user-config.yaml]
+    CTRL[shared/ipc/daemon-control.json]
+    STAT[shared/status.json]
+    SIDX[shared/daemon-control.json]
+    SESS[shared/sessions/*.meta.json + *.twin.jsonl]
+    WREG[shared/workspace-registry.json]
+    WTPL[shared/default-kato-workspace-config.yaml]
+    DLOG[daemon/logs/*.jsonl]
+    CLOG[cli/logs/*.jsonl]
+  end
 
-  LAUNCHER --> RUNTIME
-  CONFIG --> RUNTIME
-  WREG --> WORKSPACE
-  WCFG --> WORKSPACE
+  U --> PARSE
+  PARSE --> CMDS
+  CMDS --> DCFG
+  CMDS --> SHCFG
+  CMDS --> CCFG
+  CMDS --> UCFG
+  CMDS --> WREG
+  CMDS --> WTPL
+  CMDS --> CTRL
+  CMDS --> STAT
+  CMDS --> CLOG
+  CMDS --> LCH
 
-  RUNTIME --> WORKSPACE
-  RUNTIME --> INGEST
-  INGEST --> LOGS
-  INGEST --> PERSIST
-  INGEST --> SNAPSHOT
+  LCH --> MAIN
+  MAIN --> DCFG
+  MAIN --> SHCFG
+  MAIN --> UCFG
+  MAIN --> LOOP
 
-  RUNTIME --> SNAPSHOT
-  RUNTIME --> PERSIST
-  RUNTIME --> CONTROL
-  RUNTIME --> STATUS
-  RUNTIME --> WRITER
-  PERSIST --> SESSIONMETA
-  PERSIST --> SESSIONTWIN
-  PERSIST --> DCTRL
-  WRITER --> POLICY
-  WRITER --> OUTPUT
-
-  RUNTIME --> OPLOG
-  RUNTIME --> AUDIT
+  LOOP --> INGEST
+  LOOP --> SNAP
+  LOOP --> PERSIST
+  LOOP --> WRITE
+  LOOP --> CTRL
+  LOOP --> STAT
+  PERSIST --> SESS
+  PERSIST --> SIDX
+  LOOP --> DLOG
 ```
 
 ## Responsibility Map
 
-| Area               | Primary responsibility                                                    | Owns state                        | Reads from                                                                  | Writes to                                   | Key modules                                           |
-| ------------------ | ------------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------- |
-| CLI surface        | Parse commands and dispatch behavior                                      | none                              | argv, config, status/control                                                | control queue, stdout/stderr                | `apps/daemon/src/cli/*`                               |
-| Launcher           | Start daemon with narrowed permissions                                    | none                              | runtime config                                                              | child process spawn                         | `apps/daemon/src/orchestrator/launcher.ts`            |
-| Config             | Validate and default runtime config                                       | config schema rules               | `~/.kato/kato-daemon-config.yaml`, env                                      | `~/.kato/kato-daemon-config.yaml`           | `apps/daemon/src/config/runtime_config.ts`            |
-| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/kato-workspace-config.yaml` | registry + workspace config files           | `apps/daemon/src/workspace/*`                         |
-| Runtime loop       | Main orchestrator event loop                                              | live runtime snapshot object      | control queue, ingestion results                                            | status snapshot, logs                       | `apps/daemon/src/orchestrator/daemon_runtime.ts`      |
-| Ingestion          | Discover/watch/parse provider session files                               | provider cursors + dirty sets     | provider roots, parser output                                               | SessionTwin + snapshots                     | `apps/daemon/src/orchestrator/provider_ingestion.ts`  |
-| Session state      | Persistent session metadata/twin/index                                    | per-session durable artifacts     | ingestion/runtime updates                                                   | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
-| Snapshot store     | Runtime projection for status/command processing                          | per-session snapshots             | ingestion/session-state projections                                         | in-memory list/get responses                | `apps/daemon/src/orchestrator/ingestion_runtime.ts`   |
-| Writer pipeline    | Render/export markdown or JSONL with path gates                           | active recordings map             | export requests + event snapshots                                           | .md/.jsonl files, logs                      | `apps/daemon/src/writer/*`                            |
-| Policy             | Deny/allow write destinations, command detection                          | none                              | config + command text                                                       | decisions/events                            | `apps/daemon/src/policy/*`                            |
-| Observability      | structured operational + audit records                                    | none                              | events from runtime/ingestion/writer                                        | JSONL sinks                                 | `apps/daemon/src/observability/*`                     |
+| Area | Primary responsibility | Key modules |
+| --- | --- | --- |
+| CLI surface | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status | `apps/cli/src/*` |
+| Launcher | Spawn daemon with narrowed read/write permissions and env overrides | `apps/runtime/src/orchestrator/launcher.ts` |
+| Daemon bootstrap | Load daemon/shared/user config, init loggers/stores, enter runtime loop | `apps/daemon/src/main.ts` |
+| Control plane | Persist/list/mark control requests, persist/load status snapshots | `apps/runtime/src/orchestrator/control_plane.ts` |
+| Ingestion | Discover/watch provider logs, parse incremental events, project snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
+| Session persistence | Authoritative metadata/twin writes and rebuildable daemon index cache | `apps/runtime/src/orchestrator/session_state_store.ts` |
+| Writer pipeline | Render markdown/jsonl with policy gate enforcement | `apps/daemon/src/writer/*` |
+| Workspace layer | Registry + workspace profile/template resolution | `apps/runtime/src/workspace/*` |
+| Observability | Structured operational/audit events for CLI and daemon | `apps/runtime/src/observability/*` |
 
 ## Daemon Subsystems
 
-### 1) CLI, Router, and Command Handlers
+### 1) CLI Router and Command Handlers
 
-`runDaemonCli` in `apps/daemon/src/cli/router.ts` is the CLI coordinator:
+`runDaemonCli` in `apps/cli/src/router.ts` coordinates:
 
-1. parse intent (`start`, `status`, `export`, etc.)
-2. load/initialize runtime config (`kato init`, optional auto-init on start)
+1. parse intent
+2. load/initialize daemon/shared/cli config stores
 3. build command context (stores, launcher, policy gate, loggers)
-4. call command-specific handler
+4. dispatch command handler
 
-Command handlers do not run daemon business logic directly; they manipulate the
-control plane and rely on the daemon runtime to execute queued work.
+Most commands enqueue control requests or read status. `clean` is CLI-owned and
+executes immediately.
 
-Exception: `clean` is intentionally CLI-owned for immediate local hygiene. In
-current behavior, `clean --all` flushes runtime log files directly from the CLI
-path (no daemon queue dependency).
+### 2) Detached Launcher Permission Envelope
 
-### 2) Detached Launcher and Permission Envelope
+`DenoDetachedDaemonLauncher` computes runtime-scoped permission roots:
 
-`DenoDetachedDaemonLauncher` computes scoped read/write roots before spawning:
+- write: allowed write roots + runtime/config/status/control parents
+- read: write roots + daemon source/import roots + `~/.kato` user config dir +
+  provider session roots
 
-- write scope: `allowedWriteRoots` + runtime/control/status/config parents
-- read scope: write scope + `providerSessionRoots`
+This keeps the daemon process scoped tighter than broad `-A`.
 
-This makes the long-lived daemon process narrower than a broad `-A` profile.
+### 3) Runtime Loop
 
-### 3) Runtime Loop (Orchestrator)
+`runDaemonRuntimeLoop`:
 
-`runDaemonRuntimeLoop` is the central scheduler:
+1. marks daemon running in status
+2. starts ingestion runners
+3. on each poll cycle:
+   - polls ingestion
+   - applies in-chat command updates
+   - consumes control queue requests
+   - updates recording summary
+   - persists heartbeat/status snapshot
+4. stops ingestion and writes terminal status
 
-1. initialize status snapshot (`daemonRunning: true`)
-2. start ingestion runners
-3. each poll cycle (every ~1s):
-   - poll ingestion runners
-   - process in-chat recording commands via `processInChatRecordingUpdates`
-   - consume control requests from queue
-   - update recording summary
-   - on heartbeat boundary (~5s), recompute provider/session status and persist
-     `status.json`
-4. stop ingestion runners on shutdown
-5. write terminal status (`daemonRunning: false`)
+### 4) Ingestion and Snapshot Projection
 
-**Performance constraint:** hot-path functions (`processInChatRecordingUpdates`
-and heartbeat projection) must not call `list()` on the snapshot store because
-`list()` deep-clones all events via `structuredClone`. Instead:
+Ingestion runners:
 
-- `processInChatRecordingUpdates` uses `listMetadataOnly()` (no event cloning)
-  and skips sessions whose file mtime has not changed since last poll.
-- Heartbeat projection (`toProviderStatuses`, `toSessionStatuses`) also uses
-  `listMetadataOnly()` — events are not needed after snippet caching (see §5).
+- discover/watch provider files
+- resume from persisted cursor
+- parse incremental events
+- append SessionTwin with bounded dedupe
+- persist metadata and project into in-memory snapshot store
 
-### 4) Ingestion Pipeline
+Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
 
-Provider ingestion runners are created by
-`createDefaultProviderIngestionRunners(...)` with config-supplied roots.
+### 5) Export/Writer Path
 
-Per runner responsibilities:
+`kato export` flow:
 
-- discover session files from provider roots
-- watch filesystem changes with debounce
-- resume ingest cursor from persisted session metadata
-- parse new log content from last cursor
-- map parser `ConversationEvent` output into canonical SessionTwin event kinds
-  (see `dev.event-kinds.md`)
-- append to SessionTwin with bounded recent-fingerprint dedupe
-- update persisted ingest cursor/metadata, then project SessionTwin back into
-  runtime snapshot store
-- emit operational and audit events for starts/errors/cursor updates/drops
+1. CLI enqueues `export` request into shared control queue
+2. daemon resolves session snapshot
+3. writer pipeline enforces path policy
+4. writer emits markdown or JSONL
+5. request is marked processed
 
-### 5) Snapshot Store and State Semantics
-
-`InMemorySessionSnapshotStore` is runtime canonical state for session data:
-
-- bounded by retention policy (`maxSessions`, `maxEventsPerSession`)
-- stores `ConversationEvent[]` with `conversationSchemaVersion: 2`
-- upsert is copy-safe (clones inputs/outputs)
-- metadata carries:
-  - `updatedAt` (ingestion-time, resets on every upsert — do not use for
-    staleness)
-  - `eventCount`, `truncatedEvents`
-  - `lastEventAt` (timestamp of last parsed event — provider-accuracy varies)
-  - `fileModifiedAtMs` (OS-level file mtime — most reliable staleness signal)
-  - `snippet` (first non-blank user message, truncated to 60 chars, computed at
-    upsert to avoid re-scanning events on every poll)
-
-`list()` returns full deep-cloned snapshots (events included). **Avoid in hot
-paths.** Use `listMetadataOnly()` when only metadata fields are needed — it
-returns `SessionSnapshotMetadataEntry[]` with no event cloning.
-
-`status.providers` and `status.sessions` are both derived from this store on
-heartbeat, not from parser internals.
-
-### 5a) Status Projection
-
-Status fields visible in `kato status` / `status.json` are computed by
-`shared/src/status_projection.ts`:
-
-- `extractSnippet(events)` — first non-blank user message, newlines stripped,
-  truncated at 60 chars.
-- `isSessionStale(ts, now, staleAfterMs)` — compares a timestamp against the
-  stale threshold (default 5 min, `DEFAULT_STATUS_STALE_AFTER_MS`).
-- `projectSessionStatus(opts)` — builds a `DaemonSessionStatus` from metadata
-  - optional recording join. Staleness precedence: `fileModifiedAtMs` (primary)
-    → `lastEventAt` (fallback) → absent = stale.
-- `filterSessionsForDisplay(sessions, opts)` — filter active/stale + sort by
-  recency.
-
-`DaemonSessionStatus` and `DaemonRecordingStatus` are defined in
-`shared/src/contracts/status.ts` and exported from `shared/src/mod.ts`.
-
-**Known issue (codex provider):** the Codex parser sets all event timestamps to
-ingestion time (`new Date().toISOString()`), so `lastEventAt` is unreliable for
-Codex sessions. File mtime (`fileModifiedAtMs`) is the correct staleness signal
-for Codex.
-
-### 6) Export/Writer Path
-
-`export` command flow:
-
-1. CLI enqueues request in `control.json` (with optional
-   `format: markdown|jsonl`)
-2. runtime loop reads request
-3. runtime resolves snapshot events via `loadSessionSnapshot`
-4. writer pipeline enforces path policy
-5. markdown writer (`renderEventsToMarkdown`) or JSONL writer renders and writes
-6. control request is marked processed
-
-If snapshot is missing/invalid/empty, runtime skips export with explicit
-operational + audit events (fail-safe behavior, no silent empty file writes).
-
-Default export format is markdown. JSONL emits one canonical `ConversationEvent`
-JSON object per line.
-
-### 7) Policy and Security Gates
-
-Two active policy surfaces:
-
-- command policy (`::...` detection/parsing contracts)
-- write policy (canonical path checks + allowed root enforcement)
-
-Read scoping is enforced at process-launch permission envelope level, while
-write scoping is enforced both at permission envelope and policy gate layers.
-
-### 8) Observability
-
-The daemon emits two channels with independent sinks:
-
-- `operational` for system behavior and errors
-- `security-audit` for control, policy, and security-relevant events
-
-Runtime startup wires JSONL file sinks under `<runtimeDir>/logs`.
-`StructuredLogger` routes through a LogLayer adapter that preserves JSONL parity
-and falls back to parity emission when npm LogLayer transport loading is
-unavailable.
+Missing/invalid/empty snapshots fail safe (no silent empty writes).
 
 ## Source-of-Truth Boundaries
 
-- `kato-daemon-config.yaml`: canonical runtime settings and policy-relevant
-  roots/flags.
-- `control.json`: canonical queued daemon commands from CLI.
-- `status.json`: canonical externally readable daemon status snapshot.
-- session metadata + SessionTwin files: canonical durable session state.
-- in-memory snapshot store: runtime projection/cache while daemon runs.
-- exported markdown: derived artifact, never the runtime source of truth.
-
-## Workspace Status (As Of 2026-03-02)
-
-- Global runtime config lives at `~/.kato/kato-daemon-config.yaml`.
-- Workspace-local output config lives at
-  `<workspace>/kato-workspace-config.yaml`.
-- `kato workspace init/register/list/unregister` is implemented.
-- New workspace registrations, unregistrations, and workspace-config content
-  edits are visible to a running daemon for new alias-scoped commands without a
-  restart.
-- Alias, workspace-root, and config-path edits on an already-registered entry
-  are restart-bound for the running daemon.
-- Session metadata now persists authoritative workspace-scoped output state in
-  `workspaceOutputs`.
-- Tracking task:
-  - `dev-docs/notes/task.2026.2026-03-01-alias-finalization.md`
-
-## Key Interaction Flows
-
-### Ingestion to Status Flow
-
-1. provider file changes (detected by file watcher or discovery poll)
-2. runner parses incremental events, calls `upsert()` with:
-   - merged events, updated cursor, `fileModifiedAtMs` from `Deno.stat()`
-   - `upsert()` caches `snippet` and `lastEventAt` in metadata
-3. `processInChatRecordingUpdates` (every poll, 1s): calls `listMetadataOnly()`,
-   skips sessions whose `fileModifiedAtMs` is unchanged, fetches full snapshot
-   via `get()` only for changed sessions, appends new events to active
-   recordings
-4. heartbeat (~5s): calls `listMetadataOnly()`, projects `providers` and
-   `sessions` from metadata (no event access needed), writes `status.json`
-
-### Ingestion to Export Flow
-
-1. snapshot store updated by ingestion
-2. user runs `kato export <sessionId>`
-3. runtime resolves snapshot
-4. writer pipeline renders + writes output
-
-### CLI Stop and Stale Recovery
-
-1. `kato stop` queues stop request when daemon alive
-2. runtime consumes stop and shuts down cleanly
-3. if daemon is stale/dead, CLI stale-status handling resets status file
-
-## Test Coverage by Concern
-
-- CLI contracts and control-plane behavior: `tests/daemon-cli_test.ts`
-- launcher permission wiring: `tests/daemon-launcher_test.ts`
-- runtime loop orchestration and export/status semantics:
-  `tests/daemon-runtime_test.ts`
-- ingestion runner behavior: `tests/provider-ingestion_test.ts`
-- snapshot store semantics: `tests/daemon-ingestion-runtime_test.ts`
-- config parsing/defaulting/fail-closed behavior: `tests/runtime-config_test.ts`
-- parser fixtures: `tests/claude-parser_test.ts`, `tests/codex-parser_test.ts`,
-  `tests/gemini-parser_test.ts`
-- write policy enforcement: `tests/path-policy_test.ts`
+- `~/.kato/daemon/kato-daemon-config.yaml`: daemon process settings.
+- `~/.kato/shared/kato-shared-config.yaml`: shared policy + plain export
+  defaults.
+- `~/.kato/cli/kato-cli-config.yaml`: CLI-only settings (currently logging).
+- `~/.kato/shared/ipc/daemon-control.json`: queued daemon commands.
+- `~/.kato/shared/status.json`: externally readable daemon status snapshot.
+- `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session state.
+- in-memory snapshot store: runtime projection cache.
+- markdown/jsonl exports: derived artifacts.
 
 ## Extension Guide
 
-To add a new provider:
+To add a provider:
 
 1. add parser under `apps/daemon/src/providers/<provider>/`
-2. add provider root in `providerSessionRoots` contract/defaults
-3. add ingestion runner factory wiring
-4. add provider fixture + ingestion tests
-5. verify launcher read-scope includes new provider roots
+2. add provider root in daemon config defaults/contracts
+3. wire ingestion runner factory
+4. add parser + ingestion tests
+5. verify launcher read-scope includes provider roots
 
-To add a new control command:
+To add a control command:
 
-1. extend CLI parser/usage/command type
-2. enqueue payload in control plane
-3. implement runtime handling + logging/audit events
-4. add runtime and CLI tests for success + fail-closed cases
+1. extend CLI parser/intent/usage
+2. enqueue typed payload to control plane
+3. implement daemon runtime handling + audit/operational events
+4. add CLI + daemon loop tests for success and fail-closed paths
 
-## Current MVP Limits
+## Current Limits
 
-- provider cursors are in-memory only; daemon restart replays from offset `0`
-  and relies on dedupe for suppression.
-- control plane is file-based local IPC; no remote orchestration yet.
-- service-manager integration (systemd/launchd/windows service) is deferred.
+- control plane is local file IPC; no remote orchestration
+- service-manager integration is deferred
+- queue hardening beyond single-file JSON is tracked separately

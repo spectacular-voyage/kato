@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import {
   AuditLogger,
@@ -9,6 +9,7 @@ import {
   FileProviderIngestionRunner,
   InMemorySessionSnapshotStore,
   type LogRecord,
+  mapConversationEventsToTwin,
   PersistentSessionStateStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
@@ -686,24 +687,37 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
       metadata.ingestCursor = { kind: "byte-offset", value: 15_000 };
       await stateStore.saveSessionMetadata(metadata);
 
+      const existingFirst = {
+        eventId: "existing-first",
+        provider: "codex",
+        sessionId: "session-codex-compaction",
+        timestamp: "2026-02-26T10:00:00.000Z",
+        kind: "message.user",
+        role: "user",
+        content: "first message",
+        source: {
+          providerEventType: "event_msg.user_message",
+          rawCursor: { kind: "byte-offset", value: 25_010 },
+        },
+      } as ConversationEvent;
+      await stateStore.appendTwinEvents(
+        metadata,
+        mapConversationEventsToTwin({
+          provider: "codex",
+          providerSessionId: "session-codex-compaction",
+          sessionId: metadata.sessionId,
+          events: [existingFirst],
+          mode: "live",
+          capturedAt: "2026-02-26T10:00:00.000Z",
+        }),
+      );
+
       const store = new InMemorySessionSnapshotStore();
       store.upsert({
         provider: "codex",
         sessionId: "session-codex-compaction",
         cursor: { kind: "byte-offset", value: 15_000 },
-        events: [{
-          eventId: "existing-first",
-          provider: "codex",
-          sessionId: "session-codex-compaction",
-          timestamp: "2026-02-26T10:00:00.000Z",
-          kind: "message.user",
-          role: "user",
-          content: "first message",
-          source: {
-            providerEventType: "event_msg.user_message",
-            rawCursor: { kind: "byte-offset", value: 25_010 },
-          },
-        } as ConversationEvent],
+        events: [existingFirst],
       });
       const parseOffsets: number[] = [];
       const runner = new FileProviderIngestionRunner({
@@ -1048,7 +1062,7 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
       provider: "test-provider",
       providerSessionId: "session-fail-closed",
     });
-    await Deno.mkdir(join(stateRoot, "sessions"), { recursive: true });
+    await Deno.mkdir(dirname(location.metadataPath), { recursive: true });
     await Deno.writeTextFile(
       location.metadataPath,
       JSON.stringify({

@@ -71,6 +71,30 @@ Deno.test("resolveFrontmatterParticipantUsername respects exclude > workspace ma
   );
 });
 
+Deno.test("resolveFrontmatterParticipantUsername ignores prototype workspace mappings", () => {
+  const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
+    addParticipantUsernameToFrontmatter: true,
+  });
+  const userConfig = createDefaultUserConfig({
+    defaultUsername: "Default.User",
+    workspaceUsernames: {},
+    excludeMeFromParticipantList: false,
+  });
+
+  userConfig.participants.workspaceUsernames = Object.create({
+    "workspace-1": "Prototype.User",
+  }) as Record<string, string>;
+
+  assertEquals(
+    resolveFrontmatterParticipantUsername({
+      markdownFrontmatter,
+      userConfig,
+      workspaceId: "workspace-1",
+    }),
+    "Default.User",
+  );
+});
+
 Deno.test("resolveFrontmatterParticipantUsername omits user when addParticipantUsernameToFrontmatter is false", () => {
   const disabled = createDefaultRuntimeMarkdownFrontmatterConfig({
     addParticipantUsernameToFrontmatter: false,

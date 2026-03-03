@@ -21,13 +21,13 @@ Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async ()
     );
 
     const missing = await store.load();
-    assertEquals(missing.schemaVersion, 1);
+    assertEquals(missing.schemaVersion, 2);
     assertEquals(missing.daemonRunning, false);
     assertEquals(missing.generatedAt, "2026-02-22T12:00:00.000Z");
     assertEquals(missing.heartbeatAt, "2026-02-22T12:00:00.000Z");
 
     const snapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: "2026-02-22T12:05:00.000Z",
       heartbeatAt: "2026-02-22T12:05:00.000Z",
       daemonRunning: true,
@@ -53,7 +53,7 @@ Deno.test("DaemonStatusSnapshotFileStore falls back on invalid JSON", async () =
     );
 
     const fallback = await store.load();
-    assertEquals(fallback.schemaVersion, 1);
+    assertEquals(fallback.schemaVersion, 2);
     assertEquals(fallback.generatedAt, "2026-02-22T12:10:00.000Z");
     assertEquals(fallback.heartbeatAt, "2026-02-22T12:10:00.000Z");
     assertEquals(fallback.daemonRunning, false);

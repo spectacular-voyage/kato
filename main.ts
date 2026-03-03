@@ -2,7 +2,9 @@ import { describeDaemonEntryPoint } from "./apps/daemon/src/mod.ts";
 
 export function describeWorkspaceLayout(): string {
   return [
+    "apps/cli",
     "apps/daemon",
+    "apps/runtime",
     "apps/web",
     "apps/cloud",
     "shared/src",

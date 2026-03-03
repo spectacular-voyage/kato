@@ -5,18 +5,6 @@ export {
 } from "./main.ts";
 export type { RunDaemonSubprocessOptions } from "./main.ts";
 export { DAEMON_APP_VERSION } from "./version.ts";
-export {
-  CliUsageError,
-  type DaemonCliCommand,
-  type DaemonCliCommandName,
-  type DaemonCliIntent,
-  type DaemonCliRuntime,
-  getCommandUsage,
-  getGlobalUsage,
-  parseDaemonCliArgs,
-  runDaemonCli,
-  type RunDaemonCliOptions,
-} from "./cli/mod.ts";
 export type {
   CreateProviderIngestionRunnerOptions,
   DaemonControlCommand,
