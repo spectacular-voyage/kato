@@ -244,11 +244,6 @@ export async function runDaemonSubprocess(
       runtimeConfig.katoDir.trim().length > 0
     ? runtimeConfig.katoDir
     : dirname(runtimeConfig.runtimeDir);
-  if (katoDir.trim().length === 0) {
-    throw new Error(
-      "Runtime config must provide a valid katoDir or runtimeDir",
-    );
-  }
 
   const sharedConfigPath = resolveDefaultSharedConfigPath(katoDir);
   const sharedConfigStore = options.sharedConfigStore ??
@@ -419,11 +414,11 @@ export async function runDaemonSubprocess(
   try {
     await runtimeLoop({
       statusStore: new DaemonStatusSnapshotFileStore(
-        resolveDefaultStatusPath(runtimeConfig.runtimeDir),
+        resolveDefaultStatusPath(katoDir),
         now,
       ),
       controlStore: new DaemonControlRequestFileStore(
-        resolveDefaultControlPath(runtimeConfig.runtimeDir),
+        resolveDefaultControlPath(katoDir),
         now,
       ),
       recordingPipeline,

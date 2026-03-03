@@ -12,10 +12,8 @@ export type {
   RuntimeConfigStoreLike,
 } from "./runtime_config.ts";
 export {
-  createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
-  createDefaultRuntimeMarkdownFrontmatterConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   RuntimeConfigFileStore,
@@ -25,6 +23,8 @@ export type {
   SharedBehaviorConfigStoreLike,
 } from "./shared_behavior_config.ts";
 export {
+  createDefaultExportFeatureFlags,
+  createDefaultRuntimeMarkdownFrontmatterConfig,
   createDefaultSharedBehaviorConfig,
   resolveDefaultSharedConfigPath,
   SharedBehaviorConfigFileStore,

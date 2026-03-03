@@ -1,8 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import type {
-  ExportFeatureFlags,
-  MarkdownFrontmatterConfig,
   RuntimeConfig as DaemonRuntimeConfig,
   SharedBehaviorConfig,
 } from "@kato/shared";
@@ -18,14 +16,7 @@ import {
 } from "../apps/daemon/src/mod.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
-type RuntimeConfig = DaemonRuntimeConfig & {
-  statusPath?: string;
-  controlPath?: string;
-  allowedWriteRoots?: string[];
-  exportTimezone?: string;
-  exportMarkdownFrontmatter?: MarkdownFrontmatterConfig;
-  exportFeatureFlags?: ExportFeatureFlags;
-};
+type RuntimeConfig = DaemonRuntimeConfig;
 
 function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
   return {

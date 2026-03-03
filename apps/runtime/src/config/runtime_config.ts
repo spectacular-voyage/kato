@@ -1,7 +1,5 @@
 import type {
   DaemonFeatureFlags,
-  ExportFeatureFlags,
-  MarkdownFrontmatterConfig,
   ProviderAutoGenerateSnapshots,
   ProviderSessionRoots,
   RuntimeConfig,
@@ -19,6 +17,11 @@ import {
   readOptionalEnv,
   resolveHomeDir,
 } from "../utils/env.ts";
+import {
+  isRecord,
+  isYamlConfigPath,
+  writeTextAtomically,
+} from "./file_store_utils.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "kato-daemon-config.yaml";
@@ -59,10 +62,6 @@ export interface RuntimeConfigStoreLike {
   ): Promise<EnsureRuntimeConfigResult>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 const DAEMON_FEATURE_FLAG_KEYS: Array<keyof DaemonFeatureFlags> = [
   "daemonExportEnabled",
   "captureIncludeSystemEvents",
@@ -81,10 +80,6 @@ const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> =
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function isYamlConfigPath(path: string): boolean {
-  return path.trim().toLowerCase().endsWith(".yaml");
 }
 
 function parseDaemonFeatureFlags(
@@ -118,43 +113,6 @@ function parseDaemonFeatureFlags(
   return merged;
 }
 
-export function createDefaultExportFeatureFlags(
-  overrides?: Partial<ExportFeatureFlags>,
-): ExportFeatureFlags {
-  const defaults: ExportFeatureFlags = {
-    writerIncludeCommentary: true,
-    writerIncludeThinking: false,
-    writerIncludeToolCalls: false,
-    writerIncludeToolResults: false,
-    writerIncludeDecisionPrompt: true,
-    writerIncludeDecisionOptions: true,
-    writerIncludeDecisionSelection: true,
-    writerItalicizeUserMessages: false,
-  };
-  if (!overrides) {
-    return defaults;
-  }
-
-  return {
-    writerIncludeCommentary: overrides.writerIncludeCommentary ??
-      defaults.writerIncludeCommentary,
-    writerIncludeThinking: overrides.writerIncludeThinking ??
-      defaults.writerIncludeThinking,
-    writerIncludeToolCalls: overrides.writerIncludeToolCalls ??
-      defaults.writerIncludeToolCalls,
-    writerIncludeToolResults: overrides.writerIncludeToolResults ??
-      defaults.writerIncludeToolResults,
-    writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ??
-      defaults.writerIncludeDecisionPrompt,
-    writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
-      defaults.writerIncludeDecisionOptions,
-    writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
-      defaults.writerIncludeDecisionSelection,
-    writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ??
-      defaults.writerItalicizeUserMessages,
-  };
-}
-
 function isRuntimeLogLevel(value: unknown): value is RuntimeLogLevel {
   return typeof value === "string" &&
     RUNTIME_LOG_LEVELS.includes(value as RuntimeLogLevel);
@@ -181,42 +139,6 @@ export function createDefaultRuntimeLoggingConfig(
   return {
     operationalLevel: overrides.operationalLevel ?? defaults.operationalLevel,
     auditLevel: overrides.auditLevel ?? defaults.auditLevel,
-  };
-}
-
-export function createDefaultRuntimeMarkdownFrontmatterConfig(
-  overrides?: Partial<MarkdownFrontmatterConfig>,
-): MarkdownFrontmatterConfig {
-  const defaults: MarkdownFrontmatterConfig = {
-    includeFrontmatterInMarkdownRecordings: true,
-    includeUpdatedInFrontmatter: false,
-    addParticipantUsernameToFrontmatter: false,
-    includeSessionIds: true,
-    includeWorkspaceIds: true,
-    includeRecordingIds: true,
-    includeConversationEventKinds: false,
-  };
-  if (!overrides) {
-    return defaults;
-  }
-
-  return {
-    includeFrontmatterInMarkdownRecordings:
-      overrides.includeFrontmatterInMarkdownRecordings ??
-        defaults.includeFrontmatterInMarkdownRecordings,
-    includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ??
-      defaults.includeUpdatedInFrontmatter,
-    addParticipantUsernameToFrontmatter:
-      overrides.addParticipantUsernameToFrontmatter ??
-        defaults.addParticipantUsernameToFrontmatter,
-    includeSessionIds: overrides.includeSessionIds ??
-      defaults.includeSessionIds,
-    includeWorkspaceIds: overrides.includeWorkspaceIds ??
-      defaults.includeWorkspaceIds,
-    includeRecordingIds: overrides.includeRecordingIds ??
-      defaults.includeRecordingIds,
-    includeConversationEventKinds: overrides.includeConversationEventKinds ??
-      defaults.includeConversationEventKinds,
   };
 }
 
@@ -509,16 +431,6 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     logging,
     daemonMaxMemoryMb,
   };
-}
-
-async function writeTextAtomically(
-  path: string,
-  value: string,
-): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tempPath, value);
-  await Deno.rename(tempPath, path);
 }
 
 function cloneConfig(config: RuntimeConfig): RuntimeConfig {

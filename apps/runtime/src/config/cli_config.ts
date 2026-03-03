@@ -1,7 +1,12 @@
 import type { CliConfig, RuntimeLoggingConfig } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
+import {
+  isRecord,
+  isYamlConfigPath,
+  writeTextAtomically,
+} from "./file_store_utils.ts";
 import { createDefaultRuntimeLoggingConfig } from "./runtime_config.ts";
 
 const DEFAULT_SCHEMA_VERSION = 1;
@@ -21,14 +26,6 @@ export interface EnsureCliConfigResult {
 export interface CliConfigStoreLike {
   load(): Promise<CliConfig>;
   ensureInitialized(defaultConfig: CliConfig): Promise<EnsureCliConfigResult>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isYamlConfigPath(path: string): boolean {
-  return path.trim().toLowerCase().endsWith(".yaml");
 }
 
 function parseLoggingConfig(value: unknown): RuntimeLoggingConfig | undefined {
@@ -81,13 +78,6 @@ function parseCliConfig(value: unknown): CliConfig | undefined {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
     logging,
   };
-}
-
-async function writeTextAtomically(path: string, value: string): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tempPath, value);
-  await Deno.rename(tempPath, path);
 }
 
 function cloneConfig(config: CliConfig): CliConfig {

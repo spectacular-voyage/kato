@@ -97,6 +97,7 @@ function writeToStream(
 
 export function createDefaultCliRuntime(): DaemonCliRuntime {
   const runtimeDir = resolveDefaultRuntimeDir();
+  const katoDir = dirname(runtimeDir);
   let cwdPath: string | undefined;
   try {
     cwdPath = Deno.cwd();
@@ -113,8 +114,8 @@ export function createDefaultCliRuntime(): DaemonCliRuntime {
   return {
     runtimeDir,
     configPath: resolveDefaultConfigPath(runtimeDir),
-    statusPath: resolveDefaultStatusPath(runtimeDir),
-    controlPath: resolveDefaultControlPath(runtimeDir),
+    statusPath: resolveDefaultStatusPath(katoDir),
+    controlPath: resolveDefaultControlPath(katoDir),
     cwdPath,
     now: () => new Date(),
     pid: Deno.pid,
@@ -132,13 +133,14 @@ function buildRuntime(
   }
 
   const runtimeDir = overrides.runtimeDir ?? defaults.runtimeDir;
+  const katoDir = dirname(runtimeDir);
   return {
     ...defaults,
     ...overrides,
     runtimeDir,
     configPath: overrides.configPath ?? resolveDefaultConfigPath(runtimeDir),
-    statusPath: overrides.statusPath ?? resolveDefaultStatusPath(runtimeDir),
-    controlPath: overrides.controlPath ?? resolveDefaultControlPath(runtimeDir),
+    statusPath: overrides.statusPath ?? resolveDefaultStatusPath(katoDir),
+    controlPath: overrides.controlPath ?? resolveDefaultControlPath(katoDir),
   };
 }
 
@@ -377,11 +379,13 @@ export async function runDaemonCli(
     }
   }
 
+  const effectiveKatoDir = runtimeConfig.katoDir ??
+    dirname(runtimeConfig.runtimeDir);
   const effectiveRuntime: DaemonCliRuntime = {
     ...runtime,
     runtimeDir: runtimeConfig.runtimeDir,
-    statusPath: resolveDefaultStatusPath(runtimeConfig.runtimeDir),
-    controlPath: resolveDefaultControlPath(runtimeConfig.runtimeDir),
+    statusPath: resolveDefaultStatusPath(effectiveKatoDir),
+    controlPath: resolveDefaultControlPath(effectiveKatoDir),
     allowedWriteRoots: [...sharedConfig.allowedWriteRoots],
     providerSessionRoots: {
       claude: [...runtimeConfig.providerSessionRoots.claude],
@@ -402,8 +406,6 @@ export async function runDaemonCli(
     new WritePathPolicyGate({
       allowedRoots: sharedConfig.allowedWriteRoots,
     });
-  const effectiveKatoDir = runtimeConfig.katoDir ??
-    dirname(runtimeConfig.runtimeDir);
   const cliOperationalLogPath = join(
     effectiveKatoDir,
     "cli",

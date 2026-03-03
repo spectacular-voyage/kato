@@ -1,7 +1,12 @@
 import type { UserConfig, UserParticipantsConfig } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveHomeDir } from "../utils/env.ts";
+import {
+  isRecord,
+  isYamlConfigPath,
+  writeTextAtomically,
+} from "./file_store_utils.ts";
 
 const USER_CONFIG_SCHEMA_VERSION = 1;
 const USER_CONFIG_FILENAME = "kato-user-config.yaml";
@@ -28,14 +33,6 @@ export interface UserConfigStoreLike {
     defaultConfig?: UserConfig,
   ): Promise<EnsureUserConfigResult>;
   save(config: UserConfig): Promise<void>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isYamlConfigPath(path: string): boolean {
-  return path.trim().toLowerCase().endsWith(".yaml");
 }
 
 function createUserConfigSchemaError(
@@ -108,7 +105,9 @@ function parseParticipants(value: unknown): UserParticipantsConfig {
   );
   if (unknownParticipantKeys.length > 0) {
     throw new Error(
-      `Unknown UserParticipantsConfig keys: ${unknownParticipantKeys.join(", ")}`,
+      `Unknown UserParticipantsConfig keys: ${
+        unknownParticipantKeys.join(", ")
+      }`,
     );
   }
 
@@ -177,7 +176,9 @@ function parseUserConfig(
       !USER_CONFIG_KEYS.includes(key as UserConfigKey)
     );
     if (unknownConfigKeys.length > 0) {
-      throw new Error(`Unknown UserConfig keys: ${unknownConfigKeys.join(", ")}`);
+      throw new Error(
+        `Unknown UserConfig keys: ${unknownConfigKeys.join(", ")}`,
+      );
     }
 
     const schemaVersion = value["schemaVersion"];
@@ -213,13 +214,6 @@ function cloneUserConfig(config: UserConfig): UserConfig {
         config.participants.excludeMeFromParticipantList,
     },
   };
-}
-
-async function writeTextAtomically(path: string, value: string): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tempPath, value);
-  await Deno.rename(tempPath, path);
 }
 
 export function createDefaultUserConfig(

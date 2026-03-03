@@ -262,24 +262,26 @@ export function resolveDefaultRuntimeDir(): string {
 }
 
 export function resolveDefaultStatusPath(
-  runtimeDir = resolveDefaultRuntimeDir(),
+  katoDir = dirname(resolveDefaultRuntimeDir()),
 ): string {
   const override = readOptionalEnv("KATO_DAEMON_STATUS_PATH");
   if (override) {
     return expandHomePath(override);
   }
-  return join(dirname(runtimeDir), DEFAULT_SHARED_SUBDIR, STATUS_FILENAME);
+  // Shared status state is rooted under katoDir (<katoDir>/shared).
+  return join(katoDir, DEFAULT_SHARED_SUBDIR, STATUS_FILENAME);
 }
 
 export function resolveDefaultControlPath(
-  runtimeDir = resolveDefaultRuntimeDir(),
+  katoDir = dirname(resolveDefaultRuntimeDir()),
 ): string {
   const override = readOptionalEnv("KATO_DAEMON_CONTROL_PATH");
   if (override) {
     return expandHomePath(override);
   }
+  // Control queue state is rooted under katoDir (<katoDir>/shared/ipc).
   return join(
-    dirname(runtimeDir),
+    katoDir,
     DEFAULT_SHARED_SUBDIR,
     DEFAULT_IPC_SUBDIR,
     CONTROL_FILENAME,

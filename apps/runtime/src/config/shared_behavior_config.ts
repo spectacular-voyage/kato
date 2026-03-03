@@ -3,14 +3,15 @@ import type {
   MarkdownFrontmatterConfig,
   SharedBehaviorConfig,
 } from "@kato/shared";
-import { dirname, isAbsolute, join, relative } from "@std/path";
+import { isAbsolute, join, relative } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 import { expandHomePath, resolveHomeDir } from "../utils/env.ts";
 import {
-  createDefaultExportFeatureFlags,
-  createDefaultRuntimeMarkdownFrontmatterConfig,
-} from "./runtime_config.ts";
+  isRecord,
+  isYamlConfigPath,
+  writeTextAtomically,
+} from "./file_store_utils.ts";
 
 const DEFAULT_SCHEMA_VERSION = 1;
 const DEFAULT_EXPORT_TIMEZONE = "local";
@@ -43,6 +44,79 @@ const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
   "includeConversationEventKinds",
 ];
 
+export function createDefaultExportFeatureFlags(
+  overrides?: Partial<ExportFeatureFlags>,
+): ExportFeatureFlags {
+  const defaults: ExportFeatureFlags = {
+    writerIncludeCommentary: true,
+    writerIncludeThinking: false,
+    writerIncludeToolCalls: false,
+    writerIncludeToolResults: false,
+    writerIncludeDecisionPrompt: true,
+    writerIncludeDecisionOptions: true,
+    writerIncludeDecisionSelection: true,
+    writerItalicizeUserMessages: false,
+  };
+  if (!overrides) {
+    return defaults;
+  }
+
+  return {
+    writerIncludeCommentary: overrides.writerIncludeCommentary ??
+      defaults.writerIncludeCommentary,
+    writerIncludeThinking: overrides.writerIncludeThinking ??
+      defaults.writerIncludeThinking,
+    writerIncludeToolCalls: overrides.writerIncludeToolCalls ??
+      defaults.writerIncludeToolCalls,
+    writerIncludeToolResults: overrides.writerIncludeToolResults ??
+      defaults.writerIncludeToolResults,
+    writerIncludeDecisionPrompt: overrides.writerIncludeDecisionPrompt ??
+      defaults.writerIncludeDecisionPrompt,
+    writerIncludeDecisionOptions: overrides.writerIncludeDecisionOptions ??
+      defaults.writerIncludeDecisionOptions,
+    writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
+      defaults.writerIncludeDecisionSelection,
+    writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ??
+      defaults.writerItalicizeUserMessages,
+  };
+}
+
+export function createDefaultRuntimeMarkdownFrontmatterConfig(
+  overrides?: Partial<MarkdownFrontmatterConfig>,
+): MarkdownFrontmatterConfig {
+  const defaults: MarkdownFrontmatterConfig = {
+    includeFrontmatterInMarkdownRecordings: true,
+    includeUpdatedInFrontmatter: false,
+    addParticipantUsernameToFrontmatter: false,
+    includeSessionIds: true,
+    includeWorkspaceIds: true,
+    includeRecordingIds: true,
+    includeConversationEventKinds: false,
+  };
+  if (!overrides) {
+    return defaults;
+  }
+
+  return {
+    includeFrontmatterInMarkdownRecordings:
+      overrides.includeFrontmatterInMarkdownRecordings ??
+        defaults.includeFrontmatterInMarkdownRecordings,
+    includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ??
+      defaults.includeUpdatedInFrontmatter,
+    addParticipantUsernameToFrontmatter:
+      overrides.addParticipantUsernameToFrontmatter ??
+        defaults.addParticipantUsernameToFrontmatter,
+    includeSessionIds: overrides.includeSessionIds ??
+      defaults.includeSessionIds,
+    includeWorkspaceIds: overrides.includeWorkspaceIds ??
+      defaults.includeWorkspaceIds,
+    includeRecordingIds: overrides.includeRecordingIds ??
+      defaults.includeRecordingIds,
+    includeConversationEventKinds: overrides.includeConversationEventKinds ??
+      defaults.includeConversationEventKinds,
+  };
+}
+
 export interface EnsureSharedBehaviorConfigResult {
   created: boolean;
   config: SharedBehaviorConfig;
@@ -55,14 +129,6 @@ export interface SharedBehaviorConfigStoreLike {
     defaultConfig: SharedBehaviorConfig,
   ): Promise<EnsureSharedBehaviorConfigResult>;
   save(config: SharedBehaviorConfig): Promise<void>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isYamlConfigPath(path: string): boolean {
-  return path.trim().toLowerCase().endsWith(".yaml");
 }
 
 function isValidIanaTimezone(timeZone: string): boolean {
@@ -235,13 +301,6 @@ function collapseHome(path: string): string {
     return path;
   }
   return `~/${rel.replaceAll("\\", "/")}`;
-}
-
-async function writeTextAtomically(path: string, value: string): Promise<void> {
-  await Deno.mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp-${crypto.randomUUID()}`;
-  await Deno.writeTextFile(tempPath, value);
-  await Deno.rename(tempPath, path);
 }
 
 function cloneConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
