@@ -9,6 +9,11 @@ import {
   readWorkspaceConfigWorkspaceId,
 } from "../../workspace/mod.ts";
 import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
+import {
+  loadSuppressedRecentErrorKeys,
+  resolveStatusErrorCursorPath,
+  saveSuppressedRecentErrorKeys,
+} from "./status_error_cursor.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -499,6 +504,34 @@ function collectRecentErrors(
     .slice(0, RECENT_ERRORS_LIMIT);
 }
 
+function reconcileSuppressedRecentErrorKeys(
+  suppressedRecentErrorKeys: Set<string>,
+  currentRecentErrorKeys: ReadonlySet<string>,
+): boolean {
+  let changed = false;
+  for (const key of [...suppressedRecentErrorKeys]) {
+    if (currentRecentErrorKeys.has(key)) {
+      continue;
+    }
+    suppressedRecentErrorKeys.delete(key);
+    changed = true;
+  }
+  return changed;
+}
+
+async function persistSuppressedRecentErrorKeysBestEffort(
+  cursorPath: string,
+  suppressedRecentErrorKeys: ReadonlySet<string>,
+  now: Date,
+): Promise<void> {
+  try {
+    await saveSuppressedRecentErrorKeys(cursorPath, suppressedRecentErrorKeys, now);
+  } catch {
+    // Best-effort persistence: keep live output responsive even if cursor
+    // writes fail due to transient filesystem issues.
+  }
+}
+
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   const mem = snapshot.memory;
   if (!mem) {
@@ -833,10 +866,8 @@ export function renderStatusText(
   }
 
   lines.push(`Recent Errors (${visibleRecentErrors.length})`);
-  lines.push("");
-  if (visibleRecentErrors.length === 0) {
-    lines.push("  (none)");
-  } else {
+  if (visibleRecentErrors.length > 0) {
+    lines.push("");
     for (const recentError of visibleRecentErrors) {
       const channel = recentError.channel === "security-audit"
         ? "audit"
@@ -897,7 +928,12 @@ async function runLiveMode(
 
   let shouldExit = false;
   let flushRecentErrorsRequested = false;
-  const suppressedRecentErrorKeys = new Set<string>();
+  const statusErrorCursorPath = resolveStatusErrorCursorPath(
+    ctx.runtime.runtimeDir,
+  );
+  const suppressedRecentErrorKeys = await loadSuppressedRecentErrorKeys(
+    statusErrorCursorPath,
+  );
 
   const onSigint = () => {
     shouldExit = true;
@@ -942,18 +978,26 @@ async function runLiveMode(
           getStatusRecentErrorKey(error)
         ),
       );
+      let shouldPersistSuppressedKeys = false;
       if (flushRecentErrorsRequested) {
         suppressedRecentErrorKeys.clear();
         for (const key of currentRecentErrorKeys) {
           suppressedRecentErrorKeys.add(key);
         }
         flushRecentErrorsRequested = false;
+        shouldPersistSuppressedKeys = true;
       } else if (suppressedRecentErrorKeys.size > 0) {
-        for (const key of [...suppressedRecentErrorKeys]) {
-          if (!currentRecentErrorKeys.has(key)) {
-            suppressedRecentErrorKeys.delete(key);
-          }
-        }
+        shouldPersistSuppressedKeys = reconcileSuppressedRecentErrorKeys(
+          suppressedRecentErrorKeys,
+          currentRecentErrorKeys,
+        );
+      }
+      if (shouldPersistSuppressedKeys) {
+        await persistSuppressedRecentErrorKeysBestEffort(
+          statusErrorCursorPath,
+          suppressedRecentErrorKeys,
+          now,
+        );
       }
 
       const body = renderStatusText(snapshot, {
@@ -972,7 +1016,7 @@ async function runLiveMode(
       ctx.runtime.writeStdout(`${body}\n`);
       ctx.runtime.writeStdout(`\n${"─".repeat(terminalWidth)}\n`);
       ctx.runtime.writeStdout(
-        "Press q or Ctrl+C to exit · press f to flush errors\n",
+        "Press q or Ctrl+C to exit · press f to flush errors (persisted)\n",
       );
 
       // Sleep with early exit check
@@ -1008,11 +1052,39 @@ export async function runStatusCommand(
     await ctx.statusStore.load(),
     now,
   );
+  const statusErrorCursorPath = resolveStatusErrorCursorPath(
+    ctx.runtime.runtimeDir,
+  );
   const workspaceStatus = asJson
     ? undefined
     : await loadWorkspaceStatusSummary(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
+  const suppressedRecentErrorKeys = asJson
+    ? undefined
+    : await loadSuppressedRecentErrorKeys(statusErrorCursorPath);
+  if (
+    !asJson &&
+    suppressedRecentErrorKeys &&
+    suppressedRecentErrorKeys.size > 0
+  ) {
+    const currentRecentErrorKeys = new Set(
+      collectRecentErrors(now, workspaceStatus, recentErrors).map((error) =>
+        getStatusRecentErrorKey(error)
+      ),
+    );
+    const changed = reconcileSuppressedRecentErrorKeys(
+      suppressedRecentErrorKeys,
+      currentRecentErrorKeys,
+    );
+    if (changed) {
+      await persistSuppressedRecentErrorKeysBestEffort(
+        statusErrorCursorPath,
+        suppressedRecentErrorKeys,
+        now,
+      );
+    }
+  }
 
   await ctx.operationalLogger.info(
     "daemon.status",
@@ -1048,6 +1120,7 @@ export async function runStatusCommand(
       workspaceStatus,
       showWorkspaceDetails: true,
       recentErrors,
+      suppressedRecentErrorKeys,
     }) + "\n",
   );
 }

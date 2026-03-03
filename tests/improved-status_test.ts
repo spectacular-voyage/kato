@@ -143,6 +143,35 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
   assertStringIncludes(out, "(none");
 });
 
+Deno.test(
+  "renderStatusText: no recent errors renders only the section heading",
+  () => {
+    const sessions: DaemonSessionStatus[] = [{
+      provider: "claude",
+      sessionId: "recent-errors-empty",
+      snippet: "status",
+      updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      lastEventAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      stale: false,
+      recordings: [{
+        workspaceAlias: "k",
+        outputPath: "/home/user/notes.md",
+        startedAt: new Date(NOW.getTime() - 3600_000).toISOString(),
+        lastWriteAt: new Date(NOW.getTime() - 60_000).toISOString(),
+      }],
+    }];
+    const out = renderStatusText(makeSnapshot(sessions), {
+      showAll: false,
+      now: NOW,
+      stale: false,
+      terminalWidth: 160,
+    });
+    assertStringIncludes(out, "Recent Errors (0)");
+    assertEquals(out.includes("Recent Errors (0)\n\n"), false);
+    assertEquals(out.includes("Recent Errors (0)\n  (none)"), false);
+  },
+);
+
 Deno.test("renderStatusText: active session shown with bullet marker", () => {
   const sessions: DaemonSessionStatus[] = [{
     provider: "claude",

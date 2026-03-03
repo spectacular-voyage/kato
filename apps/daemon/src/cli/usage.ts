@@ -62,7 +62,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "",
     "  --json    Output as JSON (includes full memory and session fields)",
     "  --all     Include stale sessions",
-    "  --live    Refresh-loop display; press q/Ctrl+C to exit, f to flush errors (implies --all)",
+    "  --live    Refresh-loop display; press q/Ctrl+C to exit, f to flush errors (persisted, implies --all)",
   ].join("\n"),
   "workspace-init": [
     "Usage: kato workspace init [<dir>]",
