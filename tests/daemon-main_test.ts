@@ -211,6 +211,7 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
 
   const exitCode = await runDaemonSubprocess({
     configStore,
+    sharedConfigStore: makeSharedConfigStore(),
     userConfigStore: makeUserConfigStore(),
     writeStderr(text: string) {
       stderr.push(text);
@@ -522,6 +523,7 @@ Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", 
 
     const exitCode = await runDaemonSubprocess({
       configStore,
+      sharedConfigStore: makeSharedConfigStore(),
       userConfigStore: makeUserConfigStore(),
       writeStderr(text: string) {
         stderr.push(text);

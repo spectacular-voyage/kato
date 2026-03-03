@@ -23,7 +23,6 @@ import {
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
 const CONFIG_FILENAME = "kato-daemon-config.yaml";
 const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
-const DEFAULT_EXPORT_TIMEZONE = "local";
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
   "debug",
   "info",
@@ -33,15 +32,6 @@ const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
 const RUNTIME_LOGGING_CONFIG_KEYS: Array<keyof RuntimeLoggingConfig> = [
   "operationalLevel",
   "auditLevel",
-];
-const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
-  "includeFrontmatterInMarkdownRecordings",
-  "includeUpdatedInFrontmatter",
-  "addParticipantUsernameToFrontmatter",
-  "includeSessionIds",
-  "includeWorkspaceIds",
-  "includeRecordingIds",
-  "includeConversationEventKinds",
 ];
 const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
   "schemaVersion",
@@ -76,16 +66,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const DAEMON_FEATURE_FLAG_KEYS: Array<keyof DaemonFeatureFlags> = [
   "daemonExportEnabled",
   "captureIncludeSystemEvents",
-];
-const EXPORT_FEATURE_FLAG_KEYS: Array<keyof ExportFeatureFlags> = [
-  "writerIncludeCommentary",
-  "writerIncludeThinking",
-  "writerIncludeToolCalls",
-  "writerIncludeToolResults",
-  "writerIncludeDecisionPrompt",
-  "writerIncludeDecisionOptions",
-  "writerIncludeDecisionSelection",
-  "writerItalicizeUserMessages",
 ];
 const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "claude",
@@ -175,37 +155,6 @@ export function createDefaultExportFeatureFlags(
   };
 }
 
-function parseExportFeatureFlags(
-  value: unknown,
-): ExportFeatureFlags | undefined {
-  if (value === undefined) {
-    return createDefaultExportFeatureFlags();
-  }
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  for (const key of Object.keys(value)) {
-    if (!EXPORT_FEATURE_FLAG_KEYS.includes(key as keyof ExportFeatureFlags)) {
-      return undefined;
-    }
-  }
-
-  const merged = createDefaultExportFeatureFlags();
-  for (const key of EXPORT_FEATURE_FLAG_KEYS) {
-    const candidate = value[key];
-    if (candidate === undefined) {
-      continue;
-    }
-    if (typeof candidate !== "boolean") {
-      return undefined;
-    }
-    merged[key] = candidate;
-  }
-
-  return merged;
-}
-
 function isRuntimeLogLevel(value: unknown): value is RuntimeLogLevel {
   return typeof value === "string" &&
     RUNTIME_LOG_LEVELS.includes(value as RuntimeLogLevel);
@@ -216,38 +165,6 @@ function normalizeRuntimeLogLevel(
 ): RuntimeLogLevel | undefined {
   const normalized = value.trim().toLowerCase();
   return isRuntimeLogLevel(normalized) ? normalized : undefined;
-}
-
-function isValidIanaTimezone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone });
-    return true;
-  } catch (error) {
-    if (error instanceof RangeError) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-function parseExportTimezone(value: unknown): string | undefined {
-  if (value === undefined) {
-    return DEFAULT_EXPORT_TIMEZONE;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return undefined;
-  }
-  if (trimmed === DEFAULT_EXPORT_TIMEZONE || trimmed === "UTC") {
-    return trimmed;
-  }
-  if (!isValidIanaTimezone(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
 }
 
 export function createDefaultRuntimeLoggingConfig(
@@ -335,73 +252,6 @@ function parseRuntimeLoggingConfig(
       return undefined;
     }
     resolved[key] = level;
-  }
-
-  return resolved;
-}
-
-function parseRuntimeMarkdownFrontmatterConfig(
-  value: unknown,
-): MarkdownFrontmatterConfig | undefined {
-  if (value === undefined) {
-    return createDefaultRuntimeMarkdownFrontmatterConfig();
-  }
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  for (const key of Object.keys(value)) {
-    if (
-      !MARKDOWN_FRONTMATTER_KEYS.includes(
-        key as keyof MarkdownFrontmatterConfig,
-      )
-    ) {
-      return undefined;
-    }
-  }
-
-  const resolved = createDefaultRuntimeMarkdownFrontmatterConfig();
-  for (const key of MARKDOWN_FRONTMATTER_KEYS) {
-    const candidate = value[key];
-    if (candidate === undefined) {
-      continue;
-    }
-    if (key === "includeFrontmatterInMarkdownRecordings") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeFrontmatterInMarkdownRecordings = candidate;
-    } else if (key === "includeUpdatedInFrontmatter") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeUpdatedInFrontmatter = candidate;
-    } else if (key === "addParticipantUsernameToFrontmatter") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.addParticipantUsernameToFrontmatter = candidate;
-    } else if (key === "includeSessionIds") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeSessionIds = candidate;
-    } else if (key === "includeWorkspaceIds") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeWorkspaceIds = candidate;
-    } else if (key === "includeRecordingIds") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeRecordingIds = candidate;
-    } else if (key === "includeConversationEventKinds") {
-      if (typeof candidate !== "boolean") {
-        return undefined;
-      }
-      resolved.includeConversationEventKinds = candidate;
-    }
   }
 
   return resolved;
