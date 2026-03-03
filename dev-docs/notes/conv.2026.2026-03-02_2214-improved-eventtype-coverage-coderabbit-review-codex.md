@@ -1664,3 +1664,124 @@ rg -n "exportTimezone|headingTimestampTimezone|workspaceTimezone|filenameTemplat
 # gpt-5.3-codex_2026-03-02_2327_03_Tool-exec_command
 
 rg -n "runDaemonSubprocess wires exportTimezone|headingTimestampTimezone|workspaceTimezone|export" tests/daemon-main_test.ts tests/daemon-runtime_test.ts tests/workspace-registry_test.ts -S
+
+**Reviewing output override usage**
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '140,230p' apps/daemon/src/main.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '1128,1268p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '370,470p' apps/daemon/src/writer/recording_pipeline.ts
+
+# Assistant_2026-03-02_2327_09_Tool-exec_command
+
+sed -n '540,740p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Inspecting export command parsing**
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '1,240p' apps/daemon/src/cli/commands/export.ts
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '3660,3825p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+# Assistant_2026-03-02_2327_14_Tool-exec_command
+
+sed -n '2080,2195p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Inspecting writer options composition**
+
+# Assistant_2026-03-02_2327_20_Tool-exec_command
+
+sed -n '180,340p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Integrating timezone into writer options**
+
+# Assistant_2026-03-02_2327_24_Tool-exec_command
+
+sed -n '340,430p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Planning writer options placement**
+
+# Assistant_2026-03-02_2327_27_Tool-exec_command
+
+sed -n '520,700p' apps/daemon/src/writer/recording_pipeline.ts
+
+**Inspecting CLI export output handling**
+
+# Assistant_2026-03-02_2327_31_Tool-exec_command
+
+rg -n "case \"export\"|command: \"export\"|outputPath|--output" apps/daemon/src/cli/parser.ts apps/daemon/src/cli/router.ts apps/daemon/src/cli/usage.ts apps/daemon/src/cli/types.ts -S
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '230,310p' apps/daemon/src/cli/parser.ts
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '70,120p' apps/daemon/src/cli/usage.ts
+
+# Assistant_2026-03-02_2327_38_Tool-exec_command
+
+sed -n '330,370p' apps/daemon/src/cli/router.ts
+
+**Analyzing export path and timezone handling**
+
+# Assistant_2026-03-02_2327_48_Tool-exec_command
+
+sed -n '350,420p' apps/daemon/src/main.ts
+
+**Inspecting timezone tests in export**
+
+# Assistant_2026-03-02_2327_52_Tool-exec_command
+
+sed -n '110,170p' tests/daemon-main_test.ts
+
+**Inspecting filename timezone tests**
+
+# Assistant_2026-03-02_2327_55_Tool-exec_command
+
+sed -n '7180,7375p' tests/daemon-runtime_test.ts
+
+**Inspecting timezone handling in headings**
+
+# Assistant_2026-03-02_2328_00_Tool-exec_command
+
+sed -n '40,120p' apps/daemon/src/writer/markdown_writer.ts
+
+**Inspecting default export timezone**
+
+# Assistant_2026-03-02_2328_04_Tool-exec_command
+
+rg -n "DEFAULT_EXPORT_TIMEZONE|exportTimezone" apps/daemon/src/config/runtime_config.ts | sed -n '1,140p'
+
+**Mapping export filename and timezone behavior**
+
+# Assistant_2026-03-02_2328_13_Tool-exec_command
+
+sed -n '3600,3695p' apps/daemon/src/orchestrator/daemon_runtime.ts
+
+**Summarizing export filename and timezone handling**
+
+# gpt-5.3-codex_2026-03-02_2328_31
+
+Short answer: **partly, depending on which export path you use**.
+
+1. `kato export <session-id> --output <path>` (plain CLI export)
+- **Heading timezone:** yes, from `exportTimezone` (default `local`), wired into `headingTimestampTimezone` in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts:188).
+- **Filename timezone/template:** no. The filename is whatever path you pass; no template expansion for CLI export in [export.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/cli/commands/export.ts:8).
+
+2. `::export-<alias>` (workspace command)
+- **Heading timezone:** yes, uses workspace `workspaceTimezone` via output overrides in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:1202).
+- **Filename timezone/template:** yes when destination is generated (no arg or directory arg), because filename rendering uses `workspaceTimezone` in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:563) through [resolveWorkspaceCommandDestination](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:659).
+- If you pass an explicit file path, filename timezone doesn’t apply (only heading timezone still does).
+
+Also: plain `kato export` without `--output` is currently treated as invalid later in runtime processing ([daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts:3669)), so in practice you should provide `--output`.

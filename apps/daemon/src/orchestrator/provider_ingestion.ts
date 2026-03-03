@@ -45,6 +45,15 @@ export interface ProviderSessionFile {
   sessionId: string;
   filePath: string;
   modifiedAtMs: number;
+  /**
+   * Provider-native "content updated" timestamp when available.
+   * Used for deterministic dedupe of duplicate source files.
+   */
+  contentUpdatedAtMs?: number;
+  /**
+   * Provider-specific discovery layout hint (for tie-breakers/telemetry).
+   */
+  layoutType?: "hash" | "slug" | "unknown";
 }
 
 export interface FileProviderIngestionRunnerOptions {
@@ -121,6 +130,12 @@ interface CodexSessionMeta {
 interface CodexCompactionAnchor {
   lineEnd: number;
   anchor: SessionIngestAnchorV1;
+}
+
+interface GeminiSessionDiscovery {
+  sessionId: string;
+  contentUpdatedAtMs?: number;
+  layoutType: "hash" | "slug" | "unknown";
 }
 
 interface MergeEventsOptions {
@@ -545,9 +560,39 @@ async function discoverCodexSessions(
   return sessions;
 }
 
-async function readGeminiSessionId(
+function readTimeMs(value: unknown): number | undefined {
+  if (!isNonEmptyString(value)) {
+    return undefined;
+  }
+  const parsed = Date.parse(value.trim());
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function classifyGeminiLayout(
   filePath: string,
-): Promise<string | undefined> {
+  discoveryRoot: string,
+): "hash" | "slug" | "unknown" {
+  const normalizedRoot = discoveryRoot.endsWith("/")
+    ? discoveryRoot
+    : `${discoveryRoot}/`;
+  if (!filePath.startsWith(normalizedRoot)) {
+    return "unknown";
+  }
+  const relative = filePath.slice(normalizedRoot.length);
+  const firstSegment = relative.split("/")[0]?.trim();
+  if (!firstSegment || firstSegment === "chats") {
+    return "unknown";
+  }
+  if (/^[a-f0-9]{64}$/i.test(firstSegment)) {
+    return "hash";
+  }
+  return "slug";
+}
+
+async function readGeminiSessionDiscovery(
+  filePath: string,
+  discoveryRoot: string,
+): Promise<GeminiSessionDiscovery | undefined> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
@@ -565,11 +610,25 @@ async function readGeminiSessionId(
     return undefined;
   }
   const sessionId = root["sessionId"];
+  const contentUpdatedAtMs = readTimeMs(root["lastUpdated"]) ??
+    readTimeMs(root["updatedAt"]);
+  const layoutType = classifyGeminiLayout(filePath, discoveryRoot);
   if (isNonEmptyString(sessionId)) {
-    return sessionId.trim();
+    return {
+      sessionId: sessionId.trim(),
+      ...(contentUpdatedAtMs !== undefined ? { contentUpdatedAtMs } : {}),
+      layoutType,
+    };
   }
   const fromName = basename(filePath, ".json").trim();
-  return fromName.length > 0 ? fromName : undefined;
+  if (fromName.length === 0) {
+    return undefined;
+  }
+  return {
+    sessionId: fromName,
+    ...(contentUpdatedAtMs !== undefined ? { contentUpdatedAtMs } : {}),
+    layoutType,
+  };
 }
 
 async function discoverGeminiSessions(
@@ -581,12 +640,16 @@ async function discoverGeminiSessions(
     for await (const filePath of walkJsonFiles(root)) {
       const filename = basename(filePath);
       if (!filename.startsWith("session-")) continue;
-      const sessionId = await readGeminiSessionId(filePath);
-      if (!sessionId) continue;
+      const discovery = await readGeminiSessionDiscovery(filePath, root);
+      if (!discovery) continue;
       sessions.push({
-        sessionId,
+        sessionId: discovery.sessionId,
         filePath,
         modifiedAtMs: await statModifiedAtMs(filePath),
+        ...(discovery.contentUpdatedAtMs !== undefined
+          ? { contentUpdatedAtMs: discovery.contentUpdatedAtMs }
+          : {}),
+        layoutType: discovery.layoutType,
       });
     }
   }
@@ -782,6 +845,42 @@ function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
   return (stateMetadata.workspaceOutputs ?? []).some((output) =>
     output.desiredState === "on"
   );
+}
+
+function geminiLayoutRank(
+  layoutType: ProviderSessionFile["layoutType"],
+): number {
+  switch (layoutType) {
+    case "slug":
+      return 2;
+    case "hash":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function compareDiscoveredSessionCandidates(
+  a: ProviderSessionFile,
+  b: ProviderSessionFile,
+): number {
+  const aContentUpdated = a.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
+  const bContentUpdated = b.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
+  if (aContentUpdated !== bContentUpdated) {
+    return bContentUpdated - aContentUpdated;
+  }
+
+  const aLayoutRank = geminiLayoutRank(a.layoutType);
+  const bLayoutRank = geminiLayoutRank(b.layoutType);
+  if (aLayoutRank !== bLayoutRank) {
+    return bLayoutRank - aLayoutRank;
+  }
+
+  if (a.modifiedAtMs !== b.modifiedAtMs) {
+    return b.modifiedAtMs - a.modifiedAtMs;
+  }
+
+  return a.filePath.localeCompare(b.filePath);
 }
 
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
@@ -1077,7 +1176,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private shouldProactivelyIngestDiscoveredSession(
     session: ProviderSessionFile,
   ): boolean {
-    return session.modifiedAtMs >= this.startedAtMs;
+    if (session.modifiedAtMs >= this.startedAtMs) {
+      return true;
+    }
+    if (
+      this.provider === "gemini" &&
+      session.contentUpdatedAtMs !== undefined &&
+      session.contentUpdatedAtMs >= this.startedAtMs
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private async dedupeDiscoveredSessions(
@@ -1088,7 +1197,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let droppedEvents = 0;
 
     const sorted = [...sessions].sort((a, b) => {
-      if (a.sessionId === b.sessionId) return b.modifiedAtMs - a.modifiedAtMs;
+      if (a.sessionId === b.sessionId) {
+        return compareDiscoveredSessionCandidates(a, b);
+      }
       return a.sessionId.localeCompare(b.sessionId);
     });
 

@@ -66,6 +66,33 @@ async function writeGeminiSessionFixture(
   );
 }
 
+async function writeGeminiSessionWithLastUpdated(
+  filePath: string,
+  sessionId: string,
+  lastUpdated: string,
+  messages: GeminiFixtureMessage[],
+): Promise<void> {
+  await Deno.writeTextFile(
+    filePath,
+    JSON.stringify(
+      {
+        sessionId,
+        startTime: messages[0]?.timestamp ?? lastUpdated,
+        lastUpdated,
+        messages: messages.map((message) => ({
+          id: message.id,
+          type: message.type,
+          timestamp: message.timestamp,
+          content: [{ text: message.content }],
+          displayContent: [{ text: message.content }],
+        })),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 function parseGeminiFixtureEvents(
   filePath: string,
   fromOffset: number,
@@ -1620,6 +1647,88 @@ Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", 
 });
 
 Deno.test(
+  "FileProviderIngestionRunner keeps cross-kind events when dedupe fields collide",
+  async () => {
+    await withTempDir("provider-ingestion-cross-kind-", async (dir) => {
+      const sessionFile = join(dir, "session-cross-kind.jsonl");
+      await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+      const harness = makeWatchHarness();
+      const store = new InMemorySessionSnapshotStore();
+      const runner = new FileProviderIngestionRunner({
+        provider: "test-provider",
+        watchRoots: [dir],
+        sessionSnapshotStore: store,
+        watchFs: harness.watchFn,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-cross-kind",
+            filePath: sessionFile,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          return (async function* () {
+            if (fromOffset !== 0) {
+              return;
+            }
+
+            const sharedTimestamp = "2026-02-22T20:15:00.000Z";
+            const sharedCursor = { kind: "byte-offset" as const, value: 10 };
+            const sharedSource = {
+              providerEventType: "assistant",
+              rawCursor: sharedCursor,
+            };
+
+            yield {
+              event: {
+                eventId: "collision",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                timestamp: sharedTimestamp,
+                kind: "message.assistant",
+                role: "assistant",
+                content: "same-content",
+                source: sharedSource,
+              } as ConversationEvent,
+              cursor: sharedCursor,
+            };
+            yield {
+              event: {
+                eventId: "collision",
+                provider: "test-provider",
+                sessionId: "sess-test",
+                timestamp: sharedTimestamp,
+                kind: "thinking",
+                content: "same-content",
+                source: sharedSource,
+              } as ConversationEvent,
+              cursor: sharedCursor,
+            };
+          })();
+        },
+      });
+
+      await runner.start();
+      await runner.poll();
+      await runner.stop();
+
+      const snapshot = store.get("session-cross-kind");
+      assertExists(snapshot);
+      assertEquals(snapshot.events.length, 2);
+      assertEquals(
+        snapshot.events.map((event) => event.kind),
+        ["message.assistant", "thinking"],
+      );
+    });
+  },
+);
+
+Deno.test(
   "FileProviderIngestionRunner keeps distinct events when provider ids and timestamps are missing",
   async () => {
     await withTempDir("provider-ingestion-missing-id-", async (dir) => {
@@ -1964,3 +2073,199 @@ Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", asyn
     );
   });
 });
+
+Deno.test(
+  "createGeminiIngestionRunner prefers newer Gemini lastUpdated over newer mtime for duplicate session files",
+  async () => {
+    await withTempDir("provider-ingestion-gemini-dedupe-updated-", async (
+      dir,
+    ) => {
+      const sessionId = "gemini-dedupe-updated";
+      const hashProject =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const hashChats = join(dir, hashProject, "chats");
+      const slugChats = join(dir, "kato", "chats");
+      await Deno.mkdir(hashChats, { recursive: true });
+      await Deno.mkdir(slugChats, { recursive: true });
+
+      const hashPath = join(hashChats, "session-2026-02-24-dup.json");
+      const slugPath = join(slugChats, "session-2026-02-24-dup.json");
+
+      await writeGeminiSessionWithLastUpdated(
+        hashPath,
+        sessionId,
+        "2026-02-24T20:00:01.000Z",
+        [
+          {
+            id: "h-u1",
+            type: "user",
+            content: "hash user",
+            timestamp: "2026-02-24T20:00:01.000Z",
+          },
+          {
+            id: "h-a1",
+            type: "gemini",
+            content: "assistant from hash",
+            timestamp: "2026-02-24T20:00:02.000Z",
+          },
+        ],
+      );
+
+      await writeGeminiSessionWithLastUpdated(
+        slugPath,
+        sessionId,
+        "2026-02-24T20:00:10.000Z",
+        [
+          {
+            id: "s-u1",
+            type: "user",
+            content: "slug user",
+            timestamp: "2026-02-24T20:00:09.000Z",
+          },
+          {
+            id: "s-a1",
+            type: "gemini",
+            content: "assistant from slug",
+            timestamp: "2026-02-24T20:00:10.000Z",
+          },
+        ],
+      );
+
+      // Make the hash copy look newer on filesystem mtime to ensure
+      // dedupe winner is chosen by parsed lastUpdated first.
+      await Deno.utime(
+        hashPath,
+        new Date("2026-02-24T20:00:30.000Z"),
+        new Date("2026-02-24T20:00:30.000Z"),
+      );
+      await Deno.utime(
+        slugPath,
+        new Date("2026-02-24T20:00:20.000Z"),
+        new Date("2026-02-24T20:00:20.000Z"),
+      );
+
+      const store = new InMemorySessionSnapshotStore();
+      const harness = makeWatchHarness();
+      const runner = createGeminiIngestionRunner({
+        sessionSnapshotStore: store,
+        sessionRoots: [dir],
+        now: () => new Date("2026-02-24T20:00:00.000Z"),
+        watchFs: harness.watchFn,
+      });
+
+      await runner.start();
+      const result = await runner.poll();
+      await runner.stop();
+
+      assertEquals(result.provider, "gemini");
+      assertEquals(result.sessionsUpdated, 1);
+      const snapshot = store.get(sessionId);
+      assertExists(snapshot);
+
+      const contents = snapshot.events
+        .filter((event) =>
+          event.kind === "message.user" || event.kind === "message.assistant"
+        )
+        .map((event) => event.content);
+      assert(contents.includes("assistant from slug"));
+      assertEquals(contents.includes("assistant from hash"), false);
+    });
+  },
+);
+
+Deno.test(
+  "createGeminiIngestionRunner prefers slug layout over hash layout when duplicate Gemini lastUpdated ties",
+  async () => {
+    await withTempDir("provider-ingestion-gemini-dedupe-layout-", async (
+      dir,
+    ) => {
+      const sessionId = "gemini-dedupe-layout";
+      const hashProject =
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+      const hashChats = join(dir, hashProject, "chats");
+      const slugChats = join(dir, "kato", "chats");
+      await Deno.mkdir(hashChats, { recursive: true });
+      await Deno.mkdir(slugChats, { recursive: true });
+
+      const hashPath = join(hashChats, "session-2026-02-24-layout.json");
+      const slugPath = join(slugChats, "session-2026-02-24-layout.json");
+      const tiedLastUpdated = "2026-02-24T20:00:05.000Z";
+
+      await writeGeminiSessionWithLastUpdated(
+        hashPath,
+        sessionId,
+        tiedLastUpdated,
+        [
+          {
+            id: "h-u1",
+            type: "user",
+            content: "hash user",
+            timestamp: "2026-02-24T20:00:04.000Z",
+          },
+          {
+            id: "h-a1",
+            type: "gemini",
+            content: "assistant from hash layout tie",
+            timestamp: "2026-02-24T20:00:05.000Z",
+          },
+        ],
+      );
+
+      await writeGeminiSessionWithLastUpdated(
+        slugPath,
+        sessionId,
+        tiedLastUpdated,
+        [
+          {
+            id: "s-u1",
+            type: "user",
+            content: "slug user",
+            timestamp: "2026-02-24T20:00:04.000Z",
+          },
+          {
+            id: "s-a1",
+            type: "gemini",
+            content: "assistant from slug layout tie",
+            timestamp: "2026-02-24T20:00:05.000Z",
+          },
+        ],
+      );
+
+      // Keep hash mtime newer so layout tie-break runs before mtime.
+      await Deno.utime(
+        hashPath,
+        new Date("2026-02-24T20:00:30.000Z"),
+        new Date("2026-02-24T20:00:30.000Z"),
+      );
+      await Deno.utime(
+        slugPath,
+        new Date("2026-02-24T20:00:10.000Z"),
+        new Date("2026-02-24T20:00:10.000Z"),
+      );
+
+      const store = new InMemorySessionSnapshotStore();
+      const harness = makeWatchHarness();
+      const runner = createGeminiIngestionRunner({
+        sessionSnapshotStore: store,
+        sessionRoots: [dir],
+        now: () => new Date("2026-02-24T20:00:00.000Z"),
+        watchFs: harness.watchFn,
+      });
+
+      await runner.start();
+      const result = await runner.poll();
+      await runner.stop();
+
+      assertEquals(result.provider, "gemini");
+      assertEquals(result.sessionsUpdated, 1);
+      const snapshot = store.get(sessionId);
+      assertExists(snapshot);
+
+      const contents = snapshot.events
+        .filter((event) => event.kind === "message.assistant")
+        .map((event) => event.content);
+      assert(contents.includes("assistant from slug layout tie"));
+      assertEquals(contents.includes("assistant from hash layout tie"), false);
+    });
+  },
+);
