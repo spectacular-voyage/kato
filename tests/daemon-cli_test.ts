@@ -43,7 +43,7 @@ function makeRuntimeHarness(runtimeDir: string) {
     stderr,
     runtime: {
       runtimeDir,
-      configPath: `${runtimeDir}/kato-config.yaml`,
+      configPath: `${runtimeDir}/kato-daemon-config.yaml`,
       statusPath: `${runtimeDir}/status.json`,
       controlPath: `${runtimeDir}/control.json`,
       cwdPath: runtimeDir,
@@ -157,7 +157,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
               exportFeatureFlags: { ...state.exportFeatureFlags },
               logging: { ...state.logging },
             },
-            path: `${state.runtimeDir}/kato-config.yaml`,
+            path: `${state.runtimeDir}/kato-daemon-config.yaml`,
           });
         }
 
@@ -176,7 +176,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
             exportFeatureFlags: { ...state.exportFeatureFlags },
             logging: { ...state.logging },
           },
-          path: `${state.runtimeDir}/kato-config.yaml`,
+          path: `${state.runtimeDir}/kato-daemon-config.yaml`,
         });
       },
     },
@@ -711,7 +711,7 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
     assertEquals(firstCode, 0);
     assertStringIncludes(
       harness.stdout.join(""),
-      `created runtime config at ${runtimeDir}/kato-config.yaml`,
+      `created runtime config at ${runtimeDir}/kato-daemon-config.yaml`,
     );
     assertStringIncludes(
       harness.stdout.join(""),
@@ -757,7 +757,7 @@ Deno.test(
       });
       assertEquals(code, 0);
       const runtimeConfig = await Deno.readTextFile(
-        join(runtimeDir, "kato-config.yaml"),
+        join(runtimeDir, "kato-daemon-config.yaml"),
       );
       assertStringIncludes(runtimeConfig, "allowedWriteRoots: []");
     } finally {
@@ -1742,7 +1742,7 @@ Deno.test(
       assertEquals(code, 0);
       assertStringIncludes(
         harness.stdout.join(""),
-        `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
+        `initialized runtime config at ${runtimeDir}/kato-daemon-config.yaml`,
       );
       assertStringIncludes(
         harness.stdout.join(""),
@@ -1793,7 +1793,7 @@ Deno.test(
       assertEquals(code, 0);
       assertStringIncludes(
         harness.stdout.join(""),
-        `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
+        `initialized runtime config at ${runtimeDir}/kato-daemon-config.yaml`,
       );
       assertStringIncludes(
         harness.stdout.join(""),

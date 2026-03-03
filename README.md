@@ -135,7 +135,7 @@ Rules:
 
 Default paths:
 
-- Global runtime config: `~/.kato/kato-config.yaml`
+- Global runtime config: `~/.kato/kato-daemon-config.yaml`
 - Default workspace template: `~/.kato/default-kato-workspace-config.yaml`
 - Workspace registry: `~/.kato/workspace-registry.json`
 - Status: `~/.kato/runtime/status.json`
@@ -146,14 +146,14 @@ Default paths:
 - Workspace-local config: `<workspace>/kato-workspace-config.yaml`
 
 Session metadata is authoritative; `daemon-control.json` is a rebuildable cache.
-`~/.kato/kato-config.yaml` is the daemon/global config plus plain CLI
+`~/.kato/kato-daemon-config.yaml` is the daemon/global config plus plain CLI
 non-workspace export formatting. `~/.kato/default-kato-workspace-config.yaml` is
 only the template used by `kato workspace init`. Workspace-local runtime output
 settings belong in `<workspace>/kato-workspace-config.yaml`.
 
 ## Runtime Config
 
-Default `~/.kato/kato-config.yaml` shape:
+Default `~/.kato/kato-daemon-config.yaml` shape:
 
 ```yaml
 schemaVersion: 1
@@ -201,7 +201,7 @@ daemonMaxMemoryMb: 500
 Notes:
 
 - Runtime config is validated fail-closed at startup.
-- `kato init` creates both `~/.kato/kato-config.yaml` and
+- `kato init` creates both `~/.kato/kato-daemon-config.yaml` and
   `~/.kato/default-kato-workspace-config.yaml`, plus
   `~/.kato/kato-user-config.yaml`.
 - `providerSessionRoots` controls provider ingestion discovery roots and daemon

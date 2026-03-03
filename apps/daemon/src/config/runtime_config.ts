@@ -21,7 +21,7 @@ import {
 } from "../utils/env.ts";
 
 const DEFAULT_CONFIG_SCHEMA_VERSION = 1;
-const CONFIG_FILENAME = "kato-config.yaml";
+const CONFIG_FILENAME = "kato-daemon-config.yaml";
 const DEFAULT_DAEMON_MAX_MEMORY_MB = 500;
 const DEFAULT_EXPORT_TIMEZONE = "local";
 const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [

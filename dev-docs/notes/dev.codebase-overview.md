@@ -66,7 +66,7 @@ graph TD
   end
 
   subgraph FS
-    CONFIG[~/.kato/kato-config.yaml]
+    CONFIG[~/.kato/kato-daemon-config.yaml]
     WREG[~/.kato/workspace-registry.json]
     WCFG[<workspace>/kato-workspace-config.yaml]
     CONTROL[~/.kato/runtime/control.json]
@@ -128,19 +128,19 @@ graph TD
 
 ## Responsibility Map
 
-| Area            | Primary responsibility                           | Owns state                    | Reads from                           | Writes to                    | Key modules                                          |
-| --------------- | ------------------------------------------------ | ----------------------------- | ------------------------------------ | ---------------------------- | ---------------------------------------------------- |
-| CLI surface     | Parse commands and dispatch behavior             | none                          | argv, config, status/control         | control queue, stdout/stderr | `apps/daemon/src/cli/*`                              |
-| Launcher        | Start daemon with narrowed permissions           | none                          | runtime config                       | child process spawn          | `apps/daemon/src/orchestrator/launcher.ts`           |
-| Config          | Validate and default runtime config              | config schema rules           | `~/.kato/kato-config.yaml`, env      | `~/.kato/kato-config.yaml`  | `apps/daemon/src/config/runtime_config.ts`           |
-| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/kato-workspace-config.yaml` | registry + workspace config files | `apps/daemon/src/workspace/*`                     |
-| Runtime loop    | Main orchestrator event loop                     | live runtime snapshot object  | control queue, ingestion results     | status snapshot, logs        | `apps/daemon/src/orchestrator/daemon_runtime.ts`     |
-| Ingestion       | Discover/watch/parse provider session files      | provider cursors + dirty sets | provider roots, parser output        | SessionTwin + snapshots      | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Session state   | Persistent session metadata/twin/index           | per-session durable artifacts | ingestion/runtime updates            | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
-| Snapshot store  | Runtime projection for status/command processing | per-session snapshots         | ingestion/session-state projections  | in-memory list/get responses | `apps/daemon/src/orchestrator/ingestion_runtime.ts`  |
-| Writer pipeline | Render/export markdown or JSONL with path gates  | active recordings map         | export requests + event snapshots    | .md/.jsonl files, logs       | `apps/daemon/src/writer/*`                           |
-| Policy          | Deny/allow write destinations, command detection | none                          | config + command text                | decisions/events             | `apps/daemon/src/policy/*`                           |
-| Observability   | structured operational + audit records           | none                          | events from runtime/ingestion/writer | JSONL sinks                  | `apps/daemon/src/observability/*`                    |
+| Area               | Primary responsibility                                                    | Owns state                        | Reads from                                                                  | Writes to                                   | Key modules                                           |
+| ------------------ | ------------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------- |
+| CLI surface        | Parse commands and dispatch behavior                                      | none                              | argv, config, status/control                                                | control queue, stdout/stderr                | `apps/daemon/src/cli/*`                               |
+| Launcher           | Start daemon with narrowed permissions                                    | none                              | runtime config                                                              | child process spawn                         | `apps/daemon/src/orchestrator/launcher.ts`            |
+| Config             | Validate and default runtime config                                       | config schema rules               | `~/.kato/kato-daemon-config.yaml`, env                                      | `~/.kato/kato-daemon-config.yaml`           | `apps/daemon/src/config/runtime_config.ts`            |
+| Workspace registry | Manage registered workspace aliases and local workspace config resolution | registry + workspace config files | `~/.kato/workspace-registry.json`, `<workspace>/kato-workspace-config.yaml` | registry + workspace config files           | `apps/daemon/src/workspace/*`                         |
+| Runtime loop       | Main orchestrator event loop                                              | live runtime snapshot object      | control queue, ingestion results                                            | status snapshot, logs                       | `apps/daemon/src/orchestrator/daemon_runtime.ts`      |
+| Ingestion          | Discover/watch/parse provider session files                               | provider cursors + dirty sets     | provider roots, parser output                                               | SessionTwin + snapshots                     | `apps/daemon/src/orchestrator/provider_ingestion.ts`  |
+| Session state      | Persistent session metadata/twin/index                                    | per-session durable artifacts     | ingestion/runtime updates                                                   | `*.meta.json`, `*.twin.jsonl`, daemon index | `apps/daemon/src/orchestrator/session_state_store.ts` |
+| Snapshot store     | Runtime projection for status/command processing                          | per-session snapshots             | ingestion/session-state projections                                         | in-memory list/get responses                | `apps/daemon/src/orchestrator/ingestion_runtime.ts`   |
+| Writer pipeline    | Render/export markdown or JSONL with path gates                           | active recordings map             | export requests + event snapshots                                           | .md/.jsonl files, logs                      | `apps/daemon/src/writer/*`                            |
+| Policy             | Deny/allow write destinations, command detection                          | none                              | config + command text                                                       | decisions/events                            | `apps/daemon/src/policy/*`                            |
+| Observability      | structured operational + audit records                                    | none                              | events from runtime/ingestion/writer                                        | JSONL sinks                                 | `apps/daemon/src/observability/*`                     |
 
 ## Daemon Subsystems
 
@@ -180,7 +180,8 @@ This makes the long-lived daemon process narrower than a broad `-A` profile.
    - process in-chat recording commands via `processInChatRecordingUpdates`
    - consume control requests from queue
    - update recording summary
-   - on heartbeat boundary (~5s), recompute provider/session status and persist `status.json`
+   - on heartbeat boundary (~5s), recompute provider/session status and persist
+     `status.json`
 4. stop ingestion runners on shutdown
 5. write terminal status (`daemonRunning: false`)
 
@@ -219,7 +220,8 @@ Per runner responsibilities:
 - stores `ConversationEvent[]` with `conversationSchemaVersion: 2`
 - upsert is copy-safe (clones inputs/outputs)
 - metadata carries:
-  - `updatedAt` (ingestion-time, resets on every upsert — do not use for staleness)
+  - `updatedAt` (ingestion-time, resets on every upsert — do not use for
+    staleness)
   - `eventCount`, `truncatedEvents`
   - `lastEventAt` (timestamp of last parsed event — provider-accuracy varies)
   - `fileModifiedAtMs` (OS-level file mtime — most reliable staleness signal)
@@ -243,8 +245,8 @@ Status fields visible in `kato status` / `status.json` are computed by
 - `isSessionStale(ts, now, staleAfterMs)` — compares a timestamp against the
   stale threshold (default 5 min, `DEFAULT_STATUS_STALE_AFTER_MS`).
 - `projectSessionStatus(opts)` — builds a `DaemonSessionStatus` from metadata
-  + optional recording join. Staleness precedence: `fileModifiedAtMs` (primary)
-  → `lastEventAt` (fallback) → absent = stale.
+  - optional recording join. Staleness precedence: `fileModifiedAtMs` (primary)
+    → `lastEventAt` (fallback) → absent = stale.
 - `filterSessionsForDisplay(sessions, opts)` — filter active/stale + sort by
   recency.
 
@@ -298,7 +300,8 @@ unavailable.
 
 ## Source-of-Truth Boundaries
 
-- `kato-config.yaml`: canonical runtime settings and policy-relevant roots/flags.
+- `kato-daemon-config.yaml`: canonical runtime settings and policy-relevant
+  roots/flags.
 - `control.json`: canonical queued daemon commands from CLI.
 - `status.json`: canonical externally readable daemon status snapshot.
 - session metadata + SessionTwin files: canonical durable session state.
@@ -307,7 +310,7 @@ unavailable.
 
 ## Workspace Status (As Of 2026-03-02)
 
-- Global runtime config lives at `~/.kato/kato-config.yaml`.
+- Global runtime config lives at `~/.kato/kato-daemon-config.yaml`.
 - Workspace-local output config lives at
   `<workspace>/kato-workspace-config.yaml`.
 - `kato workspace init/register/list/unregister` is implemented.
@@ -331,7 +334,8 @@ unavailable.
    - `upsert()` caches `snippet` and `lastEventAt` in metadata
 3. `processInChatRecordingUpdates` (every poll, 1s): calls `listMetadataOnly()`,
    skips sessions whose `fileModifiedAtMs` is unchanged, fetches full snapshot
-   via `get()` only for changed sessions, appends new events to active recordings
+   via `get()` only for changed sessions, appends new events to active
+   recordings
 4. heartbeat (~5s): calls `listMetadataOnly()`, projects `providers` and
    `sessions` from metadata (no event access needed), writes `status.json`
 

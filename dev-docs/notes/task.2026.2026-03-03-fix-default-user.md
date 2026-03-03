@@ -68,16 +68,16 @@ Usernames preserve case and punctuation except control chars.
 
 ### Command/state scenario table
 
-| Scenario                                            | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes                                                                   |
-| --------------------------------------------------- | ------------------ | ---------------------- | -------------- | ---------------------------------------------------------------------------------------------- |
-| `kato init` with no configs                         | Yes                | N/A                    | Yes            | Creates `kato-config.yaml`, `default-kato-workspace-config.yaml`, and `kato-user-config.yaml`. |
-| `kato start` auto-init path when configs missing    | Yes                | N/A                    | Yes            | Auto-init also creates `kato-user-config.yaml`.                                                |
-| `kato user init`                                    | Yes                | N/A                    | Yes            | Explicitly creates `kato-user-config.yaml` if missing; otherwise reports already exists.       |
-| `kato user map set <alias> <username>`              | Yes                | N/A                    | Yes            | Alias must resolve to registered workspaceId or command fails hard.                            |
-| `kato user map delete <alias-or-id>` unknown target | Yes                | N/A                    | Yes            | Fail hard; no mutation.                                                                        |
-| `kato user map list`                                | Yes                | N/A                    | Yes            | Default text output for humans.                                                                |
-| `kato user map list --json`                         | Yes                | N/A                    | Yes            | Stable machine-readable schema (see Contract Changes).                                         |
-| recording/export with no explicit username config   | Yes                | Yes                    | Yes            | User participant omitted; no env/OS fallback.                                                  |
+| Scenario                                            | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes                                                                          |
+| --------------------------------------------------- | ------------------ | ---------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `kato init` with no configs                         | Yes                | N/A                    | Yes            | Creates `kato-daemon-config.yaml`, `default-kato-workspace-config.yaml`, and `kato-user-config.yaml`. |
+| `kato start` auto-init path when configs missing    | Yes                | N/A                    | Yes            | Auto-init also creates `kato-user-config.yaml`.                                                       |
+| `kato user init`                                    | Yes                | N/A                    | Yes            | Explicitly creates `kato-user-config.yaml` if missing; otherwise reports already exists.              |
+| `kato user map set <alias> <username>`              | Yes                | N/A                    | Yes            | Alias must resolve to registered workspaceId or command fails hard.                                   |
+| `kato user map delete <alias-or-id>` unknown target | Yes                | N/A                    | Yes            | Fail hard; no mutation.                                                                               |
+| `kato user map list`                                | Yes                | N/A                    | Yes            | Default text output for humans.                                                                       |
+| `kato user map list --json`                         | Yes                | N/A                    | Yes            | Stable machine-readable schema (see Contract Changes).                                                |
+| recording/export with no explicit username config   | Yes                | Yes                    | Yes            | User participant omitted; no env/OS fallback.                                                         |
 
 ## Contract Changes
 
@@ -162,7 +162,7 @@ Ordering rule: `mappings` sorted by `workspaceAlias`, then `workspaceId`.
 
 ## Non-Goals
 
-- Renaming `kato-config.yaml` to `kato-daemon-config.yaml`.
+- Renaming `kato-daemon-config.yaml` again.
 - Adding OS-specific file-permission hardening for user config.
 - Auto-pruning mappings on workspace unregister.
 - Introducing a full config migration framework.

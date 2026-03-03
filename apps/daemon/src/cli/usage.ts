@@ -39,7 +39,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates ~/.kato/kato-config.yaml, ~/.kato/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
+    "Creates ~/.kato/kato-daemon-config.yaml, ~/.kato/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",
