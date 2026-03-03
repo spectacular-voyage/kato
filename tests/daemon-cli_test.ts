@@ -6,12 +6,17 @@ import {
   assertThrows,
 } from "@std/assert";
 import { dirname, join } from "@std/path";
-import type { DaemonStatusSnapshot, RuntimeConfig } from "@kato/shared";
+import type {
+  DaemonStatusSnapshot,
+  RuntimeConfig,
+  UserConfig,
+} from "@kato/shared";
 import {
   CliUsageError,
   createDefaultDaemonFeatureFlags,
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultUserConfig,
   DAEMON_APP_VERSION,
   type DaemonControlRequest,
   type DaemonControlRequestDraft,
@@ -23,6 +28,8 @@ import {
   parseDaemonCliArgs,
   runDaemonCli,
   type RuntimeConfigStoreLike,
+  UserConfigFileStore,
+  type UserConfigStoreLike,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
@@ -171,6 +178,124 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           },
           path: `${state.runtimeDir}/kato-config.yaml`,
         });
+      },
+    },
+  };
+}
+
+function makeInMemoryUserConfigStore(
+  initial?: UserConfig,
+  path = ".test-tmp/kato-user-config.yaml",
+): {
+  ensureCalls: { value: number };
+  saveCalls: { value: number };
+  store: UserConfigStoreLike;
+  snapshot(): UserConfig;
+} {
+  let state: UserConfig | undefined = initial
+    ? {
+      schemaVersion: initial.schemaVersion,
+      participants: {
+        defaultUsername: initial.participants.defaultUsername,
+        workspaceUsernames: { ...initial.participants.workspaceUsernames },
+        excludeMeFromParticipantList:
+          initial.participants.excludeMeFromParticipantList,
+      },
+    }
+    : undefined;
+  const ensureCalls = { value: 0 };
+  const saveCalls = { value: 0 };
+
+  return {
+    ensureCalls,
+    saveCalls,
+    snapshot() {
+      if (!state) {
+        return createDefaultUserConfig();
+      }
+      return {
+        schemaVersion: state.schemaVersion,
+        participants: {
+          defaultUsername: state.participants.defaultUsername,
+          workspaceUsernames: { ...state.participants.workspaceUsernames },
+          excludeMeFromParticipantList:
+            state.participants.excludeMeFromParticipantList,
+        },
+      };
+    },
+    store: {
+      load() {
+        if (!state) {
+          return Promise.reject(
+            new Deno.errors.NotFound("missing user config"),
+          );
+        }
+        return Promise.resolve({
+          schemaVersion: state.schemaVersion,
+          participants: {
+            defaultUsername: state.participants.defaultUsername,
+            workspaceUsernames: { ...state.participants.workspaceUsernames },
+            excludeMeFromParticipantList:
+              state.participants.excludeMeFromParticipantList,
+          },
+        });
+      },
+      ensureInitialized(defaultConfig = createDefaultUserConfig()) {
+        ensureCalls.value += 1;
+        if (!state) {
+          state = {
+            schemaVersion: defaultConfig.schemaVersion,
+            participants: {
+              defaultUsername: defaultConfig.participants.defaultUsername,
+              workspaceUsernames: {
+                ...defaultConfig.participants.workspaceUsernames,
+              },
+              excludeMeFromParticipantList:
+                defaultConfig.participants.excludeMeFromParticipantList,
+            },
+          };
+          return Promise.resolve({
+            created: true,
+            config: {
+              schemaVersion: state.schemaVersion,
+              participants: {
+                defaultUsername: state.participants.defaultUsername,
+                workspaceUsernames: {
+                  ...state.participants.workspaceUsernames,
+                },
+                excludeMeFromParticipantList:
+                  state.participants.excludeMeFromParticipantList,
+              },
+            },
+            path,
+          });
+        }
+        return Promise.resolve({
+          created: false,
+          config: {
+            schemaVersion: state.schemaVersion,
+            participants: {
+              defaultUsername: state.participants.defaultUsername,
+              workspaceUsernames: { ...state.participants.workspaceUsernames },
+              excludeMeFromParticipantList:
+                state.participants.excludeMeFromParticipantList,
+            },
+          },
+          path,
+        });
+      },
+      save(config: UserConfig) {
+        saveCalls.value += 1;
+        state = {
+          schemaVersion: config.schemaVersion,
+          participants: {
+            defaultUsername: config.participants.defaultUsername,
+            workspaceUsernames: { ...config.participants.workspaceUsernames },
+            excludeMeFromParticipantList:
+              config.participants.excludeMeFromParticipantList,
+          },
+        };
+        return Promise.resolve();
       },
     },
   };
@@ -478,6 +603,44 @@ Deno.test("cli parser requires non-empty workspace register alias", () => {
   );
 });
 
+Deno.test("cli parser accepts user commands", () => {
+  const init = parseDaemonCliArgs(["user", "init"]);
+  assertEquals(init.kind, "command");
+  if (init.kind !== "command" || init.command.name !== "user-init") {
+    throw new Error("expected user-init command");
+  }
+
+  const mapSet = parseDaemonCliArgs([
+    "user",
+    "map",
+    "set",
+    "My.Proj",
+    "Dj Radon",
+  ]);
+  assertEquals(mapSet.kind, "command");
+  if (mapSet.kind !== "command" || mapSet.command.name !== "user-map-set") {
+    throw new Error("expected user-map-set command");
+  }
+  assertEquals(mapSet.command.selector, "My.Proj");
+  assertEquals(mapSet.command.username, "Dj Radon");
+
+  const mapList = parseDaemonCliArgs(["user", "map", "list", "--json"]);
+  assertEquals(mapList.kind, "command");
+  if (mapList.kind !== "command" || mapList.command.name !== "user-map-list") {
+    throw new Error("expected user-map-list command");
+  }
+  assertEquals(mapList.command.asJson, true);
+
+  const excludeMe = parseDaemonCliArgs(["user", "exclude-me", "false"]);
+  assertEquals(excludeMe.kind, "command");
+  if (
+    excludeMe.kind !== "command" || excludeMe.command.name !== "user-exclude-me"
+  ) {
+    throw new Error("expected user-exclude-me command");
+  }
+  assertEquals(excludeMe.command.value, false);
+});
+
 Deno.test("runDaemonCli prints version without loading config", async () => {
   const harness = makeRuntimeHarness(".kato/test-runtime");
 
@@ -527,6 +690,13 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
     const harness = makeRuntimeHarness(runtimeDir);
     const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
     const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+    const {
+      ensureCalls: userEnsureCalls,
+      store: userConfigStore,
+    } = makeInMemoryUserConfigStore(
+      undefined,
+      `${runtimeDir}/kato-user-config.yaml`,
+    );
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
 
@@ -534,6 +704,7 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
       runtime: harness.runtime,
       defaultRuntimeConfig,
       configStore,
+      userConfigStore,
       statusStore,
       controlStore: controlStore.store,
     });
@@ -546,19 +717,26 @@ Deno.test("runDaemonCli init creates both global config files when missing", asy
       harness.stdout.join(""),
       `created default workspace config at ${runtimeDir}/default-kato-workspace-config.yaml`,
     );
+    assertStringIncludes(
+      harness.stdout.join(""),
+      `created user config at ${runtimeDir}/kato-user-config.yaml`,
+    );
     assertEquals(ensureCalls.value, 1);
+    assertEquals(userEnsureCalls.value, 1);
 
     const secondHarness = makeRuntimeHarness(runtimeDir);
     const secondCode = await runDaemonCli(["init"], {
       runtime: secondHarness.runtime,
       defaultRuntimeConfig,
       configStore,
+      userConfigStore,
       statusStore,
       controlStore: controlStore.store,
     });
     assertEquals(secondCode, 0);
     assertStringIncludes(secondHarness.stdout.join(""), "already exists");
     assertEquals(ensureCalls.value, 2);
+    assertEquals(userEnsureCalls.value, 2);
   } finally {
     await removePathIfPresent(runtimeDir);
   }
@@ -570,8 +748,12 @@ Deno.test(
     const runtimeDir = await makeTestTempDir("daemon-cli-init-empty-roots-");
     try {
       const harness = makeRuntimeHarness(runtimeDir);
+      const userConfigStore = new UserConfigFileStore(
+        join(runtimeDir, "kato-user-config.yaml"),
+      );
       const code = await runDaemonCli(["init"], {
         runtime: harness.runtime,
+        userConfigStore,
       });
       assertEquals(code, 0);
       const runtimeConfig = await Deno.readTextFile(
@@ -1218,6 +1400,313 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli user init creates user config and is idempotent",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-user-init-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const harness = makeRuntimeHarness(runtimeDir);
+      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+      const { store: configStore } = makeInMemoryConfigStore();
+      const {
+        ensureCalls: userEnsureCalls,
+        store: userConfigStore,
+      } = makeInMemoryUserConfigStore(
+        undefined,
+        `${runtimeDir}/kato-user-config.yaml`,
+      );
+      const statusStore = makeInMemoryStatusStore();
+      const controlStore = makeInMemoryControlStore();
+
+      const firstCode = await runDaemonCli(["user", "init"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+      assertEquals(firstCode, 0);
+      assertStringIncludes(
+        harness.stdout.join(""),
+        `created user config at ${runtimeDir}/kato-user-config.yaml`,
+      );
+      assertEquals(userEnsureCalls.value, 1);
+
+      const secondHarness = makeRuntimeHarness(runtimeDir);
+      const secondCode = await runDaemonCli(["user", "init"], {
+        runtime: secondHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+      assertEquals(secondCode, 0);
+      assertStringIncludes(
+        secondHarness.stdout.join(""),
+        `user config already exists at ${runtimeDir}/kato-user-config.yaml`,
+      );
+      assertEquals(userEnsureCalls.value, 2);
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test("runDaemonCli user commands manage user participant settings", async () => {
+  const tempDir = await makeTestTempDir("daemon-cli-user-commands-");
+  try {
+    const runtimeDir = join(tempDir, "runtime");
+    const katoDir = join(tempDir, ".kato");
+    const registryPath = join(katoDir, DEFAULT_WORKSPACE_REGISTRY_FILENAME);
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    await Deno.mkdir(katoDir, { recursive: true });
+
+    const workspaceOneId = crypto.randomUUID();
+    const workspaceTwoId = crypto.randomUUID();
+    await Deno.writeTextFile(
+      registryPath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          updatedAt: "2026-03-03T10:00:00.000Z",
+          workspaces: [
+            {
+              workspaceId: workspaceOneId,
+              alias: "My.Proj",
+              workspaceRoot: join(tempDir, "My.Proj"),
+              configPath: join(
+                tempDir,
+                "My.Proj",
+                DEFAULT_WORKSPACE_CONFIG_FILENAME,
+              ),
+              registeredAt: "2026-03-03T10:00:00.000Z",
+            },
+            {
+              workspaceId: workspaceTwoId,
+              alias: "Another.Proj",
+              workspaceRoot: join(tempDir, "Another.Proj"),
+              configPath: join(
+                tempDir,
+                "Another.Proj",
+                DEFAULT_WORKSPACE_CONFIG_FILENAME,
+              ),
+              registeredAt: "2026-03-03T10:00:00.000Z",
+            },
+          ],
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    const defaultRuntimeConfig: RuntimeConfig = {
+      ...makeDefaultRuntimeConfig(runtimeDir),
+      katoDir,
+      allowedWriteRoots: [tempDir, katoDir],
+    };
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const {
+      store: userConfigStore,
+      snapshot,
+    } = makeInMemoryUserConfigStore();
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+
+    const mapSetHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(
+        ["user", "map", "set", "My.Proj", "Dj Radon"],
+        {
+          runtime: mapSetHarness.runtime,
+          defaultRuntimeConfig,
+          configStore,
+          userConfigStore,
+          statusStore,
+          controlStore: controlStore.store,
+        },
+      ),
+      0,
+    );
+    assertStringIncludes(
+      mapSetHarness.stdout.join(""),
+      `user mapping set: My.Proj (${workspaceOneId}) -> Dj Radon`,
+    );
+
+    const secondMapSetHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(
+        ["user", "map", "set", workspaceTwoId, "another-user"],
+        {
+          runtime: secondMapSetHarness.runtime,
+          defaultRuntimeConfig,
+          configStore,
+          userConfigStore,
+          statusStore,
+          controlStore: controlStore.store,
+        },
+      ),
+      0,
+    );
+
+    const defaultSetHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(["user", "default", "set", "Case Sensitive.User"], {
+        runtime: defaultSetHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      }),
+      0,
+    );
+    assertEquals(
+      snapshot().participants.defaultUsername,
+      "Case Sensitive.User",
+    );
+
+    const excludeHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(["user", "exclude-me", "false"], {
+        runtime: excludeHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      }),
+      0,
+    );
+    assertEquals(snapshot().participants.excludeMeFromParticipantList, false);
+
+    const jsonListHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(["user", "map", "list", "--json"], {
+        runtime: jsonListHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      }),
+      0,
+    );
+    const listPayload = JSON.parse(jsonListHarness.stdout.join("")) as {
+      schemaVersion: number;
+      mappings: Array<{
+        workspaceId: string;
+        workspaceAlias: string;
+        username: string;
+      }>;
+    };
+    assertEquals(listPayload.schemaVersion, 1);
+    assertEquals(listPayload.mappings, [
+      {
+        workspaceId: workspaceTwoId,
+        workspaceAlias: "Another.Proj",
+        username: "another-user",
+      },
+      {
+        workspaceId: workspaceOneId,
+        workspaceAlias: "My.Proj",
+        username: "Dj Radon",
+      },
+    ]);
+
+    const mapDeleteHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(["user", "map", "delete", workspaceOneId], {
+        runtime: mapDeleteHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      }),
+      0,
+    );
+    assertEquals(
+      Object.hasOwn(snapshot().participants.workspaceUsernames, workspaceOneId),
+      false,
+    );
+
+    const defaultClearHarness = makeRuntimeHarness(runtimeDir);
+    assertEquals(
+      await runDaemonCli(["user", "default", "clear"], {
+        runtime: defaultClearHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      }),
+      0,
+    );
+    assertEquals(snapshot().participants.defaultUsername, "");
+  } finally {
+    await removePathIfPresent(tempDir);
+  }
+});
+
+Deno.test("runDaemonCli user map set/delete fail for unknown workspace selectors", async () => {
+  const tempDir = await makeTestTempDir("daemon-cli-user-unknown-workspace-");
+  try {
+    const runtimeDir = join(tempDir, "runtime");
+    const katoDir = join(tempDir, ".kato");
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    await Deno.mkdir(katoDir, { recursive: true });
+
+    const defaultRuntimeConfig: RuntimeConfig = {
+      ...makeDefaultRuntimeConfig(runtimeDir),
+      katoDir,
+      allowedWriteRoots: [tempDir, katoDir],
+    };
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const { store: userConfigStore } = makeInMemoryUserConfigStore();
+    const statusStore = makeInMemoryStatusStore();
+    const controlStore = makeInMemoryControlStore();
+
+    const setHarness = makeRuntimeHarness(runtimeDir);
+    const setCode = await runDaemonCli(
+      ["user", "map", "set", "missing-workspace", "alice"],
+      {
+        runtime: setHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      },
+    );
+    assertEquals(setCode, 1);
+    assertStringIncludes(setHarness.stderr.join(""), "Workspace not found");
+
+    const deleteHarness = makeRuntimeHarness(runtimeDir);
+    const deleteCode = await runDaemonCli(
+      ["user", "map", "delete", "missing-workspace"],
+      {
+        runtime: deleteHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        userConfigStore,
+        statusStore,
+        controlStore: controlStore.store,
+      },
+    );
+    assertEquals(deleteCode, 1);
+    assertStringIncludes(deleteHarness.stderr.join(""), "Workspace not found");
+  } finally {
+    await removePathIfPresent(tempDir);
+  }
+});
+
+Deno.test(
   "runDaemonCli start auto-initializes runtime config when missing",
   async () => {
     const runtimeDir = await makeTestTempDir("daemon-cli-start-auto-init-");
@@ -1231,11 +1720,19 @@ Deno.test(
       );
       const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
       const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+      const {
+        ensureCalls: userEnsureCalls,
+        store: userConfigStore,
+      } = makeInMemoryUserConfigStore(
+        undefined,
+        `${runtimeDir}/kato-user-config.yaml`,
+      );
 
       const code = await runDaemonCli(["start"], {
         runtime: harness.runtime,
         defaultRuntimeConfig,
         configStore,
+        userConfigStore,
         statusStore,
         controlStore: controlStore.store,
         daemonLauncher: daemonLauncher.launcher,
@@ -1247,8 +1744,13 @@ Deno.test(
         harness.stdout.join(""),
         `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
       );
+      assertStringIncludes(
+        harness.stdout.join(""),
+        `initialized user config at ${runtimeDir}/kato-user-config.yaml`,
+      );
       assertStringIncludes(harness.stdout.join(""), "started in background");
       assertEquals(ensureCalls.value, 1);
+      assertEquals(userEnsureCalls.value, 1);
     } finally {
       await removePathIfPresent(runtimeDir);
     }
@@ -1269,11 +1771,19 @@ Deno.test(
       );
       const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
       const { ensureCalls, store: configStore } = makeInMemoryConfigStore();
+      const {
+        ensureCalls: userEnsureCalls,
+        store: userConfigStore,
+      } = makeInMemoryUserConfigStore(
+        undefined,
+        `${runtimeDir}/kato-user-config.yaml`,
+      );
 
       const code = await runDaemonCli(["restart"], {
         runtime: harness.runtime,
         defaultRuntimeConfig,
         configStore,
+        userConfigStore,
         statusStore,
         controlStore: controlStore.store,
         daemonLauncher: daemonLauncher.launcher,
@@ -1285,8 +1795,13 @@ Deno.test(
         harness.stdout.join(""),
         `initialized runtime config at ${runtimeDir}/kato-config.yaml`,
       );
+      assertStringIncludes(
+        harness.stdout.join(""),
+        `initialized user config at ${runtimeDir}/kato-user-config.yaml`,
+      );
       assertStringIncludes(harness.stdout.join(""), "started in background");
       assertEquals(ensureCalls.value, 1);
+      assertEquals(userEnsureCalls.value, 1);
     } finally {
       await removePathIfPresent(runtimeDir);
     }

@@ -5,20 +5,14 @@ import type {
   MarkdownFrontmatterConfig,
   ProviderStatus,
   SessionMetadataV1,
+  UserConfig,
 } from "@kato/shared";
 import {
   extractSnippet,
   projectSessionStatus,
   sortSessionsByRecency,
 } from "@kato/shared";
-import {
-  basename,
-  extname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-} from "@std/path";
+import { extname, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -73,7 +67,10 @@ import {
   type WorkspaceProfileResolverLike,
   WorkspaceRegistryFileStore,
 } from "../workspace/mod.ts";
-import { readOptionalEnv, resolveHomeDir } from "../utils/env.ts";
+import {
+  createDefaultUserConfig,
+  resolveFrontmatterParticipantUsername,
+} from "../config/mod.ts";
 
 interface SessionExportSnapshot {
   provider: string;
@@ -101,6 +98,7 @@ export interface DaemonRuntimeLoopOptions {
   exportsLogPath?: string;
   cleanSessionStatesOnShutdown?: boolean;
   daemonFeatureFlags?: DaemonFeatureFlags;
+  userConfig?: UserConfig;
   defaultCliExportOutputOverrides?: RecordingOutputOverrides;
   workspaceRegistryStore?: WorkspaceRegistryFileStore;
   workspaceCatalog?: WorkspaceCatalogLike;
@@ -198,6 +196,7 @@ interface ProcessInChatRecordingUpdatesOptions {
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
 }
 
 interface ProcessPersistentRecordingUpdatesOptions {
@@ -210,6 +209,7 @@ interface ProcessPersistentRecordingUpdatesOptions {
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -227,6 +227,7 @@ interface ApplyControlCommandsForEventOptions {
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
 }
 
 function makeSessionProcessingKey(provider: string, sessionId: string): string {
@@ -327,6 +328,7 @@ interface PersistentRecordingCommandContext {
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
 }
 
 interface InChatCommandBoundary {
@@ -1108,55 +1110,23 @@ function resolveBindingForRetargetedWorkspacePath(options: {
   return toWorkspaceDestinationBinding(options.profile, options.resolvedPath);
 }
 
-function normalizeFrontmatterParticipantUsername(
-  value: string | undefined,
-): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9._-]/g, "");
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function resolveConfiguredParticipantUsername(
-  markdownFrontmatter: MarkdownFrontmatterConfig,
-): string | undefined {
-  if (!markdownFrontmatter.addParticipantUsernameToFrontmatter) {
-    return undefined;
-  }
-  const configured = normalizeFrontmatterParticipantUsername(
-    markdownFrontmatter.defaultParticipantUsername,
-  );
-  if (configured) {
-    return configured;
-  }
-  const envUser = normalizeFrontmatterParticipantUsername(
-    readOptionalEnv("USER") ?? readOptionalEnv("USERNAME"),
-  );
-  if (envUser) {
-    return envUser;
-  }
-  const home = resolveHomeDir();
-  return normalizeFrontmatterParticipantUsername(
-    home ? basename(home) : undefined,
-  );
-}
-
 function createOutputOverridesFromWorkspaceProfile(
   profile: ResolvedWorkspaceProfile,
   captureIncludeSystemEvents: boolean,
+  userConfig: UserConfig,
 ): RecordingOutputOverrides {
   return createOutputOverrides({
+    workspaceId: profile.workspaceId,
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
     workspaceTimezone: profile.workspaceTimezone,
     captureIncludeSystemEvents,
+    userConfig,
   });
 }
 
 function createOutputOverrides(options: {
+  workspaceId?: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: {
     writerIncludeCommentary: boolean;
@@ -1170,6 +1140,7 @@ function createOutputOverrides(options: {
   };
   workspaceTimezone: string;
   captureIncludeSystemEvents: boolean;
+  userConfig: UserConfig;
 }): RecordingOutputOverrides {
   return {
     includeFrontmatter:
@@ -1181,8 +1152,12 @@ function createOutputOverrides(options: {
     includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
-    participantUsername: resolveConfiguredParticipantUsername(
-      options.markdownFrontmatter,
+    participantUsername: resolveFrontmatterParticipantUsername(
+      {
+        markdownFrontmatter: options.markdownFrontmatter,
+        userConfig: options.userConfig,
+        workspaceId: options.workspaceId,
+      },
     ),
     renderOptions: {
       includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
@@ -1209,6 +1184,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
 }): Promise<RecordingOutputOverrides> {
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
@@ -1220,6 +1196,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     return createOutputOverridesFromWorkspaceProfile(
       profile,
       options.captureIncludeSystemEvents,
+      options.userConfig,
     );
   }
 
@@ -1231,6 +1208,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           options.output.sourceConfigPath,
         );
         return createOutputOverrides({
+          workspaceId: options.output.workspaceId,
           markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(
             overrides.markdownFrontmatter,
           ),
@@ -1240,6 +1218,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           workspaceTimezone: overrides.workspaceTimezone ??
             DEFAULT_WORKSPACE_TIMEZONE,
           captureIncludeSystemEvents: options.captureIncludeSystemEvents,
+          userConfig: options.userConfig,
         });
       }
     } catch (error) {
@@ -1250,12 +1229,14 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
   }
 
   return createOutputOverrides({
+    workspaceId: options.output.workspaceId,
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
       options.output.writerFeatureFlags,
     ),
     workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
+    userConfig: options.userConfig,
   });
 }
 
@@ -1411,6 +1392,7 @@ async function applyPersistentControlCommandsForEvent(
     captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
+    userConfig,
   } = ctx;
 
   const detection = detectInChatControlCommands(event.content);
@@ -1503,6 +1485,7 @@ async function applyPersistentControlCommandsForEvent(
         const outputOverrides = createOutputOverridesFromWorkspaceProfile(
           profile,
           captureIncludeSystemEvents,
+          userConfig,
         );
         let output = findWorkspaceOutput(metadata, workspace.workspaceId);
 
@@ -1853,6 +1836,7 @@ async function applyControlCommandsForEvent(
     captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
+    userConfig,
   } = options;
 
   const detection = detectInChatControlCommands(event.content);
@@ -1945,6 +1929,7 @@ async function applyControlCommandsForEvent(
         const outputOverrides = createOutputOverridesFromWorkspaceProfile(
           profile,
           captureIncludeSystemEvents,
+          userConfig,
         );
         const existingState = sessionEventState.workspaceOutputs.get(
           workspace.workspaceId,
@@ -2254,6 +2239,7 @@ async function processInChatRecordingUpdates(
     captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
+    userConfig,
   } = options;
 
   // Use metadata-only listing to avoid deep-cloning events for every session
@@ -2359,6 +2345,7 @@ async function processInChatRecordingUpdates(
           captureIncludeSystemEvents,
           workspaceCatalog,
           workspaceProfileResolver,
+          userConfig,
         });
       }
 
@@ -2457,6 +2444,7 @@ async function processPersistentRecordingUpdates(
     captureIncludeSystemEvents,
     workspaceCatalog,
     workspaceProfileResolver,
+    userConfig,
   } = options;
 
   const snapshots = sessionSnapshotStore.listMetadataOnly
@@ -2526,6 +2514,7 @@ async function processPersistentRecordingUpdates(
         captureIncludeSystemEvents,
         workspaceCatalog,
         workspaceProfileResolver,
+        userConfig,
       });
       metadataChanged = metadataChanged || changed;
     }
@@ -2575,6 +2564,7 @@ async function processPersistentRecordingUpdates(
           captureIncludeSystemEvents,
           workspaceCatalog,
           workspaceProfileResolver,
+          userConfig,
         });
         await recordingPipeline.appendToDestination({
           provider,
@@ -2964,6 +2954,19 @@ export async function runDaemonRuntimeLoop(
     daemonExportEnabled: true,
     captureIncludeSystemEvents: false,
   };
+  const userConfig = options.userConfig
+    ? {
+      schemaVersion: options.userConfig.schemaVersion,
+      participants: {
+        defaultUsername: options.userConfig.participants.defaultUsername,
+        workspaceUsernames: {
+          ...options.userConfig.participants.workspaceUsernames,
+        },
+        excludeMeFromParticipantList:
+          options.userConfig.participants.excludeMeFromParticipantList,
+      },
+    }
+    : createDefaultUserConfig();
   const daemonMaxMemoryBytes = (options.daemonMaxMemoryMb ?? 200) * 1024 *
     1024;
 
@@ -3138,6 +3141,7 @@ export async function runDaemonRuntimeLoop(
                 daemonFeatureFlags.captureIncludeSystemEvents,
               workspaceCatalog,
               workspaceProfileResolver,
+              userConfig,
             });
           sessionMetadataMayHaveChanged = sessionMetadataMayHaveChanged ||
             persistentUpdatesChanged;
@@ -3154,6 +3158,7 @@ export async function runDaemonRuntimeLoop(
               daemonFeatureFlags.captureIncludeSystemEvents,
             workspaceCatalog,
             workspaceProfileResolver,
+            userConfig,
           });
         }
       } catch (error) {

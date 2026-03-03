@@ -27,6 +27,8 @@ export type {
   RuntimeConfigMetadata,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
+  UserConfig,
+  UserParticipantsConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {

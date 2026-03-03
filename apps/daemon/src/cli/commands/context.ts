@@ -7,7 +7,10 @@ import type {
   DaemonStatusSnapshotStoreLike,
 } from "../../orchestrator/mod.ts";
 import type { WritePathPolicyGateLike } from "../../policy/mod.ts";
-import type { RuntimeConfigStoreLike } from "../../config/mod.ts";
+import type {
+  RuntimeConfigStoreLike,
+  UserConfigStoreLike,
+} from "../../config/mod.ts";
 
 export interface DaemonCliCommandContext {
   runtime: DaemonCliRuntime;
@@ -20,4 +23,5 @@ export interface DaemonCliCommandContext {
   pathPolicyGate: WritePathPolicyGateLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
+  resolveUserConfigStore: () => UserConfigStoreLike;
 }

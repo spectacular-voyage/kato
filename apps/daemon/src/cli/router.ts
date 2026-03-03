@@ -18,8 +18,11 @@ import {
 import {
   createDefaultRuntimeConfig,
   resolveDefaultConfigPath,
+  resolveDefaultUserConfigPath,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
+  UserConfigFileStore,
+  type UserConfigStoreLike,
 } from "../config/mod.ts";
 import {
   WritePathPolicyGate,
@@ -39,6 +42,13 @@ import {
   runStartCommand,
   runStatusCommand,
   runStopCommand,
+  runUserDefaultClearCommand,
+  runUserDefaultSetCommand,
+  runUserExcludeMeCommand,
+  runUserInitCommand,
+  runUserMapDeleteCommand,
+  runUserMapListCommand,
+  runUserMapSetCommand,
   runWorkspaceInitCommand,
   runWorkspaceListCommand,
   runWorkspaceRegisterCommand,
@@ -53,6 +63,7 @@ export interface RunDaemonCliOptions {
   controlStore?: DaemonControlRequestStoreLike;
   daemonLauncher?: DaemonProcessLauncherLike;
   pathPolicyGate?: WritePathPolicyGateLike;
+  userConfigStore?: UserConfigStoreLike;
   autoInitOnStart?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -150,6 +161,15 @@ export async function runDaemonCli(
   const runtime = buildRuntime(options.runtime);
   const autoInitOnStart = options.autoInitOnStart ??
     resolveAutoInitOnStartDefault();
+  let cachedUserConfigStore: UserConfigStoreLike | undefined;
+  const resolveUserConfigStore = (): UserConfigStoreLike => {
+    if (cachedUserConfigStore) {
+      return cachedUserConfigStore;
+    }
+    cachedUserConfigStore = options.userConfigStore ??
+      new UserConfigFileStore(resolveDefaultUserConfigPath());
+    return cachedUserConfigStore;
+  };
 
   const defaultRuntimeConfig = options.defaultRuntimeConfig ??
     createDefaultRuntimeConfig({
@@ -203,12 +223,21 @@ export async function runDaemonCli(
   let runtimeConfig = defaultRuntimeConfig;
   let autoInitializedRuntimeConfigPath: string | undefined;
   let autoInitializedDefaultWorkspaceConfigPath: string | undefined;
+  let autoInitializedUserConfigPath: string | undefined;
   const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
     intent.command.name === "workspace-init" ||
     intent.command.name === "workspace-register" ||
     intent.command.name === "workspace-list" ||
-    intent.command.name === "workspace-unregister";
-  const commandShouldTryLoadingRuntimeConfig = intent.command.name !== "init";
+    intent.command.name === "workspace-unregister" ||
+    intent.command.name === "user-init" ||
+    intent.command.name === "user-map-set" ||
+    intent.command.name === "user-map-list" ||
+    intent.command.name === "user-map-delete" ||
+    intent.command.name === "user-default-set" ||
+    intent.command.name === "user-default-clear" ||
+    intent.command.name === "user-exclude-me";
+  const commandShouldTryLoadingRuntimeConfig = intent.command.name !== "init" &&
+    intent.command.name !== "user-init";
   if (commandShouldTryLoadingRuntimeConfig) {
     try {
       runtimeConfig = await configStore.load();
@@ -220,6 +249,7 @@ export async function runDaemonCli(
         ) {
           const initialized = await ensureGlobalConfigInitialized({
             configStore,
+            userConfigStore: resolveUserConfigStore(),
             defaultRuntimeConfig,
             runtimeConfigPath: runtime.configPath,
           });
@@ -229,6 +259,9 @@ export async function runDaemonCli(
           if (initialized.defaultWorkspaceConfigCreated) {
             autoInitializedDefaultWorkspaceConfigPath =
               initialized.defaultWorkspaceConfigPath;
+          }
+          if (initialized.userConfigCreated) {
+            autoInitializedUserConfigPath = initialized.userConfigPath;
           }
           // Reload after init so persisted path shorthands (e.g. "~") are
           // expanded by the store's own load logic.
@@ -282,12 +315,14 @@ export async function runDaemonCli(
     pathPolicyGate,
     operationalLogger,
     auditLogger,
+    resolveUserConfigStore,
   };
 
   if (
     (intent.command.name === "start" || intent.command.name === "restart") &&
     (autoInitializedRuntimeConfigPath ||
-      autoInitializedDefaultWorkspaceConfigPath)
+      autoInitializedDefaultWorkspaceConfigPath ||
+      autoInitializedUserConfigPath)
   ) {
     const lines: string[] = [];
     if (autoInitializedRuntimeConfigPath) {
@@ -298,6 +333,11 @@ export async function runDaemonCli(
     if (autoInitializedDefaultWorkspaceConfigPath) {
       lines.push(
         `initialized default workspace config at ${autoInitializedDefaultWorkspaceConfigPath}`,
+      );
+    }
+    if (autoInitializedUserConfigPath) {
+      lines.push(
+        `initialized user config at ${autoInitializedUserConfigPath}`,
       );
     }
     runtime.writeStdout(`${lines.join("\n")}\n`);
@@ -359,6 +399,31 @@ export async function runDaemonCli(
           recordingsDays: intent.command.recordingsDays,
           sessionsDays: intent.command.sessionsDays,
         });
+        return 0;
+      case "user-map-set":
+        await runUserMapSetCommand(
+          commandContext,
+          intent.command.selector,
+          intent.command.username,
+        );
+        return 0;
+      case "user-init":
+        await runUserInitCommand(commandContext);
+        return 0;
+      case "user-map-list":
+        await runUserMapListCommand(commandContext, intent.command.asJson);
+        return 0;
+      case "user-map-delete":
+        await runUserMapDeleteCommand(commandContext, intent.command.selector);
+        return 0;
+      case "user-default-set":
+        await runUserDefaultSetCommand(commandContext, intent.command.username);
+        return 0;
+      case "user-default-clear":
+        await runUserDefaultClearCommand(commandContext);
+        return 0;
+      case "user-exclude-me":
+        await runUserExcludeMeCommand(commandContext, intent.command.value);
         return 0;
     }
   } catch (error) {

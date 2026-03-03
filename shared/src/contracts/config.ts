@@ -27,11 +27,21 @@ export interface MarkdownFrontmatterConfig {
   includeFrontmatterInMarkdownRecordings: boolean;
   includeUpdatedInFrontmatter: boolean;
   addParticipantUsernameToFrontmatter: boolean;
-  defaultParticipantUsername: string;
   includeSessionIds: boolean;
   includeWorkspaceIds: boolean;
   includeRecordingIds: boolean;
   includeConversationEventKinds: boolean;
+}
+
+export interface UserParticipantsConfig {
+  defaultUsername: string;
+  workspaceUsernames: Record<string, string>;
+  excludeMeFromParticipantList: boolean;
+}
+
+export interface UserConfig {
+  schemaVersion: 1;
+  participants: UserParticipantsConfig;
 }
 
 export interface ProviderSessionRoots {

@@ -29,6 +29,8 @@ const GLOBAL_USAGE_BODY = [
   "                        Queue one-off export request",
   "  clean [--all|--logs|--recordings <days>|--sessions <days>] [--dry-run]",
   "                        Run cleanup immediately in CLI",
+  "  user <init|map|default|exclude-me>",
+  "                        Manage per-user participant username settings",
   "",
   "Run `kato help <command>` for command-specific usage.",
 ].join("\n");
@@ -37,7 +39,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   init: [
     "Usage: kato init",
     "",
-    "Creates ~/.kato/kato-config.yaml and ~/.kato/default-kato-workspace-config.yaml when missing.",
+    "Creates ~/.kato/kato-config.yaml, ~/.kato/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
   ].join("\n"),
   start: [
     "Usage: kato start",
@@ -101,6 +103,19 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "--sessions deletes persisted session twins/metadata older than <days>.",
     "--sessions refuses to run while daemon status is actively running.",
     "--recordings is accepted but currently a no-op placeholder.",
+  ].join("\n"),
+  user: [
+    "Usage:",
+    "  kato user init",
+    "  kato user map set <workspace-alias-or-id> <username>",
+    "  kato user map list [--json]",
+    "  kato user map delete <workspace-alias-or-id>",
+    "  kato user default set <username>",
+    "  kato user default clear",
+    "  kato user exclude-me <true|false>",
+    "",
+    "Manages ~/.kato/kato-user-config.yaml participant settings.",
+    "Workspace selectors must resolve to a registered workspace alias or workspaceId.",
   ].join("\n"),
 };
 

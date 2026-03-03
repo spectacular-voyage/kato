@@ -1,7 +1,7 @@
 ---
 id: 2twwyf05s2u40rr4zc302dp
 title: 2026 03 03 Fix Default User
-desc: ''
+desc: ""
 updated: 1772556756499
 created: 1772555024000
 ---
@@ -30,7 +30,8 @@ This task also includes new `kato user ...` commands for mapping CRUD.
 
 When `addParticipantUsernameToFrontmatter` is `true`:
 
-1. if `participants.excludeMeFromParticipantList` is `true`, omit user participant
+1. if `participants.excludeMeFromParticipantList` is `true`, omit user
+   participant
 2. if workspace has mapping in `participants.workspaceUsernames[workspaceId]`,
    include that username
 3. else if `participants.defaultUsername` is non-empty, include that username
@@ -62,18 +63,21 @@ Usernames preserve case and punctuation except control chars.
 - `workspaceUsernames` keys remain `workspaceId` for stability.
 - Unregistering a workspace does not auto-prune mappings.
 - A follow-up `kato user map prune` command can be added later.
+- `kato user init` is idempotent: create on first run, "already exists" on
+  subsequent runs.
 
 ### Command/state scenario table
 
-| Scenario | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes |
-| --- | --- | --- | --- | --- |
-| `kato init` with no configs | Yes | N/A | Yes | Creates `kato-config.yaml`, `default-kato-workspace-config.yaml`, and `kato-user-config.yaml`. |
-| `kato start` auto-init path when configs missing | Yes | N/A | Yes | Auto-init also creates `kato-user-config.yaml`. |
-| `kato user map set <alias> <username>` | Yes | N/A | Yes | Alias must resolve to registered workspaceId or command fails hard. |
-| `kato user map delete <alias-or-id>` unknown target | Yes | N/A | Yes | Fail hard; no mutation. |
-| `kato user map list` | Yes | N/A | Yes | Default text output for humans. |
-| `kato user map list --json` | Yes | N/A | Yes | Stable machine-readable schema (see Contract Changes). |
-| recording/export with no explicit username config | Yes | Yes | Yes | User participant omitted; no env/OS fallback. |
+| Scenario                                            | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes                                                                   |
+| --------------------------------------------------- | ------------------ | ---------------------- | -------------- | ---------------------------------------------------------------------------------------------- |
+| `kato init` with no configs                         | Yes                | N/A                    | Yes            | Creates `kato-config.yaml`, `default-kato-workspace-config.yaml`, and `kato-user-config.yaml`. |
+| `kato start` auto-init path when configs missing    | Yes                | N/A                    | Yes            | Auto-init also creates `kato-user-config.yaml`.                                                |
+| `kato user init`                                    | Yes                | N/A                    | Yes            | Explicitly creates `kato-user-config.yaml` if missing; otherwise reports already exists.       |
+| `kato user map set <alias> <username>`              | Yes                | N/A                    | Yes            | Alias must resolve to registered workspaceId or command fails hard.                            |
+| `kato user map delete <alias-or-id>` unknown target | Yes                | N/A                    | Yes            | Fail hard; no mutation.                                                                        |
+| `kato user map list`                                | Yes                | N/A                    | Yes            | Default text output for humans.                                                                |
+| `kato user map list --json`                         | Yes                | N/A                    | Yes            | Stable machine-readable schema (see Contract Changes).                                         |
+| recording/export with no explicit username config   | Yes                | Yes                    | Yes            | User participant omitted; no env/OS fallback.                                                  |
 
 ## Contract Changes
 
@@ -99,6 +103,7 @@ participants:
 
 Add `kato user` command surface:
 
+- `kato user init`
 - `kato user map set <workspace-alias-or-id> <username>`
 - `kato user map list [--json]`
 - `kato user map delete <workspace-alias-or-id>`
@@ -130,26 +135,27 @@ Ordering rule: `mappings` sorted by `workspaceAlias`, then `workspaceId`.
 
 ## Testing
 
-- [ ] `tests/user-config_test.ts`:
+- [x] `tests/user-config_test.ts`:
   - default creation/scaffold
   - valid parse
   - unknown key/type rejection
-  - username validation (trim, empty rejection, control-char rejection, length cap)
-- [ ] `tests/daemon-cli_test.ts`:
+  - username validation (trim, empty rejection, control-char rejection, length
+    cap)
+- [x] `tests/daemon-cli_test.ts`:
   - `init` creates user config
   - `start/restart` auto-init also creates user config
   - repeated init reports already exists
-- [ ] `kato user` command tests:
+- [x] `kato user` command tests:
   - map set/list/delete success
   - map set/delete unknown alias/id fail hard
   - list `--json` schema and ordering
   - default set/clear behavior
   - exclude-me toggle behavior
-- [ ] resolver tests:
+- [x] resolver tests:
   - precedence order (exclude -> workspace map -> default -> omit)
   - no participant when `addParticipantUsernameToFrontmatter=false`
   - no env/OS fallback paths
-- [ ] integration coverage in recording/export tests:
+- [x] integration coverage in recording/export tests:
   - workspace output uses workspaceId mapping
   - non-workspace export uses `defaultUsername`
   - participant omitted when no explicit username exists
@@ -165,51 +171,51 @@ Ordering rule: `mappings` sorted by `workspaceAlias`, then `workspaceId`.
 
 ### A) Remove legacy `defaultParticipantUsername` end-to-end
 
-- [ ] Remove field from shared contract and all runtime/workspace config
+- [x] Remove field from shared contract and all runtime/workspace config
       parser/default/scaffold paths.
-- [ ] Remove resolver usage and all env/home fallback logic in `main.ts` and
+- [x] Remove resolver usage and all env/home fallback logic in `main.ts` and
       `daemon_runtime.ts`.
-- [ ] Update docs/tests/fixtures that still reference the legacy key.
+- [x] Update docs/tests/fixtures that still reference the legacy key.
 
 ### B) Add user config module
 
-- [ ] Add `apps/daemon/src/config/user_config.ts` with:
+- [x] Add `apps/daemon/src/config/user_config.ts` with:
   - `resolveDefaultUserConfigPath()` targeting `~/.kato/kato-user-config.yaml`
   - scaffold creation
   - parser/validator (fail-closed on invalid shape/unknown keys)
   - `UserConfigFileStore` with `load()` and `ensureInitialized()`
-- [ ] Export new APIs via `apps/daemon/src/config/mod.ts` and
+- [x] Export new APIs via `apps/daemon/src/config/mod.ts` and
       `apps/daemon/src/mod.ts`.
 
 ### C) Init/auto-init integration
 
-- [ ] Update `ensureGlobalConfigInitialized` to also ensure user config.
-- [ ] Update `kato init` output and telemetry for user-config create/exist
+- [x] Update `ensureGlobalConfigInitialized` to also ensure user config.
+- [x] Update `kato init` output and telemetry for user-config create/exist
       status.
-- [ ] Ensure `start/restart` auto-init path also creates user config.
-- [ ] Update CLI usage/help text mentioning created files and `kato user`.
+- [x] Ensure `start/restart` auto-init path also creates user config.
+- [x] Update CLI usage/help text mentioning created files and `kato user`.
 
 ### D) Unify participant username resolver
 
-- [ ] Introduce one shared resolver utility (single source of truth) used by
+- [x] Introduce one shared resolver utility (single source of truth) used by
       `main.ts` and `daemon_runtime.ts`.
-- [ ] Inputs:
+- [x] Inputs:
   - frontmatter flag (`addParticipantUsernameToFrontmatter`)
   - workspaceId (optional)
   - user config
-- [ ] Ensure resolver implements explicit-only policy and validation rules.
+- [x] Ensure resolver implements explicit-only policy and validation rules.
 
 ### E) Implement `kato user` command group
 
-- [ ] Add parser/router/usage entries for all `kato user` subcommands.
-- [ ] Implement alias-or-id resolution through workspace registry with hard
+- [x] Add parser/router/usage entries for all `kato user` subcommands.
+- [x] Implement alias-or-id resolution through workspace registry with hard
       failure on unknown target.
-- [ ] Implement list text mode and `--json` mode with stable ordering/schema.
-- [ ] Ensure commands lazily initialize user config when missing.
+- [x] Implement list text mode and `--json` mode with stable ordering/schema.
+- [x] Ensure commands lazily initialize user config when missing.
 
 ### F) Documentation + merge checklist
 
-- [ ] Update README with new user config schema and privacy behavior.
-- [ ] Update sample docs such as `dev-docs/notes/kato-workspace-config.yaml`
-      to remove legacy key.
+- [x] Update README with new user config schema and privacy behavior.
+- [x] Update sample docs such as `dev-docs/notes/kato-workspace-config.yaml` to
+      remove legacy key.
 - [ ] Update [[dev.codebase-overview]] and [[dev.decision-log]] before merge.

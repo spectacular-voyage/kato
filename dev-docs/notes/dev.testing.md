@@ -16,15 +16,15 @@ packaging, prefer a compiled binary with explicitly scoped permissions.
 
 ## Filesystem Space for Tests
 
-`.test-tmp/` is the designated scratch directory for tests that need to touch the
-real filesystem (e.g. creating config files, writing outputs). It is listed in
-`.gitignore` so artifacts left behind do not pollute the repo or diff.
+`.test-tmp/` is the designated scratch directory for tests that need to touch
+the real filesystem (e.g. creating config files, writing outputs). It is listed
+in `.gitignore` so artifacts left behind do not pollute the repo or diff.
 
 Use it any time a test must write to an actual path instead of an in-memory
-store. Prefer `makeTestTempDir("my-test-prefix-")` from `tests/test_temp.ts`
-to get a unique subdirectory under `.test-tmp/` that can be removed in a
-`finally` block. If you hard-code a path (e.g. for tests that don't need
-isolation), use `.test-tmp/` as the parent so it stays out of `.kato/`.
+store. Prefer `makeTestTempDir("my-test-prefix-")` from `tests/test_temp.ts` to
+get a unique subdirectory under `.test-tmp/` that can be removed in a `finally`
+block. If you hard-code a path (e.g. for tests that don't need isolation), use
+`.test-tmp/` as the parent so it stays out of `.kato/`.
 
 ## Test Levels
 
@@ -73,6 +73,8 @@ Expected:
   - `created runtime config at ...`, or
   - `runtime config already exists at ...`
 - `~/.kato/kato-config.yaml` exists.
+- `~/.kato/default-kato-workspace-config.yaml` exists.
+- `~/.kato/kato-user-config.yaml` exists.
 
 ### 2) Configure provider roots and seed fixture
 
@@ -171,7 +173,8 @@ Expected:
 
 ### 8) Fail-closed config check (unknown feature flag)
 
-1. Edit `~/.kato/kato-config.yaml` and add an unknown key under `featureFlags`, e.g.:
+1. Edit `~/.kato/kato-config.yaml` and add an unknown key under `featureFlags`,
+   e.g.:
    - `futureFlagThatDoesNotExist: true`
 2. Run:
 

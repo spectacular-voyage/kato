@@ -1,10 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CliUsageError } from "./errors.ts";
-import type {
-  DaemonCliCommand,
-  DaemonCliCommandName,
-  DaemonCliIntent,
-} from "./types.ts";
+import type { DaemonCliCommand, DaemonCliIntent } from "./types.ts";
 
 interface ParsedArgs {
   _: (string | number)[];
@@ -35,7 +31,7 @@ function toPositionals(parsed: ParsedArgs): string[] {
 }
 
 function requireNoPositionals(
-  commandName: DaemonCliCommandName,
+  commandName: string,
   values: string[],
 ): void {
   if (values.length > 0) {
@@ -322,6 +318,191 @@ function parseClean(rest: string[]): DaemonCliIntent {
   return { kind: "command", command };
 }
 
+function parseUserMap(rest: string[]): DaemonCliIntent {
+  const [subcommand, ...subRest] = rest;
+  if (!subcommand) {
+    throw new CliUsageError(
+      "Usage: kato user map <set|list|delete> [options]",
+    );
+  }
+
+  if (subcommand === "set") {
+    const parsed = parseStrictArgs(subRest, {
+      boolean: ["help"],
+      alias: { h: "help" },
+    });
+    if (parsed.help === true) {
+      return { kind: "help", topic: "user" };
+    }
+    const positionals = toPositionals(parsed);
+    if (positionals.length !== 2) {
+      throw new CliUsageError(
+        "Command 'user map set' requires exactly two positional arguments: <workspace-alias-or-id> <username>",
+      );
+    }
+    return {
+      kind: "command",
+      command: {
+        name: "user-map-set",
+        selector: positionals[0]!,
+        username: positionals[1]!,
+      },
+    };
+  }
+
+  if (subcommand === "list") {
+    const parsed = parseStrictArgs(subRest, {
+      boolean: ["help", "json"],
+      alias: { h: "help" },
+    });
+    if (parsed.help === true) {
+      return { kind: "help", topic: "user" };
+    }
+    requireNoPositionals("user-map-list", toPositionals(parsed));
+    return {
+      kind: "command",
+      command: {
+        name: "user-map-list",
+        asJson: parsed.json === true,
+      },
+    };
+  }
+
+  if (subcommand === "delete") {
+    const parsed = parseStrictArgs(subRest, {
+      boolean: ["help"],
+      alias: { h: "help" },
+    });
+    if (parsed.help === true) {
+      return { kind: "help", topic: "user" };
+    }
+    const positionals = toPositionals(parsed);
+    if (positionals.length !== 1) {
+      throw new CliUsageError(
+        "Command 'user map delete' requires exactly one <workspace-alias-or-id> positional argument",
+      );
+    }
+    return {
+      kind: "command",
+      command: { name: "user-map-delete", selector: positionals[0]! },
+    };
+  }
+
+  throw new CliUsageError(`Unknown user map subcommand: ${subcommand}`);
+}
+
+function parseUserDefault(rest: string[]): DaemonCliIntent {
+  const [subcommand, ...subRest] = rest;
+  if (!subcommand) {
+    throw new CliUsageError(
+      "Usage: kato user default <set|clear> [options]",
+    );
+  }
+
+  if (subcommand === "set") {
+    const parsed = parseStrictArgs(subRest, {
+      boolean: ["help"],
+      alias: { h: "help" },
+    });
+    if (parsed.help === true) {
+      return { kind: "help", topic: "user" };
+    }
+    const positionals = toPositionals(parsed);
+    if (positionals.length !== 1) {
+      throw new CliUsageError(
+        "Command 'user default set' requires exactly one <username> positional argument",
+      );
+    }
+    return {
+      kind: "command",
+      command: {
+        name: "user-default-set",
+        username: positionals[0]!,
+      },
+    };
+  }
+
+  if (subcommand === "clear") {
+    const parsed = parseStrictArgs(subRest, {
+      boolean: ["help"],
+      alias: { h: "help" },
+    });
+    if (parsed.help === true) {
+      return { kind: "help", topic: "user" };
+    }
+    requireNoPositionals("user-default-clear", toPositionals(parsed));
+    return { kind: "command", command: { name: "user-default-clear" } };
+  }
+
+  throw new CliUsageError(`Unknown user default subcommand: ${subcommand}`);
+}
+
+function parseUserExcludeMe(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+  if (parsed.help === true) {
+    return { kind: "help", topic: "user" };
+  }
+
+  const positionals = toPositionals(parsed);
+  if (positionals.length !== 1) {
+    throw new CliUsageError(
+      "Command 'user exclude-me' requires exactly one <true|false> positional argument",
+    );
+  }
+
+  const raw = positionals[0]!.trim().toLowerCase();
+  if (raw !== "true" && raw !== "false") {
+    throw new CliUsageError(
+      "Command 'user exclude-me' requires <true|false>",
+    );
+  }
+
+  return {
+    kind: "command",
+    command: { name: "user-exclude-me", value: raw === "true" },
+  };
+}
+
+function parseUserInit(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+  if (parsed.help === true) {
+    return { kind: "help", topic: "user" };
+  }
+
+  requireNoPositionals("user-init", toPositionals(parsed));
+  return { kind: "command", command: { name: "user-init" } };
+}
+
+function parseUser(rest: string[]): DaemonCliIntent {
+  const [subcommand, ...subRest] = rest;
+  if (!subcommand) {
+    throw new CliUsageError(
+      "Usage: kato user <init|map|default|exclude-me> [options]",
+    );
+  }
+
+  if (subcommand === "init") {
+    return parseUserInit(subRest);
+  }
+  if (subcommand === "map") {
+    return parseUserMap(subRest);
+  }
+  if (subcommand === "default") {
+    return parseUserDefault(subRest);
+  }
+  if (subcommand === "exclude-me") {
+    return parseUserExcludeMe(subRest);
+  }
+
+  throw new CliUsageError(`Unknown user subcommand: ${subcommand}`);
+}
+
 export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   if (args.length === 0) {
     return { kind: "help" };
@@ -355,14 +536,15 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
         topic === "workspace-list" ||
         topic === "workspace-unregister" ||
         topic === "export" ||
-        topic === "clean"
+        topic === "clean" ||
+        topic === "user"
       ) {
         return { kind: "help", topic };
       }
     }
 
     throw new CliUsageError(
-      "Usage: kato help [init|start|restart|stop|status|workspace-init|workspace-register|workspace-list|workspace-unregister|export|clean]",
+      "Usage: kato help [init|start|restart|stop|status|workspace-init|workspace-register|workspace-list|workspace-unregister|export|clean|user]",
     );
   }
 
@@ -407,6 +589,9 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
   if (commandName === "clean") {
     return parseClean(rest);
+  }
+  if (commandName === "user") {
+    return parseUser(rest);
   }
 
   throw new CliUsageError(`Unknown command: ${commandName}`);
