@@ -738,15 +738,39 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(
+    assertMatch(
       rendered,
-      "# Assistant_2026-02-22_0200_00_Tool-search",
+      /^# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-search$/m,
     );
     assertStringIncludes(rendered, "search internet for weather");
     assertEquals(rendered.includes('"q": "weather sf"'), false);
     assertEquals(rendered.includes("result-content"), false);
   },
 );
+
+Deno.test("renderEventsToMarkdown respects headingTimestampTimezone", () => {
+  const assistant = makeEvent(
+    "assistant-heading-tz",
+    "message.assistant",
+    "Done.",
+    "2026-02-22T10:00:00.000Z",
+  );
+
+  const renderedUtc = renderEventsToMarkdown([assistant], {
+    includeFrontmatter: false,
+    headingTimestampTimezone: "UTC",
+  });
+  const renderedLosAngeles = renderEventsToMarkdown([assistant], {
+    includeFrontmatter: false,
+    headingTimestampTimezone: "America/Los_Angeles",
+  });
+
+  assertStringIncludes(renderedUtc, "# Assistant_2026-02-22_1000_00");
+  assertStringIncludes(
+    renderedLosAngeles,
+    "# Assistant_2026-02-22_0200_00",
+  );
+});
 
 Deno.test(
   "renderEventsToMarkdown uses latest assistant model for tool call headings",
@@ -788,9 +812,9 @@ Deno.test(
       includeThinking: false,
     });
 
-    assertStringIncludes(
+    assertMatch(
       rendered,
-      "# gpt-5.3-codex_2026-03-02_0222_09_Tool-exec_command",
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
     );
     assertStringIncludes(
       rendered,
@@ -854,12 +878,14 @@ Deno.test(
       },
     );
 
-    assertStringIncludes(
+    assertMatch(
       rendered,
-      "# gpt-5.3-codex_2026-03-02_0222_10_Tool-exec_command",
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
     );
     assertEquals(
-      rendered.includes("# Assistant_2026-03-02_0222_10_Tool-exec_command"),
+      /# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command/.test(
+        rendered,
+      ),
       false,
     );
   },
@@ -907,12 +933,14 @@ Deno.test(
       },
     );
 
-    assertStringIncludes(
+    assertMatch(
       rendered,
-      "# gpt-5.3-codex_2026-03-02_0222_07_Tool-exec_command",
+      /^# gpt-5\.3-codex_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command$/m,
     );
     assertEquals(
-      rendered.includes("# Assistant_2026-03-02_0222_07_Tool-exec_command"),
+      /# Assistant_\d{4}-\d{2}-\d{2}_\d{4}_\d{2}_Tool-exec_command/.test(
+        rendered,
+      ),
       false,
     );
   },

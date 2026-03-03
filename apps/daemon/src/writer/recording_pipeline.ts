@@ -28,6 +28,7 @@ export type RecordingRenderOptionOverrides = Pick<
   | "includeDecisionSelection"
   | "italicizeUserMessages"
   | "includeSystemEvents"
+  | "headingTimestampTimezone"
 >;
 
 export interface RecordingOutputOverrides {
@@ -604,7 +605,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
       return await this.jsonlWriter.writeEvents(
         outputPath,
         events,
-        "append",
+        {
+          mode: "append",
+          requireCreateNew: writerOptions.requireCreateNew,
+        },
       );
     }
     return await this.writer.appendEvents(outputPath, events, writerOptions);

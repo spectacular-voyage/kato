@@ -44,6 +44,7 @@ export interface MarkdownRenderOptions {
   truncateToolResults?: number;
   requireCreateNew?: boolean;
   speakerNames?: MarkdownSpeakerNames;
+  headingTimestampTimezone?: string;
 }
 
 export interface ConversationWriterLike {
@@ -59,11 +60,17 @@ export interface ConversationWriterLike {
   ): Promise<MarkdownWriteResult>;
 }
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
+function readDatePart(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): string {
+  return parts.find((part) => part.type === type)?.value ?? "";
 }
 
-function formatHeadingTimestamp(timestamp: string | undefined): string {
+function formatHeadingTimestamp(
+  timestamp: string | undefined,
+  headingTimestampTimezone: string | undefined,
+): string {
   if (!timestamp) {
     return "unknown-time";
   }
@@ -71,19 +78,52 @@ function formatHeadingTimestamp(timestamp: string | undefined): string {
   if (Number.isNaN(date.getTime())) {
     return "unknown-time";
   }
+  const baseFormatterOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  } as const;
 
-  return [
-    date.getFullYear(),
-    "-",
-    pad2(date.getMonth() + 1),
-    "-",
-    pad2(date.getDate()),
-    "_",
-    pad2(date.getHours()),
-    pad2(date.getMinutes()),
-    "_",
-    pad2(date.getSeconds()),
-  ].join("");
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      ...baseFormatterOptions,
+      ...(headingTimestampTimezone &&
+          headingTimestampTimezone !== "local"
+        ? { timeZone: headingTimestampTimezone }
+        : {}),
+    });
+    parts = formatter.formatToParts(date);
+  } catch (error) {
+    if (!(error instanceof RangeError)) {
+      throw error;
+    }
+    parts = new Intl.DateTimeFormat("en-CA", baseFormatterOptions)
+      .formatToParts(date);
+  }
+
+  const year = readDatePart(parts, "year");
+  const month = readDatePart(parts, "month");
+  const day = readDatePart(parts, "day");
+  const hour = readDatePart(parts, "hour");
+  const minute = readDatePart(parts, "minute");
+  const second = readDatePart(parts, "second");
+  if (
+    year.length === 0 ||
+    month.length === 0 ||
+    day.length === 0 ||
+    hour.length === 0 ||
+    minute.length === 0 ||
+    second.length === 0
+  ) {
+    return "unknown-time";
+  }
+
+  return `${year}-${month}-${day}_${hour}${minute}_${second}`;
 }
 
 function formatModelName(model: string): string {
@@ -221,6 +261,7 @@ function isMessageEvent(event: ConversationEvent): event is MessageEvent {
 function formatMessageHeading(
   event: MessageEvent,
   speakerNames: MarkdownSpeakerNames | undefined,
+  headingTimestampTimezone: string | undefined,
 ): string {
   let speaker: string;
   if (event.kind === "message.user") {
@@ -231,7 +272,9 @@ function formatMessageHeading(
     const model = "model" in event ? event.model : undefined;
     speaker = resolveAssistantSpeaker(model, speakerNames);
   }
-  return `# ${speaker}_${formatHeadingTimestamp(event.timestamp)}`;
+  return `# ${speaker}_${
+    formatHeadingTimestamp(event.timestamp, headingTimestampTimezone)
+  }`;
 }
 
 function makeEventSignature(event: ConversationEvent): string {
@@ -375,7 +418,11 @@ export function renderEventsToMarkdown(
       const messageParts: string[] = [];
       if (includeHeading) {
         messageParts.push(
-          formatMessageHeading(event, options.speakerNames),
+          formatMessageHeading(
+            event,
+            options.speakerNames,
+            options.headingTimestampTimezone,
+          ),
           "",
         );
       }
@@ -386,7 +433,10 @@ export function renderEventsToMarkdown(
 
       const callParts: string[] = [
         `# ${lastAssistantSpeaker}_${
-          formatHeadingTimestamp(event.timestamp)
+          formatHeadingTimestamp(
+            event.timestamp,
+            options.headingTimestampTimezone,
+          )
         }_Tool-${event.name}`,
       ];
       if (event.description?.trim().length) {
@@ -504,7 +554,10 @@ export function renderEventsToMarkdown(
         }
 
         const decisionHeading = `# ${lastAssistantSpeaker}_${
-          formatHeadingTimestamp(event.timestamp)
+          formatHeadingTimestamp(
+            event.timestamp,
+            options.headingTimestampTimezone,
+          )
         }_Tool-decision-${resolveDecisionHeadingSegment(event.decisionKey)}`;
         const decisionParts = [decisionHeading];
         if (includeDecisionPrompt && prompt && prompt.length > 0) {
@@ -632,7 +685,17 @@ async function writeTextFileCreateNew(
     createNew: true,
   });
   try {
-    await file.write(new TextEncoder().encode(content));
+    const buffer = new TextEncoder().encode(content);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesWritten = await file.write(buffer.subarray(offset));
+      if (bytesWritten <= 0) {
+        throw new Error(
+          `Unable to write all bytes for ${filePath}; write() returned ${bytesWritten}`,
+        );
+      }
+      offset += bytesWritten;
+    }
   } finally {
     file.close();
   }

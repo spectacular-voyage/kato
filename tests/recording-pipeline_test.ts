@@ -6,6 +6,7 @@ import {
   RecordingPipeline,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
+import { JsonlConversationWriter } from "../apps/daemon/src/writer/mod.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 function makeEvent(content: string): ConversationEvent {
@@ -397,6 +398,55 @@ Deno.test(
       assertEquals(
         await Deno.readTextFile(existingCapturePath),
         "existing content",
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "RecordingPipeline jsonl capture rejects when destination already exists",
+  async () => {
+    const tempDir = await makeTestTempDir(
+      "recording-pipeline-capture-jsonl-existing-",
+    );
+    try {
+      const existingCapturePath = join(tempDir, "notes", "capture.jsonl");
+      await Deno.mkdir(join(tempDir, "notes"), { recursive: true });
+      await Deno.writeTextFile(existingCapturePath, '{"existing":true}\n');
+
+      const gate: WritePathPolicyGateLike = {
+        evaluateWritePath(targetPath: string) {
+          return Promise.resolve({
+            decision: "allow" as const,
+            targetPath,
+            reason: "allowed-for-test",
+            canonicalTargetPath: join(tempDir, targetPath),
+            matchedRoot: tempDir,
+          });
+        },
+      };
+      const pipeline = new RecordingPipeline({
+        pathPolicyGate: gate,
+        jsonlWriter: new JsonlConversationWriter(),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+
+      await assertRejects(
+        () =>
+          pipeline.captureSnapshot({
+            provider: "codex",
+            sessionId: "session-capture-jsonl-existing",
+            targetPath: "notes/capture.jsonl",
+            events: [makeEvent("capture content")],
+            format: "jsonl",
+          }),
+        Deno.errors.AlreadyExists,
+      );
+      assertEquals(
+        await Deno.readTextFile(existingCapturePath),
+        '{"existing":true}\n',
       );
     } finally {
       await removePathIfPresent(tempDir);

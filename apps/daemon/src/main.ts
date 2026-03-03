@@ -159,6 +159,7 @@ function buildOutputOverrides(options: {
   markdownFrontmatter: MarkdownFrontmatterConfig;
   featureFlags: ExportFeatureFlags;
   includeSystemEvents: boolean;
+  exportTimezone?: string;
 }): RecordingOutputOverrides {
   return {
     includeFrontmatter:
@@ -184,6 +185,7 @@ function buildOutputOverrides(options: {
         options.featureFlags.writerIncludeDecisionSelection,
       italicizeUserMessages: options.featureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.includeSystemEvents,
+      headingTimestampTimezone: options.exportTimezone ?? "local",
     },
   };
 }
@@ -382,6 +384,7 @@ export async function runDaemonSubprocess(
         markdownFrontmatter: runtimeConfig.exportMarkdownFrontmatter,
         featureFlags: runtimeConfig.exportFeatureFlags,
         includeSystemEvents: featureSettings.captureIncludeSystemEvents,
+        exportTimezone: runtimeConfig.exportTimezone,
       }),
       workspaceRegistryStore: new WorkspaceRegistryFileStore(
         resolveDefaultWorkspaceRegistryPath(

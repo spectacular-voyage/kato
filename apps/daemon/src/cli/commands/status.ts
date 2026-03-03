@@ -25,6 +25,8 @@ const SECURITY_AUDIT_LOG_FILENAME = "security-audit.jsonl";
 const KEY_CTRL_C = 3;
 const KEY_LOWER_Q = 113;
 const KEY_UPPER_Q = 81;
+const KEY_LOWER_F = 102;
+const KEY_UPPER_F = 70;
 const ANSI_ESCAPE = String.fromCharCode(0x1b);
 const ANSI_OSC_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
@@ -57,6 +59,7 @@ export interface StatusRecentError {
   channel: "operational" | "security-audit";
   event: string;
   message: string;
+  source?: "log" | "workspace";
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -330,6 +333,7 @@ function parseStatusRecentError(
     message: typeof message === "string" && message.trim().length > 0
       ? sanitizeInlineText(message)
       : "no message",
+    source: "log",
   };
 }
 
@@ -401,6 +405,7 @@ function deriveWorkspaceStatusErrors(
       channel: "operational",
       event: "workspace.status.unavailable",
       message: sanitizeInlineText(workspaceStatus.unavailableReason),
+      source: "workspace",
     });
     return errors;
   }
@@ -423,6 +428,7 @@ function deriveWorkspaceStatusErrors(
       channel: "operational",
       event,
       message: `${alias} (${row.workspaceId}): ${reason}`,
+      source: "workspace",
     });
   }
 
@@ -433,6 +439,44 @@ export function isLiveExitKey(keyByte: number): boolean {
   return keyByte === KEY_CTRL_C ||
     keyByte === KEY_LOWER_Q ||
     keyByte === KEY_UPPER_Q;
+}
+
+export function isLiveFlushKey(keyByte: number): boolean {
+  return keyByte === KEY_LOWER_F || keyByte === KEY_UPPER_F;
+}
+
+export function getStatusRecentErrorKey(error: StatusRecentError): string {
+  const event = sanitizeInlineText(error.event);
+  const message = sanitizeInlineText(error.message);
+  const base = `${error.level}|${error.channel}|${event}|${message}`;
+  if (error.source === "workspace") {
+    // Workspace-derived rows are synthetic "current state" errors, so keep
+    // the key stable across refreshes to suppress until the state changes.
+    return `workspace|${base}`;
+  }
+  return `log|${error.timestamp}|${base}`;
+}
+
+function collectRecentErrors(
+  now: Date,
+  workspaceStatus: WorkspaceStatusSummary | undefined,
+  logRecentErrors: StatusRecentError[] | undefined,
+): StatusRecentError[] {
+  const sortedLogErrors = [...(logRecentErrors ?? [])]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const reservedLogSlots = Math.min(
+    sortedLogErrors.length,
+    Math.max(1, Math.floor(RECENT_ERRORS_LIMIT * 0.3)),
+  );
+  const reservedLogErrors = sortedLogErrors.slice(0, reservedLogSlots);
+  const remainingErrors = [
+    ...deriveWorkspaceStatusErrors(workspaceStatus, now),
+    ...sortedLogErrors.slice(reservedLogSlots),
+  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
+  return [...reservedLogErrors, ...remainingErrors]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, RECENT_ERRORS_LIMIT);
 }
 
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
@@ -699,6 +743,7 @@ export function renderStatusText(
     workspaceStatus?: WorkspaceStatusSummary;
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
+    suppressedRecentErrorKeys?: ReadonlySet<string>;
   },
 ): string {
   const { showAll, now, stale } = opts;
@@ -706,21 +751,16 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
-  const logRecentErrors = [...(opts.recentErrors ?? [])]
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-  const reservedLogSlots = Math.min(
-    logRecentErrors.length,
-    Math.max(1, Math.floor(RECENT_ERRORS_LIMIT * 0.3)),
+  const recentErrors = collectRecentErrors(
+    now,
+    opts.workspaceStatus,
+    opts.recentErrors,
   );
-  const reservedLogErrors = logRecentErrors.slice(0, reservedLogSlots);
-  const remainingErrors = [
-    ...deriveWorkspaceStatusErrors(opts.workspaceStatus, now),
-    ...logRecentErrors.slice(reservedLogSlots),
-  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, Math.max(RECENT_ERRORS_LIMIT - reservedLogErrors.length, 0));
-  const recentErrors = [...reservedLogErrors, ...remainingErrors]
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, RECENT_ERRORS_LIMIT);
+  const visibleRecentErrors = opts.suppressedRecentErrorKeys
+    ? recentErrors.filter((error) =>
+      !opts.suppressedRecentErrorKeys?.has(getStatusRecentErrorKey(error))
+    )
+    : recentErrors;
 
   const daemonText = snapshot.daemonRunning
     ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
@@ -772,12 +812,12 @@ export function renderStatusText(
     lines.push(divider);
   }
 
-  lines.push(`Recent Errors (${recentErrors.length})`);
+  lines.push(`Recent Errors (${visibleRecentErrors.length})`);
   lines.push("");
-  if (recentErrors.length === 0) {
+  if (visibleRecentErrors.length === 0) {
     lines.push("  (none)");
   } else {
-    for (const recentError of recentErrors) {
+    for (const recentError of visibleRecentErrors) {
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
@@ -836,6 +876,8 @@ async function runLiveMode(
   }
 
   let shouldExit = false;
+  let flushRecentErrorsRequested = false;
+  const suppressedRecentErrorKeys = new Set<string>();
 
   const onSigint = () => {
     shouldExit = true;
@@ -853,6 +895,9 @@ async function runLiveMode(
       if (isLiveExitKey(stdinBuf[0])) {
         shouldExit = true;
         break;
+      }
+      if (isLiveFlushKey(stdinBuf[0])) {
+        flushRecentErrorsRequested = true;
       }
     }
   };
@@ -872,6 +917,24 @@ async function runLiveMode(
       ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
+      const currentRecentErrorKeys = new Set(
+        collectRecentErrors(now, workspaceStatus, recentErrors).map((error) =>
+          getStatusRecentErrorKey(error)
+        ),
+      );
+      if (flushRecentErrorsRequested) {
+        suppressedRecentErrorKeys.clear();
+        for (const key of currentRecentErrorKeys) {
+          suppressedRecentErrorKeys.add(key);
+        }
+        flushRecentErrorsRequested = false;
+      } else if (suppressedRecentErrorKeys.size > 0) {
+        for (const key of [...suppressedRecentErrorKeys]) {
+          if (!currentRecentErrorKeys.has(key)) {
+            suppressedRecentErrorKeys.delete(key);
+          }
+        }
+      }
 
       const body = renderStatusText(snapshot, {
         showAll: true,
@@ -881,13 +944,16 @@ async function runLiveMode(
         terminalWidth,
         workspaceStatus,
         recentErrors,
+        suppressedRecentErrorKeys,
       });
 
       // Clear screen and draw
       ctx.runtime.writeStdout("\x1B[2J\x1B[H");
       ctx.runtime.writeStdout(`${body}\n`);
       ctx.runtime.writeStdout(`\n${"─".repeat(terminalWidth)}\n`);
-      ctx.runtime.writeStdout("Press q or Ctrl+C to exit\n");
+      ctx.runtime.writeStdout(
+        "Press q or Ctrl+C to exit · press f to flush errors\n",
+      );
 
       // Sleep with early exit check
       const start = Date.now();

@@ -190,6 +190,7 @@ Deno.test("RuntimeConfigFileStore backfills default feature flags and provider r
       loaded.exportMarkdownFrontmatter,
       createDefaultRuntimeMarkdownFrontmatterConfig(),
     );
+    assertEquals(loaded.exportTimezone, "local");
     assertEquals(loaded.katoDir, dirname(runtimeDir));
   } finally {
     await removePathIfPresent(root);
@@ -513,6 +514,63 @@ Deno.test("RuntimeConfigFileStore accepts valid logging overrides", async () => 
   }
 });
 
+Deno.test("RuntimeConfigFileStore accepts valid exportTimezone overrides", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        exportTimezone: "America/Los_Angeles",
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.exportTimezone, "America/Los_Angeles");
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore rejects invalid exportTimezone", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-config.yaml");
+  const runtimeDir = join(root, "runtime");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir,
+        statusPath: join(runtimeDir, "status.json"),
+        controlPath: join(runtimeDir, "control.json"),
+        allowedWriteRoots: [root],
+        exportTimezone: "Mars/Olympus_Mons",
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "unsupported schema",
+    );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
 Deno.test("RuntimeConfigFileStore rejects invalid logging level", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-config.yaml");
@@ -650,6 +708,21 @@ Deno.test("createDefaultRuntimeConfig rejects invalid daemonMaxMemoryMb option",
       }),
     Error,
     "daemonMaxMemoryMb must be a positive integer",
+  );
+});
+
+Deno.test("createDefaultRuntimeConfig rejects invalid exportTimezone option", () => {
+  assertThrows(
+    () =>
+      createDefaultRuntimeConfig({
+        runtimeDir: ".kato/runtime",
+        statusPath: ".kato/runtime/status.json",
+        controlPath: ".kato/runtime/control.json",
+        allowedWriteRoots: [".kato"],
+        exportTimezone: "Mars/Olympus_Mons",
+      }),
+    Error,
+    "exportTimezone must be",
   );
 });
 

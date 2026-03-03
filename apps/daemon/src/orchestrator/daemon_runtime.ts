@@ -63,6 +63,7 @@ import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
 import {
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
+  DEFAULT_WORKSPACE_TIMEZONE,
   loadWorkspaceConfigOverrides,
   resolveDefaultWorkspaceRegistryPath,
   type ResolvedWorkspaceProfile,
@@ -113,6 +114,8 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
 const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
+const CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES = 5;
+const CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS = 25;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -557,7 +560,7 @@ function renderWorkspaceFilename(
 ): string {
   const timestampTokens = readTimestampTemplateParts(
     now,
-    profile.filenameTemplateTimezone,
+    profile.workspaceTimezone,
   );
   const tokens: Record<string, string> = {
     provider: sanitizeFilenamePart(provider),
@@ -1085,6 +1088,7 @@ function createOutputOverridesFromWorkspaceProfile(
   return createOutputOverrides({
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
+    workspaceTimezone: profile.workspaceTimezone,
     captureIncludeSystemEvents,
   });
 }
@@ -1101,6 +1105,7 @@ function createOutputOverrides(options: {
     writerIncludeDecisionSelection?: boolean;
     writerItalicizeUserMessages: boolean;
   };
+  workspaceTimezone: string;
   captureIncludeSystemEvents: boolean;
 }): RecordingOutputOverrides {
   return {
@@ -1131,6 +1136,7 @@ function createOutputOverrides(options: {
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,
+      headingTimestampTimezone: options.workspaceTimezone,
     },
   };
 }
@@ -1168,6 +1174,8 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
             overrides.writerFeatureFlags,
           ),
+          workspaceTimezone: overrides.workspaceTimezone ??
+            DEFAULT_WORKSPACE_TIMEZONE,
           captureIncludeSystemEvents: options.captureIncludeSystemEvents,
         });
       }
@@ -1183,6 +1191,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
       options.output.writerFeatureFlags,
     ),
+    workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
   });
 }
@@ -1564,6 +1573,7 @@ async function applyPersistentControlCommandsForEvent(
             { snapshotSnippet },
           );
           let captureCycleId: string | undefined;
+          let captureConflictRetries = 0;
           while (true) {
             const destinationChangedForAttempt = !output ||
               output.currentResolvedPath !== targetPath;
@@ -1593,6 +1603,21 @@ async function applyPersistentControlCommandsForEvent(
                 !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
               ) {
                 throw error;
+              }
+              captureConflictRetries += 1;
+              if (
+                captureConflictRetries >
+                  CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES
+              ) {
+                const errorMessage = error instanceof Error
+                  ? error.message
+                  : String(error);
+                throw new Error(
+                  `Capture destination conflict retries exceeded (${CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES}) for ${targetPath}: ${errorMessage}`,
+                );
+              }
+              if (CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS > 0) {
+                await sleep(CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS);
               }
               const nextTargetPath = await resolveUniqueNonExistingPath(
                 targetPath,
@@ -2005,6 +2030,7 @@ async function applyControlCommandsForEvent(
             "capture",
           );
           let captureCycleId: string | undefined;
+          let captureConflictRetries = 0;
           while (true) {
             const destinationChangedForAttempt = !existingState ||
               existingState.currentResolvedPath !== resolvedDestination;
@@ -2034,6 +2060,21 @@ async function applyControlCommandsForEvent(
                 !resolved.usesGeneratedFilename || !isAlreadyExistsError(error)
               ) {
                 throw error;
+              }
+              captureConflictRetries += 1;
+              if (
+                captureConflictRetries >
+                  CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES
+              ) {
+                const errorMessage = error instanceof Error
+                  ? error.message
+                  : String(error);
+                throw new Error(
+                  `Capture destination conflict retries exceeded (${CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES}) for ${resolvedDestination}: ${errorMessage}`,
+                );
+              }
+              if (CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS > 0) {
+                await sleep(CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS);
               }
               const nextTargetPath = await resolveUniqueNonExistingPath(
                 resolvedDestination,

@@ -129,7 +129,7 @@ function cloneWorkspaceProfile(
     configPath: profile.configPath,
     resolvedDefaultOutputDir: profile.resolvedDefaultOutputDir,
     filenameTemplate: profile.filenameTemplate,
-    filenameTemplateTimezone: profile.filenameTemplateTimezone,
+    workspaceTimezone: profile.workspaceTimezone,
     markdownFrontmatter: { ...profile.markdownFrontmatter },
     writerFeatureFlags: { ...profile.writerFeatureFlags },
   };
@@ -238,7 +238,7 @@ async function createTestWorkspaceFixture(
     configPath: entry.configPath,
     resolvedDefaultOutputDir,
     filenameTemplate: "{provider}-{sessionShortId}.md",
-    filenameTemplateTimezone: "local",
+    workspaceTimezone: "local",
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: {
       writerIncludeCommentary: true,
@@ -2878,6 +2878,7 @@ Deno.test(
         ],
         recordingPipeline,
         prepopulate: async (sessionStateStore, workspace) => {
+          workspace.profile.workspaceTimezone = "America/Los_Angeles";
           await prepopulateScenarioSessionMetadata(
             sessionStateStore,
             (metadata) => {
@@ -2922,6 +2923,7 @@ Deno.test(
       );
       assert(content.includes("Before capture"));
       assert(content.includes("After capture"));
+      assert(content.includes("# User_2026-02-22_1100_00"));
       assert(
         content.indexOf("Before capture") < content.indexOf("After capture"),
       );
@@ -7125,7 +7127,7 @@ Deno.test(
       try {
         const workspace = await createTestWorkspaceFixture(stateDir);
         workspace.profile.filenameTemplate = filenameTemplate;
-        workspace.profile.filenameTemplateTimezone = "America/Los_Angeles";
+        workspace.profile.workspaceTimezone = "America/Los_Angeles";
 
         let currentStatus: DaemonStatusSnapshot = {
           schemaVersion: 1,
@@ -7333,7 +7335,7 @@ Deno.test(
       const workspace = await createTestWorkspaceFixture(stateDir);
       workspace.profile.filenameTemplate =
         "{timestampHumane}-{snippetSlug}-{provider}.md";
-      workspace.profile.filenameTemplateTimezone = "America/Los_Angeles";
+      workspace.profile.workspaceTimezone = "America/Los_Angeles";
 
       let currentStatus: DaemonStatusSnapshot = {
         schemaVersion: 1,

@@ -7,7 +7,9 @@ import {
 import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { CliUsageError, parseDaemonCliArgs } from "../apps/daemon/src/mod.ts";
 import {
+  getStatusRecentErrorKey,
   isLiveExitKey,
+  isLiveFlushKey,
   renderStatusText,
   type StatusRecentError,
   type WorkspaceStatusSummary,
@@ -80,8 +82,16 @@ Deno.test("isLiveExitKey: q, Q, and Ctrl+C exit live mode", () => {
 });
 
 Deno.test("isLiveExitKey: non-exit keys do not exit live mode", () => {
+  assertEquals(isLiveExitKey(102), false);
   assertEquals(isLiveExitKey(10), false);
   assertEquals(isLiveExitKey(32), false);
+});
+
+Deno.test("isLiveFlushKey: f and F trigger live error flush", () => {
+  assertEquals(isLiveFlushKey(102), true);
+  assertEquals(isLiveFlushKey(70), true);
+  assertEquals(isLiveFlushKey(113), false);
+  assertEquals(isLiveFlushKey(3), false);
 });
 
 // ─── renderStatusText ─────────────────────────────────────────────────────────
@@ -247,6 +257,54 @@ Deno.test("renderStatusText: recent errors section renders warn/error records", 
   assertStringIncludes(out, "ERROR audit recording.command.failed");
   assertStringIncludes(out, "permission denied");
   assertStringIncludes(out, "capture destination already exists");
+});
+
+Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "provider.ingestion.read_denied",
+    message: "permission denied",
+    source: "log",
+  }, {
+    timestamp: "2026-02-24T09:59:00.000Z",
+    level: "error",
+    channel: "security-audit",
+    event: "recording.command.failed",
+    message: "capture destination already exists",
+    source: "log",
+  }];
+  const suppressedRecentErrorKeys = new Set<string>([
+    getStatusRecentErrorKey(recentErrors[0]),
+  ]);
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    suppressedRecentErrorKeys,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "Recent Errors (1)");
+  assertEquals(out.includes("provider.ingestion.read_denied"), false);
+  assertStringIncludes(out, "ERROR audit recording.command.failed");
+});
+
+Deno.test("getStatusRecentErrorKey: workspace errors ignore timestamp", () => {
+  const first: StatusRecentError = {
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "workspace.config.invalid",
+    message: "Broken.Proj (ws-invalid): invalid workspace configuration",
+    source: "workspace",
+  };
+  const second: StatusRecentError = {
+    ...first,
+    timestamp: "2026-02-24T10:03:00.000Z",
+  };
+  assertEquals(getStatusRecentErrorKey(first), getStatusRecentErrorKey(second));
 });
 
 Deno.test("renderStatusText: invalid workspace rows are promoted into Recent Errors", () => {
