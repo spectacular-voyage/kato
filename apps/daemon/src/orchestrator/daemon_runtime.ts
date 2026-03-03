@@ -3510,53 +3510,64 @@ function resolveExportOutputOverrides(
   const featureFlags = payload["resolvedExportFeatureFlags"];
   if (isRecord(featureFlags)) {
     const renderOptions = { ...(resolved.renderOptions ?? {}) };
+    let changed = false;
     const includeCommentary = readBoolean(
       featureFlags["writerIncludeCommentary"],
     );
     if (includeCommentary !== undefined) {
+      changed = true;
       renderOptions.includeCommentary = includeCommentary;
     }
     const includeThinking = readBoolean(featureFlags["writerIncludeThinking"]);
     if (includeThinking !== undefined) {
+      changed = true;
       renderOptions.includeThinking = includeThinking;
     }
     const includeToolCalls = readBoolean(
       featureFlags["writerIncludeToolCalls"],
     );
     if (includeToolCalls !== undefined) {
+      changed = true;
       renderOptions.includeToolCalls = includeToolCalls;
     }
     const includeToolResults = readBoolean(
       featureFlags["writerIncludeToolResults"],
     );
     if (includeToolResults !== undefined) {
+      changed = true;
       renderOptions.includeToolResults = includeToolResults;
     }
     const includeDecisionPrompt = readBoolean(
       featureFlags["writerIncludeDecisionPrompt"],
     );
     if (includeDecisionPrompt !== undefined) {
+      changed = true;
       renderOptions.includeDecisionPrompt = includeDecisionPrompt;
     }
     const includeDecisionOptions = readBoolean(
       featureFlags["writerIncludeDecisionOptions"],
     );
     if (includeDecisionOptions !== undefined) {
+      changed = true;
       renderOptions.includeDecisionOptions = includeDecisionOptions;
     }
     const includeDecisionSelection = readBoolean(
       featureFlags["writerIncludeDecisionSelection"],
     );
     if (includeDecisionSelection !== undefined) {
+      changed = true;
       renderOptions.includeDecisionSelection = includeDecisionSelection;
     }
     const italicizeUserMessages = readBoolean(
       featureFlags["writerItalicizeUserMessages"],
     );
     if (italicizeUserMessages !== undefined) {
+      changed = true;
       renderOptions.italicizeUserMessages = italicizeUserMessages;
     }
-    resolved.renderOptions = renderOptions;
+    if (changed) {
+      resolved.renderOptions = renderOptions;
+    }
   }
 
   const resolvedExportTimezone = readString(payload["resolvedExportTimezone"]);

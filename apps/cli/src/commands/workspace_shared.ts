@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
+import type { RuntimeConfig } from "@kato/shared";
 import {
   createWorkspaceConfigScaffold,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
@@ -13,6 +14,10 @@ import {
   WorkspaceRegistryFileStore,
 } from "@kato/runtime";
 
+export function getKatoDir(runtimeConfig: RuntimeConfig): string {
+  return runtimeConfig.katoDir ?? dirname(runtimeConfig.runtimeDir);
+}
+
 export function requireCliCwd(ctx: DaemonCliCommandContext): string {
   const cwd = ctx.runtime.cwdPath;
   if (!cwd) {
@@ -21,14 +26,48 @@ export function requireCliCwd(ctx: DaemonCliCommandContext): string {
   return resolve(cwd);
 }
 
+export function resolveWorkspaceSelector(selector: string): string {
+  const trimmed = selector.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Workspace selector must be a non-empty string");
+  }
+  return trimmed;
+}
+
+export class WorkspaceNotFoundError extends Error {
+  readonly selector: string;
+
+  constructor(selector: string) {
+    super(
+      `Workspace not found: ${selector}. Register it first with \`kato workspace register --alias <alias>\`.`,
+    );
+    this.name = "WorkspaceNotFoundError";
+    this.selector = selector;
+  }
+}
+
 export function resolveWorkspaceRegistryStore(
   ctx: DaemonCliCommandContext,
 ): WorkspaceRegistryFileStore {
-  const katoDir = ctx.runtimeConfig.katoDir ??
-    dirname(ctx.runtimeConfig.runtimeDir);
+  const katoDir = getKatoDir(ctx.runtimeConfig);
   return new WorkspaceRegistryFileStore(
     resolveDefaultWorkspaceRegistryPath(katoDir),
   );
+}
+
+export async function resolveWorkspaceBySelector(
+  ctx: DaemonCliCommandContext,
+  selector: string,
+): Promise<RegisteredWorkspace> {
+  const trimmedSelector = resolveWorkspaceSelector(selector);
+  const entries = await resolveWorkspaceRegistryStore(ctx).load();
+  const workspace = entries.find((entry) =>
+    entry.alias === trimmedSelector || entry.workspaceId === trimmedSelector
+  );
+  if (!workspace) {
+    throw new WorkspaceNotFoundError(trimmedSelector);
+  }
+  return workspace;
 }
 
 export function validateWorkspaceAlias(alias: string): string {
@@ -137,8 +176,7 @@ export function shouldWarnWriteRootCoverage(
 export async function loadWorkspaceTemplateScaffold(
   ctx: DaemonCliCommandContext,
 ): Promise<string> {
-  const katoDir = ctx.runtimeConfig.katoDir ??
-    dirname(ctx.runtimeConfig.runtimeDir);
+  const katoDir = getKatoDir(ctx.runtimeConfig);
   const templatePath = resolveDefaultWorkspaceTemplateConfigPath(
     katoDir,
   );

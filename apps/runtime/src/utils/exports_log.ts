@@ -20,8 +20,9 @@ export interface ExportLogEntry {
   matchedBy?: string;
 }
 
-export function resolveExportsLogPath(runtimeDir: string): string {
-  return join(dirname(runtimeDir), EXPORTS_LOG_FILENAME);
+// Export logs live at the Kato root (parent of daemon runtimeDir).
+export function resolveExportsLogPath(daemonRuntimeDir: string): string {
+  return join(dirname(daemonRuntimeDir), EXPORTS_LOG_FILENAME);
 }
 
 export async function appendExportsLogEntry(

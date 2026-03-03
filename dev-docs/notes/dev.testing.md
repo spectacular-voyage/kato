@@ -73,14 +73,15 @@ Expected:
   - runtime config (`~/.kato/daemon/kato-daemon-config.yaml`)
   - shared config (`~/.kato/shared/kato-shared-config.yaml`)
   - CLI config (`~/.kato/cli/kato-cli-config.yaml`)
-  - default workspace config (`~/.kato/shared/default-kato-workspace-config.yaml`)
+  - default workspace config
+    (`~/.kato/shared/default-kato-workspace-config.yaml`)
   - user config (`~/.kato/kato-user-config.yaml`)
 
 ### 2) Configure provider roots, write roots, and seed fixture
 
 ```bash
-deno eval -A 'import { parse, stringify } from "@std/yaml"; const home=Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE"); if(!home) throw new Error("HOME/USERPROFILE not set"); const daemonPath=`${home}/.kato/daemon/kato-daemon-config.yaml`; const sharedPath=`${home}/.kato/shared/kato-shared-config.yaml`; const daemonRaw=await Deno.readTextFile(daemonPath); const daemonCfg=parse(daemonRaw); if(typeof daemonCfg!=="object" || daemonCfg===null || Array.isArray(daemonCfg)) throw new Error("invalid daemon yaml config"); (daemonCfg as Record<string, unknown>).providerSessionRoots={claude:[`${home}/.kato/test-provider/claude`],codex:[`${home}/.kato/test-provider/codex`],gemini:[`${home}/.kato/test-provider/gemini`]}; await Deno.writeTextFile(daemonPath, `${stringify(daemonCfg).trimEnd()}\n`); const sharedRaw=await Deno.readTextFile(sharedPath); const sharedCfg=parse(sharedRaw); if(typeof sharedCfg!=="object" || sharedCfg===null || Array.isArray(sharedCfg)) throw new Error("invalid shared yaml config"); (sharedCfg as Record<string, unknown>).allowedWriteRoots=[`${home}/.kato/test-output`]; await Deno.writeTextFile(sharedPath, `${stringify(sharedCfg).trimEnd()}\n`);'
-mkdir -p ~/.kato/test-provider/codex ~/.kato/test-output
+deno run -A scripts/smoke-test-setup.ts
+mkdir -p ~/.kato/test-provider/claude ~/.kato/test-provider/codex ~/.kato/test-provider/gemini ~/.kato/test-output
 cp tests/fixtures/codex-session-vscode-new.jsonl ~/.kato/test-provider/codex/smoke-codex.jsonl
 ```
 
@@ -207,7 +208,7 @@ Expected:
    - Inspect `~/.kato/daemon/kato-daemon-config.yaml` for invalid shape/unknown
      `daemonFeatureFlags` keys.
 3. `Export path denied by policy`:
-   - Add the target parent directory to
-     `~/.kato/shared/kato-shared-config.yaml` -> `allowedWriteRoots`.
+   - Add the target parent directory to `~/.kato/shared/kato-shared-config.yaml`
+     -> `allowedWriteRoots`.
 4. Status appears running right after failed start:
    - Known MVP limitation; wait for stale-heartbeat window or run `stop`.

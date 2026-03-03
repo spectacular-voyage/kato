@@ -35,12 +35,9 @@ const UINT64_MASK = 0xffffffffffffffffn;
 
 export function hashStringFNV1a(value: string): string {
   let hash = FNV1A64_OFFSET_BASIS;
-  for (const char of value) {
-    const codePoint = char.codePointAt(0);
-    if (codePoint === undefined) {
-      continue;
-    }
-    hash ^= BigInt(codePoint);
+  const bytes = new TextEncoder().encode(value);
+  for (const byte of bytes) {
+    hash ^= BigInt(byte);
     hash = (hash * FNV1A64_PRIME) & UINT64_MASK;
   }
   return hash.toString(16).padStart(16, "0");

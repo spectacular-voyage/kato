@@ -40,7 +40,7 @@ import {
 import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
-type RuntimeConfig = DaemonRuntimeConfig & {
+type DaemonCliRuntimeConfigFixture = DaemonRuntimeConfig & {
   statusPath: string;
   controlPath: string;
   allowedWriteRoots: string[];
@@ -74,7 +74,9 @@ function makeRuntimeHarness(runtimeDir: string) {
   };
 }
 
-function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
+function makeDefaultRuntimeConfig(
+  runtimeDir: string,
+): DaemonCliRuntimeConfigFixture {
   return {
     schemaVersion: 1,
     runtimeDir,
@@ -97,7 +99,7 @@ function makeDefaultRuntimeConfig(runtimeDir: string): RuntimeConfig {
   };
 }
 
-function makeInMemoryConfigStore(initial?: RuntimeConfig): {
+function makeInMemoryConfigStore(initial?: DaemonCliRuntimeConfigFixture): {
   ensureCalls: { value: number };
   store: RuntimeConfigStoreLike;
 } {
@@ -139,7 +141,7 @@ function makeInMemoryConfigStore(initial?: RuntimeConfig): {
           logging: { ...state.logging },
         });
       },
-      ensureInitialized(defaultConfig: RuntimeConfig) {
+      ensureInitialized(defaultConfig: DaemonCliRuntimeConfigFixture) {
         ensureCalls.value += 1;
         if (!state) {
           state = {
@@ -808,7 +810,7 @@ Deno.test(
       const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
       await Deno.mkdir(workspaceDir, { recursive: true });
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [workspaceDir, katoDir],
@@ -971,7 +973,7 @@ Deno.test(
       const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
       await Deno.mkdir(workspaceDir, { recursive: true });
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [tempDir, katoDir],
@@ -1087,7 +1089,7 @@ Deno.test(
         ) + "\n",
       );
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [tempDir, katoDir],
@@ -1154,7 +1156,7 @@ Deno.test(
       const configPath = join(workspaceDir, DEFAULT_WORKSPACE_CONFIG_FILENAME);
       await Deno.mkdir(configPath, { recursive: true });
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [workspaceDir, katoDir],
@@ -1191,7 +1193,7 @@ Deno.test(
       await Deno.mkdir(firstWorkspaceDir, { recursive: true });
       await Deno.mkdir(secondWorkspaceDir, { recursive: true });
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [tempDir, katoDir],
@@ -1280,7 +1282,7 @@ Deno.test(
       await Deno.mkdir(dirname(legacyConfigPath), { recursive: true });
       await Deno.writeTextFile(legacyConfigPath, 'defaultOutputDir: "."\n');
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [workspaceDir, katoDir],
@@ -1322,7 +1324,7 @@ Deno.test(
       const workspaceDir = join(tempDir, "warn-me");
       await Deno.mkdir(workspaceDir, { recursive: true });
 
-      const defaultRuntimeConfig: RuntimeConfig = {
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...makeDefaultRuntimeConfig(runtimeDir),
         katoDir,
         allowedWriteRoots: [katoDir],
@@ -1359,7 +1361,7 @@ Deno.test(
         "warning: the running daemon may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
       );
       const sharedConfigPath = join(
-        dirname(runtimeDir),
+        katoDir,
         "shared",
         "kato-shared-config.yaml",
       );
@@ -1389,7 +1391,7 @@ Deno.test(
       await Deno.mkdir(workspaceDir, { recursive: true });
 
       const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-      const persistedRuntimeConfig: RuntimeConfig = {
+      const persistedRuntimeConfig: DaemonCliRuntimeConfigFixture = {
         ...defaultRuntimeConfig,
         katoDir: configuredKatoDir,
         allowedWriteRoots: [workspaceDir, configuredKatoDir],
@@ -1429,12 +1431,33 @@ Deno.test(
         await Deno.readTextFile(registryPath),
         `"alias": "config-backed"`,
       );
+      assertStringIncludes(
+        await Deno.readTextFile(
+          join(configuredKatoDir, "shared", "kato-shared-config.yaml"),
+        ),
+        workspaceDir,
+      );
+      assertExists(
+        await Deno.stat(join(configuredKatoDir, "cli", "kato-cli-config.yaml")),
+      );
 
       await assertRejects(
         () =>
           Deno.stat(
             resolveDefaultWorkspaceRegistryPath(dirname(runtimeDir)),
           ),
+        Deno.errors.NotFound,
+      );
+      await assertRejects(
+        () =>
+          Deno.stat(
+            join(dirname(runtimeDir), "shared", "kato-shared-config.yaml"),
+          ),
+        Deno.errors.NotFound,
+      );
+      await assertRejects(
+        () =>
+          Deno.stat(join(dirname(runtimeDir), "cli", "kato-cli-config.yaml")),
         Deno.errors.NotFound,
       );
     } finally {
@@ -1545,7 +1568,7 @@ Deno.test("runDaemonCli user commands manage user participant settings", async (
       ) + "\n",
     );
 
-    const defaultRuntimeConfig: RuntimeConfig = {
+    const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
       ...makeDefaultRuntimeConfig(runtimeDir),
       katoDir,
       allowedWriteRoots: [tempDir, katoDir],
@@ -1710,7 +1733,7 @@ Deno.test("runDaemonCli user map set fails unknown selector while delete support
       },
     });
 
-    const defaultRuntimeConfig: RuntimeConfig = {
+    const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
       ...makeDefaultRuntimeConfig(runtimeDir),
       katoDir,
       allowedWriteRoots: [tempDir, katoDir],

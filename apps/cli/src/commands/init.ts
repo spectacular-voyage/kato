@@ -91,10 +91,15 @@ export async function runInitCommand(
     defaultCliConfig: ctx.defaultCliConfig,
     katoDir: resolvedKatoDir,
   });
+  const anyGlobalConfigCreated = result.runtimeConfigCreated ||
+    result.sharedConfigCreated ||
+    result.cliConfigCreated ||
+    result.defaultWorkspaceConfigCreated ||
+    result.userConfigCreated;
 
   await ctx.operationalLogger.info(
     "config.init",
-    result.runtimeConfigCreated || result.defaultWorkspaceConfigCreated
+    anyGlobalConfigCreated
       ? "Global config initialized"
       : "Global config already present",
     {

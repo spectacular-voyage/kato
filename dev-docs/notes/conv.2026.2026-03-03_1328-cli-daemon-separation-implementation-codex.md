@@ -1761,3 +1761,30 @@ commit message please
 - persist/rebuild twin history whenever session state is enabled
 - keep snapshot hydration behavior stable for existing in-memory snapshots
 - update README and runtime/provider-ingestion tests
+
+# User_2026-03-03_1427_17
+
+How come there's no schemaversion for kato-workspace-config or default-kato-workspace-config.yaml ?
+
+**Inspecting workspace config parsing rationale**
+
+# gpt-5.3-codex_2026-03-03_1427_25
+
+I’ll quickly verify the workspace config parser behavior so I can answer precisely why `schemaVersion` isn’t present there today.
+
+**Explaining missing schemaVersion**
+
+# gpt-5.3-codex_2026-03-03_1427_42
+
+Because in code today, workspace configs are treated as unversioned override files, not schema-versioned contracts.
+
+- The allowed top-level keys for workspace/default-workspace config are hardcoded and do **not** include `schemaVersion`:
+  - [registry.ts:65](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/registry.ts:65)
+  - [registry.ts:73](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/registry.ts:73)
+- Unknown keys are fail-closed, so adding `schemaVersion` right now would error:
+  - [registry.ts:575](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/registry.ts:575)
+- By contrast, machine-owned persisted files like workspace registry **are** schema-versioned:
+  - [registry.ts:99](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/registry.ts:99)
+
+So this is intentional in the current design, not an omission in parsing.  
+If you want, I can add `schemaVersion: 1` support for workspace/default-workspace config next.

@@ -75,7 +75,7 @@ function makeSharedConfigStore(
     load() {
       return Promise.resolve(cloneSharedConfig(state));
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       return Promise.resolve({
         created: false,
         path: ".test-tmp/kato-shared-config.yaml",
@@ -113,7 +113,7 @@ function makeUserConfigStore(
         },
       });
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       return Promise.resolve({
         created: false,
         path: ".test-tmp/kato-user-config.yaml",
@@ -150,7 +150,7 @@ Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded
     load() {
       return Promise.reject(new Error("bad config"));
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       throw new Error("not used");
     },
   };
@@ -192,7 +192,7 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
     load() {
       return Promise.resolve(config);
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       throw new Error("not used");
     },
   };
@@ -236,7 +236,7 @@ Deno.test("runDaemonSubprocess wires exportTimezone into plain CLI export overri
     load() {
       return Promise.resolve(config);
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       throw new Error("not used");
     },
   };
@@ -267,7 +267,7 @@ Deno.test("runDaemonSubprocess plain CLI export uses default user participant us
     load() {
       return Promise.resolve(config);
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       throw new Error("not used");
     },
   };
@@ -308,7 +308,7 @@ Deno.test("runDaemonSubprocess plain CLI export omits user participant when no e
     load() {
       return Promise.resolve(config);
     },
-    ensureInitialized() {
+    ensureInitialized(_defaultConfig) {
       throw new Error("not used");
     },
   };
@@ -352,7 +352,7 @@ Deno.test("runDaemonSubprocess writes operational and audit logs to runtime log 
       load() {
         return Promise.resolve(config);
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };
@@ -402,7 +402,7 @@ Deno.test("runDaemonSubprocess respects configured logger min levels", async () 
       load() {
         return Promise.resolve(config);
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };
@@ -454,7 +454,7 @@ Deno.test("runDaemonSubprocess applies log-level env overrides", async () => {
       load() {
         return Promise.resolve(config);
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };
@@ -511,7 +511,7 @@ Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", 
       load() {
         return Promise.resolve(makeRuntimeConfig());
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };
@@ -555,7 +555,7 @@ Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state p
       load() {
         return Promise.resolve(config);
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };
@@ -602,7 +602,7 @@ Deno.test("runDaemonSubprocess falls back to runtimeDir parent when runtimeConfi
       load() {
         return Promise.resolve(config);
       },
-      ensureInitialized() {
+      ensureInitialized(_defaultConfig) {
         throw new Error("not used");
       },
     };

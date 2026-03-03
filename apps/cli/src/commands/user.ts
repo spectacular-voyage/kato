@@ -4,7 +4,12 @@ import {
   createDefaultUserConfig,
   validateAndNormalizeParticipantUsername,
 } from "@kato/runtime";
-import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
+import {
+  resolveWorkspaceBySelector,
+  resolveWorkspaceRegistryStore,
+  resolveWorkspaceSelector,
+  WorkspaceNotFoundError,
+} from "./workspace_shared.ts";
 
 interface UserMapListEntry {
   workspaceId: string;
@@ -21,14 +26,6 @@ function compareUserMapEntries(
     return aliasCompare;
   }
   return a.workspaceId.localeCompare(b.workspaceId);
-}
-
-function resolveSelector(selector: string): string {
-  const trimmed = selector.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Workspace selector must be a non-empty string");
-  }
-  return trimmed;
 }
 
 async function loadInitializedUserConfig(
@@ -54,31 +51,8 @@ function cloneUserConfig(config: UserConfig): UserConfig {
   };
 }
 
-async function resolveWorkspaceBySelector(
-  ctx: DaemonCliCommandContext,
-  selector: string,
-): Promise<{ workspaceId: string; alias: string }> {
-  const trimmedSelector = resolveSelector(selector);
-  const entries = await resolveWorkspaceRegistryStore(ctx).load();
-  const workspace = entries.find((entry) =>
-    entry.alias === trimmedSelector || entry.workspaceId === trimmedSelector
-  );
-
-  if (!workspace) {
-    throw new Error(
-      `Workspace not found: ${trimmedSelector}. Register it first with \`kato workspace register --alias <alias>\`.`,
-    );
-  }
-
-  return {
-    workspaceId: workspace.workspaceId,
-    alias: workspace.alias,
-  };
-}
-
 function isWorkspaceSelectorNotFoundError(error: unknown): boolean {
-  return error instanceof Error &&
-    error.message.startsWith("Workspace not found:");
+  return error instanceof WorkspaceNotFoundError;
 }
 
 function buildUserMapListEntries(
@@ -200,7 +174,7 @@ export async function runUserMapDeleteCommand(
   ctx: DaemonCliCommandContext,
   selector: string,
 ): Promise<void> {
-  const trimmedSelector = resolveSelector(selector);
+  const trimmedSelector = resolveWorkspaceSelector(selector);
   let workspaceId = trimmedSelector;
   let workspaceAlias = trimmedSelector;
   try {

@@ -30,6 +30,7 @@ import {
 } from "@kato/runtime";
 import {
   createDefaultRuntimeConfig,
+  expandHomePath,
   resolveDefaultConfigPath,
   resolveDefaultUserConfigPath,
   RuntimeConfigFileStore,
@@ -208,7 +209,6 @@ export async function runDaemonCli(
     return cachedUserConfigStore;
   };
 
-  const defaultKatoDir = dirname(runtime.runtimeDir);
   const defaultRuntimeConfig = options.defaultRuntimeConfig ??
     createDefaultRuntimeConfig({
       runtimeDir: runtime.runtimeDir,
@@ -223,12 +223,30 @@ export async function runDaemonCli(
     createDefaultCliConfig();
   const configStore = options.configStore ??
     new RuntimeConfigFileStore(runtime.configPath);
-  const sharedConfigStore = options.sharedConfigStore ??
-    new SharedBehaviorConfigFileStore(
-      resolveDefaultSharedConfigPath(defaultKatoDir),
+  let resolvedSharedConfigStore = options.sharedConfigStore;
+  let resolvedCliConfigStore = options.cliConfigStore;
+  const resolveRuntimeKatoDir = (config: RuntimeConfig): string =>
+    expandHomePath(config.katoDir ?? dirname(config.runtimeDir));
+  const resolveSharedConfigStore = (
+    katoDir: string,
+  ): SharedBehaviorConfigStoreLike => {
+    if (resolvedSharedConfigStore) {
+      return resolvedSharedConfigStore;
+    }
+    resolvedSharedConfigStore = new SharedBehaviorConfigFileStore(
+      resolveDefaultSharedConfigPath(katoDir),
     );
-  const cliConfigStore = options.cliConfigStore ??
-    new CliConfigFileStore(resolveDefaultCliConfigPath(defaultKatoDir));
+    return resolvedSharedConfigStore;
+  };
+  const resolveCliConfigStore = (katoDir: string): CliConfigStoreLike => {
+    if (resolvedCliConfigStore) {
+      return resolvedCliConfigStore;
+    }
+    resolvedCliConfigStore = new CliConfigFileStore(
+      resolveDefaultCliConfigPath(katoDir),
+    );
+    return resolvedCliConfigStore;
+  };
 
   let intent;
   try {
@@ -283,15 +301,20 @@ export async function runDaemonCli(
           (intent.command.name === "start" ||
             intent.command.name === "restart") && autoInitOnStart
         ) {
+          const initializationKatoDir = resolveRuntimeKatoDir(
+            defaultRuntimeConfig,
+          );
           const initialized = await ensureGlobalConfigInitialized({
             configStore,
-            sharedConfigStore,
-            cliConfigStore,
+            sharedConfigStore: resolveSharedConfigStore(
+              initializationKatoDir,
+            ),
+            cliConfigStore: resolveCliConfigStore(initializationKatoDir),
             userConfigStore: resolveUserConfigStore(),
             defaultRuntimeConfig,
             defaultSharedConfig,
             defaultCliConfig,
-            katoDir: defaultKatoDir,
+            katoDir: initializationKatoDir,
           });
           if (initialized.runtimeConfigCreated) {
             autoInitializedRuntimeConfigPath = initialized.runtimeConfigPath;
@@ -323,6 +346,9 @@ export async function runDaemonCli(
       }
     }
   }
+  const runtimeKatoDir = resolveRuntimeKatoDir(runtimeConfig);
+  const sharedConfigStore = resolveSharedConfigStore(runtimeKatoDir);
+  const cliConfigStore = resolveCliConfigStore(runtimeKatoDir);
   if (commandShouldTryLoadingRuntimeConfig) {
     try {
       sharedConfig = await sharedConfigStore.load();

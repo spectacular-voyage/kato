@@ -1,13 +1,6 @@
-export type {
-  CliConfigStoreLike,
-  EnsureCliConfigResult,
-  EnsureRuntimeConfigResult,
-  EnsureSharedBehaviorConfigResult,
-  RuntimeConfigStoreLike,
-  SharedBehaviorConfigStoreLike,
-} from "./config/mod.ts";
 export {
   CliConfigFileStore,
+  type CliConfigStoreLike,
   createDefaultCliConfig,
   createDefaultExportFeatureFlags,
   createDefaultRuntimeConfig,
@@ -15,6 +8,10 @@ export {
   createDefaultRuntimeMarkdownFrontmatterConfig,
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
+  type EnsureCliConfigResult,
+  type EnsureRuntimeConfigResult,
+  type EnsureSharedBehaviorConfigResult,
+  type EnsureUserConfigResult,
   resolveDefaultCliConfigPath,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
@@ -22,13 +19,12 @@ export {
   resolveDefaultUserConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
+  type RuntimeConfigStoreLike,
   SharedBehaviorConfigFileStore,
+  type SharedBehaviorConfigStoreLike,
   UserConfigFileStore,
+  type UserConfigStoreLike,
   validateAndNormalizeParticipantUsername,
-} from "./config/mod.ts";
-export type {
-  EnsureUserConfigResult,
-  UserConfigStoreLike,
 } from "./config/mod.ts";
 
 export type {
