@@ -41,6 +41,20 @@ type DenoCommandFactory = (
   options: DenoCommandOptions,
 ) => CommandLike;
 
+function toPowerShellSingleQuoted(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function toPowerShellEncodedCommand(script: string): string {
+  const bytes = new Uint8Array(script.length * 2);
+  for (let i = 0; i < script.length; i += 1) {
+    const code = script.charCodeAt(i);
+    bytes[i * 2] = code & 0xff;
+    bytes[i * 2 + 1] = code >> 8;
+  }
+  return btoa(String.fromCharCode(...bytes));
+}
+
 export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
   constructor(
     private readonly runtime: DaemonLauncherRuntime,
@@ -48,7 +62,52 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
     private readonly daemonMainPath: string = resolveDaemonMainPath(),
     private readonly commandFactory: DenoCommandFactory = (command, options) =>
       new Deno.Command(command, options),
+    private readonly preferPowerShellStartProcessOnWindows: boolean = true,
   ) {}
+
+  private launchDetachedViaPowerShell(
+    args: string[],
+    env: Record<string, string>,
+  ): Promise<number> {
+    const envAssignments = Object.entries(env).map(([key, value]) =>
+      `$env:${key}=${toPowerShellSingleQuoted(value)}`
+    ).join(";\n");
+    const argList = args.map(toPowerShellSingleQuoted).join(", ");
+    const script = `$ErrorActionPreference = 'Stop';
+${envAssignments};
+$argList = @(${argList});
+$proc = Start-Process -FilePath ${
+      toPowerShellSingleQuoted(this.denoExecPath)
+    } -ArgumentList $argList -WindowStyle Hidden -PassThru;
+[Console]::Out.WriteLine($proc.Id);`;
+    const encodedCommand = toPowerShellEncodedCommand(script);
+    return new Deno.Command("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encodedCommand,
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).output().then((result) => {
+      if (result.code !== 0) {
+        const errorText = new TextDecoder().decode(result.stderr).trim();
+        throw new Error(
+          `PowerShell Start-Process launch failed (exit ${result.code}): ${errorText}`,
+        );
+      }
+      const stdoutText = new TextDecoder().decode(result.stdout).trim();
+      const pid = Number.parseInt(stdoutText, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        throw new Error(
+          `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
+        );
+      }
+      return pid;
+    });
+  }
 
   launchDetached(): Promise<number> {
     const workspaceSourceRoot = resolveWorkspaceSourceRoot(this.daemonMainPath);
@@ -71,36 +130,46 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
       ...(this.runtime.providerSessionRoots?.gemini ?? []),
     ]);
 
+    const args = [
+      "run",
+      `--allow-read=${Array.from(readRoots).join(",")}`,
+      `--allow-write=${Array.from(writeRoots).join(",")}`,
+      "--allow-env",
+      this.daemonMainPath,
+      "__daemon-run",
+    ];
+    const env = {
+      KATO_RUNTIME_DIR: this.runtime.runtimeDir,
+      KATO_CONFIG_PATH: this.runtime.configPath,
+      KATO_DAEMON_STATUS_PATH: this.runtime.statusPath,
+      KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
+      KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
+        this.runtime.allowedWriteRoots ?? [],
+      ),
+      KATO_CLAUDE_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.claude ?? [],
+      ),
+      KATO_CODEX_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.codex ?? [],
+      ),
+      KATO_GEMINI_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.gemini ?? [],
+      ),
+    };
+
+    if (
+      this.preferPowerShellStartProcessOnWindows &&
+      Deno.build.os === "windows"
+    ) {
+      return this.launchDetachedViaPowerShell(args, env);
+    }
+
     const command = this.commandFactory(this.denoExecPath, {
-      args: [
-        "run",
-        `--allow-read=${Array.from(readRoots).join(",")}`,
-        `--allow-write=${Array.from(writeRoots).join(",")}`,
-        "--allow-env",
-        this.daemonMainPath,
-        "__daemon-run",
-      ],
+      args,
       stdin: "null",
       stdout: "null",
-      stderr: "null",
-      env: {
-        KATO_RUNTIME_DIR: this.runtime.runtimeDir,
-        KATO_CONFIG_PATH: this.runtime.configPath,
-        KATO_DAEMON_STATUS_PATH: this.runtime.statusPath,
-        KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
-        KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
-          this.runtime.allowedWriteRoots ?? [],
-        ),
-        KATO_CLAUDE_SESSION_ROOTS: JSON.stringify(
-          this.runtime.providerSessionRoots?.claude ?? [],
-        ),
-        KATO_CODEX_SESSION_ROOTS: JSON.stringify(
-          this.runtime.providerSessionRoots?.codex ?? [],
-        ),
-        KATO_GEMINI_SESSION_ROOTS: JSON.stringify(
-          this.runtime.providerSessionRoots?.gemini ?? [],
-        ),
-      },
+      stderr: "inherit",
+      env,
     });
     const child = command.spawn();
     return Promise.resolve(child.pid);

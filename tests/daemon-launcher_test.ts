@@ -38,6 +38,7 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
         },
       };
     },
+    false,
   );
 
   const pid = await launcher.launchDetached();
@@ -82,6 +83,9 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
   assertEquals(allowWriteRoots.includes("./exports"), true);
 
   const env = capturedOptions?.env ?? {};
+  assertEquals(capturedOptions?.stdin, "null");
+  assertEquals(capturedOptions?.stdout, "null");
+  assertEquals(capturedOptions?.stderr, "inherit");
   assertEquals(env["KATO_RUNTIME_DIR"], runtime.runtimeDir);
   assertEquals(env["KATO_CONFIG_PATH"], runtime.configPath);
   assertEquals(env["KATO_DAEMON_STATUS_PATH"], runtime.statusPath);
