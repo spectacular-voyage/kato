@@ -34,12 +34,21 @@ Related notes:
 - **Control plane**: file-based IPC between CLI and daemon:
   `~/.kato/shared/ipc/daemon-control.json` (requests) and
   `~/.kato/shared/status.json` (status snapshot).
-- **Session metadata**: per-session durable state (`*.meta.json`) with ingest
-  cursor, dedupe fingerprints, command cursor, and recording bindings.
-- **SessionTwin**: canonical per-session event log (`*.twin.jsonl`) for replay
+- **Provider session**: provider conversation identity
+  (`provider + providerSessionId`) used as the durable state key.
+- **Source file**: provider transcript file discovered by ingestion
+  (`sourceFilePath`) and parsed into canonical events.
+- **Session metadata**: durable per-provider-session state (`*.meta.json`) with
+  ingest cursor, dedupe fingerprints, command cursor/anchor, and recording
+  bindings.
+- **SessionTwin**: canonical per-provider-session event log (`*.twin.jsonl`) for replay
   and durable cursor/write state.
-- **Runtime session snapshot**: bounded in-memory projection used by status,
-  in-chat command handling, and export.
+- **Runtime snapshot**: bounded in-memory projection of parsed events used by
+  status, in-chat command handling, and export.
+- **First-seen provider session**: daemon has no prior command cursor/anchor
+  state for that provider session key.
+- **First-seen source file**: source file newly observed/fresh by filesystem
+  signals; not equivalent to first-seen provider session.
 
 ## Monorepo Boundaries
 
@@ -148,8 +157,8 @@ graph TD
 | Launcher | Spawn daemon with narrowed read/write permissions and env overrides | `apps/runtime/src/orchestrator/launcher.ts` |
 | Daemon bootstrap | Load daemon/shared/user config, init loggers/stores, enter runtime loop | `apps/daemon/src/main.ts` |
 | Control plane | Persist/list/mark control requests, persist/load status snapshots | `apps/runtime/src/orchestrator/control_plane.ts` |
-| Ingestion | Discover/watch provider logs, parse incremental events, project snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Session persistence | Authoritative metadata/twin writes and rebuildable daemon index cache | `apps/runtime/src/orchestrator/session_state_store.ts` |
+| Ingestion | Discover/watch provider source files, parse incremental events, project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
+| Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache | `apps/runtime/src/orchestrator/session_state_store.ts` |
 | Writer pipeline | Render markdown/jsonl with policy gate enforcement | `apps/daemon/src/writer/*` |
 | Workspace layer | Registry + workspace profile/template resolution | `apps/runtime/src/workspace/*` |
 | Observability | Structured operational/audit events for CLI and daemon | `apps/runtime/src/observability/*` |
@@ -196,13 +205,21 @@ This keeps the daemon process scoped tighter than broad `-A`.
 
 Ingestion runners:
 
-- discover/watch provider files
-- resume from persisted cursor
+- discover/watch provider source files
+- resume by provider session identity + persisted cursor
 - parse incremental events
 - append SessionTwin with bounded dedupe
 - persist metadata and project into in-memory snapshot store
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
+
+### Naming Guardrail
+
+- Use **provider session** for identity/cursor/anchor state.
+- Use **source file** for filesystem freshness (`birthtime`/`mtime`) and parser
+  input context.
+- Avoid plain **session** in new replay/freshness comments when it could mean
+  either provider-session identity or source-file state.
 
 ### 5) Export/Writer Path
 
@@ -224,6 +241,8 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 - `~/.kato/cli/kato-cli-config.yaml`: CLI-only settings (currently logging).
 - `~/.kato/shared/ipc/daemon-control.json`: queued daemon commands.
 - `~/.kato/shared/status.json`: externally readable daemon status snapshot.
+- provider source files (Codex/Claude/Gemini transcript files): external inputs,
+  not authoritative control state.
 - `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session state.
 - in-memory snapshot store: runtime projection cache.
 - markdown/jsonl exports: derived artifacts.

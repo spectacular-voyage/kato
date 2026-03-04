@@ -58,6 +58,25 @@ function makeEvent(
   } as unknown as ConversationEvent;
 }
 
+function makeEventWithoutTimestamp(
+  id: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "codex",
+    sessionId: "session-1",
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: id,
+    },
+  } as unknown as ConversationEvent;
+}
+
 function makeEventForSession(
   sessionId: string,
   id: string,
@@ -2124,7 +2143,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonRuntimeLoop persistent in-chat skips historical first-seen commands when source mtime predates daemon start",
+  "runDaemonRuntimeLoop persistent in-chat skips stale first-seen commands even when source freshness is post-start",
   async () => {
     let stateDir: string | undefined;
 
@@ -2136,7 +2155,7 @@ Deno.test(
             "u-old-capture",
             "message.user",
             `::capture-${TEST_WORKSPACE_ALIAS} /tmp/old-command.md`,
-            "2026-02-22T09:59:59.000Z",
+            "2026-02-22T09:59:40.000Z",
           ),
         ],
         recordingPipeline: makePersistentInChatRecordingPipeline({
@@ -2161,7 +2180,7 @@ Deno.test(
               metadata.commandCursor = 0;
               delete metadata.commandCursorAnchor;
               metadata.lastObservedMtimeMs = new Date(
-                "2026-02-22T09:59:00.000Z",
+                "2026-02-22T10:00:04.000Z",
               ).getTime();
             },
           );
@@ -2176,6 +2195,304 @@ Deno.test(
       assertEquals(session.workspaceOutputs ?? [], []);
     } finally {
       await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat processes only near-realtime first-seen commands from mixed backlog",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-first-seen-mixed-backlog-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const staleDestination = join(scenarioDir, "stale.md");
+      const freshDestination = join(scenarioDir, "fresh.md");
+      const captureTargets: string[] = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-stale",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${staleDestination}`,
+            "2026-02-22T09:59:40.000Z",
+          ),
+          makeEvent(
+            "u-capture-fresh",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${freshDestination}`,
+            "2026-02-22T09:59:56.000Z",
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureTargets.push(input.targetPath);
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 0;
+              delete metadata.commandCursorAnchor;
+              metadata.lastObservedMtimeMs = new Date(
+                "2026-02-22T10:00:04.000Z",
+              ).getTime();
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(captureTargets, [freshDestination]);
+      assertEquals(session.commandCursor, 2);
+      assertEquals(session.commandCursorAnchor?.eventId, "u-capture-fresh");
+      assertEquals(output.currentResolvedPath, freshDestination);
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat applies first-seen no-timestamp commands when source freshness is within near-realtime grace",
+  async () => {
+    let stateDir: string | undefined;
+
+    try {
+      let captureCalls = 0;
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEventWithoutTimestamp(
+            "u-capture-no-timestamp-fresh",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} /tmp/no-timestamp-fresh.md`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureCalls += 1;
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 0;
+              delete metadata.commandCursorAnchor;
+              metadata.sourceFilePath = join(
+                "/tmp",
+                `kato-missing-source-${crypto.randomUUID()}.jsonl`,
+              );
+              metadata.lastObservedMtimeMs = new Date(
+                "2026-02-22T09:59:56.000Z",
+              ).getTime();
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      assertEquals(captureCalls, 1);
+      assertEquals(session.commandCursor, 1);
+      assertEquals(
+        session.commandCursorAnchor?.eventId,
+        "u-capture-no-timestamp-fresh",
+      );
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat skips first-seen no-timestamp commands when source freshness is outside near-realtime grace",
+  async () => {
+    let stateDir: string | undefined;
+
+    try {
+      let captureCalls = 0;
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEventWithoutTimestamp(
+            "u-capture-no-timestamp-stale",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} /tmp/no-timestamp-stale.md`,
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureCalls += 1;
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 0;
+              delete metadata.commandCursorAnchor;
+              metadata.sourceFilePath = join(
+                "/tmp",
+                `kato-missing-source-${crypto.randomUUID()}.jsonl`,
+              );
+              metadata.lastObservedMtimeMs = new Date(
+                "2026-02-22T09:59:49.000Z",
+              ).getTime();
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      assertEquals(captureCalls, 0);
+      assertEquals(session.commandCursor, 1);
+      assertEquals(
+        session.commandCursorAnchor?.eventId,
+        "u-capture-no-timestamp-stale",
+      );
+      assertEquals(session.workspaceOutputs ?? [], []);
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat keeps active destination appends when first-seen stale commands are skipped",
+  async () => {
+    const scenarioDir = await makeWritableScenarioDir(
+      "daemon-runtime-first-seen-stale-command-active-output-",
+    );
+    let stateDir: string | undefined;
+
+    try {
+      const persistentDestination = join(scenarioDir, "active.md");
+      let captureCalls = 0;
+      const appendTargets: string[] = [];
+      const appendEventCounts: number[] = [];
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-capture-stale-command",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} ${
+              join(scenarioDir, "stale.md")
+            }`,
+            "2026-02-22T09:59:40.000Z",
+          ),
+          makeEvent(
+            "a-followup",
+            "message.assistant",
+            "assistant follow-up",
+            "2026-02-22T10:00:01.000Z",
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureCalls += 1;
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+          appendToDestination(input) {
+            appendTargets.push(input.targetPath);
+            appendEventCounts.push(input.events.length);
+            return Promise.resolve({
+              mode: "append",
+              outputPath: input.targetPath,
+              wrote: true,
+              deduped: false,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore, workspace) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 0;
+              delete metadata.commandCursorAnchor;
+              metadata.lastObservedMtimeMs = new Date(
+                "2026-02-22T10:00:04.000Z",
+              ).getTime();
+              metadata.workspaceOutputs = [
+                makeWorkspaceOutputState(workspace, {
+                  currentResolvedPath: persistentDestination,
+                  desiredState: "on",
+                  writeCursor: 0,
+                  activeRecordingCycleId: "cycle-live",
+                  recordingCycles: [{
+                    recordingCycleId: "cycle-live",
+                    startedCursor: 0,
+                    startedAt: "2026-02-22T09:59:00.000Z",
+                  }],
+                }),
+              ];
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      const output = findWorkspaceOutputState(session);
+      assertEquals(captureCalls, 0);
+      assertEquals(appendTargets, [persistentDestination]);
+      assertEquals(appendEventCounts, [2]);
+      assertEquals(session.commandCursor, 2);
+      assertEquals(session.commandCursorAnchor?.eventId, "a-followup");
+      assertEquals(output.currentResolvedPath, persistentDestination);
+      assertEquals(output.desiredState, "on");
+      assertEquals(output.activeRecordingCycleId, "cycle-live");
+      assertEquals(output.writeCursor, 2);
+      assertEquals(output.recordingCycles.length, 1);
+      assertEquals(output.recordingCycles[0]?.stoppedCursor, undefined);
+    } finally {
+      await removeDirIfPresent(stateDir);
+      await removeDirIfPresent(scenarioDir);
     }
   },
 );

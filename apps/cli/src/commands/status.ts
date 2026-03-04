@@ -853,7 +853,8 @@ export function renderStatusText(
   const lines: string[] = [];
 
   // Sessions section
-  const sessionsLoading = snapshot.sessions === undefined && snapshot.daemonRunning;
+  const sessionsLoading = snapshot.sessions === undefined &&
+    snapshot.daemonRunning;
   const allSessions = snapshot.sessions ?? [];
   const activeCount = allSessions.filter((s) => !s.stale).length;
   const staleCount = allSessions.length - activeCount;

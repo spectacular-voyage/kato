@@ -116,6 +116,7 @@ const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
 const CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES = 5;
 const CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS = 25;
+const FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS = 5_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -899,6 +900,116 @@ function writeCommandCursor(
   } else {
     delete metadata.commandCursorAnchor;
   }
+}
+
+type FirstSeenSourceFileFreshnessBasis =
+  | "source.birthtime"
+  | "source.mtime"
+  | "metadata.lastObservedMtimeMs";
+
+async function resolveFirstSeenSourceFileFreshness(options: {
+  sourceFilePath: string | undefined;
+  metadataLastObservedMtimeMs: number | undefined;
+}): Promise<{
+  sourceFileFreshnessMs?: number;
+  sourceFileFreshnessBasis?: FirstSeenSourceFileFreshnessBasis;
+}> {
+  const sourceFilePath = readString(options.sourceFilePath);
+  if (sourceFilePath && !sourceFilePath.startsWith("[unknown:")) {
+    try {
+      const sourceFileInfo = await Deno.stat(sourceFilePath);
+      const sourceFileBirthtimeMs = sourceFileInfo.birthtime?.getTime();
+      if (
+        sourceFileBirthtimeMs !== undefined &&
+        Number.isFinite(sourceFileBirthtimeMs)
+      ) {
+        return {
+          sourceFileFreshnessMs: sourceFileBirthtimeMs,
+          sourceFileFreshnessBasis: "source.birthtime",
+        };
+      }
+      const sourceFileMtimeMs = sourceFileInfo.mtime?.getTime();
+      if (
+        sourceFileMtimeMs !== undefined &&
+        Number.isFinite(sourceFileMtimeMs)
+      ) {
+        return {
+          sourceFileFreshnessMs: sourceFileMtimeMs,
+          sourceFileFreshnessBasis: "source.mtime",
+        };
+      }
+    } catch {
+      // Best-effort source freshness check; metadata fallback handles unavailable files.
+    }
+  }
+
+  if (
+    options.metadataLastObservedMtimeMs !== undefined &&
+    Number.isFinite(options.metadataLastObservedMtimeMs)
+  ) {
+    return {
+      sourceFileFreshnessMs: options.metadataLastObservedMtimeMs,
+      sourceFileFreshnessBasis: "metadata.lastObservedMtimeMs",
+    };
+  }
+
+  return {};
+}
+
+function isFirstSeenProviderSessionUserEventEligible(options: {
+  event: ConversationEvent & { kind: "message.user" };
+  daemonStartMs: number;
+  nearRealtimeGraceMs: number;
+  sourceFileFreshnessMs: number | undefined;
+}): boolean {
+  const nearRealtimeThresholdMs = options.daemonStartMs -
+    options.nearRealtimeGraceMs;
+  const eventTimeMs = readTimeMs(options.event.timestamp);
+  if (eventTimeMs !== undefined) {
+    return eventTimeMs >= nearRealtimeThresholdMs;
+  }
+  if (options.sourceFileFreshnessMs !== undefined) {
+    return options.sourceFileFreshnessMs >= nearRealtimeThresholdMs;
+  }
+  return false;
+}
+
+function resolveFirstSeenProviderSessionCommandCursor(options: {
+  events: ConversationEvent[];
+  daemonStartMs: number;
+  nearRealtimeGraceMs: number;
+  sourceFileFreshnessMs: number | undefined;
+}): {
+  commandCursor: number;
+  eligibleUserEvents: number;
+  skippedUserEvents: number;
+} {
+  let commandCursor = options.events.length;
+  let eligibleUserEvents = 0;
+  let skippedUserEvents = 0;
+
+  for (let i = 0; i < options.events.length; i += 1) {
+    const event = options.events[i];
+    if (!event || event.kind !== "message.user") {
+      continue;
+    }
+    const eligible = isFirstSeenProviderSessionUserEventEligible({
+      event,
+      daemonStartMs: options.daemonStartMs,
+      nearRealtimeGraceMs: options.nearRealtimeGraceMs,
+      sourceFileFreshnessMs: options.sourceFileFreshnessMs,
+    });
+    if (!eligible) {
+      skippedUserEvents += 1;
+      continue;
+    }
+    eligibleUserEvents += 1;
+    if (commandCursor === options.events.length) {
+      commandCursor = i;
+    }
+  }
+
+  return { commandCursor, eligibleUserEvents, skippedUserEvents };
 }
 
 function resolveCommandBoundaries(
@@ -2496,28 +2607,55 @@ async function processPersistentRecordingUpdates(
     let metadataChanged = false;
     const persistedCommandCursor = readCommandCursor(metadata);
     const persistedCommandCursorAnchor = readCommandCursorAnchor(metadata);
-    const commandCursorUninitialized = persistedCommandCursor === 0 &&
+    const firstSeenProviderSession = persistedCommandCursor === 0 &&
       !persistedCommandCursorAnchor;
-    const sourcePredatesDaemonStart = metadata.lastObservedMtimeMs !== undefined &&
-      metadata.lastObservedMtimeMs < processEventsFromMs;
-    const skipHistoricalFirstSeenCommands = commandCursorUninitialized &&
-      sourcePredatesDaemonStart;
+    let sourceFileFreshnessMs: number | undefined;
+    let sourceFileFreshnessBasis: FirstSeenSourceFileFreshnessBasis | undefined;
 
     let commandCursor = resolveCommandStartCursor(metadata, snapshot.events);
-    if (skipHistoricalFirstSeenCommands) {
-      commandCursor = snapshot.events.length;
-      writeCommandCursor(metadata, commandCursor, snapshot.events);
-      metadataChanged = true;
+    if (firstSeenProviderSession) {
+      const sourceFileFreshness = await resolveFirstSeenSourceFileFreshness({
+        sourceFilePath: metadata.sourceFilePath,
+        metadataLastObservedMtimeMs: metadata.lastObservedMtimeMs,
+      });
+      sourceFileFreshnessMs = sourceFileFreshness.sourceFileFreshnessMs;
+      sourceFileFreshnessBasis = sourceFileFreshness.sourceFileFreshnessBasis;
+      const firstSeenResolution = resolveFirstSeenProviderSessionCommandCursor({
+        events: snapshot.events,
+        daemonStartMs: processEventsFromMs,
+        nearRealtimeGraceMs: FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS,
+        sourceFileFreshnessMs,
+      });
+      commandCursor = firstSeenResolution.commandCursor;
+      const nextFirstSeenAnchor = commandCursor > 0
+        ? buildCommandCursorAnchor(snapshot.events[commandCursor - 1])
+        : undefined;
+      if (
+        persistedCommandCursor !== commandCursor ||
+        !commandCursorAnchorEquals(
+          persistedCommandCursorAnchor,
+          nextFirstSeenAnchor,
+        )
+      ) {
+        writeCommandCursor(metadata, commandCursor, snapshot.events);
+        metadataChanged = true;
+      }
       await operationalLogger.debug(
-        "recording.command.first_seen_skipped",
-        "Skipping historical in-chat commands on first-seen persistent session",
+        "recording.command.first_seen_cursor_initialized",
+        "Initialized first-seen provider session command cursor using near-realtime eligibility",
         {
           provider,
           sessionId: providerSessionId,
           sourceFilePath: metadata.sourceFilePath,
           sourceMtimeMs: metadata.lastObservedMtimeMs,
+          sourceFileFreshnessMs,
+          sourceFileFreshnessBasis,
           daemonStartedAtMs: processEventsFromMs,
-          skippedCommandsThroughCursor: commandCursor,
+          nearRealtimeGraceMs: FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS,
+          initializedCommandCursor: commandCursor,
+          snapshotEventCount: snapshot.events.length,
+          eligibleUserEvents: firstSeenResolution.eligibleUserEvents,
+          skippedUserEvents: firstSeenResolution.skippedUserEvents,
         },
       );
     }
@@ -2525,6 +2663,17 @@ async function processPersistentRecordingUpdates(
     for (let i = commandCursor; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event || event.kind !== "message.user") {
+        continue;
+      }
+      if (
+        firstSeenProviderSession &&
+        !isFirstSeenProviderSessionUserEventEligible({
+          event,
+          daemonStartMs: processEventsFromMs,
+          nearRealtimeGraceMs: FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS,
+          sourceFileFreshnessMs,
+        })
+      ) {
         continue;
       }
       const changed = await applyPersistentControlCommandsForEvent({
