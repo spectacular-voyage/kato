@@ -20,5 +20,8 @@
     "loglayer": "npm:loglayer@9.1.0",
     "@kato/shared": "./shared/src/mod.ts",
     "@kato/runtime": "./apps/runtime/src/mod.ts"
+  },
+  "fmt": {
+    "exclude": ["dev-docs/notes/**", "**/*.md"]
   }
 }

@@ -1062,3 +1062,176 @@ commit message please
 # gpt-5.3-codex_2026-03-04_0826_38
 
 `fix(windows): launch daemon via Start-Process; harden stale heartbeat + fatal logging`
+
+# User_2026-03-04_0831_03
+
+How do you specify deno fmt to ignore certain files without use CLI arguments?
+
+# gpt-5.3-codex_2026-03-04_0831_06
+
+Use `exclude` in `deno.json` under `fmt`.
+
+Example:
+
+```json
+{
+  "fmt": {
+    "exclude": [
+      "dev-docs/notes/**",
+      "path/to/generated-file.ts"
+    ]
+  }
+}
+```
+
+Then plain `deno fmt` (or `deno task fmt`) will skip those paths without extra CLI flags.
+
+# User_2026-03-04_0831_33
+
+can you do a dry run with deno fmt?
+
+**Running dry-run formatting check**
+
+# gpt-5.3-codex_2026-03-04_0831_36
+
+I’ll run `deno fmt --check` from the repo root (no file changes) and report what it would reformat.
+
+# gpt-5.3-codex_2026-03-04_0832_10
+
+Running a formatting dry run now with `deno fmt --check` from the repo root so we can see exactly what would change without modifying files.
+
+**Confirming dry run with CRLF**
+
+# gpt-5.3-codex_2026-03-04_0832_17
+
+Dry run complete: `deno fmt --check` failed.
+
+Result summary:
+- `146` not-formatted files out of `151` checked.
+- Most diffs are line-ending only (`Text differed by line endings`) plus some markdown wrapping changes in files like `CODEX.md`, `CLAUDE.md`, `GEMINI.md`.
+
+So yes, this is consistent with the CRLF/LF issue we suspected.
+
+# User_2026-03-04_0832_43
+
+is this valid:   "fmt": {
+    "exclude": ["dev-docs/notes/**", "*.md"]
+  }
+
+**Verifying Deno fmt exclude glob support**
+
+# gpt-5.3-codex_2026-03-04_0832_51
+
+I’ll quickly verify against Deno’s current config behavior in this repo so we can answer precisely.
+
+**Inspecting config schema**
+
+**Validating markdown exclusion patterns**
+
+# gpt-5.3-codex_2026-03-04_0833_06
+
+Short answer: almost, but one glob is too narrow. I’ll confirm behavior with a quick targeted check.
+
+**Confirming markdown exclusion pattern**
+
+# gpt-5.3-codex_2026-03-04_0833_13
+
+Yes, that is valid Deno config.
+
+```json
+"fmt": {
+  "exclude": ["dev-docs/notes/**", "*.md"]
+}
+```
+
+Notes:
+- `*.md` matches only root-level markdown files.
+- If you want markdown excluded everywhere, use `**/*.md`.
+- I verified it’s active: `deno fmt --check CODEX.md` now returns `No target files found` (excluded).
+
+# User_2026-03-04_0834_41
+
+Ah, I'd created .gitattributes already but on the main branch and forgot to pull it here. How should I avoid git confusion here.
+
+**Recommending git line-ending fix steps**
+
+# gpt-5.3-codex_2026-03-04_0834_47
+
+Best low-risk workflow:
+
+1. Bring just `.gitattributes` into your current branch first.
+```bash
+git checkout main -- .gitattributes
+# or: git restore --source=main -- .gitattributes
+git add .gitattributes
+git commit -m "chore: add .gitattributes for consistent line endings"
+```
+
+2. Renormalize once on that branch (after `.gitattributes` is committed):
+```bash
+git add --renormalize .
+git status
+```
+- If this shows huge churn you don’t want yet, stop and `git restore --staged --worktree .` and do it in a dedicated cleanup branch.
+- If acceptable, commit separately:
+```bash
+git commit -m "chore: renormalize line endings"
+```
+
+3. Keep functional changes separate from EOL commits.
+- One commit for `.gitattributes`
+- One commit for renormalization
+- Then your real code changes
+
+4. Local config to reduce repeats (Windows):
+```bash
+git config core.autocrlf false
+git config core.eol lf
+```
+(Use repo-local `--local` if you don’t want global behavior.)
+
+If you want, I can suggest a `.gitattributes` file tuned for this repo.
+
+# User_2026-03-04_0835_24
+
+error: pathspec '.gitattributes' did not match any file(s) known to git
+
+**Planning branch and file inspection**
+
+# gpt-5.3-codex_2026-03-04_0835_31
+
+That error means Git can’t find `.gitattributes` in the commit you referenced. I’ll quickly check which branches actually contain it and give you the exact checkout command.
+
+**Checking remote branch attributes**
+
+# gpt-5.3-codex_2026-03-04_0835_34
+
+Quick check shows `.gitattributes` is not in local `main` either. I’ll check `origin/main` next in case your local main is behind.
+
+**Clarifying fetch necessity and cherry-pick option**
+
+# gpt-5.3-codex_2026-03-04_0835_42
+
+That explains it: `.gitattributes` is in `origin/main`, but not in your local `main`.
+
+Use this instead:
+
+```bash
+git checkout origin/main -- .gitattributes
+# or: git restore --source=origin/main -- .gitattributes
+```
+
+Then commit it on your current branch:
+
+```bash
+git add .gitattributes
+git commit -m "chore: add .gitattributes from main"
+```
+
+If you want local `main` to match too:
+
+```bash
+git switch main
+git pull
+git switch windows-troubleshooting
+```
