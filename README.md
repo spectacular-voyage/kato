@@ -19,22 +19,28 @@ Prerequisites:
 
 - Deno 2.x
 
-### MacOS
+### MacOS and Linux
 
 ```
+# clone the Kato repository somewhere reasonable, like ~/github/kato
+git clone https://github.com/spectacular-voyage/kato.git ~/github/kato
+
 # install deno if not already installed
 curl -fsSL https://deno.land/install.sh | sh
 ```
 
-Deno is not automatically appended to your PATH, so add these lines to the end of your .zshrc
+Deno is not automatically appended to your PATH, so add these lines to the end of your .zshrc:
 ```
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 ```
 
+While you're modifying your .zshrc, add an alias to `<clone-location>/apps/cli/src/main.ts` for easy execution:
+```
+alias kato="deno run -A ~/github/kato/apps/cli/src/main.ts""
+```
+
 After modifying your path, you need to restart apps where applicable, e.g.: VSCode, Terminal
-
-
 
 
 ## Quickstart
@@ -133,26 +139,7 @@ Workspace registration changes are visible to a running daemon for new
 alias-scoped commands without a restart. Changes to an already-registered
 workspace's alias, root, or config path are restart-bound.
 
-## Manual Migration (Pre-Separation -> Current Layout)
 
-If you have older single-root files from before CLI/daemon separation, migrate
-once with:
-
-```bash
-mkdir -p ~/.kato/shared/ipc ~/.kato/shared/sessions ~/.kato/daemon ~/.kato/cli
-mv ~/.kato/kato-daemon-config.yaml ~/.kato/daemon/kato-daemon-config.yaml
-mv ~/.kato/workspace-registry.json ~/.kato/shared/workspace-registry.json
-mv ~/.kato/default-kato-workspace-config.yaml ~/.kato/shared/default-kato-workspace-config.yaml
-mv ~/.kato/sessions/* ~/.kato/shared/sessions/
-mv ~/.kato/daemon-control.json ~/.kato/shared/daemon-control.json
-mv ~/.kato/runtime/status.json ~/.kato/shared/status.json
-mv ~/.kato/runtime/control.json ~/.kato/shared/ipc/daemon-control.json
-deno run -A apps/cli/src/main.ts init
-deno run -A apps/cli/src/main.ts restart
-```
-
-This migration is intentionally manual and hard-break; there is no compatibility
-auto-move logic in runtime code.
 
 ## In-Chat Control Commands
 
@@ -167,7 +154,6 @@ Kato also watches user messages for in-chat control commands:
 Rules:
 
 - `::record`, `::capture`, and `::export` require a workspace alias suffix.
-- `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
 - `::capture-<alias>` is create-only: it fails when the resolved target path
   already exists.
 - Pathless `::capture-<alias>` always resolves a fresh default filename for the
