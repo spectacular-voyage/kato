@@ -1534,3 +1534,118 @@ Ready for the next code/doc change.
 # gpt-5.3-codex_2026-03-04_0608_38
 
 Ignored `::capture-k` as an in-chat Kato command.
+
+# User_2026-03-04_0617_52
+
+runDaemonCli start auto-initializes global config and warns when local .kato exists => ./tests/daemon-cli_test.ts:1947:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:84:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1950:22
+
+runDaemonCli init/start/restart warn when local .kato exists but global root is active => ./tests/daemon-cli_test.ts:2008:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:84:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:2011:22
+
+runDaemonCli fails early when KATO_RUNTIME_DIR is relative => ./tests/daemon-cli_test.ts:2067:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:84:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:2070:22
+
+resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present => ./tests/daemon-control-plane_test.ts:54:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:28:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:55:20
+
+resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR => ./tests/daemon-control-plane_test.ts:70:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:28:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:71:20
+
+resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR => ./tests/daemon-control-plane_test.ts:88:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:28:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:89:20
+
+resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR => ./tests/daemon-control-plane_test.ts:104:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:28:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:105:20
+
+resolveDefaultRuntimeDir fails when home and override are unavailable => ./tests/daemon-control-plane_test.ts:123:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:28:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:124:20
+
+runDaemonSubprocess fails cleanly when runtime root cannot be resolved => ./tests/daemon-main_test.ts:179:6
+error: NotCapable: Requires env access to "KATO_RUNTIME_DIR", run again with the --allow-env flag
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+                               ^
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:124:10)
+    at snapshotRuntimeEnv (file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts:153:32)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts:180:20
+
+**Planning env permission handling**
+
+# gpt-5.3-codex_2026-03-04_0617_57
+
+You’re right; these new tests are directly touching `Deno.env` and will fail under permission-restricted test runs. I’ll patch them to request env permission at runtime and skip cleanly when it isn’t granted, then re-run the targeted tests in restricted mode.
+
+**Inspecting test environment handling**
+
+**Adjusting env permissions in tests**
+
+**Adjusting test env permissions**
+
+# gpt-5.3-codex_2026-03-04_0618_32
+
+The failures come from the repo test task’s env allowlist, not from runtime logic: `KATO_RUNTIME_DIR` wasn’t included. I’m patching `deno.json` to allow that variable in `deno task test`, then I’ll rerun with the task command to confirm.
+
+**Refactoring tests to use controlled temp dirs**
+
+# gpt-5.3-codex_2026-03-04_0618_54
+
+I fixed the env allowlist issue, and found one more compatibility problem: those new resolver tests used `Deno.makeTempDir()` (writes to `/tmp`), while your test task only permits writes in `.test-tmp`. I’m switching those tests to `withTestTempDir`-scoped paths.
+
+**Planning full test run**
+
+**Checking changed files**
+
+**Summarizing root cause and fix**
+
+# gpt-5.3-codex_2026-03-04_0619_42
+
+Good catch. I fixed both causes of those failures.
+
+1. Added `KATO_RUNTIME_DIR` to the test env allowlist in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json).
+2. Updated new resolver tests to avoid `Deno.makeTempDir()` (which writes outside `.test-tmp`) and use `withTestTempDir`-scoped paths in [tests/daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts).
+
+Validation:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-control-plane_test.ts tests/daemon-cli_test.ts tests/daemon-main_test.ts` passed.
+- `deno task test` passed (`389 passed, 0 failed`).
+
+If you want, I can also give you a commit message for this follow-up fix.
