@@ -313,7 +313,7 @@ export class DaemonStatusSnapshotFileStore
   constructor(
     private readonly statusPath: string,
     private readonly now: () => Date = () => new Date(),
-  ) { }
+  ) {}
 
   async load(): Promise<DaemonStatusSnapshot> {
     let raw: string;
@@ -349,7 +349,7 @@ export class DaemonControlRequestFileStore
     private readonly controlPath: string,
     private readonly now: () => Date = () => new Date(),
     private readonly makeRequestId: () => string = () => crypto.randomUUID(),
-  ) { }
+  ) {}
 
   private makeDefaultDocument(): DaemonControlQueueDocument {
     return {

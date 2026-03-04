@@ -637,7 +637,9 @@ Deno.test("cli parser preserves Windows-style workspace register path input", ()
     "Win.Proj",
   ]);
   assertEquals(parsed.kind, "command");
-  if (parsed.kind !== "command" || parsed.command.name !== "workspace-register") {
+  if (
+    parsed.kind !== "command" || parsed.command.name !== "workspace-register"
+  ) {
     throw new Error("expected workspace-register command");
   }
   assertEquals(parsed.command.dirPath, "C:\\Users\\tester\\proj\\");
@@ -1919,18 +1921,22 @@ Deno.test(
     });
     const controlStore = makeInMemoryControlStore();
     const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-    const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
     const daemonLauncher = makeDaemonLauncher(31337);
 
-    const code = await withMockedDateNow([0, 20_000], () =>
-      runDaemonCli(["start"], {
-        runtime: harness.runtime,
-        defaultRuntimeConfig,
-        configStore,
-        statusStore,
-        controlStore: controlStore.store,
-        daemonLauncher: daemonLauncher.launcher,
-      })
+    const code = await withMockedDateNow(
+      [0, 20_000],
+      () =>
+        runDaemonCli(["start"], {
+          runtime: harness.runtime,
+          defaultRuntimeConfig,
+          configStore,
+          statusStore,
+          controlStore: controlStore.store,
+          daemonLauncher: daemonLauncher.launcher,
+        }),
     );
 
     assertEquals(code, 1);
@@ -2884,15 +2890,17 @@ Deno.test("runDaemonCli restart fails when stop does not complete before timeout
     },
   };
 
-  const code = await withMockedDateNow([0, 0, 20_000], () =>
-    runDaemonCli(["restart"], {
-      runtime: harness.runtime,
-      defaultRuntimeConfig,
-      configStore,
-      statusStore,
-      controlStore,
-      daemonLauncher: daemonLauncher.launcher,
-    })
+  const code = await withMockedDateNow(
+    [0, 0, 20_000],
+    () =>
+      runDaemonCli(["restart"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore,
+        daemonLauncher: daemonLauncher.launcher,
+      }),
   );
 
   assertEquals(code, 1);
