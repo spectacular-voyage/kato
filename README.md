@@ -150,12 +150,12 @@ Supported commands:
   - Text mode includes a `Recent Errors` section sourced from runtime
     operational/security-audit WARN and ERROR log entries.
 - `workspace init [<dir>]`
-  - Create `<dir>/kato-workspace-config.yaml`.
+  - Create `<dir>/.kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
 - `workspace register [<dir>] --alias <alias>`
   - Register a workspace config under an explicit workspace alias.
   - If `<dir>` is provided, Kato uses exactly
-    `<dir>/kato-workspace-config.yaml`.
+    `<dir>/.kato-workspace-config.yaml`.
   - If `<dir>` is omitted, Kato searches nearest ancestors from the current
     working directory.
   - Adds the workspace root to shared `allowedWriteRoots` when missing.
@@ -204,7 +204,7 @@ Default paths:
 - Daemon session index cache: `~/.kato/shared/daemon-control.json`
 - Session metadata + twins: `~/.kato/shared/sessions/*.meta.json` and
   `~/.kato/shared/sessions/*.twin.jsonl`
-- Workspace-local config: `<workspace>/kato-workspace-config.yaml`
+- Workspace-local config: `<workspace>/.kato-workspace-config.yaml`
 
 Session metadata is authoritative; `shared/daemon-control.json` is a rebuildable
 cache index. `kato-daemon-config.yaml` is daemon-only process config.
@@ -294,7 +294,7 @@ Notes:
   - config file values
 
 Default `~/.kato/shared/default-kato-workspace-config.yaml` and
-`<workspace>/kato-workspace-config.yaml` share the same runtime output shape.
+`<workspace>/.kato-workspace-config.yaml` share the same runtime output shape.
 Only the workspace-local file may include `workspaceId`:
 
 ```yaml

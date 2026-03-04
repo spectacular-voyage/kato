@@ -69,14 +69,14 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   "workspace-init": [
     "Usage: kato workspace init [<dir>]",
     "",
-    "Creates <dir>/kato-workspace-config.yaml using the default template.",
+    "Creates <dir>/.kato-workspace-config.yaml using the default template.",
     "If <dir> is omitted, uses the current working directory.",
   ].join("\n"),
   "workspace-register": [
     "Usage: kato workspace register [<dir>] --alias <alias>",
     "",
     "Registers a workspace config under an explicit workspace alias.",
-    "If <dir> is provided, registers exactly <dir>/kato-workspace-config.yaml.",
+    "If <dir> is provided, registers exactly <dir>/.kato-workspace-config.yaml.",
     "If <dir> is omitted, uses the nearest ancestor workspace config from the current directory.",
   ].join("\n"),
   "workspace-list": [

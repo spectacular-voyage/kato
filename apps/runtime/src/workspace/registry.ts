@@ -14,7 +14,7 @@ import { parse as parseYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
-export const DEFAULT_WORKSPACE_CONFIG_FILENAME = "kato-workspace-config.yaml";
+export const DEFAULT_WORKSPACE_CONFIG_FILENAME = ".kato-workspace-config.yaml";
 export const DEFAULT_WORKSPACE_TEMPLATE_CONFIG_FILENAME =
   "default-kato-workspace-config.yaml";
 const DEFAULT_SHARED_DIRNAME = "shared";
