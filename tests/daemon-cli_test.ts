@@ -465,6 +465,11 @@ async function withMockedDateNow<T>(
   nowValues: number[],
   run: () => Promise<T>,
 ): Promise<T> {
+  if (!nowValues || nowValues.length === 0) {
+    throw new Error(
+      "withMockedDateNow requires nowValues to include at least one value for sequence and Date.now fallback",
+    );
+  }
   const originalDescriptor = Object.getOwnPropertyDescriptor(Date, "now");
   const sequence = [...nowValues];
   const fallback = nowValues[nowValues.length - 1] ?? 0;
