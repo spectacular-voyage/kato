@@ -715,6 +715,16 @@ export class PersistentSessionStateStore {
     const normalizedMetadataPath = metadataPath === canonicalPaths.metadataPath;
     const normalizedTwinPath = metadata.twinPath === canonicalPaths.twinPath;
     if (normalizedMetadataPath && normalizedTwinPath) {
+      await this.ensureDaemonControlEntry({
+        sessionKey: metadata.sessionKey,
+        provider: metadata.provider,
+        providerSessionId: metadata.providerSessionId,
+        sessionId: metadata.sessionId,
+        sessionShortId: makeSessionShortId(metadata.sessionId),
+        metadataPath: canonicalPaths.metadataPath,
+        twinPath: metadata.twinPath,
+        updatedAt: metadata.updatedAt,
+      });
       return metadata;
     }
 
@@ -797,6 +807,29 @@ export class PersistentSessionStateStore {
       );
     }
     return parsed;
+  }
+
+  private async ensureDaemonControlEntry(
+    entry: DaemonControlSessionIndexEntryV1,
+  ): Promise<void> {
+    const index = await this.loadDaemonControlIndex();
+    const existing = index.sessions.find((item) =>
+      item.sessionKey === entry.sessionKey
+    );
+    if (
+      existing &&
+      existing.provider === entry.provider &&
+      existing.providerSessionId === entry.providerSessionId &&
+      existing.sessionId === entry.sessionId &&
+      existing.sessionShortId === entry.sessionShortId &&
+      existing.metadataPath === entry.metadataPath &&
+      existing.twinPath === entry.twinPath &&
+      existing.updatedAt === entry.updatedAt
+    ) {
+      return;
+    }
+
+    await this.upsertDaemonControlEntry(entry);
   }
 
   private async upsertDaemonControlEntry(

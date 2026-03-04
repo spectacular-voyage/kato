@@ -261,7 +261,7 @@ export function resolveDefaultRuntimeDir(): string {
   const homeDir = resolveHomeDir();
   if (!homeDir) {
     throw new Error(
-      'Unable to resolve runtime directory: HOME/USERPROFILE is not set. Set KATO_RUNTIME_DIR to an absolute path (for example "~/.kato/daemon").',
+      'Unable to resolve runtime directory: HOME/USERPROFILE is not set. Set KATO_RUNTIME_DIR to an absolute path (for example "/home/<user>/.kato/daemon" or "C:\\\\Users\\\\<user>\\\\.kato\\\\daemon"), or use "~/.kato/daemon" for home expansion.',
     );
   }
 

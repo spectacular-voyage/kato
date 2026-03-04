@@ -174,6 +174,7 @@ Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", asyn
         )
       }\n`,
     );
+    const expectedTwinPayload = await Deno.readTextFile(legacyTwinPath);
 
     const restartedStore = new PersistentSessionStateStore({
       katoDir,
@@ -196,6 +197,10 @@ Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", asyn
       () => Deno.stat(legacyTwinPath),
       Deno.errors.NotFound,
     );
+    const migratedTwinPayload = await Deno.readTextFile(
+      canonicalLocation.twinPath,
+    );
+    assertEquals(migratedTwinPayload, expectedTwinPayload);
 
     const index = await restartedStore.loadDaemonControlIndex();
     const indexEntry = index.sessions.find((entry) =>
@@ -206,6 +211,76 @@ Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", asyn
     assertEquals(indexEntry.twinPath, canonicalLocation.twinPath);
   });
 });
+
+Deno.test(
+  "PersistentSessionStateStore heals stale daemon index entries for canonical metadata",
+  async () => {
+    await withTempDir("session-state-store-index-healing-", async (dir) => {
+      const katoDir = join(dir, ".kato");
+      const identity = {
+        provider: "codex",
+        providerSessionId: "index-healing-session-1",
+      } as const;
+      const initialStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-01T11:00:00.000Z"),
+        makeSessionId: () => "session-uuid-index-healing-1234",
+      });
+      const created = await initialStore.getOrCreateSessionMetadata({
+        ...identity,
+        sourceFilePath: "/tmp/codex-index-healing-session-1.jsonl",
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const canonicalLocation = initialStore.resolveLocation(identity);
+      const sessionsDir = dirname(canonicalLocation.metadataPath);
+      const daemonControlPath = join(katoDir, "daemon-control.json");
+      await Deno.writeTextFile(
+        daemonControlPath,
+        `${
+          JSON.stringify(
+            {
+              schemaVersion: 1,
+              updatedAt: "2026-03-01T11:01:00.000Z",
+              sessions: [
+                {
+                  sessionKey: created.sessionKey,
+                  provider: created.provider,
+                  providerSessionId: created.providerSessionId,
+                  sessionId: created.sessionId,
+                  sessionShortId: created.sessionId.slice(0, 8),
+                  metadataPath: join(sessionsDir, "stale.meta.json"),
+                  twinPath: join(sessionsDir, "stale.twin.jsonl"),
+                  updatedAt: created.updatedAt,
+                },
+              ],
+            },
+            null,
+            2,
+          )
+        }\n`,
+      );
+
+      const restartedStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-01T11:05:00.000Z"),
+      });
+      const restored = await restartedStore.getOrCreateSessionMetadata({
+        ...identity,
+        sourceFilePath: "/tmp/codex-index-healing-session-1.jsonl",
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+
+      assertEquals(restored.twinPath, canonicalLocation.twinPath);
+      const healedIndex = await restartedStore.loadDaemonControlIndex();
+      const healedEntry = healedIndex.sessions.find((entry) =>
+        entry.sessionKey === created.sessionKey
+      );
+      assertExists(healedEntry);
+      assertEquals(healedEntry.metadataPath, canonicalLocation.metadataPath);
+      assertEquals(healedEntry.twinPath, canonicalLocation.twinPath);
+    });
+  },
+);
 
 Deno.test(
   "PersistentSessionStateStore only advances updatedAt for realtime twin appends",

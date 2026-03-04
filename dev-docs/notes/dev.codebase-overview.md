@@ -41,8 +41,8 @@ Related notes:
 - **Session metadata**: durable per-provider-session state (`*.meta.json`) with
   ingest cursor, dedupe fingerprints, command cursor/anchor, and recording
   bindings.
-- **SessionTwin**: canonical per-provider-session event log (`*.twin.jsonl`) for replay
-  and durable cursor/write state.
+- **SessionTwin**: canonical per-provider-session event log (`*.twin.jsonl`) for
+  replay and durable cursor/write state.
 - **Runtime snapshot**: bounded in-memory projection of parsed events used by
   status, in-chat command handling, and export.
 - **First-seen provider session**: daemon has no prior command cursor/anchor
@@ -79,7 +79,7 @@ Related notes:
 - `~/.kato/cli/logs/operational.jsonl`
 - `~/.kato/cli/logs/security-audit.jsonl`
 
-Workspace-local config remains `<workspace>/kato-workspace-config.yaml`.
+Workspace-local config remains `<workspace>/.kato-workspace-config.yaml`.
 
 ## Topology
 
@@ -151,17 +151,17 @@ graph TD
 
 ## Responsibility Map
 
-| Area | Primary responsibility | Key modules |
-| --- | --- | --- |
-| CLI surface | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status | `apps/cli/src/*` |
-| Launcher | Spawn daemon with narrowed read/write permissions and env overrides | `apps/runtime/src/orchestrator/launcher.ts` |
-| Daemon bootstrap | Load daemon/shared/user config, init loggers/stores, enter runtime loop | `apps/daemon/src/main.ts` |
-| Control plane | Persist/list/mark control requests, persist/load status snapshots | `apps/runtime/src/orchestrator/control_plane.ts` |
-| Ingestion | Discover/watch provider source files, parse incremental events, project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts` |
-| Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache | `apps/runtime/src/orchestrator/session_state_store.ts` |
-| Writer pipeline | Render markdown/jsonl with policy gate enforcement | `apps/daemon/src/writer/*` |
-| Workspace layer | Registry + workspace profile/template resolution | `apps/runtime/src/workspace/*` |
-| Observability | Structured operational/audit events for CLI and daemon | `apps/runtime/src/observability/*` |
+| Area                | Primary responsibility                                                                             | Key modules                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status        | `apps/cli/src/*`                                       |
+| Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                | `apps/runtime/src/orchestrator/launcher.ts`            |
+| Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                            | `apps/daemon/src/main.ts`                              |
+| Control plane       | Persist/list/mark control requests, persist/load status snapshots                                  | `apps/runtime/src/orchestrator/control_plane.ts`       |
+| Ingestion           | Discover/watch provider source files, parse incremental events, project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts`   |
+| Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache             | `apps/runtime/src/orchestrator/session_state_store.ts` |
+| Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                 | `apps/daemon/src/writer/*`                             |
+| Workspace layer     | Registry + workspace profile/template resolution                                                   | `apps/runtime/src/workspace/*`                         |
+| Observability       | Structured operational/audit events for CLI and daemon                                             | `apps/runtime/src/observability/*`                     |
 
 ## Daemon Subsystems
 

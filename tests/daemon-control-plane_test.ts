@@ -10,45 +10,17 @@ import {
   DaemonStatusSnapshotFileStore,
   resolveDefaultRuntimeDir,
 } from "../apps/daemon/src/mod.ts";
+import {
+  restoreRuntimeEnv,
+  setRuntimeEnv,
+  snapshotRuntimeEnv,
+} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 async function withTempRuntimeDir(
   run: (runtimeDir: string) => Promise<void>,
 ): Promise<void> {
   await withTestTempDir("daemon-control-plane-", run);
-}
-
-const RUNTIME_ENV_KEYS = ["HOME", "USERPROFILE", "KATO_RUNTIME_DIR"] as const;
-type RuntimeEnvKey = (typeof RUNTIME_ENV_KEYS)[number];
-
-function snapshotRuntimeEnv(): Record<RuntimeEnvKey, string | undefined> {
-  return {
-    HOME: Deno.env.get("HOME"),
-    USERPROFILE: Deno.env.get("USERPROFILE"),
-    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
-  };
-}
-
-function setRuntimeEnv(
-  values: Partial<Record<RuntimeEnvKey, string | undefined>>,
-): void {
-  for (const key of RUNTIME_ENV_KEYS) {
-    if (!(key in values)) {
-      continue;
-    }
-    const value = values[key];
-    if (value === undefined) {
-      Deno.env.delete(key);
-      continue;
-    }
-    Deno.env.set(key, value);
-  }
-}
-
-function restoreRuntimeEnv(
-  snapshot: Record<RuntimeEnvKey, string | undefined>,
-): void {
-  setRuntimeEnv(snapshot);
 }
 
 Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", async () => {

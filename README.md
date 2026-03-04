@@ -48,7 +48,7 @@ While you're modifying your .zshrc, add an alias to
 `<clone-location>/apps/cli/src/main.ts` for easy execution:
 
 ```
-alias kato="deno run -A ~/github/kato/apps/cli/src/main.ts""
+alias kato="deno run -A ~/github/kato/apps/cli/src/main.ts"
 ```
 
 After modifying your path, you need to restart apps where applicable, e.g.:

@@ -1649,3 +1649,188 @@ Validation:
 - `deno task test` passed (`389 passed, 0 failed`).
 
 If you want, I can also give you a commit message for this follow-up fix.
+
+# User_2026-03-04_0624_09
+
+Please review coderabbit's feedback in @review.2026-03-04_0622-coderabbit-hodgepodge.md and  provide your feedback in that document. Add markdown checkboxes for each, and any not worth doing should be marked [c] for cancelled.
+
+**Preparing to review and annotate feedback**
+
+# gpt-5.3-codex_2026-03-04_0624_16
+
+I’ll inspect the CodeRabbit review doc, evaluate each suggestion against the current codebase, and then write decisions directly into that file with checkboxes, marking any rejected items as `[c]`.
+
+**Assessing reported issues for updates**
+
+# gpt-5.3-codex_2026-03-04_0624_26
+
+I’m now validating each CodeRabbit item against the current implementation so we can mark what to do vs cancel with concrete rationale.
+
+**Inspecting codebase for old naming**
+
+**Evaluating review document edits**
+
+**Inspecting upsert logic in getOrCreate**
+
+**Identifying potential bug in healing logic**
+
+**Reviewing fallback and test inconsistencies**
+
+**Planning detailed checklist updates**
+
+# gpt-5.3-codex_2026-03-04_0625_14
+
+I verified all 11 CodeRabbit items against current code/tests. Next I’ll append a decision checklist to the review doc with `[x]`/`[ ]`/`[c]` and short rationale per item.
+
+**Reviewing markdown checkbox indentation**
+
+**Finalizing update confirmation**
+
+# gpt-5.3-codex_2026-03-04_0625_33
+
+Updated with decisions in [review.2026-03-04_0622-coderabbit-hodgepodge.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/review.2026-03-04_0622-coderabbit-hodgepodge.md).
+
+I added a new **“Codex review decisions”** section with markdown checkboxes for every CodeRabbit item:
+- `[x]` for already done (`KATO_RUNTIME_DIR` env allowlist)
+- `[ ]` for worth doing
+- `[c]` for cancelled/not worth doing right now
+
+I also included a short rationale on each cancelled item.
+
+# User_2026-03-04_0626_08
+
+For that first one (and maybe others), I think the suggestion compromises windows compatibility.
+
+**Noting Windows compatibility concerns**
+
+# gpt-5.3-codex_2026-03-04_0626_22
+
+Good catch. I’ll update the review note so we keep the fix but make it explicitly cross-platform (no Unix-only absolute-path example).
+
+# gpt-5.3-codex_2026-03-04_0626_30
+
+Agreed. I updated the first review item to explicitly require a cross-platform example, not a Unix-only one.
+
+Updated note now says to use platform-neutral guidance like:
+- `/home/<user>/.kato/daemon` **or**
+- `C:\\Users\\<user>\\.kato\\daemon`
+
+So we get the UX improvement without harming Windows compatibility.
+
+# User_2026-03-04_0628_20
+
+Okay, fix the rest please.
+
+**Planning remaining fixes**
+
+# gpt-5.3-codex_2026-03-04_0628_30
+
+I’ll implement all remaining non-cancelled items from that review list: runtime error wording, session index healing, docs fixes, shared env-test helper refactor, and the twin payload assertion, then run targeted tests.
+
+**Planning index healing optimization**
+
+**Implementing conditional index upsert**
+
+# gpt-5.3-codex_2026-03-04_0629_10
+
+I’m starting edits now: runtime error message, session-state index healing, docs fixes, and test refactors/assertions. Then I’ll run focused tests and update the review checklist statuses.
+
+**Verifying string escape sequences**
+
+**Analyzing backslash escaping and patching normalization**
+
+**Identifying line length formatting need**
+
+**Fixing README alias**
+
+**Planning detailed todo patch**
+
+**Creating shared test environment**
+
+**Patching test imports and constants**
+
+**Identifying daemon-cli patch similarity**
+
+**Patching daemon main process**
+
+**Modifying migration test assertions**
+
+**Creating test for index healing**
+
+**Marking completed review items**
+
+**Extracting helper and formatting changes**
+
+**Planning targeted formatting**
+
+**Planning targeted test runs**
+
+# gpt-5.3-codex_2026-03-04_0630_55
+
+I’ve finished the edits and refactors; next I’m running the impacted test files (`daemon-*` plus `session-state-store`) under the project’s permission profile to confirm everything passes.
+
+**Running tests after refactor**
+
+**Checking git status**
+
+**Noting unrelated file modifications**
+
+# gpt-5.3-codex_2026-03-04_0631_28
+
+Everything requested is implemented and tests are green. I’m doing a quick diff pass now so I can give you a tight summary of exactly what changed.
+
+**Evaluating diff visibility for review**
+
+**Validating untracked files**
+
+**Finalizing summary structure**
+
+# gpt-5.3-codex_2026-03-04_0631_52
+
+Implemented the remaining non-cancelled review items.
+
+**Code changes**
+- Cross-platform runtime-root error guidance updated in [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts).
+- Canonical-metadata path now heals stale daemon index entries without rewriting when already correct:
+  - Added `ensureDaemonControlEntry(...)` and used it in canonical fast-path in [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts).
+- Fixed malformed zsh alias quote in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
+- Updated workspace config filename docs to dotfile form in [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md).
+- Split ambiguous terminology todo into two actionable items (acceptance criteria + owner + target date) in [dev.todo.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.todo.md).
+
+**Test refactor + hardening**
+- Extracted shared env helpers to [test_env.ts](/home/djradon/hub/spectacular-voyage/kato/tests/test_env.ts).
+- Updated imports/usages in:
+  - [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts)
+  - [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts)
+  - [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts)
+- Added twin payload preservation assertion and a new stale-index-healing regression test in [session-state-store_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/session-state-store_test.ts).
+
+**Review doc**
+- Marked remaining completed items as `[x]` in [review.2026-03-04_0622-coderabbit-hodgepodge.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/review.2026-03-04_0622-coderabbit-hodgepodge.md).
+
+**Validation**
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-control-plane_test.ts tests/daemon-cli_test.ts tests/daemon-main_test.ts tests/session-state-store_test.ts` passed.
+- `deno task test` passed (`390 passed, 0 failed`).
+
+Note: there is still an unrelated modified conversation note file in your worktree:
+- [conv.2026.2026-03-04_0608-why-are-all-the-conversations-show-as-git-modified-when-on-codex-2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-04_0608-why-are-all-the-conversations-show-as-git-modified-when-on-codex-2.md).
+
+# User_2026-03-04_0632_25
+
+commit message?
+
+**Committing runtime root and coderabbit fixes**
+
+# gpt-5.3-codex_2026-03-04_0632_30
+
+`fix(runtime/tests/docs): address remaining CodeRabbit findings and harden session index healing`
+
+Optional body:
+
+- make runtime-dir HOME/USERPROFILE error guidance cross-platform
+- heal stale `daemon-control.json` entries even on canonical metadata fast-path
+- fix README zsh alias typo
+- update docs to `.kato-workspace-config.yaml`
+- split ambiguous terminology TODO into actionable tasks
+- extract shared env test helpers to `tests/test_env.ts`
+- add session twin payload-preservation + stale-index-healing tests
