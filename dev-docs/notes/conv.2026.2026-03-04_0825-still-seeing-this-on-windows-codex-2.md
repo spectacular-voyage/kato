@@ -1235,3 +1235,285 @@ git switch main
 git pull
 git switch windows-troubleshooting
 ```
+
+# User_2026-03-04_0848_03
+
+ERRORS 
+
+runDaemonCli workspace register accepts an explicit target directory => ./tests/daemon-cli_test.ts:970:6
+error: AssertionError: Expected actual: "{
+  "schemaVersion": 1,
+  "updatedAt": "2026-03-04T16:45:06.966Z",
+  "workspaces": [
+    {
+      "workspaceId": "ba656e92-08c0-4629-8a9e-c8f4b8e6787b",
+      "alias": "Explicit.Target",
+      "workspaceRoot": "C:\\Users\\drich\\hub\\spectacular-voyage\\kato\\.test-tmp\\daemon-cli-workspace-explicit-c9cef46296beb9b4\\explicit-target",
+      "configPath": "C:\\Users\\drich\\hub\\spectacular-voyage\\kato\\.test-tmp\\daemon-cli-workspace-explicit-c9cef46296beb9b4\\explicit-target\\.kato-workspace-config.yaml",
+      "registeredAt": "2026-02-22T10:00:00.000Z"
+    }
+  ]
+}
+" to contain: ""workspaceRoot": "C:\Users\drich\hub\spectacular-voyage\kato\.test-tmp\daemon-cli-workspace-explicit-c9cef46296beb9b4\explicit-target"".
+  throw new AssertionError(msg);
+        ^
+    at assertStringIncludes (https://jsr.io/@std/assert/1.0.13/string_includes.ts:29:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1017:7
+
+runDaemonRuntimeLoop persistent in-chat accepts relative arguments for ::record-<alias>, ::capture-<alias>, and ::export-<alias> => ./tests/daemon-runtime_test.ts:2500:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+-   notes\\relative-capture.md
++   notes/relative-capture.md
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:2614:7
+
+runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates recording => ./tests/daemon-runtime_test.ts:5593:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+    [
+-     "C:\\tmp\\captured.md",
++     "/tmp/captured.md",
+    ]
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:5838:3
+
+runDaemonRuntimeLoop applies in-chat ::capture-<alias> on first seen snapshot when the event is newer than daemon start => ./tests/daemon-runtime_test.ts:5847:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+    [
+-     "C:\\tmp\\first-seen.md",
++     "/tmp/first-seen.md",
+    ]
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts:6028:5
+
+createGeminiIngestionRunner prefers slug layout over hash layout when duplicate Gemini lastUpdated ties => ./tests/provider-ingestion_test.ts:2190:6
+error: AssertionError
+    throw new AssertionError(msg);
+          ^
+    at assert (https://jsr.io/@std/assert/1.0.13/assert.ts:21:11)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:2281:7
+    at async withTestTempDir (file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/test_temp.ts:55:12)
+    at async withTempDir (file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:209:3)
+    at async file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts:2193:5
+
+resolveDefaultConfigPath keeps daemon config inside daemon dir => ./tests/runtime-config_test.ts:251:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+-   .kato\\daemon\\kato-daemon-config.yaml
++   .kato/daemon/kato-daemon-config.yaml
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/runtime-config_test.ts:253:3
+
+resolveDefaultSharedConfigPath keeps shared config under ~/.kato/shared => ./tests/runtime-config_test.ts:256:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+-   .kato\\shared\\kato-shared-config.yaml
++   .kato/shared/kato-shared-config.yaml
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/runtime-config_test.ts:258:3
+
+PersistentSessionStateStore migrates legacy colon storage keys => ./tests/session-state-store_test.ts:123:6
+error: Error: The filename, directory name, or volume label syntax is incorrect. (os error 123): rename 'C:\Users\drich\hub\spectacular-voyage\kato\.test-tmp\session-state-store-legacy-key-3c0f6e06bf098107\.kato\shared\sessions\5_codex_legacy-session-1.meta.json' -> 'C:\Users\drich\hub\spectacular-voyage\kato\.test-tmp\session-state-store-legacy-key-3c0f6e06bf098107\.kato\shared\sessions\codex:legacy-session-1.meta.json'
+    await Deno.rename(canonicalLocation.metadataPath, legacyMetadataPath);
+    ^
+    at async Object.rename (ext:deno_fs/30_fs.js:274:3)
+    at async file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/session-state-store_test.ts:162:5
+    at async withTestTempDir (file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/test_temp.ts:55:12)
+    at async withTempDir (file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/session-state-store_test.ts:14:3)
+    at async file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/session-state-store_test.ts:124:3
+
+resolveStatusErrorCursorPath uses runtime dir => ./tests/status-error-cursor_test.ts:10:6
+error: AssertionError: Values are not equal.
+
+    [Diff] Actual / Expected
+
+-   \\tmp\\kato-runtime\\status-error-cursor.json
++   /tmp/kato-runtime/status-error-cursor.json
+
+  throw new AssertionError(message);
+        ^
+    at assertEquals (https://jsr.io/@std/assert/1.0.13/equals.ts:64:9)
+    at file:///C:/Users/drich/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts:11:3
+
+ FAILURES 
+
+runDaemonCli workspace register accepts an explicit target directory => ./tests/daemon-cli_test.ts:970:6
+runDaemonRuntimeLoop persistent in-chat accepts relative arguments for ::record-<alias>, ::capture-<alias>, and ::export-<alias> => ./tests/daemon-runtime_test.ts:2500:6
+runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates recording => ./tests/daemon-runtime_test.ts:5593:6
+runDaemonRuntimeLoop applies in-chat ::capture-<alias> on first seen snapshot when the event is newer than daemon start => ./tests/daemon-runtime_test.ts:5847:6
+createGeminiIngestionRunner prefers slug layout over hash layout when duplicate Gemini lastUpdated ties => ./tests/provider-ingestion_test.ts:2190:6
+resolveDefaultConfigPath keeps daemon config inside daemon dir => ./tests/runtime-config_test.ts:251:6
+resolveDefaultSharedConfigPath keeps shared config under ~/.kato/shared => ./tests/runtime-config_test.ts:256:6
+PersistentSessionStateStore migrates legacy colon storage keys => ./tests/session-state-store_test.ts:123:6
+resolveStatusErrorCursorPath uses runtime dir => ./tests/status-error-cursor_test.ts:10:6
+
+**Planning cross-platform test fixes**
+
+# gpt-5.3-codex_2026-03-04_0848_08
+
+I see the pattern: most failures are Windows path-separator assumptions in tests, plus one Windows-invalid filename case. I’m going to patch those tests to be OS-agnostic and rerun the focused set.
+
+**Planning targeted test inspection**
+
+**Identifying command string context**
+
+**Identifying invalid session store rename path**
+
+**Planning error cursor test inspection**
+
+**Isolating flaky ingestion test**
+
+# gpt-5.3-codex_2026-03-04_0848_40
+
+I’m going to run just the Gemini tie-break test to capture the exact assertion context before editing that one.
+
+**Investigating Windows path handling**
+
+**Identifying provider ingestion location**
+
+**Preparing to inspect layout resolver**
+
+**Planning consistent path normalization**
+
+**Refining path handling and tests**
+
+**Refining path normalization in tests**
+
+**Adapting tests for cross-platform path differences**
+
+# gpt-5.3-codex_2026-03-04_0849_44
+
+I’ve identified concrete fixes: one real cross-platform bug in Gemini layout classification, and several Windows-specific test expectations. I’m applying those now in code/tests, then I’ll rerun a focused check.
+
+**Patching test files**
+
+**Extending runtime assertions with helper**
+
+**Inspecting top-level imports**
+
+**Planning precise patch placement**
+
+**Patching session state store**
+
+**Verifying snippet indentation**
+
+**Running formatter on changed files**
+
+**Running type checks on changed files**
+
+# gpt-5.3-codex_2026-03-04_0850_46
+
+I’ve applied the fixes and formatted the touched test file. I’ll run a type check on the changed files now (avoids the flaky `deno test` runner issue in this environment).
+
+**Inspecting git changes and test feasibility**
+
+**Summarizing fixes and rerun instructions**
+
+# gpt-5.3-codex_2026-03-04_0851_07
+
+Good catch. I patched these failures as cross-platform fixes (plus one real Windows bug):
+
+- Fixed Gemini layout tie-break to handle Windows path separators in discovery logic:
+  - [provider_ingestion.ts](c:/Users/drich/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts)
+
+- Fixed brittle string-contains JSON assertion in workspace register test (now parses JSON and compares field):
+  - [daemon-cli_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts)
+
+- Made runtime capture path assertions OS-agnostic (`\` vs `/`) and adjusted relative-path expectation to use `join(...)`:
+  - [daemon-runtime_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts)
+
+- Made runtime config path expectations OS-agnostic:
+  - [runtime-config_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/runtime-config_test.ts)
+
+- Made status-error-cursor path expectation OS-agnostic:
+  - [status-error-cursor_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts)
+
+- Skipped the legacy colon-filename migration test on Windows (colon in filename is invalid on NTFS):
+  - [session-state-store_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/session-state-store_test.ts)
+
+Validation I ran:
+- `deno check` on all changed files passed.
+
+I could not run `deno test` reliably here due the Deno Windows pipe panic in this environment, so please rerun your suite locally and paste any remaining failures.
+
+# gpt-5.3-codex_2026-03-04_0851_08
+
+Good catch. I patched these failures as cross-platform fixes (plus one real Windows bug):
+
+- Fixed Gemini layout tie-break to handle Windows path separators in discovery logic:
+  - [provider_ingestion.ts](c:/Users/drich/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts)
+
+- Fixed brittle string-contains JSON assertion in workspace register test (now parses JSON and compares field):
+  - [daemon-cli_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts)
+
+- Made runtime capture path assertions OS-agnostic (`\` vs `/`) and adjusted relative-path expectation to use `join(...)`:
+  - [daemon-runtime_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts)
+
+- Made runtime config path expectations OS-agnostic:
+  - [runtime-config_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/runtime-config_test.ts)
+
+- Made status-error-cursor path expectation OS-agnostic:
+  - [status-error-cursor_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts)
+
+- Skipped the legacy colon-filename migration test on Windows (colon in filename is invalid on NTFS):
+  - [session-state-store_test.ts](c:/Users/drich/hub/spectacular-voyage/kato/tests/session-state-store_test.ts)
+
+Validation I ran:
+- `deno check` on all changed files passed.
+
+I could not run `deno test` reliably here due the Deno Windows pipe panic in this environment, so please rerun your suite locally and paste any remaining failures.
+
+# User_2026-03-04_0851_26
+
+Can you update [dev.testing.md](dev-docs/notes/dev.testing.md) with guidelines on writing windows-compatible tests?
+
+**Inspecting file contents**
+
+# gpt-5.3-codex_2026-03-04_0851_34
+
+I’ll add a concise Windows-compatibility section to the testing guidance with concrete do/don’t patterns based on the failures we just fixed.
+
+**Adding append section with guidelines**
+
+# gpt-5.3-codex_2026-03-04_0851_41
+
+I’m editing the doc now with a focused “Windows-Compatible Tests” section: path handling, JSON assertions, filename constraints, and OS-gated tests.
+
+# gpt-5.3-codex_2026-03-04_0851_51
+
+Updated with a new **Windows-Compatible Tests** section in [dev.testing.md](c:/Users/drich/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md).
+
+It now covers:
+- `join(...)` for expected paths
+- avoiding raw JSON string assertions for path data
+- path normalization for cross-platform assertions
+- avoiding Windows-invalid filename cases (like `:`)
+- explicit OS-gating only when necessary
+- asserting behavior/semantics instead of path-string formatting

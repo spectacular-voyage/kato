@@ -120,96 +120,103 @@ Deno.test("PersistentSessionStateStore uses Windows-safe storage keys", async ()
   });
 });
 
-Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", async () => {
-  await withTempDir("session-state-store-legacy-key-", async (dir) => {
-    const katoDir = join(dir, ".kato");
-    const identity = {
-      provider: "codex",
-      providerSessionId: "legacy-session-1",
-    } as const;
+Deno.test({
+  name: "PersistentSessionStateStore migrates legacy colon storage keys",
+  ignore: Deno.build.os === "windows",
+  fn: async () => {
+    await withTempDir("session-state-store-legacy-key-", async (dir) => {
+      const katoDir = join(dir, ".kato");
+      const identity = {
+        provider: "codex",
+        providerSessionId: "legacy-session-1",
+      } as const;
 
-    const initialStore = new PersistentSessionStateStore({
-      katoDir,
-      now: () => new Date("2026-03-01T10:00:00.000Z"),
-      makeSessionId: () => "session-uuid-legacy-key-1234",
+      const initialStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-01T10:00:00.000Z"),
+        makeSessionId: () => "session-uuid-legacy-key-1234",
+      });
+      const created = await initialStore.getOrCreateSessionMetadata({
+        ...identity,
+        sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      await initialStore.appendTwinEvents(created, [
+        makeTwinEvent(created.sessionId, 0, "hello from legacy"),
+      ]);
+
+      const canonicalLocation = initialStore.resolveLocation(identity);
+      const sessionsDir = dirname(canonicalLocation.metadataPath);
+      const legacyStorageKey = `${encodeURIComponent(identity.provider)}:${
+        encodeURIComponent(identity.providerSessionId)
+      }`;
+      const legacyMetadataPath = join(
+        sessionsDir,
+        `${legacyStorageKey}.meta.json`,
+      );
+      const legacyTwinPath = join(
+        sessionsDir,
+        `${legacyStorageKey}.twin.jsonl`,
+      );
+
+      const currentMetadata = JSON.parse(
+        await Deno.readTextFile(canonicalLocation.metadataPath),
+      ) as {
+        twinPath: string;
+        [key: string]: unknown;
+      };
+      await Deno.rename(canonicalLocation.metadataPath, legacyMetadataPath);
+      await Deno.rename(canonicalLocation.twinPath, legacyTwinPath);
+      await Deno.writeTextFile(
+        legacyMetadataPath,
+        `${
+          JSON.stringify(
+            {
+              ...currentMetadata,
+              twinPath: legacyTwinPath,
+            },
+            null,
+            2,
+          )
+        }\n`,
+      );
+      const expectedTwinPayload = await Deno.readTextFile(legacyTwinPath);
+
+      const restartedStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-01T10:05:00.000Z"),
+      });
+      const restored = await restartedStore.getOrCreateSessionMetadata({
+        ...identity,
+        sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+
+      assertEquals(restored.twinPath, canonicalLocation.twinPath);
+      await Deno.stat(canonicalLocation.metadataPath);
+      await Deno.stat(canonicalLocation.twinPath);
+      await assertRejects(
+        () => Deno.stat(legacyMetadataPath),
+        Deno.errors.NotFound,
+      );
+      await assertRejects(
+        () => Deno.stat(legacyTwinPath),
+        Deno.errors.NotFound,
+      );
+      const migratedTwinPayload = await Deno.readTextFile(
+        canonicalLocation.twinPath,
+      );
+      assertEquals(migratedTwinPayload, expectedTwinPayload);
+
+      const index = await restartedStore.loadDaemonControlIndex();
+      const indexEntry = index.sessions.find((entry) =>
+        entry.sessionKey === "codex:legacy-session-1"
+      );
+      assertExists(indexEntry);
+      assertEquals(indexEntry.metadataPath, canonicalLocation.metadataPath);
+      assertEquals(indexEntry.twinPath, canonicalLocation.twinPath);
     });
-    const created = await initialStore.getOrCreateSessionMetadata({
-      ...identity,
-      sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
-      initialCursor: makeDefaultSessionCursor("codex"),
-    });
-    await initialStore.appendTwinEvents(created, [
-      makeTwinEvent(created.sessionId, 0, "hello from legacy"),
-    ]);
-
-    const canonicalLocation = initialStore.resolveLocation(identity);
-    const sessionsDir = dirname(canonicalLocation.metadataPath);
-    const legacyStorageKey = `${encodeURIComponent(identity.provider)}:${
-      encodeURIComponent(identity.providerSessionId)
-    }`;
-    const legacyMetadataPath = join(
-      sessionsDir,
-      `${legacyStorageKey}.meta.json`,
-    );
-    const legacyTwinPath = join(sessionsDir, `${legacyStorageKey}.twin.jsonl`);
-
-    const currentMetadata = JSON.parse(
-      await Deno.readTextFile(canonicalLocation.metadataPath),
-    ) as {
-      twinPath: string;
-      [key: string]: unknown;
-    };
-    await Deno.rename(canonicalLocation.metadataPath, legacyMetadataPath);
-    await Deno.rename(canonicalLocation.twinPath, legacyTwinPath);
-    await Deno.writeTextFile(
-      legacyMetadataPath,
-      `${
-        JSON.stringify(
-          {
-            ...currentMetadata,
-            twinPath: legacyTwinPath,
-          },
-          null,
-          2,
-        )
-      }\n`,
-    );
-    const expectedTwinPayload = await Deno.readTextFile(legacyTwinPath);
-
-    const restartedStore = new PersistentSessionStateStore({
-      katoDir,
-      now: () => new Date("2026-03-01T10:05:00.000Z"),
-    });
-    const restored = await restartedStore.getOrCreateSessionMetadata({
-      ...identity,
-      sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
-      initialCursor: makeDefaultSessionCursor("codex"),
-    });
-
-    assertEquals(restored.twinPath, canonicalLocation.twinPath);
-    await Deno.stat(canonicalLocation.metadataPath);
-    await Deno.stat(canonicalLocation.twinPath);
-    await assertRejects(
-      () => Deno.stat(legacyMetadataPath),
-      Deno.errors.NotFound,
-    );
-    await assertRejects(
-      () => Deno.stat(legacyTwinPath),
-      Deno.errors.NotFound,
-    );
-    const migratedTwinPayload = await Deno.readTextFile(
-      canonicalLocation.twinPath,
-    );
-    assertEquals(migratedTwinPayload, expectedTwinPayload);
-
-    const index = await restartedStore.loadDaemonControlIndex();
-    const indexEntry = index.sessions.find((entry) =>
-      entry.sessionKey === "codex:legacy-session-1"
-    );
-    assertExists(indexEntry);
-    assertEquals(indexEntry.metadataPath, canonicalLocation.metadataPath);
-    assertEquals(indexEntry.twinPath, canonicalLocation.twinPath);
-  });
+  },
 });
 
 Deno.test(

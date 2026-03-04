@@ -1014,10 +1014,10 @@ Deno.test(
         await Deno.readTextFile(registryPath),
         `"alias": "Explicit.Target"`,
       );
-      assertStringIncludes(
-        await Deno.readTextFile(registryPath),
-        `"workspaceRoot": "${workspaceDir}"`,
-      );
+      const registry = JSON.parse(await Deno.readTextFile(registryPath)) as {
+        workspaces?: Array<{ workspaceRoot?: string }>;
+      };
+      assertEquals(registry.workspaces?.[0]?.workspaceRoot, workspaceDir);
     } finally {
       await removePathIfPresent(tempDir);
     }
