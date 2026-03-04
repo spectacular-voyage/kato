@@ -346,6 +346,16 @@ export async function runDaemonSubprocess(
     minLevel: logLevels.operationalLevel,
     now,
   });
+  await operationalLogger.debug(
+    "daemon.startup.debug_enabled",
+    "Daemon startup debug logging enabled",
+    {
+      pid: Deno.pid,
+      runtimeDir: runtimeConfig.runtimeDir,
+      operationalLogPath,
+      auditLogPath,
+    },
+  );
   const auditLogger = new AuditLogger(
     new StructuredLogger([new JsonLineFileSink(auditLogPath)], {
       channel: "security-audit",
@@ -470,6 +480,19 @@ export async function runDaemonSubprocess(
     });
     return 0;
   } catch (error) {
+    await logBestEffortStartupError(
+      runtimeConfig.runtimeDir,
+      now(),
+      "daemon.runtime.failed",
+      "Daemon runtime loop failed",
+      {
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack
+          ? { stack: error.stack }
+          : {}),
+        severity: "critical",
+      },
+    );
     writeStderr(
       `Daemon runtime failed: ${
         error instanceof Error ? error.message : String(error)
@@ -482,8 +505,38 @@ export async function runDaemonSubprocess(
 if (import.meta.main) {
   const mode = Deno.args[0];
   if (mode === undefined || mode === "run" || mode === "__daemon-run") {
-    const exitCode = await runDaemonSubprocess();
-    Deno.exit(exitCode);
+    try {
+      const exitCode = await runDaemonSubprocess();
+      Deno.exit(exitCode);
+    } catch (error) {
+      let runtimeDir = readOptionalEnv("KATO_RUNTIME_DIR");
+      if (!runtimeDir) {
+        try {
+          runtimeDir = resolveDefaultRuntimeDir();
+        } catch {
+          runtimeDir = ".kato/daemon";
+        }
+      }
+      await logBestEffortStartupError(
+        runtimeDir,
+        new Date(),
+        "daemon.entrypoint.failed",
+        "Daemon entrypoint failed before runtime shutdown handling",
+        {
+          error: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error && error.stack
+            ? { stack: error.stack }
+            : {}),
+          severity: "critical",
+        },
+      );
+      writeToStderr(
+        `Daemon entrypoint failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+      Deno.exit(1);
+    }
   }
   writeToStderr(
     `Unsupported daemon command: ${mode}. Use \`deno run -A apps/daemon/src/main.ts run\`.\n`,

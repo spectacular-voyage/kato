@@ -6,7 +6,7 @@ import type {
   SessionMetadataV1,
 } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
-import { basename, join } from "@std/path";
+import { basename, join, relative } from "@std/path";
 import {
   type DebouncedWatchBatch,
   type WatchDebounceOptions,
@@ -572,14 +572,14 @@ function classifyGeminiLayout(
   filePath: string,
   discoveryRoot: string,
 ): "hash" | "slug" | "unknown" {
-  const normalizedRoot = discoveryRoot.endsWith("/")
-    ? discoveryRoot
-    : `${discoveryRoot}/`;
-  if (!filePath.startsWith(normalizedRoot)) {
+  const relativePath = relative(discoveryRoot, filePath).trim();
+  if (
+    relativePath.length === 0 || relativePath === "." ||
+    relativePath.startsWith("..")
+  ) {
     return "unknown";
   }
-  const relative = filePath.slice(normalizedRoot.length);
-  const firstSegment = relative.split("/")[0]?.trim();
+  const firstSegment = relativePath.split(/[\\/]/)[0]?.trim();
   if (!firstSegment || firstSegment === "chats") {
     return "unknown";
   }

@@ -8,9 +8,10 @@ import {
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 Deno.test("resolveStatusErrorCursorPath uses runtime dir", () => {
+  const runtimeDir = join("/tmp", "kato-runtime");
   assertEquals(
-    resolveStatusErrorCursorPath("/tmp/kato-runtime"),
-    "/tmp/kato-runtime/status-error-cursor.json",
+    resolveStatusErrorCursorPath(runtimeDir),
+    join(runtimeDir, "status-error-cursor.json"),
   );
 });
 

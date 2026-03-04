@@ -37,6 +37,10 @@ import {
   removePathIfPresent as removeDirIfPresent,
 } from "./test_temp.ts";
 
+function toPosixPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/^[A-Za-z]:/, "");
+}
+
 function makeEvent(
   id: string,
   kind: "message.user" | "message.assistant",
@@ -2613,7 +2617,7 @@ Deno.test(
       assertEquals(output.currentDestination.kind, "workspace-relative");
       assertEquals(
         output.currentDestination.relativePathFromWorkspaceRoot,
-        "notes/relative-capture.md",
+        join("notes", "relative-capture.md"),
       );
     } finally {
       await removeDirIfPresent(stateDir);
@@ -5835,10 +5839,12 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
   });
 
   assertEquals(callOrder, ["capture", "record"]);
-  assertEquals(captureTargets, ["/tmp/captured.md"]);
+  assertEquals(captureTargets.length, 1);
+  assertEquals(toPosixPath(captureTargets[0] ?? ""), "/tmp/captured.md");
   assertEquals(captureRecordingCycleIds.length, 1);
   assertEquals(captureRecordingCycleIds[0]?.length, 1);
-  assertEquals(activatedTargets, ["/tmp/captured.md"]);
+  assertEquals(activatedTargets.length, 1);
+  assertEquals(toPosixPath(activatedTargets[0] ?? ""), "/tmp/captured.md");
   assertEquals(activatedRecordingIds.length, 1);
   assertEquals(activatedRecordingIds[0], captureRecordingCycleIds[0]?.[0]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
@@ -6025,8 +6031,13 @@ Deno.test(
     });
 
     assertEquals(callOrder, ["capture", "record"]);
-    assertEquals(captureTargets, ["/tmp/first-seen.md"]);
-    assertEquals(activatedTargets, ["/tmp/first-seen.md"]);
+    assertEquals(captureTargets.length, 1);
+    assertEquals(toPosixPath(captureTargets[0] ?? ""), "/tmp/first-seen.md");
+    assertEquals(activatedTargets.length, 1);
+    assertEquals(
+      toPosixPath(activatedTargets[0] ?? ""),
+      "/tmp/first-seen.md",
+    );
   },
 );
 

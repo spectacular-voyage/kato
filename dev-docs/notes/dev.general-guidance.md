@@ -40,6 +40,8 @@ see [[dev.testing]]
   - daemon subprocess startup must load runtime config successfully before
     entering runtime loop.
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
+  - Windows detached daemon launch should use `Start-Process` semantics to
+    avoid parent/child lifecycle coupling seen with direct subprocess spawn.
 
 ## Task notes
 

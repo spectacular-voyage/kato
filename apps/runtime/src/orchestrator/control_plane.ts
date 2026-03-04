@@ -15,7 +15,10 @@ const CONTROL_FILENAME = "daemon-control.json";
 const STATUS_SCHEMA_VERSION = 2;
 const CONTROL_SCHEMA_VERSION = 1;
 const MAX_CONTROL_QUEUE_LENGTH = 10_000;
-const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 30_000;
+
+/* DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS is set slightly above 2x the expected heartbeat cadence plus a 1 second buffer to avoid premature staleness detection */
+
+const DEFAULT_STALE_HEARTBEAT_THRESHOLD_MS = 11_000;
 
 export type DaemonControlCommand =
   | "start"
