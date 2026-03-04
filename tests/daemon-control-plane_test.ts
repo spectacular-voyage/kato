@@ -1,9 +1,20 @@
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { join } from "@std/path";
 import {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  resolveDefaultRuntimeDir,
 } from "../apps/daemon/src/mod.ts";
+import {
+  restoreRuntimeEnv,
+  setRuntimeEnv,
+  snapshotRuntimeEnv,
+} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 async function withTempRuntimeDir(
@@ -11,6 +22,100 @@ async function withTempRuntimeDir(
 ): Promise<void> {
   await withTestTempDir("daemon-control-plane-", run);
 }
+
+Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  await withTestTempDir("daemon-control-home-", async (rootDir) => {
+    const homeDir = join(rootDir, "home");
+    await Deno.mkdir(homeDir, { recursive: true });
+    try {
+      setRuntimeEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+        KATO_RUNTIME_DIR: undefined,
+      });
+      assertEquals(
+        resolveDefaultRuntimeDir(),
+        join(homeDir, ".kato", "daemon"),
+      );
+    } finally {
+      restoreRuntimeEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", () => {
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: ".kato/daemon",
+    });
+    assertThrows(
+      () => resolveDefaultRuntimeDir(),
+      Error,
+      "must resolve to an absolute path",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
+
+Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  await withTestTempDir("daemon-control-runtime-", async (rootDir) => {
+    const runtimeDir = join(rootDir, "runtime");
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    try {
+      setRuntimeEnv({
+        KATO_RUNTIME_DIR: runtimeDir,
+      });
+      assertEquals(resolveDefaultRuntimeDir(), runtimeDir);
+    } finally {
+      restoreRuntimeEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  await withTestTempDir("daemon-control-home-", async (rootDir) => {
+    const homeDir = join(rootDir, "home");
+    await Deno.mkdir(homeDir, { recursive: true });
+    try {
+      setRuntimeEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+        KATO_RUNTIME_DIR: "~/.kato/custom-daemon",
+      });
+      assertEquals(
+        resolveDefaultRuntimeDir(),
+        join(homeDir, ".kato", "custom-daemon"),
+      );
+    } finally {
+      restoreRuntimeEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", () => {
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: undefined,
+    });
+    assertThrows(
+      () => resolveDefaultRuntimeDir(),
+      Error,
+      "HOME/USERPROFILE is not set",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
 
 Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async () => {
   await withTempRuntimeDir(async (runtimeDir) => {

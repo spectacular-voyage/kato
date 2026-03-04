@@ -1,47 +1,87 @@
 # Kato - Own your AI conversations.
 
-Kato allows you to capture
+Kato is your trusty sidekick for capturing chats, whether in your IDE or from a
+code-assistant CLI.
 
 ## Features
 
-- initiate a chat capture from within the chat
-- record to markdown or json
+- initiate a chat recording from within the chat interface
+- capture to markdown or json
 - automatically generate frontmatter for your markdown output files
 - stop and start recording in-chat, as you go
 - export entire conversations from the CLI or from within a chat
-- specify the types of messages (thinking, tool calls, decisions) that you want to capture
+- specify the types of messages (thinking, tool calls, decisions) that you want
+  to capture
 - centralize conversations from multiple provider in a single location
 - decentralize conversations into multiple locations
 
 ## Installation
 
-Prerequisites:
+Prerequisite: Deno 2.x
 
-- Deno 2.x
+Eventually, we'll have binary distributions. In the meantime, you have to clone
+the repo:
 
-### MacOS
+```
+# clone the Kato repository somewhere reasonable, like ~/github/kato
+git clone https://github.com/spectacular-voyage/kato.git $HOME\github\kato
+```
+
+The rest of the installation depends on your platform...
+
+### MacOS and Linux
 
 ```
 # install deno if not already installed
 curl -fsSL https://deno.land/install.sh | sh
 ```
 
-Deno is not automatically appended to your PATH, so add these lines to the end of your .zshrc
+Deno is not automatically appended to your PATH, so add these lines to the end
+of your .zshrc:
+
 ```
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 ```
 
-After modifying your path, you need to restart apps where applicable, e.g.: VSCode, Terminal
+While you're modifying your .zshrc, add an alias to
+`<clone-location>/apps/cli/src/main.ts` for easy execution:
 
+```
+alias kato="deno run -A ~/github/kato/apps/cli/src/main.ts"
+```
 
+After modifying your path, you need to restart apps where applicable, e.g.:
+VSCode, Terminal
 
+### Windows (Powershell)
+
+Install Deno:
+
+```
+irm https://deno.land/install.ps1 | iex
+```
+
+Modify your Powershell $PROFILE for easy execution:
+
+```
+function kato {
+  deno run -A "$HOME\github\kato\apps\cli\src\main.ts" @args
+}
+```
+
+Then open a new Powershell window or try `.$PROFILE`
 
 ## Quickstart
 
+By default, kato uses the global runtime root `~/.kato/daemon` and does not
+implicitly create `./.kato`. To opt into local runtime state, set
+`KATO_RUNTIME_DIR` explicitly to an absolute path (for example
+`$PWD/.kato/daemon`) or a `~/...` path.
+
 ```
-cd ~
 kato init
+kato start
 
 # Switch to a directory where you'd like to record chats
 # In Kato, this is known as a workspace
@@ -52,7 +92,15 @@ kato workspace init
 kato workspace register alias=default
 ```
 
-Then start a new LLM chat (suggestion: the first line should be a good title for the chat), on any new line, type `::capture-default` (or whatever alias you defined for your workspace). These "in-chat kato commands" can be confusing for LLMs, so you might want to add a message like "ignore all kato commands, which start with `::` on a new line" to your message, system prompt, our guidance files.
+Then start a new LLM chat (suggestion: the first line should be a good title for
+the chat), on any new line, type `::capture-default` (or
+`::capture-<whatever alias you defined for your workspace>`).
+
+These "in-chat kato commands" can be confusing for LLMs, so you might want to
+add something like "ignore all kato commands, which start with `::` on a new
+line" to your message, system prompt, or guidance files.
+
+### Example First Message
 
 ```
 Our First Kato Session
@@ -63,7 +111,37 @@ Please ignore Kato commands, like this next line:
 ::capture-default
 ```
 
-## Command Reference
+## In-Chat Kato Commands
+
+Kato also watches user messages for in-chat control commands:
+
+- `::capture-<alias> [<path>]` (start a recording from the beginning of the
+  conversation)
+- `::record-<alias> [<path>]` (start a recording from this point in the
+  conversation)
+- `::stop` (stop all recordings)
+- `::stop-<alias>`
+- `::export-<alias> [<path>]`
+
+Rules:
+
+- `::record`, `::capture`, and `::export` require a workspace alias suffix.
+- `::capture-<alias>` is create-only: it fails when the resolved target path
+  already exists.
+- Pathless `::capture-<alias>` always resolves a fresh default filename for the
+  workspace (it does not reuse the current recording binding).
+- Successful `::capture-<alias>` writes a full snapshot to the resolved target
+  and then activates recording for subsequent events at that destination.
+- `::stop` stops all active workspace outputs for the session.
+- `::stop-<alias>` stops only the active output bound to that alias.
+- Explicit path arguments may be absolute or relative, and may point to a file
+  or a directory target.
+- Relative paths resolve against the registered workspace root for the command's
+  alias.
+- Pathless alias-scoped commands use that workspace's configured default output
+  rules.
+
+## CLI Command Reference
 
 Supported commands:
 
@@ -72,15 +150,21 @@ Supported commands:
 - `init`
   - Create missing daemon/shared/CLI/user config and default workspace template
     files.
+  - Uses global `~/.kato` by default. If `./.kato` exists in the current
+    directory, kato warns and continues with global state.
 - `start`
   - Start daemon in detached background mode.
   - CLI returns success only after daemon heartbeat acknowledges startup.
   - If config is missing, auto-init runs by default
     (`KATO_AUTO_INIT_ON_START=true`).
   - Disable auto-init by setting `KATO_AUTO_INIT_ON_START=false`.
+  - Uses global `~/.kato` by default; `./.kato` is ignored unless
+    `KATO_RUNTIME_DIR` is explicitly set.
 - `restart`
   - Stop daemon and start it again.
   - If daemon is not running, behaves like `start`.
+  - Uses global `~/.kato` by default; `./.kato` is ignored unless
+    `KATO_RUNTIME_DIR` is explicitly set.
 - `stop`
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
@@ -88,12 +172,12 @@ Supported commands:
   - Text mode includes a `Recent Errors` section sourced from runtime
     operational/security-audit WARN and ERROR log entries.
 - `workspace init [<dir>]`
-  - Create `<dir>/kato-workspace-config.yaml`.
+  - Create `<dir>/.kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
 - `workspace register [<dir>] --alias <alias>`
   - Register a workspace config under an explicit workspace alias.
   - If `<dir>` is provided, Kato uses exactly
-    `<dir>/kato-workspace-config.yaml`.
+    `<dir>/.kato-workspace-config.yaml`.
   - If `<dir>` is omitted, Kato searches nearest ancestors from the current
     working directory.
   - Adds the workspace root to shared `allowedWriteRoots` when missing.
@@ -121,75 +205,25 @@ Supported commands:
   - Manage participant username settings in `~/.kato/kato-user-config.yaml`.
   - `user map` manages workspace-specific username mappings.
 
-Usage help:
-
-```bash
-deno run -A apps/cli/src/main.ts help
-deno run -A apps/cli/src/main.ts help start
-deno run -A apps/cli/src/main.ts --version
-```
-
 Workspace registration changes are visible to a running daemon for new
 alias-scoped commands without a restart. Changes to an already-registered
 workspace's alias, root, or config path are restart-bound.
 
-## Manual Migration (Pre-Separation -> Current Layout)
+Runtime root precedence:
 
-If you have older single-root files from before CLI/daemon separation, migrate
-once with:
-
-```bash
-mkdir -p ~/.kato/shared/ipc ~/.kato/shared/sessions ~/.kato/daemon ~/.kato/cli
-mv ~/.kato/kato-daemon-config.yaml ~/.kato/daemon/kato-daemon-config.yaml
-mv ~/.kato/workspace-registry.json ~/.kato/shared/workspace-registry.json
-mv ~/.kato/default-kato-workspace-config.yaml ~/.kato/shared/default-kato-workspace-config.yaml
-mv ~/.kato/sessions/* ~/.kato/shared/sessions/
-mv ~/.kato/daemon-control.json ~/.kato/shared/daemon-control.json
-mv ~/.kato/runtime/status.json ~/.kato/shared/status.json
-mv ~/.kato/runtime/control.json ~/.kato/shared/ipc/daemon-control.json
-deno run -A apps/cli/src/main.ts init
-deno run -A apps/cli/src/main.ts restart
-```
-
-This migration is intentionally manual and hard-break; there is no compatibility
-auto-move logic in runtime code.
-
-## In-Chat Control Commands
-
-Kato also watches user messages for in-chat control commands:
-
-- `::record-<alias> [<path>]`
-- `::capture-<alias> [<path>]`
-- `::export-<alias> [<path>]`
-- `::stop`
-- `::stop-<alias>`
-
-Rules:
-
-- `::record`, `::capture`, and `::export` require a workspace alias suffix.
-- `::init` / `::init-<alias>` are unsupported and treated as invalid commands.
-- `::capture-<alias>` is create-only: it fails when the resolved target path
-  already exists.
-- Pathless `::capture-<alias>` always resolves a fresh default filename for the
-  workspace (it does not reuse the current recording binding).
-- Successful `::capture-<alias>` writes a full snapshot to the resolved target
-  and then activates recording for subsequent events at that destination.
-- `::stop` stops all active workspace outputs for the session.
-- `::stop-<alias>` stops only the active output bound to that alias.
-- Explicit path arguments may be absolute or relative, and may point to a file
-  or a directory target.
-- Relative paths resolve against the registered workspace root for the command's
-  alias.
-- Pathless alias-scoped commands use that workspace's configured default output
-  rules.
+1. `KATO_RUNTIME_DIR` (must be absolute or `~/...`; relative values are
+   rejected).
+2. Home default `~/.kato/daemon` (from `HOME`/`USERPROFILE`).
+3. No implicit `./.kato` fallback. If home cannot be resolved and no override is
+   set, CLI/daemon startup fails with remediation text.
 
 ## Runtime Files
 
 Default paths:
 
 - Daemon config: `~/.kato/daemon/kato-daemon-config.yaml`
-- Shared config: `~/.kato/shared/kato-shared-config.yaml`
 - CLI config: `~/.kato/cli/kato-cli-config.yaml`
+- Shared config: `~/.kato/shared/kato-shared-config.yaml`
 - User config: `~/.kato/kato-user-config.yaml`
 - Default workspace template:
   `~/.kato/shared/default-kato-workspace-config.yaml`
@@ -199,7 +233,7 @@ Default paths:
 - Daemon session index cache: `~/.kato/shared/daemon-control.json`
 - Session metadata + twins: `~/.kato/shared/sessions/*.meta.json` and
   `~/.kato/shared/sessions/*.twin.jsonl`
-- Workspace-local config: `<workspace>/kato-workspace-config.yaml`
+- Workspace-local config: `<workspace>/.kato-workspace-config.yaml`
 
 Session metadata is authoritative; `shared/daemon-control.json` is a rebuildable
 cache index. `kato-daemon-config.yaml` is daemon-only process config.
@@ -289,7 +323,7 @@ Notes:
   - config file values
 
 Default `~/.kato/shared/default-kato-workspace-config.yaml` and
-`<workspace>/kato-workspace-config.yaml` share the same runtime output shape.
+`<workspace>/.kato-workspace-config.yaml` share the same runtime output shape.
 Only the workspace-local file may include `workspaceId`:
 
 ```yaml
@@ -332,13 +366,13 @@ User-to-workspace username mapping is configured in
 by CLI commands:
 
 ```bash
-deno run -A apps/cli/src/main.ts user init
-deno run -A apps/cli/src/main.ts user map set <workspace-alias-or-id> <username>
-deno run -A apps/cli/src/main.ts user map list
-deno run -A apps/cli/src/main.ts user map delete <workspace-alias-or-id>
-deno run -A apps/cli/src/main.ts user default set <username>
-deno run -A apps/cli/src/main.ts user default clear
-deno run -A apps/cli/src/main.ts user exclude-me <true|false>
+kato user init
+kato user map set <workspace-alias-or-id> <username>
+kato user map list
+kato user map delete <workspace-alias-or-id>
+kato user default set <username>
+kato user default clear
+kato user exclude-me <true|false>
 ```
 
 Participant username precedence for frontmatter is:
@@ -347,6 +381,8 @@ Participant username precedence for frontmatter is:
 2. If a workspace-specific mapping exists for the resolved `workspaceId`, use
    that mapped username.
 3. Otherwise, use `defaultUsername` when non-empty.
+
+## Filename Templating
 
 Supported `filenameTemplate` tokens:
 
@@ -363,31 +399,15 @@ Supported `filenameTemplate` tokens:
 - `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
   then command-time snippet extraction, then `conversation`)
 
-`workspaceTimezone` accepts:
+## Timezone
+
+`workspaceTimezone` and `exportTimezone` accept:
 
 - `"local"`: daemon process local timezone
 - `"UTC"`
 - any valid IANA timezone id (for example `"America/Los_Angeles"`)
 
-## Current MVP Status
-
-Working now:
-
-- CLI control-plane commands (`init`, `start`, `restart`, `stop`, `status`,
-  `export`, `clean`)
-- Detached daemon launcher and heartbeat/status snapshots
-- Provider ingestion for `claude`, `codex`, and `gemini` with persisted ingest
-  cursors
-- Persistent SessionTwin state (`~/.kato/shared/sessions/*.twin.jsonl`) and
-  per-session metadata (`*.meta.json`)
-- Restart-safe session/recording state (including per-recording write cursors)
-- Provider-backed export pipeline (`markdown` default, `jsonl` optional)
-- Structured operational/audit logging via LogLayer adapter with JSONL parity
-  fallback
-- Path-policy-gated writer pipeline (`record`/`capture`/`export` contracts)
-- Local OpenFeature baseline with config-driven feature flags
-
-Known limits:
+## Known Issues
 
 - `clean --recordings` is accepted but not implemented yet.
 - SessionTwin logs are append-only and currently unbounded (no compaction or

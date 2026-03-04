@@ -8,11 +8,12 @@ import type {
   RuntimeConfig,
   SharedBehaviorConfig,
 } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { dirname, join, resolve } from "@std/path";
 import {
   CliConfigFileStore,
   type CliConfigStoreLike,
   createDefaultCliConfig,
+  createDefaultRuntimeConfig,
   createDefaultSharedBehaviorConfig,
   DaemonControlRequestFileStore,
   type DaemonControlRequestStoreLike,
@@ -25,11 +26,11 @@ import {
   resolveDefaultRuntimeDir,
   resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
+  resolveHomeDir,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
 } from "@kato/runtime";
 import {
-  createDefaultRuntimeConfig,
   expandHomePath,
   resolveDefaultConfigPath,
   resolveDefaultUserConfigPath,
@@ -125,14 +126,35 @@ export function createDefaultCliRuntime(): DaemonCliRuntime {
   };
 }
 
+function hasCompleteRuntimeOverride(
+  overrides: Partial<DaemonCliRuntime>,
+): overrides is DaemonCliRuntime {
+  return typeof overrides.runtimeDir === "string" &&
+    typeof overrides.configPath === "string" &&
+    typeof overrides.statusPath === "string" &&
+    typeof overrides.controlPath === "string" &&
+    typeof overrides.now === "function" &&
+    typeof overrides.pid === "number" &&
+    typeof overrides.writeStdout === "function" &&
+    typeof overrides.writeStderr === "function";
+}
+
 function buildRuntime(
   overrides: Partial<DaemonCliRuntime> | undefined,
 ): DaemonCliRuntime {
+  if (overrides && hasCompleteRuntimeOverride(overrides)) {
+    return {
+      ...overrides,
+      ...(overrides.cwdPath !== undefined
+        ? { cwdPath: overrides.cwdPath }
+        : {}),
+    };
+  }
+
   const defaults = createDefaultCliRuntime();
   if (!overrides) {
     return defaults;
   }
-
   const runtimeDir = overrides.runtimeDir ?? defaults.runtimeDir;
   const katoDir = dirname(runtimeDir);
   return {
@@ -192,11 +214,70 @@ async function createCliLogSink(
   return new JsonLineFileSink(path);
 }
 
+function shouldWarnOnIgnoredLocalState(commandName: string): boolean {
+  return commandName === "init" || commandName === "start" ||
+    commandName === "restart";
+}
+
+function isUsingGlobalHomeKatoDir(effectiveKatoDir: string): boolean {
+  const homeDir = resolveHomeDir();
+  if (!homeDir) {
+    return false;
+  }
+  return resolve(effectiveKatoDir) === resolve(join(homeDir, ".kato"));
+}
+
+async function resolveIgnoredLocalKatoDirWarning(
+  commandName: string,
+  cwdPath: string | undefined,
+  effectiveKatoDir: string,
+): Promise<string | undefined> {
+  if (!shouldWarnOnIgnoredLocalState(commandName)) {
+    return undefined;
+  }
+  if (!cwdPath || !isUsingGlobalHomeKatoDir(effectiveKatoDir)) {
+    return undefined;
+  }
+
+  const localKatoDir = resolve(cwdPath, ".kato");
+  if (localKatoDir === resolve(effectiveKatoDir)) {
+    return undefined;
+  }
+  try {
+    const stat = await Deno.stat(localKatoDir);
+    if (!stat.isDirectory) {
+      return undefined;
+    }
+    return `warning: detected local state at ${localKatoDir}; using global runtime root ${effectiveKatoDir}. Set KATO_RUNTIME_DIR to an absolute path if you intend to use local state.\n`;
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotFound ||
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 export async function runDaemonCli(
   args: string[],
   options: RunDaemonCliOptions = {},
 ): Promise<number> {
-  const runtime = buildRuntime(options.runtime);
+  let runtime: DaemonCliRuntime;
+  try {
+    runtime = buildRuntime(options.runtime);
+  } catch (error) {
+    const writeStderr = options.runtime?.writeStderr ??
+      ((text: string) => writeToStream(Deno.stderr, text));
+    writeStderr(
+      `Command failed: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+    return 1;
+  }
   const autoInitOnStart = options.autoInitOnStart ??
     resolveAutoInitOnStartDefault();
   let cachedUserConfigStore: UserConfigStoreLike | undefined;
@@ -511,6 +592,15 @@ export async function runDaemonCli(
       );
     }
     runtime.writeStdout(`${lines.join("\n")}\n`);
+  }
+
+  const ignoredLocalKatoWarning = await resolveIgnoredLocalKatoDirWarning(
+    intent.command.name,
+    runtime.cwdPath,
+    effectiveKatoDir,
+  );
+  if (ignoredLocalKatoWarning) {
+    runtime.writeStdout(ignoredLocalKatoWarning);
   }
 
   try {

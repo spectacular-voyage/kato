@@ -213,7 +213,16 @@ export async function runDaemonSubprocess(
 ): Promise<number> {
   const now = options.now ?? (() => new Date());
   const writeStderr = options.writeStderr ?? writeToStderr;
-  const runtimeDir = options.runtimeDir ?? resolveDefaultRuntimeDir();
+  let runtimeDir: string;
+  try {
+    runtimeDir = options.runtimeDir ?? resolveDefaultRuntimeDir();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    writeStderr(
+      `Daemon startup failed: unable to resolve runtime directory: ${errorMessage}\n`,
+    );
+    return 1;
+  }
   const configPath = resolveDefaultConfigPath(runtimeDir);
   const configStore = options.configStore ?? new RuntimeConfigFileStore(
     configPath,
@@ -438,6 +447,7 @@ export async function runDaemonSubprocess(
       },
       exportEnabled: featureSettings.exportEnabled,
       exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
+      clearControlQueueOnStartup: true,
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       daemonFeatureFlags: runtimeConfig.daemonFeatureFlags,
       defaultCliExportOutputOverrides: buildOutputOverrides({

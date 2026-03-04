@@ -14,6 +14,11 @@ import {
   type RuntimeConfigStoreLike,
   type UserConfigStoreLike,
 } from "../apps/daemon/src/mod.ts";
+import {
+  restoreRuntimeEnv,
+  setRuntimeEnv,
+  snapshotRuntimeEnv,
+} from "./test_env.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
 type RuntimeConfig = DaemonRuntimeConfig;
@@ -142,6 +147,35 @@ function makeUserConfigStore(
     },
   };
 }
+
+Deno.test("runDaemonSubprocess fails cleanly when runtime root cannot be resolved", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  const stderr: string[] = [];
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: undefined,
+    });
+    const exitCode = await runDaemonSubprocess({
+      writeStderr(text: string) {
+        stderr.push(text);
+      },
+      runtimeLoop() {
+        throw new Error("runtime loop should not be called");
+      },
+    });
+
+    assertEquals(exitCode, 1);
+    assertStringIncludes(
+      stderr.join(""),
+      "Daemon startup failed: unable to resolve runtime directory",
+    );
+    assertStringIncludes(stderr.join(""), "HOME/USERPROFILE is not set");
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
 
 Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded", async () => {
   const stderr: string[] = [];

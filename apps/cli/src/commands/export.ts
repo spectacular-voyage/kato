@@ -1,5 +1,9 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import { appendExportsLogEntry, resolveExportsLogPath } from "@kato/runtime";
+import {
+  appendExportsLogEntry,
+  isStatusSnapshotStale,
+  resolveExportsLogPath,
+} from "@kato/runtime";
 
 export async function runExportCommand(
   ctx: DaemonCliCommandContext,
@@ -7,6 +11,29 @@ export async function runExportCommand(
   outputPath?: string,
   format?: "markdown" | "jsonl",
 ): Promise<void> {
+  const snapshot = await ctx.statusStore.load();
+  const staleStatus = isStatusSnapshotStale(snapshot, ctx.runtime.now());
+  if (!snapshot.daemonRunning || staleStatus) {
+    await ctx.operationalLogger.warn(
+      "export.rejected.daemon_unavailable",
+      "Export request rejected because daemon status is unavailable or stale",
+      {
+        daemonRunning: snapshot.daemonRunning,
+        staleStatus,
+        daemonPid: snapshot.daemonPid,
+      },
+    );
+    await ctx.auditLogger.command("export", {
+      daemonRunning: snapshot.daemonRunning,
+      staleStatus,
+      daemonPid: snapshot.daemonPid,
+      requestEnqueued: false,
+    });
+    throw new Error(
+      "Export requires a running daemon with a fresh heartbeat. Start or restart the daemon and retry.",
+    );
+  }
+
   let resolvedOutputPath = outputPath;
   if (outputPath) {
     const policyDecision = await ctx.pathPolicyGate.evaluateWritePath(
@@ -76,6 +103,7 @@ export async function runExportCommand(
     outputPath,
     resolvedOutputPath,
     format,
+    requestEnqueued: true,
   });
 
   const exportsLogPath = resolveExportsLogPath(ctx.runtime.runtimeDir);

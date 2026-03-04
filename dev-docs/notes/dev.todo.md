@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1772401876014
+updated: 1772598957049
 created: 1771812869620
 ---
 
@@ -101,3 +101,11 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
       allowedWriteRoots
 - [ ] add codex "plan" documents (and other documents?) to
       ConversationEventKinds and add corresponding config switches.
+- [ ] Decide terminology: workspace -> destination. Acceptance: a short decision
+      note is published in dev docs, README wording is updated if approved, and
+      a PR is opened (or linked) for code/string renames when required. Owner:
+      @djradon. Target: 2026-03-15.
+- [ ] Decide terminology: sessions -> chats. Acceptance: decision is documented
+      with scope boundaries (UI/docs/internal IDs), impacted code surfaces are
+      enumerated, and an implementation PR is opened (or explicitly deferred).
+      Owner: @djradon. Target: 2026-03-15.

@@ -243,7 +243,7 @@ async function runWorkspaceResolutionScenario(
         workspaceId: "workspace-1",
         alias: "My.Proj",
         workspaceRoot: "/tmp/workspace",
-        configPath: "/tmp/workspace/kato-workspace-config.yaml",
+        configPath: "/tmp/workspace/.kato-workspace-config.yaml",
         registeredAt: "2026-03-03T10:00:00.000Z",
       });
     },
@@ -261,7 +261,7 @@ async function runWorkspaceResolutionScenario(
         workspaceId: "workspace-1",
         alias: "My.Proj",
         workspaceRoot: "/tmp/workspace",
-        configPath: "/tmp/workspace/kato-workspace-config.yaml",
+        configPath: "/tmp/workspace/.kato-workspace-config.yaml",
         resolvedDefaultOutputDir: "/tmp/workspace/notes",
         filenameTemplate: "{provider}.md",
         workspaceTimezone: "local",
