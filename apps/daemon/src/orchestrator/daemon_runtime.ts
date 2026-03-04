@@ -207,6 +207,7 @@ interface ProcessPersistentRecordingUpdatesOptions {
   recordingPipeline: RecordingPipelineLike;
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
+  processEventsFromMs: number;
   now: () => Date;
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
@@ -2442,6 +2443,7 @@ async function processPersistentRecordingUpdates(
     recordingPipeline,
     operationalLogger,
     auditLogger,
+    processEventsFromMs,
     now,
     captureIncludeSystemEvents,
     workspaceCatalog,
@@ -2494,7 +2496,32 @@ async function processPersistentRecordingUpdates(
     let metadataChanged = false;
     const persistedCommandCursor = readCommandCursor(metadata);
     const persistedCommandCursorAnchor = readCommandCursorAnchor(metadata);
-    const commandCursor = resolveCommandStartCursor(metadata, snapshot.events);
+    const commandCursorUninitialized = persistedCommandCursor === 0 &&
+      !persistedCommandCursorAnchor;
+    const sourcePredatesDaemonStart = metadata.lastObservedMtimeMs !== undefined &&
+      metadata.lastObservedMtimeMs < processEventsFromMs;
+    const skipHistoricalFirstSeenCommands = commandCursorUninitialized &&
+      sourcePredatesDaemonStart;
+
+    let commandCursor = resolveCommandStartCursor(metadata, snapshot.events);
+    if (skipHistoricalFirstSeenCommands) {
+      commandCursor = snapshot.events.length;
+      writeCommandCursor(metadata, commandCursor, snapshot.events);
+      metadataChanged = true;
+      await operationalLogger.debug(
+        "recording.command.first_seen_skipped",
+        "Skipping historical in-chat commands on first-seen persistent session",
+        {
+          provider,
+          sessionId: providerSessionId,
+          sourceFilePath: metadata.sourceFilePath,
+          sourceMtimeMs: metadata.lastObservedMtimeMs,
+          daemonStartedAtMs: processEventsFromMs,
+          skippedCommandsThroughCursor: commandCursor,
+        },
+      );
+    }
+
     for (let i = commandCursor; i < snapshot.events.length; i += 1) {
       const event = snapshot.events[i];
       if (!event || event.kind !== "message.user") {
@@ -3143,6 +3170,7 @@ export async function runDaemonRuntimeLoop(
               recordingPipeline,
               operationalLogger,
               auditLogger,
+              processEventsFromMs,
               now,
               captureIncludeSystemEvents:
                 daemonFeatureFlags.captureIncludeSystemEvents,

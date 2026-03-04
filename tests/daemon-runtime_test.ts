@@ -2124,6 +2124,63 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat skips historical first-seen commands when source mtime predates daemon start",
+  async () => {
+    let stateDir: string | undefined;
+
+    try {
+      let captureCalls = 0;
+      const result = await runPersistentInChatScenario({
+        events: [
+          makeEvent(
+            "u-old-capture",
+            "message.user",
+            `::capture-${TEST_WORKSPACE_ALIAS} /tmp/old-command.md`,
+            "2026-02-22T09:59:59.000Z",
+          ),
+        ],
+        recordingPipeline: makePersistentInChatRecordingPipeline({
+          captureSnapshot(input) {
+            captureCalls += 1;
+            return Promise.resolve({
+              outputPath: input.targetPath,
+              writeResult: {
+                mode: "overwrite",
+                outputPath: input.targetPath,
+                wrote: true,
+                deduped: false,
+              },
+              format: "markdown" as const,
+            });
+          },
+        }),
+        prepopulate: async (sessionStateStore) => {
+          await prepopulateScenarioSessionMetadata(
+            sessionStateStore,
+            (metadata) => {
+              metadata.commandCursor = 0;
+              delete metadata.commandCursorAnchor;
+              metadata.lastObservedMtimeMs = new Date(
+                "2026-02-22T09:59:00.000Z",
+              ).getTime();
+            },
+          );
+        },
+      });
+      stateDir = result.stateDir;
+
+      const session = findScenarioMetadata(result.metadataList);
+      assertEquals(captureCalls, 0);
+      assertEquals(session.commandCursor, 1);
+      assertEquals(session.commandCursorAnchor?.eventId, "u-old-capture");
+      assertEquals(session.workspaceOutputs ?? [], []);
+    } finally {
+      await removeDirIfPresent(stateDir);
+    }
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat accepts relative arguments for ::record-<alias>, ::capture-<alias>, and ::export-<alias>",
   async () => {
     let stateDir: string | undefined;

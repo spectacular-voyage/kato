@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1772401876014
+updated: 1772598957049
 created: 1771812869620
 ---
 
@@ -101,3 +101,4 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
       allowedWriteRoots
 - [ ] add codex "plan" documents (and other documents?) to
       ConversationEventKinds and add corresponding config switches.
+- [ ] rename workspace to destination and maybe sessions -> chats
