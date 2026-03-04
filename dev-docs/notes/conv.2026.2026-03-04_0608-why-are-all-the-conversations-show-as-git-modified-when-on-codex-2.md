@@ -1,13 +1,13 @@
 ---
-id: why-are-all-the-conversa-53978fc0
+id: why-are-all-the-conversa-c889669d
 title: 'Why are all the conversations show as git modified, when on…'
 desc: ''
-created: 1772630779038
-updated: 1772630779038
+created: 1772633316035
+updated: 1772633316035
 participants: [user.djradon@users.noreply.github.com, codex.gpt-5.3-codex]
 kato-sessionIds: [019cb700-1b98-74a2-87f2-a8ba59c4ada1]
 kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [53978fc0-06ba-40f4-8be1-b9ce4adb3a5e]
+kato-recordingIds: [c889669d-2bfb-4309-ae7d-f92ca572b8ab]
 conversationEventKinds: [decision, message.assistant, message.user, thinking, tool.call, tool.result]
 ---
 
@@ -898,8 +898,6 @@ I’m implementing it now across runtime, CLI, and daemon startup behavior, plus
 
 **Confirming repo state before implementation**
 
-# gpt-5.3-codex_2026-03-04_0527_00
-
 Implementing now. I’m going to patch the runtime/CLI/store changes and corresponding tests in one pass, then run the targeted test files to confirm behavior.
 
 **Confirming clean code state**
@@ -917,8 +915,6 @@ Implementing now. I’m going to patch the runtime/CLI/store changes and corresp
 **Inspecting session store tests**
 
 **Reviewing export tests**
-
-# gpt-5.3-codex_2026-03-04_0527_34
 
 I’ve located the exact hot spots. Next I’ll patch `session_state_store.ts`, `export.ts`, and `daemon_runtime.ts`, then update targeted tests for those three behaviors.
 
@@ -956,8 +952,6 @@ I’ve located the exact hot spots. Next I’ll patch `session_state_store.ts`, 
 
 **Planning startup queue clearing**
 
-# gpt-5.3-codex_2026-03-04_0530_54
-
 I’m about to edit three implementation files now: `session_state_store.ts` (Windows-safe keys + legacy migration), `export.ts` (daemon heartbeat gate), and `daemon_runtime.ts`/`main.ts` (startup queue drain). Then I’ll add focused tests.
 
 **Segmenting patch for session_state_store**
@@ -980,15 +974,11 @@ I’m about to edit three implementation files now: `session_state_store.ts` (Wi
 
 **Adding detailed session-store tests**
 
-# gpt-5.3-codex_2026-03-04_0531_55
-
 I’m now adding tests for the filename-key migration path so we verify both new Windows-safe naming and automatic pickup of legacy `provider:session` files.
 
 **Adding CLI test patches**
 
 **Splitting patch due to conflicts**
-
-# gpt-5.3-codex_2026-03-04_0532_28
 
 I hit a patch context mismatch in the CLI test file; I’m applying it in smaller targeted hunks now.
 
@@ -1004,23 +994,17 @@ I hit a patch context mismatch in the CLI test file; I’m applying it in smalle
 
 **Planning targeted test runs**
 
-# gpt-5.3-codex_2026-03-04_0533_19
-
 Code changes are in place. I’m running the three affected test files now to catch type/runtime regressions before I summarize.
 
 **Planning test execution with timeout**
 
 **Targeting tests with elevated permissions**
 
-# gpt-5.3-codex_2026-03-04_0533_29
-
 The test run failed mainly from missing Deno permissions, not logic. I’m re-running focused tests with `-A` and filters to validate the new behaviors directly.
 
 **Planning test parallelization**
 
 **Verifying test filters with exact substrings**
-
-# gpt-5.3-codex_2026-03-04_0533_40
 
 Those regex filters didn’t match any test names. I’m rerunning with exact test-name substrings so the modified tests actually execute.
 
@@ -1034,8 +1018,6 @@ Those regex filters didn’t match any test names. I’m rerunning with exact te
 
 **Refining test filter keywords**
 
-# gpt-5.3-codex_2026-03-04_0534_23
-
 I’m running the modified CLI/runtime tests one-by-one with simple unique filters since Deno’s regex filtering was skipping the multi-phrase patterns.
 
 **Planning parallel command execution**
@@ -1046,13 +1028,9 @@ I’m running the modified CLI/runtime tests one-by-one with simple unique filte
 
 **Pausing due to unexpected file changes**
 
-# gpt-5.3-codex_2026-03-04_0534_59
-
 I noticed unexpected new modifications in unrelated files during this run (`.gitignore`, `apps/cli/src/usage.ts`, `apps/runtime/src/workspace/registry.ts`, `tests/daemon-runtime-participant-resolution_test.ts`) that I did not edit directly. Per your repo safety rule, I need your direction: should I ignore these unrelated changes and proceed with only the implementation files, or inspect/reconcile them too?
 
 **Preparing final update with question**
-
-# gpt-5.3-codex_2026-03-04_0535_15
 
 Implemented the requested changes in these files:
 
@@ -1082,8 +1060,6 @@ Acknowledged. I’ll ignore those unrelated edits and finalize around the implem
 **Gathering git status and line references**
 
 **Summarizing implemented changes and test results**
-
-# gpt-5.3-codex_2026-03-04_0537_32
 
 Understood, and I proceeded that way: I left unrelated edits alone and finalized only the implementation/test files tied to this change.
 
@@ -1115,3 +1091,446 @@ commit message please
 - clear queued control requests on daemon startup
 - reject CLI `export` when daemon is not running or heartbeat is stale
 - add coverage for filename migration, export gating, and startup queue clearing
+
+# User_2026-03-04_0608_35
+
+"kato start" issued from my project dir is creating a .kato file and running from there. This is an accidental regression. I'm tempted to say, we should look in ~/.kato first and only create a .kato file if there's nothing there. But I can see that this would hamper running kato from an arbitrary location, if there is also a ~/.kato.
+
+Can you help me plan a solution? Eventually we can support OS-specific daemons, but that's out of scope for now.
+
+**Starting exploratory commentary**
+
+# gpt-5.3-codex_2026-03-04_0608_35
+
+I’ll inspect the runtime-dir/config resolution path for `kato start` first, so we can anchor the plan in exact current behavior and regression cause before choosing policy.
+
+**Inspecting router environment resolution**
+
+**Inspecting runtime config defaults**
+
+**Analyzing runtime directory resolution and env permissions**
+
+**Reviewing runtime config path resolution**
+
+**Inspecting runtime config initialization**
+
+**Investigating environment variable access cause**
+
+**Reviewing README for environment permissions**
+
+**Analyzing fallback to local runtime**
+
+I found the likely root: default path resolution falls back to relative `.kato/daemon` when `HOME/USERPROFILE` isn’t readable, and auto-init then creates config there. I’m checking if there are existing docs/todos about global-vs-local runtime policy so the plan can align with your intended direction.
+
+**Investigating runtime root decision**
+
+**Formulating user scope questions**
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-runtime-scope-policy
+
+## Prompt
+
+When `KATO_RUNTIME_DIR` is unset, what default runtime-root policy should we implement now?
+
+## Options
+
+- Global only (Recommended): Always target `~/.kato`; if home cannot be resolved, fail with a clear error instead of creating `./.kato`.
+- Local if present: Use `./.kato` only when a local daemon config already exists; otherwise use `~/.kato`.
+- Keep local fallback: Preserve current behavior that can create `./.kato` when home/env resolution is unavailable.
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-existing-local-state
+
+## Prompt
+
+If a local `./.kato` already exists from this regression, how should startup handle it by default?
+
+## Options
+
+- Warn and ignore (Recommended): Continue with global `~/.kato` and print a warning plus manual migration guidance for `./.kato`.
+- Auto-migrate: On startup, move detected local daemon/shared files into `~/.kato` automatically once.
+- Adopt local state: If `./.kato` exists, use it as active runtime root for backward compatibility.
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-runtime-scope-policy
+
+## Prompt
+
+When `KATO_RUNTIME_DIR` is unset, what default runtime-root policy should we implement now?
+
+## Options
+
+- Global only (Recommended): Always target `~/.kato`; if home cannot be resolved, fail with a clear error instead of creating `./.kato`.
+- Local if present: Use `./.kato` only when a local daemon config already exists; otherwise use `~/.kato`.
+- Keep local fallback: Preserve current behavior that can create `./.kato` when home/env resolution is unavailable.
+
+## User Selection
+
+Global only (Recommended)
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-existing-local-state
+
+## Prompt
+
+If a local `./.kato` already exists from this regression, how should startup handle it by default?
+
+## Options
+
+- Warn and ignore (Recommended): Continue with global `~/.kato` and print a warning plus manual migration guidance for `./.kato`.
+- Auto-migrate: On startup, move detected local daemon/shared files into `~/.kato` automatically once.
+- Adopt local state: If `./.kato` exists, use it as active runtime root for backward compatibility.
+
+## User Selection
+
+Warn and ignore (Recommended)
+
+**Assessing local mode config handling**
+
+Thanks, that locks the key policy decisions. I’ll do one more quick pass over path resolvers (`runtime`, `shared`, `cli`, `user`) so the plan covers all codepaths that might still leak into `./.kato`.
+
+**Diagnosing runtime dir override causing local .kato**
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-relative-runtime-override-policy
+
+## Prompt
+
+How should we handle `KATO_RUNTIME_DIR` values that are relative paths (for example `.kato/daemon`)?
+
+## Options
+
+- Reject relative (Recommended): Require absolute or `~`-prefixed paths; fail with a clear error to prevent accidental project-local daemons.
+- Allow relative: Keep accepting relative paths and resolve them against current working directory.
+- Allow but warn: Permit relative paths but print a warning that behavior is cwd-dependent and can create local state.
+
+# gpt-5.3-codex_2026-03-04_0608_35_Tool-decision-relative-runtime-override-policy
+
+## Prompt
+
+How should we handle `KATO_RUNTIME_DIR` values that are relative paths (for example `.kato/daemon`)?
+
+## Options
+
+- Reject relative (Recommended): Require absolute or `~`-prefixed paths; fail with a clear error to prevent accidental project-local daemons.
+- Allow relative: Keep accepting relative paths and resolve them against current working directory.
+- Allow but warn: Permit relative paths but print a warning that behavior is cwd-dependent and can create local state.
+
+## User Selection
+
+Reject relative (Recommended)
+
+**Designing strict runtime dir resolution**
+
+**Identifying missing error handling**
+
+<proposed_plan>
+# Runtime Directory Resolution and Local Runtime Warning Enhancement
+
+## Summary
+- Enforce strict runtime directory resolution policy rejecting relative `KATO_RUNTIME_DIR` overrides.
+- Remove fallback to local `.kato` directory if no `HOME` set; require explicit absolute path or home dir.
+- Detect presence of local `.kato` in working directory and warn users on relevant commands.
+- Update CLI bootstrap and daemon startup to handle missing home directory with clear errors.
+- Provide migration guidance and documentation updates reflecting new behavior.
+- Add tests covering new resolver behavior, CLI warnings, and daemon startup errors.
+- Preserve ability to run local runtime only via explicit absolute environment override.
+- Avoid broad signature changes; keep most API surface backward compatible.
+
+## Public APIs and Interfaces
+1. Behavior of `resolveDefaultRuntimeDir` changes: throws error if no home and no absolute override.
+2. Possibly add internal helper to validate/reject relative overrides.
+3. Environment variable `KATO_RUNTIME_DIR` semantics updated to disallow relative paths.
+4. CLI and daemon exit codes and error messages updated for missing environment or invalid overrides.
+5. Warning messages for local `.kato` detection surfaced on `start`, `restart`, `init` commands.
+6. No new CLI arguments introduced.
+
+## Behavioral Specification
+1. Runtime root resolution precedence ordered:
+   - If `KATO_RUNTIME_DIR` set: must be absolute or start with ``; else throw error.
+   - Else: use `$HOME/.kato` (or `%USERPROFILE%` on Windows).
+   - No fallback to local `.kato` directory if above fail.
+2. Relative overrides rejected with explicit error message.
+3. Detect local `.kato` in current working directory (CWD) during `start`, `restart`, `init`.
+   - If present and differs from effective runtime dir, issue warning once per command.
+   - If explicit override points to local `.kato`, no warning issued.
+4. Daemon startup fails with exit code 1 and descriptive error if runtime dir cannot be resolved.
+5. Existing commands relying on fallback local runtime directories updated to fail fast.
+6. Migration recommended: users set `KATO_RUNTIME_DIR` explicitly to absolute path e.g. `"$PWD/.kato/daemon"`.
+7. Tests and code must accommodate all above strict rules.
+
+## Implementation Steps
+1. Update `apps/runtime/src/orchestrator/control_plane.ts`
+   - Modify `resolveDefaultRuntimeDir` to throw on missing home or relative override.
+   - Add path validation to reject relative `KATO_RUNTIME_DIR`.
+   - Remove local `.kato` fallback.
+2. Enhance CLI bootstrap router (`apps/cli/src/router.ts`)
+   - Wrap runtime resolution in try/catch; convert errors to user-friendly messages and exit code 1.
+   - Implement `warnIfLocalKatoDirDetected` for `start`, `restart`, `init`.
+   - Warning triggered if local `.kato` dir exists in CWD and differs from effective runtime dir.
+3. Adjust daemon main entry (`apps/daemon/src/main.ts`)
+   - Handle resolver errors gracefully; log and exit 1 on failure to determine runtime dir.
+4. Update documentation:
+   - README and `apps/cli/src/usage.ts` usage text reflecting new runtime root resolution and warnings.
+   - Add migration note for users with local `.kato` directories.
+5. Add tests:
+   - Resolver unit tests in `tests/daemon-control-plane_test.ts`.
+   - CLI integration tests in `tests/daemon-cli_test.ts` for environment overrides and warnings.
+   - Daemon startup tests in `tests/daemon-main_test.ts` covering missing home scenarios.
+6. Review existing tests for reliance on fallback local `.kato`; update as needed.
+7. Include code comments and user-facing messages for clarity on new constraints and warnings.
+
+## Test Cases
+1. Reject relative `KATO_RUNTIME_DIR`; error with clear message.
+2. Accept absolute or tilde-prefixed `KATO_RUNTIME_DIR`.
+3. Throw error if no home and no override.
+4. Detect and warn about local `.kato` directory during `start`, `restart`, `init`.
+5. No warning when local runtime explicitly set via absolute override.
+6. Daemon fails startup gracefully on missing runtime dir.
+7. Ensure existing tests pass or are adapted to strict runtime dir behavior.
+8. Verify no silent fallback to local runtime dir occurs.
+
+## Risks and Migration
+1. Removal of local `.kato` fallback breaks workflows relying on implicit local runtimes.
+2. Users must explicitly set `KATO_RUNTIME_DIR` absolute paths to continue local usage.
+3. Relative runtimeDir values persisted in runtime config may cause unexpected errors; no immediate fix planned.
+4. New strictness may increase failures for users with missing environment variables.
+5. Migration guidance and warnings included to ease transition.
+
+## Assumptions and Defaults
+1. Single global daemon remains default runtime environment.
+2. Local runtime usage allowed only via explicit absolute overrides.
+3. No automatic migration of local state; users must migrate manually.
+4. OS-specific daemons remain out of scope.
+5. Warnings emitted only on explicit runtime-sensitive commands (`start`, `restart`, `init`).
+6. No additional CLI flags introduced for this feature.
+
+</proposed_plan>
+
+# User_2026-03-04_0608_35
+
+PLEASE IMPLEMENT THIS PLAN:
+# Fix Runtime Root Regression: Global-First, No Implicit `./.kato`
+
+## Summary
+1. Make `kato start` and `kato restart` global-by-default again, using `~/.kato` unless an explicit runtime override is provided.
+2. Remove implicit fallback that creates `./.kato` from current working directory.
+3. Keep local runtime usage available only by explicit override, not by accidental fallback.
+4. If accidental local state already exists at `./.kato`, warn and ignore it by default.
+
+## Public APIs / Interfaces / Behavior Changes
+1. No new CLI command flags in this iteration.
+2. `KATO_RUNTIME_DIR` semantics tighten: relative values (for example `.kato/daemon`) are rejected; only absolute or `~`-prefixed values are accepted.
+3. Default runtime resolution behavior changes: when no override exists and home cannot be resolved, fail with a clear error instead of using `./.kato/daemon`.
+4. Startup warning behavior added: `start`/`restart`/`init` warns when `./.kato` exists but global root is being used.
+
+## Behavioral Specification (Decision-Complete)
+1. Runtime root precedence is:
+   1. `KATO_RUNTIME_DIR` (validated, expanded, must resolve to absolute).
+   2. Home default `~/.kato/daemon` (from `HOME` or `USERPROFILE`).
+   3. No third fallback; if unresolved, command fails with remediation text.
+2. Local state policy is:
+   1. If `./.kato` exists and resolved runtime root is global, print one warning and continue with global root.
+   2. No automatic migration in this iteration.
+3. Explicit local usage policy is:
+   1. Supported only via explicit override (for example `KATO_RUNTIME_DIR="$PWD/.kato/daemon"`).
+   2. Relative override values are rejected to avoid cwd-dependent behavior.
+
+## Implementation Plan
+1. Tighten default runtime resolution in [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts).
+2. Remove `DEFAULT_RUNTIME_DIR_FALLBACK` usage for runtime-root resolution.
+3. Validate override path in resolver:
+   1. Expand `~`.
+   2. Reject non-absolute values with actionable error text.
+4. Fail when home is unavailable and no override is set, with message instructing to set `KATO_RUNTIME_DIR` (absolute or `~`-prefixed).
+5. Harden CLI bootstrap error handling in [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts).
+6. Catch runtime-root resolution failures early and return exit code `1` with concise remediation.
+7. Add local-state detection warning in CLI flow for `init`, `start`, and `restart`:
+   1. Detect `cwd/.kato`.
+   2. If distinct from effective resolved Kato dir, warn and continue with global root.
+8. Harden daemon direct entry behavior in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts).
+9. Catch runtime-root resolution failures in `runDaemonSubprocess` startup path and fail cleanly with stderr message instead of uncaught exception.
+10. Update user-facing docs/help text:
+    1. [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts) for explicit runtime-root rules.
+    2. [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md) with global-first behavior and explicit local override guidance.
+
+## Test Cases and Scenarios
+1. Resolver unit tests in [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts):
+   1. Uses `~/.kato/daemon` when no override and home is present.
+   2. Rejects relative `KATO_RUNTIME_DIR`.
+   3. Accepts absolute `KATO_RUNTIME_DIR`.
+   4. Accepts `~`-prefixed override by expansion.
+   5. Fails when home is missing and override is absent.
+2. CLI behavior tests in [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts):
+   1. `start` auto-inits global config even when `./.kato` exists.
+   2. `start`/`restart`/`init` emits warning when local `./.kato` exists but is ignored.
+   3. `start` fails with clear message when `KATO_RUNTIME_DIR` is relative.
+3. Daemon entry tests in [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts):
+   1. Direct daemon startup fails cleanly when runtime root cannot be resolved.
+4. Regression check:
+   1. Running `kato start` from arbitrary project directories no longer creates `./.kato` by default.
+
+## Rollout / Compatibility Notes
+1. Users who intentionally relied on implicit local fallback must now opt in explicitly with `KATO_RUNTIME_DIR` absolute path.
+2. Existing accidental local `./.kato` state is preserved on disk and ignored by default; migration is manual in this iteration.
+3. No daemon architecture split or OS-specific daemon manager changes are included.
+
+## Assumptions and Defaults
+1. Single-daemon global default remains the product policy for now.
+2. Auto-init-on-start remains enabled by default (`KATO_AUTO_INIT_ON_START=true`).
+3. “Warn and ignore local `./.kato`” is the selected default handling for regression leftovers.
+4. Relative `KATO_RUNTIME_DIR` rejection is intentional and enforced to eliminate cwd-dependent surprises.
+
+**Planning periodic updates and safeguards**
+
+# gpt-5.3-codex_2026-03-04_0608_35
+
+Implementing this now. I’ll patch resolver + CLI/daemon startup behavior first, then update docs and tests, and run targeted test suites to verify the regression is closed.
+
+**Assessing runtime root fallback and tests**
+
+I’ve confirmed the current regression source: `resolveDefaultRuntimeDir()` still falls back to relative `.kato/daemon`. Next I’m patching resolver semantics and then adding CLI warnings/error handling plus tests.
+
+**Planning README and test updates**
+
+**Designing runtime dir resolution and warnings**
+**Finalizing runtime dir validation and tests**
+
+**Adding runtime error handling helpers**
+
+**Designing runtime override validation**
+
+**Adding home dir warning check**
+
+**Fixing runtime directory resolution**
+
+**Updating usage instructions**
+
+**Planning README update**
+
+**Planning quickstart enhancement**
+
+**Preparing repository inspection**
+
+I’m continuing implementation from where it left off: I’ll verify the current edits, finish the remaining test/doc changes, then run targeted tests for `control_plane`, CLI, and daemon entry behavior.
+
+**Inspecting modified file contents**
+
+I found your runtime/CLI edits in place. Next I’m reviewing those files for edge cases and then I’ll add/adjust tests to match the new behavior.
+
+**Inspecting router command warnings**
+
+**Reviewing imports and test needs**
+
+**Inspecting module exports for tests**
+
+**Reviewing existing daemon tests**
+
+I’m now adding the missing test coverage for resolver behavior and CLI warning/failure paths, then I’ll run the targeted test files.
+
+**Inspecting test environment handling**
+
+**Designing env override tests**
+
+**Inspecting runtime configuration function**
+
+**Evaluating runtime dir constant usage**
+
+**Planning runtime detection fixes and tests**
+
+I identified one behavior mismatch in the warning logic: it currently suppresses the warning whenever `KATO_RUNTIME_DIR` is set, even if the effective root is still global `~/.kato`. I’m fixing that while adding the tests.
+
+**Identifying unused import**
+
+**Removing unused import**
+
+**Adding comprehensive runtime dir tests**
+
+**Adapting temp path for cross-platform**
+
+**Testing environment variable handling**
+
+**Adding runtime environment helpers**
+
+**Designing comprehensive init/start/restart tests**
+
+**Adding runtime root failure test**
+
+**Planning README runtime docs**
+
+**Finalizing formatting and tests**
+
+**Reporting format impact**
+
+I’ve applied the remaining runtime/CLI/doc changes and added the new test cases for resolver strictness, local `.kato` warnings, and daemon startup failure on unresolved runtime root. I’m running the targeted test suite now.
+
+**Running targeted tests**
+
+**Verifying test changes and git status**
+
+**Verifying previous file modifications**
+
+Targeted tests are green (`73 passed`). I’m doing a final diff review now and then I’ll give you a concise implementation summary plus a commit message you can use.
+
+**Summarizing runtime root fix with tests**
+
+Implemented the plan end-to-end. `kato` is now global-first again and no longer implicitly falls back to `./.kato`.
+
+**What changed**
+- Tightened runtime-root resolution in [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts):
+  - `KATO_RUNTIME_DIR` is expanded and must resolve to an absolute path.
+  - Relative overrides are rejected with actionable error text.
+  - Default is `~/.kato/daemon` from `HOME`/`USERPROFILE`.
+  - If home cannot be resolved and no override exists, it fails (no `./.kato` fallback).
+- Hardened CLI bootstrap in [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts):
+  - Early catch for runtime resolution failures with exit code `1`.
+  - Added warning for `init`/`start`/`restart` when local `./.kato` exists but effective root is global `~/.kato`.
+  - Warning is based on effective root, not just env presence.
+- Hardened daemon direct entry in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts):
+  - Clean failure path when runtime root cannot be resolved.
+- Updated CLI help text in [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts).
+- Updated user docs in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md) for:
+  - global-first behavior,
+  - explicit local override usage,
+  - relative override rejection,
+  - no implicit `./.kato` fallback.
+
+**Tests added/updated**
+- [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts):
+  - home default resolution
+  - relative override rejection
+  - absolute override acceptance
+  - `~` override expansion
+  - failure when home/override unavailable
+- [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts):
+  - warning behavior for `init`/`start`/`restart` with local `./.kato`
+  - `start` auto-init still targets global root with local `./.kato` present
+  - failure on relative `KATO_RUNTIME_DIR`
+- [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts):
+  - direct daemon startup fails cleanly when runtime root is unresolved
+
+**Verification**
+- Ran:
+  - `deno test -A tests/daemon-control-plane_test.ts tests/daemon-cli_test.ts tests/daemon-main_test.ts`
+- Result:
+  - `73 passed`, `0 failed`
+
+Suggested commit message:
+`fix(runtime): restore global-first root resolution and remove implicit ./.kato fallback`
+
+# User_2026-03-04_0608_35
+
+::capture-k
+
+**Acknowledging in-chat command**
+
+# gpt-5.3-codex_2026-03-04_0608_35
+
+Ignored `::capture-k` as an in-chat Kato command.  
+Ready for the next code/doc change.
+
+# User_2026-03-04_0608_35
+
+::capture-k
+
+**Continuing concise in-chat command handling**
+
+# gpt-5.3-codex_2026-03-04_0608_38
+
+Ignored `::capture-k` as an in-chat Kato command.
