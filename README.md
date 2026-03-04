@@ -1,6 +1,7 @@
 # Kato - Own your AI conversations.
 
-Kato is your trusty sidekick for capturing chats, whether in your IDE or from a code-assistant CLI.
+Kato is your trusty sidekick for capturing chats, whether in your IDE or from a
+code-assistant CLI.
 
 ## Features
 
@@ -9,7 +10,8 @@ Kato is your trusty sidekick for capturing chats, whether in your IDE or from a 
 - automatically generate frontmatter for your markdown output files
 - stop and start recording in-chat, as you go
 - export entire conversations from the CLI or from within a chat
-- specify the types of messages (thinking, tool calls, decisions) that you want to capture
+- specify the types of messages (thinking, tool calls, decisions) that you want
+  to capture
 - centralize conversations from multiple provider in a single location
 - decentralize conversations into multiple locations
 
@@ -17,7 +19,8 @@ Kato is your trusty sidekick for capturing chats, whether in your IDE or from a 
 
 Prerequisite: Deno 2.x
 
-Eventually, we'll have binary distributions. In the meantime, you have to clone the repo:
+Eventually, we'll have binary distributions. In the meantime, you have to clone
+the repo:
 
 ```
 # clone the Kato repository somewhere reasonable, like ~/github/kato
@@ -26,7 +29,6 @@ git clone https://github.com/spectacular-voyage/kato.git $HOME\github\kato
 
 The rest of the installation depends on your platform...
 
-
 ### MacOS and Linux
 
 ```
@@ -34,27 +36,34 @@ The rest of the installation depends on your platform...
 curl -fsSL https://deno.land/install.sh | sh
 ```
 
-Deno is not automatically appended to your PATH, so add these lines to the end of your .zshrc:
+Deno is not automatically appended to your PATH, so add these lines to the end
+of your .zshrc:
+
 ```
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 ```
 
-While you're modifying your .zshrc, add an alias to `<clone-location>/apps/cli/src/main.ts` for easy execution:
+While you're modifying your .zshrc, add an alias to
+`<clone-location>/apps/cli/src/main.ts` for easy execution:
+
 ```
 alias kato="deno run -A ~/github/kato/apps/cli/src/main.ts""
 ```
 
-After modifying your path, you need to restart apps where applicable, e.g.: VSCode, Terminal
+After modifying your path, you need to restart apps where applicable, e.g.:
+VSCode, Terminal
 
 ### Windows (Powershell)
 
 Install Deno:
+
 ```
 irm https://deno.land/install.ps1 | iex
 ```
 
 Modify your Powershell $PROFILE for easy execution:
+
 ```
 function kato {
   deno run -A "$HOME\github\kato\apps\cli\src\main.ts" @args
@@ -65,7 +74,10 @@ Then open a new Powershell window or try `.$PROFILE`
 
 ## Quickstart
 
-By default, kato will initialize itself into a ".kato" directory in your home folder.
+By default, kato uses the global runtime root `~/.kato/daemon` and does not
+implicitly create `./.kato`. To opt into local runtime state, set
+`KATO_RUNTIME_DIR` explicitly to an absolute path (for example
+`$PWD/.kato/daemon`) or a `~/...` path.
 
 ```
 kato init
@@ -80,9 +92,13 @@ kato workspace init
 kato workspace register alias=default
 ```
 
-Then start a new LLM chat (suggestion: the first line should be a good title for the chat), on any new line, type `::capture-default` (or `::capture-<whatever alias you defined for your workspace>`). 
+Then start a new LLM chat (suggestion: the first line should be a good title for
+the chat), on any new line, type `::capture-default` (or
+`::capture-<whatever alias you defined for your workspace>`).
 
-These "in-chat kato commands" can be confusing for LLMs, so you might want to add something like "ignore all kato commands, which start with `::` on a new line" to your message, system prompt, or guidance files.
+These "in-chat kato commands" can be confusing for LLMs, so you might want to
+add something like "ignore all kato commands, which start with `::` on a new
+line" to your message, system prompt, or guidance files.
 
 ### Example First Message
 
@@ -95,17 +111,18 @@ Please ignore Kato commands, like this next line:
 ::capture-default
 ```
 
-
 ## In-Chat Kato Commands
 
 Kato also watches user messages for in-chat control commands:
 
-- `::capture-<alias> [<path>]` (start a recording from the beginning of the conversation)
-- `::record-<alias> [<path>]` (start a recording from this point in the conversation)
+- `::capture-<alias> [<path>]` (start a recording from the beginning of the
+  conversation)
+- `::record-<alias> [<path>]` (start a recording from this point in the
+  conversation)
 - `::stop` (stop all recordings)
 - `::stop-<alias>`
-- `::export-<alias> [<path>]` 
-  
+- `::export-<alias> [<path>]`
+
 Rules:
 
 - `::record`, `::capture`, and `::export` require a workspace alias suffix.
@@ -124,7 +141,6 @@ Rules:
 - Pathless alias-scoped commands use that workspace's configured default output
   rules.
 
-
 ## CLI Command Reference
 
 Supported commands:
@@ -134,15 +150,21 @@ Supported commands:
 - `init`
   - Create missing daemon/shared/CLI/user config and default workspace template
     files.
+  - Uses global `~/.kato` by default. If `./.kato` exists in the current
+    directory, kato warns and continues with global state.
 - `start`
   - Start daemon in detached background mode.
   - CLI returns success only after daemon heartbeat acknowledges startup.
   - If config is missing, auto-init runs by default
     (`KATO_AUTO_INIT_ON_START=true`).
   - Disable auto-init by setting `KATO_AUTO_INIT_ON_START=false`.
+  - Uses global `~/.kato` by default; `./.kato` is ignored unless
+    `KATO_RUNTIME_DIR` is explicitly set.
 - `restart`
   - Stop daemon and start it again.
   - If daemon is not running, behaves like `start`.
+  - Uses global `~/.kato` by default; `./.kato` is ignored unless
+    `KATO_RUNTIME_DIR` is explicitly set.
 - `stop`
   - Queue daemon stop request (or reset stale status if heartbeat is stale).
 - `status [--json]`
@@ -187,7 +209,13 @@ Workspace registration changes are visible to a running daemon for new
 alias-scoped commands without a restart. Changes to an already-registered
 workspace's alias, root, or config path are restart-bound.
 
+Runtime root precedence:
 
+1. `KATO_RUNTIME_DIR` (must be absolute or `~/...`; relative values are
+   rejected).
+2. Home default `~/.kato/daemon` (from `HOME`/`USERPROFILE`).
+3. No implicit `./.kato` fallback. If home cannot be resolved and no override is
+   set, CLI/daemon startup fails with remediation text.
 
 ## Runtime Files
 
@@ -197,7 +225,8 @@ Default paths:
 - CLI config: `~/.kato/cli/kato-cli-config.yaml`
 - Shared config: `~/.kato/shared/kato-shared-config.yaml`
 - User config: `~/.kato/kato-user-config.yaml`
-- Default workspace template: `~/.kato/shared/default-kato-workspace-config.yaml`
+- Default workspace template:
+  `~/.kato/shared/default-kato-workspace-config.yaml`
 - Workspace registry: `~/.kato/shared/workspace-registry.json`
 - Status: `~/.kato/shared/status.json`
 - Control queue: `~/.kato/shared/ipc/daemon-control.json`

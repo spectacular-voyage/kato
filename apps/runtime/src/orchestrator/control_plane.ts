@@ -1,12 +1,11 @@
 import type { DaemonStatusSnapshot } from "@kato/shared";
-import { dirname, join } from "@std/path";
+import { dirname, isAbsolute, join } from "@std/path";
 import {
   expandHomePath,
   readOptionalEnv,
   resolveHomeDir,
 } from "../utils/env.ts";
 
-const DEFAULT_RUNTIME_DIR_FALLBACK = ".kato/daemon";
 const DEFAULT_KATO_DIRNAME = ".kato";
 const DEFAULT_RUNTIME_SUBDIR = "daemon";
 const DEFAULT_SHARED_SUBDIR = "shared";
@@ -250,15 +249,33 @@ export function isStatusSnapshotStale(
 export function resolveDefaultRuntimeDir(): string {
   const runtimeDirOverride = readOptionalEnv("KATO_RUNTIME_DIR");
   if (runtimeDirOverride) {
-    return expandHomePath(runtimeDirOverride);
+    const expandedOverride = expandHomePath(runtimeDirOverride);
+    if (!isAbsolute(expandedOverride)) {
+      throw new Error(
+        `KATO_RUNTIME_DIR must resolve to an absolute path (or start with "~/" for home expansion): ${runtimeDirOverride}`,
+      );
+    }
+    return expandedOverride;
   }
 
   const homeDir = resolveHomeDir();
-  if (homeDir) {
-    return join(homeDir, DEFAULT_KATO_DIRNAME, DEFAULT_RUNTIME_SUBDIR);
+  if (!homeDir) {
+    throw new Error(
+      'Unable to resolve runtime directory: HOME/USERPROFILE is not set. Set KATO_RUNTIME_DIR to an absolute path (for example "~/.kato/daemon").',
+    );
   }
 
-  return DEFAULT_RUNTIME_DIR_FALLBACK;
+  const defaultRuntimeDir = join(
+    homeDir,
+    DEFAULT_KATO_DIRNAME,
+    DEFAULT_RUNTIME_SUBDIR,
+  );
+  if (!isAbsolute(defaultRuntimeDir)) {
+    throw new Error(
+      `Resolved home directory is not absolute; unable to derive default runtime directory: ${homeDir}`,
+    );
+  }
+  return defaultRuntimeDir;
 }
 
 export function resolveDefaultStatusPath(

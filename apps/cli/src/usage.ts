@@ -40,17 +40,20 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Usage: kato init",
     "",
     "Creates ~/.kato/daemon/kato-daemon-config.yaml, ~/.kato/shared/kato-shared-config.yaml, ~/.kato/cli/kato-cli-config.yaml, ~/.kato/shared/default-kato-workspace-config.yaml, and ~/.kato/kato-user-config.yaml when missing.",
+    "Uses global ~/.kato by default; local ./.kato is ignored unless KATO_RUNTIME_DIR is explicitly set to an absolute path.",
   ].join("\n"),
   start: [
     "Usage: kato start",
     "",
     "Starts daemon runtime in detached background mode.",
     "Returns success after daemon heartbeat acknowledges startup.",
+    "Uses global ~/.kato by default; set KATO_RUNTIME_DIR to an absolute path (or ~/...) to use another runtime root.",
   ].join("\n"),
   restart: [
     "Usage: kato restart",
     "",
     "Stops daemon and starts it again. If daemon is not running, starts it.",
+    "Uses global ~/.kato by default; set KATO_RUNTIME_DIR to an absolute path (or ~/...) to use another runtime root.",
   ].join("\n"),
   stop: [
     "Usage: kato stop",

@@ -147,7 +147,10 @@ Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", asyn
     const legacyStorageKey = `${encodeURIComponent(identity.provider)}:${
       encodeURIComponent(identity.providerSessionId)
     }`;
-    const legacyMetadataPath = join(sessionsDir, `${legacyStorageKey}.meta.json`);
+    const legacyMetadataPath = join(
+      sessionsDir,
+      `${legacyStorageKey}.meta.json`,
+    );
     const legacyTwinPath = join(sessionsDir, `${legacyStorageKey}.twin.jsonl`);
 
     const currentMetadata = JSON.parse(
@@ -160,10 +163,16 @@ Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", asyn
     await Deno.rename(canonicalLocation.twinPath, legacyTwinPath);
     await Deno.writeTextFile(
       legacyMetadataPath,
-      `${JSON.stringify({
-        ...currentMetadata,
-        twinPath: legacyTwinPath,
-      }, null, 2)}\n`,
+      `${
+        JSON.stringify(
+          {
+            ...currentMetadata,
+            twinPath: legacyTwinPath,
+          },
+          null,
+          2,
+        )
+      }\n`,
     );
 
     const restartedStore = new PersistentSessionStateStore({

@@ -1,8 +1,14 @@
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { join } from "@std/path";
 import {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  resolveDefaultRuntimeDir,
 } from "../apps/daemon/src/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
@@ -11,6 +17,126 @@ async function withTempRuntimeDir(
 ): Promise<void> {
   await withTestTempDir("daemon-control-plane-", run);
 }
+
+const RUNTIME_ENV_KEYS = ["HOME", "USERPROFILE", "KATO_RUNTIME_DIR"] as const;
+type RuntimeEnvKey = (typeof RUNTIME_ENV_KEYS)[number];
+
+function snapshotRuntimeEnv(): Record<RuntimeEnvKey, string | undefined> {
+  return {
+    HOME: Deno.env.get("HOME"),
+    USERPROFILE: Deno.env.get("USERPROFILE"),
+    KATO_RUNTIME_DIR: Deno.env.get("KATO_RUNTIME_DIR"),
+  };
+}
+
+function setRuntimeEnv(
+  values: Partial<Record<RuntimeEnvKey, string | undefined>>,
+): void {
+  for (const key of RUNTIME_ENV_KEYS) {
+    if (!(key in values)) {
+      continue;
+    }
+    const value = values[key];
+    if (value === undefined) {
+      Deno.env.delete(key);
+      continue;
+    }
+    Deno.env.set(key, value);
+  }
+}
+
+function restoreRuntimeEnv(
+  snapshot: Record<RuntimeEnvKey, string | undefined>,
+): void {
+  setRuntimeEnv(snapshot);
+}
+
+Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  const homeDir = await Deno.makeTempDir({ prefix: "daemon-control-home-" });
+  try {
+    setRuntimeEnv({
+      HOME: homeDir,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: undefined,
+    });
+    assertEquals(resolveDefaultRuntimeDir(), join(homeDir, ".kato", "daemon"));
+  } finally {
+    restoreRuntimeEnv(snapshot);
+    await Deno.remove(homeDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", () => {
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: ".kato/daemon",
+    });
+    assertThrows(
+      () => resolveDefaultRuntimeDir(),
+      Error,
+      "must resolve to an absolute path",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
+
+Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  const runtimeDir = await Deno.makeTempDir({
+    prefix: "daemon-control-runtime-",
+  });
+  try {
+    setRuntimeEnv({
+      KATO_RUNTIME_DIR: runtimeDir,
+    });
+    assertEquals(resolveDefaultRuntimeDir(), runtimeDir);
+  } finally {
+    restoreRuntimeEnv(snapshot);
+    await Deno.remove(runtimeDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async () => {
+  const snapshot = snapshotRuntimeEnv();
+  const homeDir = await Deno.makeTempDir({ prefix: "daemon-control-home-" });
+  try {
+    setRuntimeEnv({
+      HOME: homeDir,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: "~/.kato/custom-daemon",
+    });
+    assertEquals(
+      resolveDefaultRuntimeDir(),
+      join(homeDir, ".kato", "custom-daemon"),
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+    await Deno.remove(homeDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", () => {
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: undefined,
+      KATO_RUNTIME_DIR: undefined,
+    });
+    assertThrows(
+      () => resolveDefaultRuntimeDir(),
+      Error,
+      "HOME/USERPROFILE is not set",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
 
 Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async () => {
   await withTempRuntimeDir(async (runtimeDir) => {

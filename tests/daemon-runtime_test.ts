@@ -3585,7 +3585,9 @@ Deno.test("runDaemonRuntimeLoop clears queued control requests at startup", asyn
     list() {
       listCallCount += 1;
       if (listCallCount === 1) {
-        return Promise.resolve(startupRequests.map((request) => ({ ...request })));
+        return Promise.resolve(
+          startupRequests.map((request) => ({ ...request })),
+        );
       }
       if (listCallCount === 2) {
         return Promise.resolve(liveRequests.map((request) => ({ ...request })));
