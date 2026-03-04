@@ -42,3 +42,42 @@ created: 1772636147795
 1. Watcher behavior for Windows-style atomic-save patterns
 - Simulate create/modify/rename bursts for same file and ensure one debounced batch, not dropped events.
 - This catches editor-save behavior differences common on Windows.
+
+## Analysis
+
+Focus should be on tests that either:
+
+1. Reproduce your observed Windows failures (`start`/detached lifecycle), or
+2. Protect cross-platform correctness/security boundaries (path/env handling).
+
+Most valuable now:
+
+- Detached lifecycle + startup/stop timeout behavior.
+- Windows path/env resolution in launcher/control-plane/path-policy.
+
+Moderate value:
+
+- Workspace trailing-separator interpretation (important, but narrower blast radius).
+
+Lower value for now:
+
+- Watcher atomic-save burst simulation as a deterministic unit test. This tends to
+  be noisy/flaky across CI/host filesystems and is better covered by a targeted
+  Windows smoke/integration check.
+
+## Checklist (Value-Prioritized)
+
+- [ ] `P0` Detached daemon survives parent CLI exit on Windows.
+- [x] `P0` `start` timeout behavior when startup ack never arrives.
+- [x] `P0` Launcher argument/env handling with Windows paths (`C:\...`).
+- [x] `P1` Path policy with Windows separators + traversal (`..\` and mixed `/\`).
+- [x] `P1` `resolveDefaultRuntimeDir` with `USERPROFILE`-only env and `~\` expansion.
+- [x] `P1` `restart` timeout behavior when stop never completes.
+- [x] `P2` Workspace register path interpretation on Windows trailing separator.
+- [c] `P3` Watcher atomic-save burst unit test (lower ROI/flaky risk; prefer Windows smoke test).
+
+## Implemented on 2026-03-04
+
+- Added deterministic CLI timeout regression tests for `start` and `restart`.
+- Added Windows path/env coverage in launcher, control-plane, and path-policy tests.
+- Added parser coverage to preserve Windows-style `workspace register` path input.

@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1772598957049
+updated: 1772645979457
 created: 1771812869620
 ---
 
@@ -90,6 +90,13 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
 - [ ] Re-evaluate `zod` adoption only if boundary validation complexity
       materially increases.
 
+## workspaceID Risks
+
+Biggest shared-repo risk is when workspaceId is missing and different users run register: each machine may generate a different UUID, causing noisy diffs until one wins and is committed (workspace_register.ts, registry.ts).
+Another risk is duplicate workspaceId across two different workspace roots on one user’s machine; register logic treats that as a conflict (workspace_register.ts).
+In this repo, .kato-workspace-config.yaml is not gitignored globally (only .kato/ is), so it can be committed and cause merge churn if edited often (.gitignore).
+If you want to minimize team friction: keep workspaceId committed and stable, and avoid machine-specific settings in that file.
+
 ## Other
 
 - [x] removed legacy `defaultParticipantUsername`; participant usernames now
@@ -109,3 +116,4 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
       with scope boundaries (UI/docs/internal IDs), impacted code surfaces are
       enumerated, and an implementation PR is opened (or explicitly deferred).
       Owner: @djradon. Target: 2026-03-15.
+

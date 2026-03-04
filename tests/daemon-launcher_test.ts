@@ -107,3 +107,102 @@ Deno.test("DenoDetachedDaemonLauncher passes configured paths to daemon subproce
     JSON.stringify(runtime.providerSessionRoots.gemini),
   );
 });
+
+Deno.test("DenoDetachedDaemonLauncher preserves Windows-style paths", async () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+
+  const runtime = {
+    runtimeDir: "C:\\Users\\tester\\.kato\\daemon",
+    configPath: "C:\\Users\\tester\\.kato\\daemon\\kato-daemon-config.yaml",
+    statusPath: "C:\\Users\\tester\\.kato\\shared\\status.json",
+    controlPath: "C:\\Users\\tester\\.kato\\shared\\ipc\\daemon-control.json",
+    allowedWriteRoots: [
+      "C:\\Users\\tester\\notes",
+      "C:\\Users\\tester\\exports",
+    ],
+    providerSessionRoots: {
+      claude: ["C:\\Users\\tester\\.claude\\projects"],
+      codex: ["C:\\Users\\tester\\.codex\\sessions"],
+      gemini: ["C:\\Users\\tester\\.gemini\\tmp"],
+    },
+    now: () => new Date("2026-03-04T10:00:00.000Z"),
+    pid: 4242,
+    writeStdout: (_text: string) => {},
+    writeStderr: (_text: string) => {},
+  };
+
+  let capturedOptions:
+    | ConstructorParameters<typeof Deno.Command>[1]
+    | undefined;
+
+  const launcher = new DenoDetachedDaemonLauncher(
+    runtime,
+    "C:\\deno\\deno.exe",
+    "C:\\repo\\apps\\daemon\\src\\main.ts",
+    (_command, options) => {
+      capturedOptions = options;
+      return {
+        spawn() {
+          return { pid: 31337 };
+        },
+      };
+    },
+    false,
+  );
+
+  const pid = await launcher.launchDetached();
+  assertEquals(pid, 31337);
+
+  const args = capturedOptions?.args ?? [];
+  const allowReadArg = args[1];
+  if (!allowReadArg?.startsWith("--allow-read=")) {
+    throw new Error("launcher did not set --allow-read");
+  }
+  const allowWriteArg = args[2];
+  if (!allowWriteArg?.startsWith("--allow-write=")) {
+    throw new Error("launcher did not set --allow-write");
+  }
+
+  const allowReadRoots = allowReadArg
+    .slice("--allow-read=".length)
+    .split(",");
+  const allowWriteRoots = allowWriteArg
+    .slice("--allow-write=".length)
+    .split(",");
+
+  assertEquals(allowReadRoots.includes(runtime.runtimeDir), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.configPath)), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.statusPath)), true);
+  assertEquals(allowReadRoots.includes(dirname(runtime.controlPath)), true);
+  assertEquals(
+    allowReadRoots.includes(runtime.providerSessionRoots.claude[0]),
+    true,
+  );
+  assertEquals(
+    allowReadRoots.includes(runtime.providerSessionRoots.codex[0]),
+    true,
+  );
+  assertEquals(
+    allowReadRoots.includes(runtime.providerSessionRoots.gemini[0]),
+    true,
+  );
+
+  assertEquals(allowWriteRoots.includes(runtime.runtimeDir), true);
+  assertEquals(allowWriteRoots.includes(dirname(runtime.configPath)), true);
+  assertEquals(allowWriteRoots.includes(dirname(runtime.statusPath)), true);
+  assertEquals(allowWriteRoots.includes(dirname(runtime.controlPath)), true);
+  assertEquals(allowWriteRoots.includes(runtime.allowedWriteRoots[0]), true);
+  assertEquals(allowWriteRoots.includes(runtime.allowedWriteRoots[1]), true);
+
+  const env = capturedOptions?.env ?? {};
+  assertEquals(env["KATO_RUNTIME_DIR"], runtime.runtimeDir);
+  assertEquals(env["KATO_CONFIG_PATH"], runtime.configPath);
+  assertEquals(env["KATO_DAEMON_STATUS_PATH"], runtime.statusPath);
+  assertEquals(env["KATO_DAEMON_CONTROL_PATH"], runtime.controlPath);
+  assertEquals(
+    env["KATO_ALLOWED_WRITE_ROOTS_JSON"],
+    JSON.stringify(runtime.allowedWriteRoots),
+  );
+});

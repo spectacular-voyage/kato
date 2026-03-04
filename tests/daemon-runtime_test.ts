@@ -38,7 +38,7 @@ import {
 } from "./test_temp.ts";
 
 function toPosixPath(path: string): string {
-  return path.replaceAll("\\", "/");
+  return path.replaceAll("\\", "/").replace(/^[A-Za-z]:/, "");
 }
 
 function makeEvent(

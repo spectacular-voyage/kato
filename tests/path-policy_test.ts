@@ -86,3 +86,33 @@ Deno.test("WritePathPolicyGate denies when no valid roots are configured", async
   assertEquals(decision.decision, "deny");
   assertEquals(decision.reason, "No valid allowed write roots configured");
 });
+
+Deno.test("WritePathPolicyGate handles Windows separators and traversal", async () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+
+  await withTempDir(async (dir) => {
+    const allowedRoot = join(dir, "allowed");
+    await Deno.mkdir(allowedRoot, { recursive: true });
+
+    const gate = new WritePathPolicyGate({
+      allowedRoots: [allowedRoot],
+    });
+
+    const insideDecision = await gate.evaluateWritePath(
+      `${allowedRoot}\\sub\\session.md`,
+    );
+    assertEquals(insideDecision.decision, "allow");
+
+    const traversalDecision = await gate.evaluateWritePath(
+      `${allowedRoot}\\..\\outside.md`,
+    );
+    assertEquals(traversalDecision.decision, "deny");
+
+    const mixedTraversalDecision = await gate.evaluateWritePath(
+      `${allowedRoot}/..\\outside-mixed.md`,
+    );
+    assertEquals(mixedTraversalDecision.decision, "deny");
+  });
+});
