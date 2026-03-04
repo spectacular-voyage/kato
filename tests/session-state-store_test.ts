@@ -1,5 +1,5 @@
-import { assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { basename, dirname, join } from "@std/path";
 import type { SessionTwinEventV1 } from "@kato/shared";
 import {
   makeDefaultSessionCursor,
@@ -89,6 +89,112 @@ Deno.test("PersistentSessionStateStore persists metadata and rebuilds daemon ind
     const rebuiltIndex = await coldStore.loadDaemonControlIndex();
     assertEquals(rebuiltIndex.sessions.length, 1);
     assertEquals(rebuiltIndex.sessions[0]?.sessionKey, "codex:session-1");
+  });
+});
+
+Deno.test("PersistentSessionStateStore uses Windows-safe storage keys", async () => {
+  await withTempDir("session-state-store-windows-safe-", async (dir) => {
+    const katoDir = join(dir, ".kato");
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-01T10:00:00.000Z"),
+      makeSessionId: () => "session-uuid-windows-safe-1234",
+    });
+
+    const location = store.resolveLocation({
+      provider: "codex",
+      providerSessionId: "session-1",
+    });
+    assertEquals(basename(location.metadataPath).includes(":"), false);
+    assertEquals(basename(location.twinPath).includes(":"), false);
+    assertEquals(basename(location.metadataPath).startsWith("5_codex_"), true);
+    assertEquals(basename(location.twinPath).startsWith("5_codex_"), true);
+
+    const metadata = await store.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-1",
+      sourceFilePath: "/tmp/codex-session-1.jsonl",
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+    assertEquals(metadata.twinPath, location.twinPath);
+  });
+});
+
+Deno.test("PersistentSessionStateStore migrates legacy colon storage keys", async () => {
+  await withTempDir("session-state-store-legacy-key-", async (dir) => {
+    const katoDir = join(dir, ".kato");
+    const identity = {
+      provider: "codex",
+      providerSessionId: "legacy-session-1",
+    } as const;
+
+    const initialStore = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-01T10:00:00.000Z"),
+      makeSessionId: () => "session-uuid-legacy-key-1234",
+    });
+    const created = await initialStore.getOrCreateSessionMetadata({
+      ...identity,
+      sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+    await initialStore.appendTwinEvents(created, [
+      makeTwinEvent(created.sessionId, 0, "hello from legacy"),
+    ]);
+
+    const canonicalLocation = initialStore.resolveLocation(identity);
+    const sessionsDir = dirname(canonicalLocation.metadataPath);
+    const legacyStorageKey = `${encodeURIComponent(identity.provider)}:${
+      encodeURIComponent(identity.providerSessionId)
+    }`;
+    const legacyMetadataPath = join(sessionsDir, `${legacyStorageKey}.meta.json`);
+    const legacyTwinPath = join(sessionsDir, `${legacyStorageKey}.twin.jsonl`);
+
+    const currentMetadata = JSON.parse(
+      await Deno.readTextFile(canonicalLocation.metadataPath),
+    ) as {
+      twinPath: string;
+      [key: string]: unknown;
+    };
+    await Deno.rename(canonicalLocation.metadataPath, legacyMetadataPath);
+    await Deno.rename(canonicalLocation.twinPath, legacyTwinPath);
+    await Deno.writeTextFile(
+      legacyMetadataPath,
+      `${JSON.stringify({
+        ...currentMetadata,
+        twinPath: legacyTwinPath,
+      }, null, 2)}\n`,
+    );
+
+    const restartedStore = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-01T10:05:00.000Z"),
+    });
+    const restored = await restartedStore.getOrCreateSessionMetadata({
+      ...identity,
+      sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+
+    assertEquals(restored.twinPath, canonicalLocation.twinPath);
+    await Deno.stat(canonicalLocation.metadataPath);
+    await Deno.stat(canonicalLocation.twinPath);
+    await assertRejects(
+      () => Deno.stat(legacyMetadataPath),
+      Deno.errors.NotFound,
+    );
+    await assertRejects(
+      () => Deno.stat(legacyTwinPath),
+      Deno.errors.NotFound,
+    );
+
+    const index = await restartedStore.loadDaemonControlIndex();
+    const indexEntry = index.sessions.find((entry) =>
+      entry.sessionKey === "codex:legacy-session-1"
+    );
+    assertExists(indexEntry);
+    assertEquals(indexEntry.metadataPath, canonicalLocation.metadataPath);
+    assertEquals(indexEntry.twinPath, canonicalLocation.twinPath);
   });
 });
 
@@ -192,7 +298,7 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
         relativePathFromWorkspaceRoot: "notes/session.md",
       },
       currentResolvedPath: `${dir}/workspace/notes/session.md`,
-      sourceConfigPath: `${dir}/workspace/kato-workspace-config.yaml`,
+      sourceConfigPath: `${dir}/workspace/.kato-workspace-config.yaml`,
       workspaceRootSnapshot: `${dir}/workspace`,
       resolvedDefaultOutputDir: `${dir}/workspace/notes`,
       filenameTemplate: "{provider}-{sessionShortId}.md",

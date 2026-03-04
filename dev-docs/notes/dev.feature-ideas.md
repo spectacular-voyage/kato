@@ -2,7 +2,7 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ""
-updated: 1772581026659
+updated: 1772630797901
 created: 1771724652182
 ---
 
@@ -29,3 +29,4 @@ created: 1771724652182
   user-facing output while allowing only non-critical logs; add an explicit
   toggle (CLI flag or config key) to enable silent failure behavior for
   unexpected aliases
+- real (OS-aware) liveness check

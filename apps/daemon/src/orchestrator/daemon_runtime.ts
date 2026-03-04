@@ -98,6 +98,7 @@ export interface DaemonRuntimeLoopOptions {
   sessionMetadataRefreshIntervalMs?: number;
   daemonMaxMemoryMb?: number;
   exportsLogPath?: string;
+  clearControlQueueOnStartup?: boolean;
   cleanSessionStatesOnShutdown?: boolean;
   daemonFeatureFlags?: DaemonFeatureFlags;
   userConfig?: UserConfig;
@@ -3110,6 +3111,16 @@ async function logMemoryTelemetry(options: {
   return cloneSnapshotMemoryStats(snapshotMemory);
 }
 
+function summarizeControlCommands(
+  requests: DaemonControlRequest[],
+): Record<string, number> {
+  const summary: Record<string, number> = {};
+  for (const request of requests) {
+    summary[request.command] = (summary[request.command] ?? 0) + 1;
+  }
+  return summary;
+}
+
 export async function runDaemonRuntimeLoop(
   options: DaemonRuntimeLoopOptions = {},
 ): Promise<void> {
@@ -3126,6 +3137,8 @@ export async function runDaemonRuntimeLoop(
   );
   const exportEnabled = options.exportEnabled ?? true;
   const exportsLogPath = options.exportsLogPath;
+  const clearControlQueueOnStartup = options.clearControlQueueOnStartup ??
+    false;
   const cleanSessionStatesOnShutdown = options.cleanSessionStatesOnShutdown ??
     false;
   const daemonFeatureFlags = options.daemonFeatureFlags ?? {
@@ -3200,6 +3213,38 @@ export async function runDaemonRuntimeLoop(
     "Daemon runtime loop started",
     { pid },
   );
+
+  if (clearControlQueueOnStartup) {
+    const startupRequests = await controlStore.list();
+    if (startupRequests.length > 0) {
+      const lastStartupRequest = startupRequests.at(-1);
+      if (!lastStartupRequest) {
+        throw new Error(
+          "startup control queue unexpectedly empty while attempting to clear",
+        );
+      }
+      await controlStore.markProcessed(lastStartupRequest.requestId);
+      const commandSummary = summarizeControlCommands(startupRequests);
+      await operationalLogger.info(
+        "daemon.control.queue.cleared_on_startup",
+        "Daemon startup discarded queued control requests",
+        {
+          discardedRequests: startupRequests.length,
+          discardedByCommand: commandSummary,
+          lastDiscardedRequestId: lastStartupRequest.requestId,
+        },
+      );
+      await auditLogger.record(
+        "daemon.control.queue.cleared_on_startup",
+        "Daemon startup discarded queued control requests",
+        {
+          discardedRequests: startupRequests.length,
+          discardedByCommand: commandSummary,
+          lastDiscardedRequestId: lastStartupRequest.requestId,
+        },
+      );
+    }
+  }
 
   for (const runner of ingestionRunners) {
     try {

@@ -438,6 +438,7 @@ export async function runDaemonSubprocess(
       },
       exportEnabled: featureSettings.exportEnabled,
       exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
+      clearControlQueueOnStartup: true,
       cleanSessionStatesOnShutdown: runtimeConfig.cleanSessionStatesOnShutdown,
       daemonFeatureFlags: runtimeConfig.daemonFeatureFlags,
       defaultCliExportOutputOverrides: buildOutputOverrides({

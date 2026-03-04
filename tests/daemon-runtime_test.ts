@@ -3531,6 +3531,126 @@ Deno.test("runDaemonRuntimeLoop processes stop requests and updates status", asy
   assertEquals(requests.length, 0);
 });
 
+Deno.test("runDaemonRuntimeLoop clears queued control requests at startup", async () => {
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+      };
+      return Promise.resolve();
+    },
+  };
+
+  const startupRequests = [{
+    requestId: "req-startup-export",
+    requestedAt: "2026-02-22T10:00:00.000Z",
+    command: "export" as const,
+    payload: {
+      sessionId: "session-old",
+      resolvedOutputPath: ".kato/test-runtime/old.md",
+    },
+  }, {
+    requestId: "req-startup-stop",
+    requestedAt: "2026-02-22T10:00:01.000Z",
+    command: "stop" as const,
+  }];
+  const liveRequests = [{
+    requestId: "req-live-stop",
+    requestedAt: "2026-02-22T10:00:02.000Z",
+    command: "stop" as const,
+  }];
+  let listCallCount = 0;
+  const processedRequestIds: string[] = [];
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      listCallCount += 1;
+      if (listCallCount === 1) {
+        return Promise.resolve(startupRequests.map((request) => ({ ...request })));
+      }
+      if (listCallCount === 2) {
+        return Promise.resolve(liveRequests.map((request) => ({ ...request })));
+      }
+      return Promise.resolve([]);
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called in this test");
+    },
+    markProcessed(requestId: string) {
+      processedRequestIds.push(requestId);
+      if (requestId === "req-startup-stop") {
+        startupRequests.splice(0, startupRequests.length);
+      }
+      if (requestId === "req-live-stop") {
+        liveRequests.splice(0, liveRequests.length);
+      }
+      return Promise.resolve();
+    },
+  };
+
+  let exportCalls = 0;
+  const recordingPipeline: RecordingPipelineLike = {
+    activateRecording() {
+      throw new Error("not used");
+    },
+    captureSnapshot() {
+      throw new Error("not used");
+    },
+    exportSnapshot() {
+      exportCalls += 1;
+      throw new Error("stale startup export should not execute");
+    },
+    appendToActiveRecording() {
+      throw new Error("not used");
+    },
+    stopRecording() {
+      return true;
+    },
+    getActiveRecording() {
+      return undefined;
+    },
+    listActiveRecordings() {
+      return [];
+    },
+    getRecordingSummary() {
+      return { activeRecordings: 0, destinations: 0 };
+    },
+  };
+
+  await runDaemonRuntimeLoop({
+    statusStore,
+    controlStore,
+    recordingPipeline,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+    pid: 4242,
+    heartbeatIntervalMs: 50,
+    pollIntervalMs: 10,
+    clearControlQueueOnStartup: true,
+  });
+
+  assertEquals(processedRequestIds, ["req-startup-stop", "req-live-stop"]);
+  assertEquals(exportCalls, 0);
+});
+
 Deno.test("runDaemonRuntimeLoop routes export requests through recording pipeline", async () => {
   const statusHistory: DaemonStatusSnapshot[] = [];
   let currentStatus: DaemonStatusSnapshot = {

@@ -191,20 +191,43 @@ function toSessionKey(identity: SessionStateIdentity): string {
 }
 
 function toStorageKey(identity: SessionStateIdentity): string {
+  // Windows-safe storage key (no colon in basenames).
+  return `${identity.provider.length}_${sanitizeKeyPart(identity.provider)}_${
+    sanitizeKeyPart(identity.providerSessionId)
+  }`;
+}
+
+function toLegacyStorageKey(identity: SessionStateIdentity): string {
   return `${sanitizeKeyPart(identity.provider)}:${
     sanitizeKeyPart(identity.providerSessionId)
   }`;
+}
+
+function toSessionFilePathsForStorageKey(
+  sessionsDir: string,
+  storageKey: string,
+): { metadataPath: string; twinPath: string } {
+  return {
+    metadataPath: join(sessionsDir, `${storageKey}${SESSION_META_SUFFIX}`),
+    twinPath: join(sessionsDir, `${storageKey}${SESSION_TWIN_SUFFIX}`),
+  };
 }
 
 function toSessionFilePaths(
   sessionsDir: string,
   identity: SessionStateIdentity,
 ): { metadataPath: string; twinPath: string } {
-  const storageKey = toStorageKey(identity);
-  return {
-    metadataPath: join(sessionsDir, `${storageKey}${SESSION_META_SUFFIX}`),
-    twinPath: join(sessionsDir, `${storageKey}${SESSION_TWIN_SUFFIX}`),
-  };
+  return toSessionFilePathsForStorageKey(sessionsDir, toStorageKey(identity));
+}
+
+function toLegacySessionFilePaths(
+  sessionsDir: string,
+  identity: SessionStateIdentity,
+): { metadataPath: string; twinPath: string } {
+  return toSessionFilePathsForStorageKey(
+    sessionsDir,
+    toLegacyStorageKey(identity),
+  );
 }
 
 function makeSessionShortId(sessionId: string): string {
@@ -339,7 +362,11 @@ export class PersistentSessionStateStore {
       this.sessionsDir,
       input,
     );
-    const existing = await this.loadMetadataFromDisk(metadataPath);
+    const existing = await this.loadExistingSessionMetadata(
+      sessionKey,
+      input,
+      { metadataPath, twinPath },
+    );
     if (existing) {
       this.metadataCache.set(sessionKey, existing);
       return cloneSessionMetadata(existing);
@@ -628,6 +655,116 @@ export class PersistentSessionStateStore {
     }
 
     return { deleted, failed };
+  }
+
+  private async loadExistingSessionMetadata(
+    sessionKey: string,
+    identity: SessionStateIdentity,
+    canonicalPaths: { metadataPath: string; twinPath: string },
+  ): Promise<SessionMetadataV1 | undefined> {
+    const canonicalMetadata = await this.loadMetadataFromDisk(
+      canonicalPaths.metadataPath,
+    );
+    if (canonicalMetadata) {
+      return await this.normalizeMetadataStoragePaths(
+        canonicalMetadata,
+        canonicalPaths.metadataPath,
+        canonicalPaths,
+      );
+    }
+
+    const daemonIndex = await this.loadDaemonControlIndex();
+    const indexEntry = daemonIndex.sessions.find((entry) =>
+      entry.sessionKey === sessionKey
+    );
+    if (indexEntry) {
+      const indexedMetadata = await this.loadMetadataFromDisk(
+        indexEntry.metadataPath,
+      );
+      if (indexedMetadata) {
+        return await this.normalizeMetadataStoragePaths(
+          indexedMetadata,
+          indexEntry.metadataPath,
+          canonicalPaths,
+        );
+      }
+    }
+
+    const legacyPaths = toLegacySessionFilePaths(this.sessionsDir, identity);
+    if (legacyPaths.metadataPath === canonicalPaths.metadataPath) {
+      return undefined;
+    }
+    const legacyMetadata = await this.loadMetadataFromDisk(
+      legacyPaths.metadataPath,
+    );
+    if (!legacyMetadata) {
+      return undefined;
+    }
+    return await this.normalizeMetadataStoragePaths(
+      legacyMetadata,
+      legacyPaths.metadataPath,
+      canonicalPaths,
+    );
+  }
+
+  private async normalizeMetadataStoragePaths(
+    metadata: SessionMetadataV1,
+    metadataPath: string,
+    canonicalPaths: { metadataPath: string; twinPath: string },
+  ): Promise<SessionMetadataV1> {
+    const normalizedMetadataPath = metadataPath === canonicalPaths.metadataPath;
+    const normalizedTwinPath = metadata.twinPath === canonicalPaths.twinPath;
+    if (normalizedMetadataPath && normalizedTwinPath) {
+      return metadata;
+    }
+
+    const nextMetadata = cloneSessionMetadata(metadata);
+    const previousTwinPath = metadata.twinPath;
+    if (!normalizedTwinPath) {
+      try {
+        await Deno.rename(previousTwinPath, canonicalPaths.twinPath);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          // Nothing to move; keep canonical target in metadata.
+        } else if (error instanceof Deno.errors.AlreadyExists) {
+          await this.removeFileIfExists(previousTwinPath);
+        } else {
+          throw error;
+        }
+      }
+      nextMetadata.twinPath = canonicalPaths.twinPath;
+    }
+
+    await writeJsonAtomically(canonicalPaths.metadataPath, nextMetadata);
+    if (!normalizedMetadataPath) {
+      await this.removeFileIfExists(metadataPath);
+    }
+    if (!normalizedTwinPath) {
+      await this.removeFileIfExists(previousTwinPath);
+    }
+    await this.upsertDaemonControlEntry({
+      sessionKey: nextMetadata.sessionKey,
+      provider: nextMetadata.provider,
+      providerSessionId: nextMetadata.providerSessionId,
+      sessionId: nextMetadata.sessionId,
+      sessionShortId: makeSessionShortId(nextMetadata.sessionId),
+      metadataPath: canonicalPaths.metadataPath,
+      twinPath: nextMetadata.twinPath,
+      updatedAt: nextMetadata.updatedAt,
+    });
+
+    return nextMetadata;
+  }
+
+  private async removeFileIfExists(path: string): Promise<void> {
+    try {
+      await Deno.remove(path);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return;
+      }
+      throw error;
+    }
   }
 
   private async loadMetadataFromDisk(

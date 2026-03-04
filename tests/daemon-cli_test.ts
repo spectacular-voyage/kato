@@ -2078,7 +2078,18 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
   try {
     await Deno.mkdir(runtimeDir, { recursive: true });
     const controlStore = makeInMemoryControlStore();
-    const statusStore = makeInMemoryStatusStore();
+    const statusStore = makeInMemoryStatusStore({
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: true,
+      daemonPid: 4242,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    });
     const allowPathPolicy = makePathPolicyGate("allow");
     const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
     const { store: configStore } = makeInMemoryConfigStore(
@@ -2287,9 +2298,99 @@ Deno.test("runDaemonCli clean --sessions refuses while daemon is running", async
   );
 });
 
+Deno.test("runDaemonCli export fails when daemon is not running", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
+  const runtimeDir = ".kato/test-runtime";
+  const allowPathPolicy = makePathPolicyGate("allow");
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(
+    ["export", "session-42", "--output", "exports/session-42.md"],
+    {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+      pathPolicyGate: allowPathPolicy,
+    },
+  );
+
+  assertEquals(code, 1);
+  assertEquals(controlStore.requests.length, 0);
+  assertStringIncludes(
+    harness.stderr.join(""),
+    "Export requires a running daemon with a fresh heartbeat",
+  );
+});
+
+Deno.test("runDaemonCli export fails when daemon heartbeat is stale", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T09:00:00.000Z",
+    heartbeatAt: "2026-02-22T09:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 4242,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
+  const runtimeDir = ".kato/test-runtime";
+  const allowPathPolicy = makePathPolicyGate("allow");
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(
+    ["export", "session-42", "--output", "exports/session-42.md"],
+    {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+      pathPolicyGate: allowPathPolicy,
+    },
+  );
+
+  assertEquals(code, 1);
+  assertEquals(controlStore.requests.length, 0);
+  assertStringIncludes(
+    harness.stderr.join(""),
+    "Export requires a running daemon with a fresh heartbeat",
+  );
+});
+
 Deno.test("runDaemonCli denies export when path policy rejects output path", async () => {
   const controlStore = makeInMemoryControlStore();
-  const statusStore = makeInMemoryStatusStore();
+  const statusStore = makeInMemoryStatusStore({
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 4242,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
   const runtimeDir = ".kato/test-runtime";
   const denyPathPolicy = makePathPolicyGate("deny");
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
