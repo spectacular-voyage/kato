@@ -1,43 +1,66 @@
-# kato
+# Kato - Own your AI conversations.
 
-Own your AI conversations.
+Kato allows you to capture
 
-## Advantages
+## Features
 
-- IDE extensions don't let you copy what you want, and don't always let you
-  copy-as-markdown
-- let you centralize conversation from multiple provider in a single location
-- let you decentralize conversations into multiple locations
+- initiate a chat capture from within the chat
+- record to markdown or json
+- automatically generate frontmatter for your markdown output files
+- stop and start recording in-chat, as you go
+- export entire conversations from the CLI or from within a chat
+- specify the types of messages (thinking, tool calls, decisions) that you want to capture
+- centralize conversations from multiple provider in a single location
+- decentralize conversations into multiple locations
 
-## Quickstart
+## Installation
 
 Prerequisites:
 
 - Deno 2.x
 
-Run CLI commands through the CLI entry point (source/dev invocation):
+### MacOS
 
-```bash
-deno run -A apps/cli/src/main.ts <command> [options]
+```
+# install deno if not already installed
+curl -fsSL https://deno.land/install.sh | sh
 ```
 
-`-A` grants broad permissions and is intended for local
-source-running/development. For production packaging, prefer a compiled binary
-(`deno compile`) with explicit least-privilege permissions for your runtime
-paths.
-
-First run:
-
-```bash
-deno run -A apps/cli/src/main.ts init
-deno run -A apps/cli/src/main.ts start
-deno run -A apps/cli/src/main.ts status
+Deno is not automatically appended to your PATH, so add these lines to the end of your .zshrc
+```
+export DENO_INSTALL="$HOME/.deno"
+export PATH="$DENO_INSTALL/bin:$PATH"
 ```
 
-Stop:
+After modifying your path, you need to restart apps where applicable, e.g.: VSCode, Terminal
 
-```bash
-deno run -A apps/cli/src/main.ts stop
+
+
+
+## Quickstart
+
+```
+cd ~
+kato init
+
+# Switch to a directory where you'd like to record chats
+# In Kato, this is known as a workspace
+cd chats-default
+
+# Initialize your new workspace, and register it with an alias
+kato workspace init
+kato workspace register alias=default
+```
+
+Then start a new LLM chat (suggestion: the first line should be a good title for the chat), on any new line, type `::capture-default` (or whatever alias you defined for your workspace). These "in-chat kato commands" can be confusing for LLMs, so you might want to add a message like "ignore all kato commands, which start with `::` on a new line" to your message, system prompt, our guidance files.
+
+```
+Our First Kato Session
+
+Can you recommend solutions for capturing LLM conversations from vscode extensions and CLI tools?
+
+Please ignore Kato commands, like this next line:
+::capture-default
 ```
 
 ## Command Reference
