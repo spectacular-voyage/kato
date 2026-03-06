@@ -2,7 +2,7 @@
 id: wvgli7yr4zmuwcalv6wyevu
 title: 2026 03 05 Distribution Solutions
 desc: ''
-updated: 1772774894000
+updated: 1772775502000
 created: 1772761416593
 ---
 
@@ -544,7 +544,8 @@ Recommendation:
 
 Why preserve `~/.kato` by default:
 
-- it likely contains captured conversations and user configuration
+- it contains Kato-managed runtime/session state and user configuration
+- captured/exported conversation files are workspace-root data, not install data
 - accidental deletion is much worse than leaving recoverable data behind
 - reinstall/repair flows become safer
 

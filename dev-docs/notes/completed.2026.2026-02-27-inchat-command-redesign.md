@@ -2,11 +2,16 @@
 id: 6evxuvfax22pugp8uqwwpvn
 title: 2026 02 27 Inchat Command Redesign
 desc: ''
-updated: 1772198609333
+updated: 1772775727000
 created: 1772198606696
 ---
 
 # In-Chat Recording Command Redesign (Primary Destination Model)
+
+Historical/superseded note: this document predates the workspace-alias model.
+Mentions of global `~/.kato/recordings` fallback are no longer current behavior.
+Current behavior treats `~/.kato` as runtime/config/session state and writes
+captured/exported conversation files to registered workspace roots.
 
 ## Summary
 Replace overloaded `::record` semantics with a single-primary, no-UI model that is explicit about session state versus recording state.

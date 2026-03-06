@@ -2,7 +2,7 @@
 id: 5pwg2idztnftvedqh3sqc7f
 title: Codebase Overview
 desc: ""
-updated: 1772569800000
+updated: 1772775700000
 created: 1771787449702
 ---
 
@@ -80,6 +80,8 @@ Related notes:
 - `~/.kato/cli/logs/security-audit.jsonl`
 
 Workspace-local config remains `<workspace>/.kato-workspace-config.yaml`.
+Captured/exported conversation files are workspace-root data and do not belong
+under `~/.kato` by default.
 
 ## Topology
 

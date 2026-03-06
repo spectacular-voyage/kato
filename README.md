@@ -80,6 +80,8 @@ By default, kato uses the global runtime root `~/.kato/daemon` and does not
 implicitly create `./.kato`. To opt into local runtime state, set
 `KATO_RUNTIME_DIR` explicitly to an absolute path (for example
 `$PWD/.kato/daemon`) or a `~/...` path.
+The `~/.kato` tree stores Kato runtime/config/session state; captured/exported
+conversation files are written to registered workspace roots.
 
 ```
 kato init
@@ -150,8 +152,8 @@ Supported commands:
 - `--version` / `-V`
   - Print the CLI version.
 - `init`
-  - Create missing daemon/shared/CLI/user config and default workspace template
-    files.
+  - Create missing daemon/shared/CLI/user config plus default workspace template
+    files (template only; not conversation outputs).
   - Uses global `~/.kato` by default. If `./.kato` exists in the current
     directory, kato warns and continues with global state.
 - `start`
@@ -241,6 +243,7 @@ Session metadata is authoritative; `shared/daemon-control.json` is a rebuildable
 cache index. `kato-daemon-config.yaml` is daemon-only process config.
 `kato-shared-config.yaml` owns shared policy and plain export defaults.
 `kato-cli-config.yaml` is CLI-local settings (currently logging).
+`~/.kato` is runtime/config/session state, not a workspace output root.
 
 ## Runtime Config
 
@@ -435,4 +438,3 @@ defaultOutputDir supports the same template tokens as `filenameTemplate`.
   - `dev-docs/notes/dev.general-guidance.md`
   - `dev-docs/notes/dev.codebase-overview.md`
   - `dev-docs/notes/dev.decision-log.md`
-
