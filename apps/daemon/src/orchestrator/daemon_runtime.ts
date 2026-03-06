@@ -1300,7 +1300,7 @@ function createOutputOverridesFromWorkspaceProfile(
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig,
     workspaceId: profile.workspaceId,
-  }) ?? UNKNOWN_OUTPUT_USERNAME;
+  });
   return createOutputOverrides({
     workspaceId: profile.workspaceId,
     markdownFrontmatter: profile.markdownFrontmatter,
@@ -1326,7 +1326,7 @@ function createOutputOverrides(options: {
     writerItalicizeUserMessages: boolean;
   };
   workspaceTimezone: string;
-  preferredUsername: string;
+  preferredUsername?: string;
   captureIncludeSystemEvents: boolean;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
@@ -1363,7 +1363,8 @@ function createOutputOverrides(options: {
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,
       headingTimestampTimezone: options.workspaceTimezone,
-      ...(options.markdownFrontmatter.addParticipantUsernameToHeadings
+      ...(options.markdownFrontmatter.addParticipantUsernameToHeadings &&
+          options.preferredUsername
         ? {
           speakerNames: { user: options.preferredUsername },
         }
@@ -1382,7 +1383,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig: options.userConfig,
     workspaceId: options.output.workspaceId,
-  }) ?? UNKNOWN_OUTPUT_USERNAME;
+  });
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
   );

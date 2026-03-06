@@ -1,7 +1,7 @@
 ---
 id: kijkk7ll23lsry5229wlj2o
 title: 2026 03 04 Username Features
-desc: ''
+desc: ""
 updated: 1772758742764
 created: 1772632731040
 ---
@@ -31,6 +31,7 @@ standardizes username usage across output surfaces while keeping behavior
 explicit and deterministic.
 
 Decisions:
+
 - Username source for filenames/directories/headings:
   `workspaceUsernames[workspaceId]` -> `defaultUsername` -> `"unknown-user"`.
 - This source policy ignores `excludeMeFromParticipantList`; that flag remains
@@ -44,12 +45,14 @@ Decisions:
 ## Contract Changes
 
 Workspace config:
+
 - `filenameTemplate` now supports `{username}`.
 - `defaultOutputDir` now supports token interpolation, including `{username}`.
 - `markdownFrontmatter.addParticipantUsernameToHeadings: boolean` is added with
   default `false`.
 
 Frontmatter behavior:
+
 - User participant entry is emitted as `<username>` (no `user.` prefix).
 - Assistant participants remain `provider.model` or `provider.assistant`.
 
@@ -76,17 +79,29 @@ Frontmatter behavior:
 
 ## Implementation Plan
 
-- [ ] Update workspace config token validation to allow `{username}` in
-  `filenameTemplate`.
-- [ ] Implement token interpolation for `defaultOutputDir` with `{username}`
-  support.
-- [ ] Thread resolved username into workspace generated-path rendering.
-- [ ] Add `markdownFrontmatter.addParticipantUsernameToHeadings` to workspace
-  config parse/default shape.
-- [ ] Wire heading rendering to use resolved username when heading toggle is
-  enabled.
-- [ ] Update frontmatter participant generation to emit plain username entries.
-- [ ] Add tests for token validation, interpolation, fallback behavior, heading
-  toggle behavior, and participant formatting.
-- [ ] Update README and related notes to document new token support, heading
-  toggle, and participant output format.
+- [x] Update workspace config token validation to allow `{username}` in
+      `filenameTemplate`.
+- [x] Implement token interpolation for `defaultOutputDir` with `{username}`
+      support.
+- [x] Thread resolved username into workspace generated-path rendering.
+- [x] Add `markdownFrontmatter.addParticipantUsernameToHeadings` to workspace
+      config parse/default shape.
+- [x] Wire heading rendering to use resolved username when heading toggle is
+      enabled.
+- [x] Update frontmatter participant generation to emit plain username entries.
+- [x] Add tests for token validation, interpolation, fallback behavior, heading
+      toggle behavior, and participant formatting.
+- [x] Update README and related notes to document new token support, heading
+      toggle, and participant output format.
+
+## Coderabbit Review
+
+- [x] Verify each CodeRabbit finding against current code before changing
+      behavior.
+- [x] In `daemon_runtime`, stop injecting `UNKNOWN_OUTPUT_USERNAME` into heading
+      speaker names. Only set `speakerNames.user` when
+      `resolvePreferredParticipantUsername(...)` returns a real non-empty username.
+      Apply this consistently at the three similar call sites.
+- [x] In `recording_pipeline`, trim `participantUsername` before emitting frontmatter
+      participants and only include it when the trimmed value is non-empty.
+

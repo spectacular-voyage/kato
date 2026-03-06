@@ -786,8 +786,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
     participantUsername: string | undefined,
   ): string[] | undefined {
     const participants: string[] = [];
-    if (participantUsername) {
-      participants.push(participantUsername);
+    const normalizedParticipantUsername = participantUsername?.trim();
+    if (normalizedParticipantUsername) {
+      participants.push(normalizedParticipantUsername);
     }
 
     const assistantParticipants = new Set<string>();
