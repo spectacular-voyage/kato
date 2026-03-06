@@ -461,6 +461,31 @@ function makeStartupAckCallback(
   };
 }
 
+async function withMockedDateNow<T>(
+  nowValues: number[],
+  run: () => Promise<T>,
+): Promise<T> {
+  if (!nowValues || nowValues.length === 0) {
+    throw new Error(
+      "withMockedDateNow requires nowValues to include at least one value for sequence and Date.now fallback",
+    );
+  }
+  const originalDescriptor = Object.getOwnPropertyDescriptor(Date, "now");
+  const sequence = [...nowValues];
+  const fallback = nowValues[nowValues.length - 1] ?? 0;
+  Object.defineProperty(Date, "now", {
+    configurable: true,
+    value: () => sequence.shift() ?? fallback,
+  });
+  try {
+    return await run();
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(Date, "now", originalDescriptor);
+    }
+  }
+}
+
 Deno.test("cli parser rejects unknown command", () => {
   assertThrows(
     () => parseDaemonCliArgs(["wat"]),
@@ -606,6 +631,24 @@ Deno.test("cli parser accepts workspace commands", () => {
     throw new Error("expected workspace-unregister command");
   }
   assertEquals(unregister.command.selector, "My.Proj");
+});
+
+Deno.test("cli parser preserves Windows-style workspace register path input", () => {
+  const parsed = parseDaemonCliArgs([
+    "workspace",
+    "register",
+    "C:\\Users\\tester\\proj\\",
+    "--alias",
+    "Win.Proj",
+  ]);
+  assertEquals(parsed.kind, "command");
+  if (
+    parsed.kind !== "command" || parsed.command.name !== "workspace-register"
+  ) {
+    throw new Error("expected workspace-register command");
+  }
+  assertEquals(parsed.command.dirPath, "C:\\Users\\tester\\proj\\");
+  assertEquals(parsed.command.alias, "Win.Proj");
 });
 
 Deno.test("cli parser requires non-empty workspace register alias", () => {
@@ -1014,10 +1057,10 @@ Deno.test(
         await Deno.readTextFile(registryPath),
         `"alias": "Explicit.Target"`,
       );
-      assertStringIncludes(
-        await Deno.readTextFile(registryPath),
-        `"workspaceRoot": "${workspaceDir}"`,
-      );
+      const registry = JSON.parse(await Deno.readTextFile(registryPath)) as {
+        workspaces?: Array<{ workspaceRoot?: string }>;
+      };
+      assertEquals(registry.workspaces?.[0]?.workspaceRoot, workspaceDir);
     } finally {
       await removePathIfPresent(tempDir);
     }
@@ -1862,6 +1905,50 @@ Deno.test(
     } finally {
       await removePathIfPresent(runtimeDir);
     }
+  },
+);
+
+Deno.test(
+  "runDaemonCli start fails when startup acknowledgement times out",
+  async () => {
+    const runtimeDir = ".kato/test-runtime";
+    const harness = makeRuntimeHarness(runtimeDir);
+    const statusStore = makeInMemoryStatusStore({
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    });
+    const controlStore = makeInMemoryControlStore();
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const daemonLauncher = makeDaemonLauncher(31337);
+
+    const code = await withMockedDateNow(
+      [0, 20_000],
+      () =>
+        runDaemonCli(["start"], {
+          runtime: harness.runtime,
+          defaultRuntimeConfig,
+          configStore,
+          statusStore,
+          controlStore: controlStore.store,
+          daemonLauncher: daemonLauncher.launcher,
+        }),
+    );
+
+    assertEquals(code, 1);
+    assertStringIncludes(
+      harness.stderr.join(""),
+      "Timed out waiting for daemon startup acknowledgement",
+    );
   },
 );
 
@@ -2743,6 +2830,92 @@ Deno.test("runDaemonCli restart queues stop and then starts daemon when running"
   assertEquals(daemonLauncher.launchedCount.value, 1);
   assertStringIncludes(harness.stdout.join(""), "stop request queued");
   assertStringIncludes(harness.stdout.join(""), "started in background");
+});
+
+Deno.test("runDaemonCli restart fails when stop does not complete before timeout", async () => {
+  const runtimeDir = ".kato/test-runtime";
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+  const harness = makeRuntimeHarness(runtimeDir);
+  const daemonLauncher = makeDaemonLauncher(31337);
+
+  const currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: true,
+    daemonPid: 9999,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  };
+
+  const statusStore: DaemonStatusSnapshotStoreLike = {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+      });
+    },
+    save(_next: DaemonStatusSnapshot) {
+      return Promise.resolve();
+    },
+  };
+
+  const controlRequests: DaemonControlRequest[] = [];
+  let requestCounter = 0;
+  const controlStore: DaemonControlRequestStoreLike = {
+    list() {
+      return Promise.resolve(
+        controlRequests.map((request) => ({
+          ...request,
+          ...(request.payload ? { payload: { ...request.payload } } : {}),
+        })),
+      );
+    },
+    enqueue(draft: DaemonControlRequestDraft) {
+      requestCounter += 1;
+      const request: DaemonControlRequest = {
+        requestId: `req-${requestCounter}`,
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: draft.command,
+        ...(draft.payload ? { payload: { ...draft.payload } } : {}),
+      };
+      controlRequests.push(request);
+      return Promise.resolve({
+        ...request,
+        ...(request.payload ? { payload: { ...request.payload } } : {}),
+      });
+    },
+    markProcessed(_requestId: string) {
+      return Promise.resolve();
+    },
+  };
+
+  const code = await withMockedDateNow(
+    [0, 0, 20_000],
+    () =>
+      runDaemonCli(["restart"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore,
+        daemonLauncher: daemonLauncher.launcher,
+      }),
+  );
+
+  assertEquals(code, 1);
+  assertEquals(controlRequests.length, 1);
+  assertEquals(controlRequests[0]?.command, "stop");
+  assertEquals(daemonLauncher.launchedCount.value, 0);
+  assertStringIncludes(
+    harness.stderr.join(""),
+    "Timed out waiting for daemon to stop before restart",
+  );
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {

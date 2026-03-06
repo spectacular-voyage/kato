@@ -220,6 +220,52 @@ Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded
   }
 });
 
+Deno.test("runDaemonSubprocess logs fatal runtime loop failures to operational log", async () => {
+  const stderr: string[] = [];
+  const runtimeDir = await makeTestTempDir("daemon-main-runtime-fail-");
+
+  try {
+    const config = makeRuntimeConfig(runtimeDir);
+    const configStore: RuntimeConfigStoreLike = {
+      load() {
+        return Promise.resolve(config);
+      },
+      ensureInitialized(_defaultConfig) {
+        throw new Error("not used");
+      },
+    };
+
+    const exitCode = await runDaemonSubprocess({
+      runtimeDir,
+      configStore,
+      sharedConfigStore: makeSharedConfigStore(),
+      userConfigStore: makeUserConfigStore(),
+      writeStderr(text: string) {
+        stderr.push(text);
+      },
+      runtimeLoop() {
+        throw new Error("boom");
+      },
+    });
+
+    assertEquals(exitCode, 1);
+    assertStringIncludes(stderr.join(""), "Daemon runtime failed");
+    assertStringIncludes(stderr.join(""), "boom");
+
+    const operationalLogPath = join(runtimeDir, "logs", "operational.jsonl");
+    const operationalLog = await Deno.readTextFile(operationalLogPath);
+    assertStringIncludes(operationalLog, '"event":"daemon.runtime.failed"');
+    assertStringIncludes(
+      operationalLog,
+      '"message":"Daemon runtime loop failed"',
+    );
+    assertStringIncludes(operationalLog, '"error":"boom"');
+    assertStringIncludes(operationalLog, '"severity":"critical"');
+  } finally {
+    await removePathIfPresent(runtimeDir);
+  }
+});
+
 Deno.test("runDaemonSubprocess wires export feature flag into runtime loop options", async () => {
   const config = makeRuntimeConfig();
   const configStore: RuntimeConfigStoreLike = {

@@ -34,6 +34,24 @@ block. If you hard-code a path (e.g. for tests that do not need isolation), use
 2. Full gate:
    - `deno task ci`
 
+## Windows-Compatible Tests
+
+Use these patterns to keep tests portable across Windows/macOS/Linux:
+
+1. Build expected paths with `join(...)` instead of hardcoded `/` strings.
+2. Do not assert on raw JSON text when it includes file paths.
+   - Parse JSON and assert object fields (`assertEquals(parsed.path, expected)`).
+3. For command outputs or logs that may normalize separators differently, compare
+   normalized values (for example, convert `\\` to `/` before asserting).
+4. Avoid test fixtures that require Windows-invalid filenames.
+   - Example: `:` is not valid in Windows filenames.
+5. Gate platform-specific behavior explicitly when needed.
+   - Use `Deno.test({ ..., ignore: Deno.build.os === "windows" })` only when
+     there is no meaningful cross-platform equivalent for that specific case.
+6. Prefer asserting semantic behavior over string shape.
+   - Example: verify resolved destination points to the expected location, not
+     that the rendered path uses a specific separator style.
+
 ## MVP Smoke Test Runbook
 
 This runbook validates currently implemented MVP slices:

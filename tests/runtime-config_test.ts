@@ -250,10 +250,10 @@ Deno.test("CliConfigFileStore rejects invalid logging level", async () => {
 
 Deno.test("resolveDefaultConfigPath keeps daemon config inside daemon dir", () => {
   const resolved = resolveDefaultConfigPath(".kato/daemon");
-  assertEquals(resolved, ".kato/daemon/kato-daemon-config.yaml");
+  assertEquals(resolved, join(".kato", "daemon", "kato-daemon-config.yaml"));
 });
 
 Deno.test("resolveDefaultSharedConfigPath keeps shared config under ~/.kato/shared", () => {
   const resolved = resolveDefaultSharedConfigPath(".kato");
-  assertEquals(resolved, ".kato/shared/kato-shared-config.yaml");
+  assertEquals(resolved, join(".kato", "shared", "kato-shared-config.yaml"));
 });

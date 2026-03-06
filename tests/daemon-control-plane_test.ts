@@ -44,6 +44,26 @@ Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", a
   });
 });
 
+Deno.test("resolveDefaultRuntimeDir uses USERPROFILE when HOME is unset", () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: "C:\\Users\\WindowsUser",
+      KATO_RUNTIME_DIR: undefined,
+    });
+    assertEquals(
+      resolveDefaultRuntimeDir(),
+      "C:\\Users\\WindowsUser\\.kato\\daemon",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
+});
+
 Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", () => {
   const snapshot = snapshotRuntimeEnv();
   try {
@@ -97,6 +117,26 @@ Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async 
       restoreRuntimeEnv(snapshot);
     }
   });
+});
+
+Deno.test("resolveDefaultRuntimeDir expands ~\\-prefixed KATO_RUNTIME_DIR", () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+  const snapshot = snapshotRuntimeEnv();
+  try {
+    setRuntimeEnv({
+      HOME: undefined,
+      USERPROFILE: "C:\\Users\\WindowsUser",
+      KATO_RUNTIME_DIR: "~\\.kato\\custom-daemon",
+    });
+    assertEquals(
+      resolveDefaultRuntimeDir(),
+      "C:\\Users\\WindowsUser\\.kato\\custom-daemon",
+    );
+  } finally {
+    restoreRuntimeEnv(snapshot);
+  }
 });
 
 Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", () => {
