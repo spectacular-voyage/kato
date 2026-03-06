@@ -38,8 +38,8 @@ The root `test` and `test:coverage` tasks now use Deno module parallelism by
 default. Local verification on 2026-03-06 stayed deterministic with both
 `deno task test --frozen --quiet` and `deno task test:coverage --frozen --quiet`,
 including after adding direct JSONL writer, session-twin mapper,
-runtime-config, and path-policy tests plus a shared env lock in
-`tests/test_env.ts` for env-mutating cases.
+runtime-config, path-policy, launcher, status-command, and Codex parser tests
+plus a shared env lock in `tests/test_env.ts` for env-mutating cases.
 
 GitHub CI uses a split gate:
 
@@ -76,9 +76,17 @@ instead of rerunning the whole suite.
 
 Current local timings from 2026-03-06:
 
-- `deno task test --frozen --quiet`: `418` passing tests, about `8.4s` real
-- `deno task test:coverage --frozen --quiet`: `418` passing tests,
-  `74.8%` line coverage, `81.2%` branch coverage, about `10.5s` real
+- `deno task test --frozen --quiet`: `427` passing tests, about `8.5s` real
+- `deno task test:coverage --frozen --quiet`: `427` passing tests,
+  `76.1%` line coverage, `82.0%` branch coverage, about `10.1s` real
+
+Current coverage-report caveat:
+
+- `deno coverage --detailed .coverage` currently warns that
+  `apps/runtime/src/orchestrator/launcher.ts` is missing transpiled source and
+  attributes the covered launcher code under
+  `apps/daemon/src/orchestrator/launcher.ts` instead. Treat that daemon-path
+  entry as the launcher result until the reporting quirk is resolved.
 
 ## Security Automation
 

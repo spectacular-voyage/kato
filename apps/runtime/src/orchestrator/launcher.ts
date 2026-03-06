@@ -35,7 +35,15 @@ function resolveUserConfigDir(): string | undefined {
 }
 
 type DenoCommandOptions = ConstructorParameters<typeof Deno.Command>[1];
-type CommandLike = { spawn(): { pid: number } };
+type CommandOutputLike = {
+  code: number;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+};
+type CommandLike = {
+  spawn(): { pid: number };
+  output?(): Promise<CommandOutputLike>;
+};
 type DenoCommandFactory = (
   command: string,
   options: DenoCommandOptions,
@@ -81,7 +89,7 @@ $proc = Start-Process -FilePath ${
     } -ArgumentList $argList -WindowStyle Hidden -PassThru;
 [Console]::Out.WriteLine($proc.Id);`;
     const encodedCommand = toPowerShellEncodedCommand(script);
-    return new Deno.Command("powershell.exe", {
+    const command = this.commandFactory("powershell.exe", {
       args: [
         "-NoProfile",
         "-NonInteractive",
@@ -91,7 +99,13 @@ $proc = Start-Process -FilePath ${
       stdin: "null",
       stdout: "piped",
       stderr: "piped",
-    }).output().then((result) => {
+    });
+    if (typeof command.output !== "function") {
+      throw new Error(
+        "Detached PowerShell launcher requires commandFactory output() support",
+      );
+    }
+    return command.output().then((result) => {
       if (result.code !== 0) {
         const errorText = new TextDecoder().decode(result.stderr).trim();
         throw new Error(

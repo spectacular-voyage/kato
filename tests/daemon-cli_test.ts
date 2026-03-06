@@ -37,6 +37,12 @@ import {
   parseDaemonCliArgs,
   runDaemonCli,
 } from "../apps/cli/src/mod.ts";
+import { getStatusRecentErrorKey } from "../apps/cli/src/commands/status.ts";
+import {
+  loadSuppressedRecentErrorKeys,
+  resolveStatusErrorCursorPath,
+  saveSuppressedRecentErrorKeys,
+} from "../apps/cli/src/commands/status_error_cursor.ts";
 import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
 import {
   restoreRuntimeEnv,
@@ -1188,6 +1194,208 @@ Deno.test(
       );
       assertStringIncludes(output, "root: ");
       assertStringIncludes(output, "config: ");
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonCli status --json filters stale sessions unless --all is set",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-status-json-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+
+      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const statusStore = makeInMemoryStatusStore({
+        schemaVersion: 1,
+        generatedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        daemonRunning: true,
+        daemonPid: 4242,
+        providers: [],
+        recordings: {
+          activeRecordings: 1,
+          destinations: 1,
+        },
+        sessions: [
+          {
+            provider: "codex",
+            sessionId: "sess-active",
+            sessionShortId: "active",
+            snippet: "fresh session",
+            updatedAt: "2026-02-22T09:59:00.000Z",
+            lastEventAt: "2026-02-22T09:59:00.000Z",
+            stale: false,
+            recordings: [],
+          },
+          {
+            provider: "claude",
+            sessionId: "sess-stale",
+            sessionShortId: "stale",
+            snippet: "stale session",
+            updatedAt: "2026-02-20T10:00:00.000Z",
+            lastEventAt: "2026-02-20T10:00:00.000Z",
+            stale: false,
+            recordings: [],
+          },
+        ],
+      });
+      const controlStore = makeInMemoryControlStore();
+
+      const jsonHarness = makeRuntimeHarness(runtimeDir);
+      const jsonCode = await runDaemonCli(["status", "--json"], {
+        runtime: jsonHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+
+      assertEquals(jsonCode, 0);
+      const filtered = JSON.parse(
+        jsonHarness.stdout.join(""),
+      ) as DaemonStatusSnapshot;
+      assertEquals(filtered.sessions?.map((session) => session.sessionId), [
+        "sess-active",
+      ]);
+
+      const allHarness = makeRuntimeHarness(runtimeDir);
+      const allCode = await runDaemonCli(["status", "--json", "--all"], {
+        runtime: allHarness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+
+      assertEquals(allCode, 0);
+      const unfiltered = JSON.parse(
+        allHarness.stdout.join(""),
+      ) as DaemonStatusSnapshot;
+      assertEquals(unfiltered.sessions?.map((session) => session.sessionId), [
+        "sess-active",
+        "sess-stale",
+      ]);
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonCli status reads recent log errors and reconciles the suppression cursor",
+  async () => {
+    const tempDir = await makeTestTempDir("daemon-cli-status-errors-");
+    try {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const logsDir = join(runtimeDir, "logs");
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+      await Deno.mkdir(logsDir, { recursive: true });
+      await Deno.mkdir(dirname(registryPath), { recursive: true });
+      await Deno.writeTextFile(
+        registryPath,
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            updatedAt: "2026-03-02T10:00:00.000Z",
+            workspaces: [],
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+
+      const suppressedError = {
+        timestamp: "2026-03-02T10:00:00.000Z",
+        level: "error" as const,
+        channel: "operational" as const,
+        event: "daemon.disk_full",
+        message: "disk full",
+        source: "log" as const,
+      };
+      const visibleError = {
+        timestamp: "2026-03-02T10:01:00.000Z",
+        level: "warn" as const,
+        channel: "security-audit" as const,
+        event: "audit.backlog",
+        message: "needs review",
+        source: "log" as const,
+      };
+      await Deno.writeTextFile(
+        join(logsDir, "operational.jsonl"),
+        [
+          JSON.stringify(suppressedError),
+          JSON.stringify({
+            timestamp: "2026-03-02T09:58:00.000Z",
+            level: "info",
+            channel: "operational",
+            event: "daemon.ok",
+            message: "ignored",
+          }),
+          "{not-json}",
+        ].join("\n") + "\n",
+      );
+      await Deno.writeTextFile(
+        join(logsDir, "security-audit.jsonl"),
+        `${JSON.stringify(visibleError)}\n`,
+      );
+
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const statusStore = makeInMemoryStatusStore({
+        schemaVersion: 1,
+        generatedAt: "2026-03-02T10:02:00.000Z",
+        heartbeatAt: "2026-03-02T10:02:00.000Z",
+        daemonRunning: true,
+        daemonPid: 4242,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      });
+      const controlStore = makeInMemoryControlStore();
+      const cursorPath = resolveStatusErrorCursorPath(runtimeDir);
+      const currentSuppressedKey = getStatusRecentErrorKey(suppressedError);
+      await saveSuppressedRecentErrorKeys(
+        cursorPath,
+        new Set([currentSuppressedKey, "stale|suppressed|key"]),
+        new Date("2026-03-02T10:01:30.000Z"),
+      );
+
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["status"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+      });
+
+      assertEquals(code, 0);
+      const output = harness.stdout.join("");
+      assertStringIncludes(output, "Recent Errors (1)");
+      assertStringIncludes(output, "WARN audit audit.backlog");
+      assertStringIncludes(output, "needs review");
+      assertEquals(output.includes("daemon.disk_full"), false);
+      assertEquals(output.includes("disk full"), false);
+
+      const persistedKeys = await loadSuppressedRecentErrorKeys(cursorPath);
+      assertEquals([...persistedKeys], [currentSuppressedKey]);
     } finally {
       await removePathIfPresent(tempDir);
     }
