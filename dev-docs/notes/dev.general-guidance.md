@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772767981786
+updated: 1772813360935
 created: 1771724621833
 ---
 
@@ -52,6 +52,7 @@ Sections should include
 - Summary
 - Discussion
 - Open Issues
+- Decisions
 - Contract Changes
 - Testing
 - Non-Goals

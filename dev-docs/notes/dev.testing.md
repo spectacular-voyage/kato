@@ -2,7 +2,7 @@
 id: kclfduln80f7td4hcfuszi4
 title: Testing
 desc: ""
-updated: 1772573000000
+updated: 1772813627045
 created: 1771811926065
 ---
 
@@ -33,6 +33,29 @@ block. If you hard-code a path (e.g. for tests that do not need isolation), use
    - `deno task test`
 2. Full gate:
    - `deno task ci`
+
+GitHub CI uses a split gate:
+
+- `deno task ci:quality` for `fmt` + `lint` + `check`
+- `deno task test:coverage --frozen` for the test suite and coverage artifact
+
+This keeps local `deno task ci` as the full pre-PR gate while avoiding running
+the full test suite twice in GitHub Actions.
+
+## Security Automation
+
+CI now has an initial advisory-only security automation slice:
+
+- `CodeQL` scans the TypeScript codebase with a local-threat-model emphasis.
+- `OSV-Scanner` runs with `fail-on-vuln: false`, so findings should surface
+  without failing the workflow solely because vulnerabilities were detected.
+
+Important caveat:
+
+- `OSV-Scanner` does not currently list `deno.lock` as a native supported
+  lockfile format, so immediate dependency-vulnerability signal for this
+  Deno-first repo may be limited until we add a supported SBOM or another
+  compatible dependency input.
 
 ## Windows-Compatible Tests
 

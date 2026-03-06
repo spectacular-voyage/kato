@@ -419,7 +419,7 @@ created: 1771779490894
 - Why:
   - Previous status output only showed aggregate counts; operators could not see
     which sessions were recording or where output was going.
-  - Web (`kato-status-web`) and CLI share identical filtering/sorting logic by
+  - `Kato Web` and CLI share identical filtering/sorting logic by
     using shared helpers instead of duplicating staleness thresholds.
 - Tradeoffs:
   - `sessions` is additive/optional on snapshot; old status files remain valid.

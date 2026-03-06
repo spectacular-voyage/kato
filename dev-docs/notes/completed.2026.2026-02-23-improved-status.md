@@ -9,7 +9,7 @@ created: 1771870111637
 ## Goal
 
 Improve `kato status` so it is useful for real operator workflows and reusable
-by `kato-status-web`.
+by `Kato Web`.
 
 Logging-specific work is tracked separately in
 [[task.2026.2026-02-23-awesome-logging]].
@@ -19,7 +19,7 @@ Logging-specific work is tracked separately in
 - Current status output only shows aggregate counts (`providers`, `recordings`)
   and hides the actionable data users care about: which sessions are recording,
   where output is going, and whether the session is stale.
-- `kato-status-web` will need almost the same status projection logic, so
+- `Kato Web` will need almost the same status projection logic, so
   sharing model/projection code avoids duplicate business logic.
 
 ## Dependency
@@ -226,7 +226,7 @@ Legend:
 - `--json` returns richer snapshot as-is; obeys `--all` filter for parity with
   text output (full snapshot always available via `--json --all`).
 
-### Web (`kato-status-web`)
+### Web (`Kato Web`)
 
 - Consume same status snapshot fields.
 - Reuse shared projection helpers for filtering/sorting and stale labeling.

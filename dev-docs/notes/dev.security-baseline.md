@@ -22,6 +22,8 @@ In scope:
   `::export-<alias>`).
 - Controlled Markdown export writes.
 - Daemon lifecycle, state, logging, and release pipeline.
+- Local web operator-console lifecycle, bootstrap, and authentication
+  configuration.
 
 Out of scope (baseline):
 - Arbitrary code execution from chat content.
@@ -36,6 +38,8 @@ Out of scope (baseline):
 4. Every write target `MUST` pass path policy checks before write.
 5. Path normalization and allowlist checks `MUST` happen before any file mutation.
 6. Security-relevant allow/deny decisions `MUST` be auditable.
+7. Unconfigured sensitive surfaces `MUST` fail closed rather than starting with
+   insecure defaults.
 
 ## Process and Permission Model
 
@@ -96,6 +100,12 @@ Enterprise upgrade path:
 2. Config and state `MUST` be schema-validated on load.
 3. Security audit logs `MUST` be separate from operational logs.
 4. Logs `MUST NOT` include unnecessary sensitive content by default.
+5. The web operator console `MUST NOT` start until explicit web bootstrap has
+   completed.
+6. Non-interactive `kato init` `MUST NOT` silently enable or configure the web
+   operator console with default credentials.
+7. If web bootstrap provisions credentials, only password hashes/verifiers
+   `MUST` be persisted; plaintext passwords `MUST NOT` be stored.
 
 ## Build and Supply Chain Controls
 
