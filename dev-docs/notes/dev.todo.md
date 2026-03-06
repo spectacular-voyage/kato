@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1772645979457
+updated: 1772759921935
 created: 1771812869620
 ---
 
@@ -16,10 +16,6 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
 
 ## Event Schema Follow-ups (v2)
 
-- [x] Add `request_user_input` Codex fixture under `tests/fixtures/` and add
-      explicit questionnaire→decision event synthesis tests.
-- [x] Add explicit cross-kind collision test: assert two events with same
-      content/timestamp but different `kind` do NOT dedupe.
 - [ ] Add schema fail-closed check when persisted snapshot files are added (fail
       with `kato clean --all` remediation hint on v1 data).
 - [ ] Add `JsonlConversationWriter` to active recording pipeline (currently only
@@ -99,8 +95,6 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
 
 ## Other
 
-- [x] removed legacy `defaultParticipantUsername`; participant usernames now
-      resolve via `~/.kato/kato-user-config.yaml`.
 - [ ] resolveConversationTitle call dedup/memoization in daemon runtime is still
       an optimization opportunity.
 - [ ] remove all compatibility-layer cruft

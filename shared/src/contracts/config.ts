@@ -27,6 +27,7 @@ export interface MarkdownFrontmatterConfig {
   includeFrontmatterInMarkdownRecordings: boolean;
   includeUpdatedInFrontmatter: boolean;
   addParticipantUsernameToFrontmatter: boolean;
+  addParticipantUsernameToHeadings: boolean;
   includeSessionIds: boolean;
   includeWorkspaceIds: boolean;
   includeRecordingIds: boolean;

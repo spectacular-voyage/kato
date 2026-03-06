@@ -7,6 +7,11 @@ interface ResolveParticipantUsernameOptions {
   workspaceId?: string;
 }
 
+interface ResolvePreferredParticipantUsernameOptions {
+  userConfig: UserConfig;
+  workspaceId?: string;
+}
+
 function readDefaultUsername(userConfig: UserConfig): string | undefined {
   const normalized = validateAndNormalizeParticipantUsername(
     userConfig.participants.defaultUsername,
@@ -39,6 +44,21 @@ function readWorkspaceUsername(
   );
 }
 
+export function resolvePreferredParticipantUsername(
+  options: ResolvePreferredParticipantUsernameOptions,
+): string | undefined {
+  if (options.workspaceId) {
+    const workspaceUsername = readWorkspaceUsername(
+      options.userConfig,
+      options.workspaceId,
+    );
+    if (workspaceUsername) {
+      return workspaceUsername;
+    }
+  }
+  return readDefaultUsername(options.userConfig);
+}
+
 export function resolveFrontmatterParticipantUsername(
   options: ResolveParticipantUsernameOptions,
 ): string | undefined {
@@ -56,12 +76,8 @@ export function resolveFrontmatterParticipantUsername(
     return undefined;
   }
 
-  if (workspaceId) {
-    const workspaceUsername = readWorkspaceUsername(userConfig, workspaceId);
-    if (workspaceUsername) {
-      return workspaceUsername;
-    }
-  }
-
-  return readDefaultUsername(userConfig);
+  return resolvePreferredParticipantUsername({
+    userConfig,
+    workspaceId,
+  });
 }

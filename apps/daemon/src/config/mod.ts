@@ -18,6 +18,7 @@ export {
   resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
   resolveFrontmatterParticipantUsername,
+  resolvePreferredParticipantUsername,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
   SharedBehaviorConfigFileStore,

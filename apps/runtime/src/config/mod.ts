@@ -29,7 +29,10 @@ export {
   resolveDefaultSharedConfigPath,
   SharedBehaviorConfigFileStore,
 } from "./shared_behavior_config.ts";
-export { resolveFrontmatterParticipantUsername } from "./participant_username.ts";
+export {
+  resolveFrontmatterParticipantUsername,
+  resolvePreferredParticipantUsername,
+} from "./participant_username.ts";
 export type {
   EnsureUserConfigResult,
   UserConfigStoreLike,

@@ -141,7 +141,7 @@ Deno.test(
         includeUpdatedInFrontmatter: false,
         frontmatterSessionIds: ["12345678-abcdef"],
         frontmatterRecordingCycleIds: ["rec-seed"],
-        frontmatterParticipants: ["user.djradon", "codex.gpt-5.3-codex"],
+        frontmatterParticipants: ["djradon", "codex.gpt-5.3-codex"],
         frontmatterTags: ["provider.codex"],
         frontmatterConversationEventKinds: ["message.user"],
       });
@@ -152,7 +152,7 @@ Deno.test(
       assertStringIncludes(content, "kato-recordingIds: [rec-seed]");
       assertStringIncludes(
         content,
-        "participants: [user.djradon, codex.gpt-5.3-codex]",
+        "participants: [djradon, codex.gpt-5.3-codex]",
       );
       assertStringIncludes(
         content,
@@ -311,7 +311,7 @@ Deno.test(
           "desc: ''",
           "created: 1",
           "updated: 1",
-          "participants: [user.djradon]",
+          "participants: [djradon]",
           "tags: [provider.codex, kind.message.user, topic.keep]",
           "conversationEventKinds: [message.assistant]",
           "---",
@@ -339,7 +339,7 @@ Deno.test(
       const content = await Deno.readTextFile(outputPath);
       assertStringIncludes(
         content,
-        "participants: [user.djradon, codex.gpt-5.3-codex]",
+        "participants: [djradon, codex.gpt-5.3-codex]",
       );
       assertStringIncludes(
         content,

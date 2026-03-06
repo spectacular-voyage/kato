@@ -29,6 +29,7 @@ export type RecordingRenderOptionOverrides = Pick<
   | "italicizeUserMessages"
   | "includeSystemEvents"
   | "headingTimestampTimezone"
+  | "speakerNames"
 >;
 
 export interface RecordingOutputOverrides {
@@ -785,8 +786,9 @@ export class RecordingPipeline implements RecordingPipelineLike {
     participantUsername: string | undefined,
   ): string[] | undefined {
     const participants: string[] = [];
-    if (participantUsername) {
-      participants.push(`user.${participantUsername}`);
+    const normalizedParticipantUsername = participantUsername?.trim();
+    if (normalizedParticipantUsername) {
+      participants.push(normalizedParticipantUsername);
     }
 
     const assistantParticipants = new Set<string>();
