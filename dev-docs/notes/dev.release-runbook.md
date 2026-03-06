@@ -2,7 +2,7 @@
 id: zskc5s6r8d1khexmq6q6q7t
 title: Release Runbook
 desc: ''
-updated: 1772646503555
+updated: 1772776769658
 created: 1772551839242
 ---
 
@@ -101,7 +101,7 @@ Confirm at least one Gemini command-handling event is present:
 
 ## Immediate Follow-Up Hardening (Post-v0.2.0)
 
-- [ ] Enable branch protection on `main` requiring CI checks.
-- [ ] Add Dependabot for GitHub Actions.
-- [ ] Add coverage artifact generation and patch coverage gating.
-- [ ] Add binary release workflow(s) with scoped `deno compile` permissions.
+- [c] Enable branch protection on `main` requiring CI checks.
+- [x] Add Dependabot for GitHub Actions.
+- [x] Add coverage artifact generation and patch coverage gating.
+- [c] Add binary release workflow(s) with scoped `deno compile` permissions.
