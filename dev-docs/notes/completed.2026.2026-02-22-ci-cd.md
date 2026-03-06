@@ -2,7 +2,7 @@
 id: 0qjcf9cphpnfylmmjsp6v10
 title: 2026 02 22 CI CD
 desc: ''
-updated: 1772770303167
+updated: 1772778893878
 created: 1771831193268
 ---
 
@@ -94,8 +94,8 @@ git push origin v0.2.0
 
 ### Governance Hardening
 
-- [ ] Enable branch protection on `main` requiring CI checks.
-- [ ] Require green status checks before merge.
+- [d] Enable branch protection on `main` requiring CI checks.
+- [d] Require green status checks before merge.
 
 ## Notes
 

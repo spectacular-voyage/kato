@@ -439,3 +439,21 @@ For this repo, I’d do a two-step setup.
 - Add required checks: `codecov/project` and `codecov/patch`
 
 This keeps protection strict enough now without blocking merges on Codecov setup lag.
+
+# User_2026-03-05_2203_00
+
+Should I "Set as a pre-release"
+
+**Recommending stable release unless testing**
+
+# gpt-5.3-codex_2026-03-05_2203_17
+
+For `v0.2.1`, I’d **not** mark it pre-release unless you still want canary testing.
+
+Reason: this looks like a patch/stabilization cut (no stated breaking changes), and `0.2.1` semver implies stable.
+
+Use **pre-release** only if:
+- you want limited validation first (especially for the Windows launcher/status changes), or
+- you’re not confident in backward compatibility.
+
+If you want canary first, tag `v0.2.1-rc.1` as pre-release, then publish `v0.2.1` as final after validation.

@@ -1,9 +1,9 @@
-# Kato - Own your AI conversations.
+# Kato
 
-[![Coverage](https://codecov.io/gh/spectacular-voyage/kato/graph/badge.svg?branch=main)](https://codecov.io/gh/spectacular-voyage/kato)
+## Own your AI conversations.
 
-Kato is your trusty sidekick for capturing chats, whether in your IDE or from a
-code-assistant CLI.
+Kato is your trusty sidekick for capturing chats, whether in your IDE, from a
+code-assistant CLI,
 
 ## Features
 
@@ -16,6 +16,16 @@ code-assistant CLI.
   to capture
 - centralize conversations from multiple provider in a single location
 - decentralize conversations into multiple locations
+
+## Compatibility
+
+| Provider | VSCode | CLI | Stand-alone App |
+| --- | --- | --- | --- |
+| Codex | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) |
+| Claude Code | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) |
+| Gemini | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![Supported](https://img.shields.io/badge/Supported-Yes-2ea043?style=flat-square) | ![N/A](https://img.shields.io/badge/N%2FA-Not%20available-9ea7b3?style=flat-square) |
+
+`N/A` means the provider does not currently offer that interface.
 
 ## Installation
 
@@ -75,13 +85,6 @@ function kato {
 Then open a new Powershell window or try `.$PROFILE`
 
 ## Quickstart
-
-By default, kato uses the global runtime root `~/.kato/daemon` and does not
-implicitly create `./.kato`. To opt into local runtime state, set
-`KATO_RUNTIME_DIR` explicitly to an absolute path (for example
-`$PWD/.kato/daemon`) or a `~/...` path.
-The `~/.kato` tree stores Kato runtime/config/session state; captured/exported
-conversation files are written to registered workspace roots.
 
 ```
 kato init
@@ -244,6 +247,10 @@ cache index. `kato-daemon-config.yaml` is daemon-only process config.
 `kato-shared-config.yaml` owns shared policy and plain export defaults.
 `kato-cli-config.yaml` is CLI-local settings (currently logging).
 `~/.kato` is runtime/config/session state, not a workspace output root.
+
+Captured/exported
+conversation files are written to registered workspace roots.
+
 
 ## Runtime Config
 
@@ -438,3 +445,11 @@ defaultOutputDir supports the same template tokens as `filenameTemplate`.
   - `dev-docs/notes/dev.general-guidance.md`
   - `dev-docs/notes/dev.codebase-overview.md`
   - `dev-docs/notes/dev.decision-log.md`
+
+[![Coverage](https://codecov.io/gh/spectacular-voyage/kato/graph/badge.svg?branch=main)](https://codecov.io/gh/spectacular-voyage/kato)
+
+---
+
+<p align="center">
+  <img src="https://spectacular.voyage/assets/2026-03_kato-wordmark_v2_black-outline.png" alt="Kato wordmark" width="560" />
+</p>

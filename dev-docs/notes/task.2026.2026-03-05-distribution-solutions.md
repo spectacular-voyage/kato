@@ -2,7 +2,7 @@
 id: wvgli7yr4zmuwcalv6wyevu
 title: 2026 03 05 Distribution Solutions
 desc: ''
-updated: 1772775502000
+updated: 1772779005238
 created: 1772761416593
 ---
 
@@ -756,6 +756,23 @@ release-automation ownership stays with distribution work:
 - [ ] Configure GitHub Environment (`release`) with required reviewers.
 - [ ] Evaluate tag-triggered binary release workflow after stable manual
   releases.
+
+Also:
+
+Enable protection on main now with:
+Require a pull request before merging
+Require approvals: 1
+Dismiss stale pull request approvals when new commits are pushed
+Require conversation resolution before merging
+Require status checks to pass before merging
+Required check: CI / quality (use the exact check name shown in your PR checks UI)
+Require branches to be up to date before merging
+Do not allow force pushes
+Do not allow deletions
+Apply to admins too
+After Codecov appears reliably in PR checks:
+Add required checks: codecov/project and codecov/patch
+
 
 ## What Else You May Be Missing
 
