@@ -2,7 +2,7 @@
 id: 0qjcf9cphpnfylmmjsp6v10
 title: 2026 02 22 CI CD
 desc: ''
-updated: 1772548248746
+updated: 1772770303167
 created: 1771831193268
 ---
 
@@ -21,12 +21,13 @@ is deferred to post-`v0.2.0` hardening.
 - Publish a GitHub release from tag/source only (no compiled binaries).
 - Document runbook and verification steps.
 
-### Track B (Deferred): Binary Distribution + Expanded CI Hardening
+### Track B (Deferred): CI/Governance Hardening + Distribution Handoff
 
-- Manual and/or tag-triggered binary workflows (`deno compile`).
 - Coverage artifact and patch-gate integration (Codecov or equivalent).
 - Dependabot for GitHub Actions.
-- GitHub `release` environment and required reviewers for binary releases.
+- Branch protection and required status checks.
+- Release automation ownership moved to
+  `task.2026.2026-03-05-distribution-solutions.md`.
 
 ## Current State
 
@@ -35,6 +36,15 @@ is deferred to post-`v0.2.0` hardening.
 - ✅ `deno.json` now carries explicit version `0.2.0`.
 - ❌ No release workflow YAML exists yet (intentional for source-only `v0.2.0`).
 - ❌ Branch protection / release-environment policies are not yet configured.
+
+## Closeout Split (2026-03-05)
+
+- `Release Automation Hardening` is now tracked in
+  `task.2026.2026-03-05-distribution-solutions.md`.
+- This file retains CI/governance hardening ownership.
+- Ownership includes CI quality gates/coverage/dependabot follow-ups.
+- Ownership includes branch protection and required status checks.
+- `Track A` source-only `v0.2.0` is complete and verified.
 
 ## Track A: Source-Only `v0.2.0` (Required Now)
 
@@ -60,27 +70,27 @@ git push origin v0.2.0
 
 ### Verification Checklist
 
-- [ ] Tag exists as `v0.2.0`.
-- [ ] `deno.json` version is `0.2.0`.
-- [ ] `deno task ci` passed for release commit.
-- [ ] GitHub release exists from tag/source.
-- [ ] Release notes state that binaries are deferred.
+- [x] Tag exists as `v0.2.0`.
+- [x] `deno.json` version is `0.2.0`.
+- [x] `deno task ci` passed for release commit.
+- [x] GitHub release exists from tag/source.
+- [x] Release notes state that binaries are deferred.
 
-## Track B: Post-`v0.2.0` Hardening (Deferred)
+## Track B: Post-`v0.2.0` Hardening (Split)
 
 ### CI Quality Hardening
 
-- [ ] Add coverage artifact generation to CI (`lcov`).
-- [ ] Configure patch-coverage quality gate.
-- [ ] Add coverage badge to README.
-- [ ] Add Dependabot for GitHub Actions updates.
+- [x] Add coverage artifact generation to CI (`lcov`).
+- [x] Configure patch-coverage quality gate.
+- [x] Add coverage badge to README.
+- [x] Add Dependabot for GitHub Actions updates.
 
-### Release Automation Hardening
+### Release Automation Hardening (Moved)
 
-- [ ] Create `.github/workflows/release-manual.yml` for multi-platform binaries.
-- [ ] Define scoped `deno compile` permission flags aligned with launcher scoping.
-- [ ] Configure GitHub Environment (`release`) with required reviewers.
-- [ ] Evaluate tag-triggered binary release workflow after stable manual releases.
+- Moved to
+  `task.2026.2026-03-05-distribution-solutions.md` under
+  `Release Automation Hardening Intake From CI/CD Task`.
+- This avoids split ownership while binary distribution work is being designed.
 
 ### Governance Hardening
 

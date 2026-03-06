@@ -1,6 +1,8 @@
 # Deno cache and coverage artifacts
 .deno/
 coverage/
+.coverage/
+coverage.lcov
 .test-tmp/
 
 # Editor and OS artifacts

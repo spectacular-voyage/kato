@@ -2,7 +2,7 @@
 id: wvgli7yr4zmuwcalv6wyevu
 title: 2026 03 05 Distribution Solutions
 desc: ''
-updated: 1772768391920
+updated: 1772774894000
 created: 1772761416593
 ---
 
@@ -197,6 +197,27 @@ Inference:
 - not auto-start background capture without clear user consent
 - not delete `~/.kato` data on uninstall by default
 
+## Code Signing And Notarization Policy
+
+This is not a "nice-to-have". It is part of the Phase 1 binary-distribution
+definition.
+
+### Phase 1 Policy
+
+- macOS release binaries must be code signed and notarized before they are
+  documented as the default install path.
+- Windows release binaries/installers must be Authenticode signed before they
+  are documented as the default install path.
+- Linux signing can remain checksum-based in Phase 1; broader Linux signing
+  options can be tracked separately.
+
+### If Signing/Notarization Is Not Ready
+
+- any unsigned/un-notarized binary release must be labeled as preview/early
+  access
+- release notes must include explicit OS-specific trust-warning workarounds
+- wide end-user rollout should wait until signing/notarization is enabled in CI
+
 
 ## Script-Based Direct Installers
 
@@ -232,6 +253,59 @@ Important separation:
 These scripts do not need to be generated every release. They can be stable,
 source-controlled installer entrypoints that fetch stable latest-release asset
 names.
+
+## Install-Channel Metadata Contract
+
+Install-channel metadata should be introduced in Phase 1 so update and uninstall
+logic has one durable source of truth before extra channels land.
+
+### Location
+
+- store as a file at `~/.kato/shared/install-channel.json`
+- keep this outside program install directories so it survives binary replacement
+  and remains channel-neutral
+- use the same path on all platforms (including Windows) for consistency
+
+### Schema (v1)
+
+```json
+{
+  "schemaVersion": 1,
+  "channel": "direct-binary",
+  "installRoot": "/home/alice/.local/bin",
+  "managedBy": "script-installer",
+  "installScope": "user",
+  "installedVersion": "0.3.0",
+  "updatedAt": "2026-03-06T00:00:00Z"
+}
+```
+
+Field notes:
+
+- `schemaVersion`: metadata schema version, starting at `1`
+- `channel`: one of `direct-binary`, `windows-installer`, `npm`, `deno-jsr`,
+  `source`
+- `installRoot`: program install root for the active channel
+- `managedBy`: owner of lifecycle operations, for example `script-installer`,
+  `msi`, `npm`, `deno`, `manual`
+- `installScope`: `user` for current plans
+- `installedVersion`: installed Kato release version
+- `updatedAt`: RFC3339 timestamp when metadata was last written
+
+### Write Ownership
+
+- installer/script writes metadata during install and upgrade
+- channel-native updaters rewrite metadata after successful replacement
+- binaries should not invent a new channel on first run; they may only preserve
+  or migrate known values
+
+### Legacy Migration Rule
+
+- if metadata is absent, treat install as `direct-binary` (legacy Phase 1)
+- first successful `kato self-update` on such installs should write v1 metadata
+  with `channel=direct-binary` and `managedBy=manual` unless a stronger signal
+  exists
+
 ## npm Distribution Options
 
 Lots of target users already have npm. That makes npm a strong convenience
@@ -546,6 +620,19 @@ Recommended approach:
 - npm publishing should check whether each target package version already exists
   before attempting publish, and skip if present.
 
+### Build Execution Strategy
+
+Recommendation: build release binaries on native OS runners using a matrix
+(`windows-latest`, `macos-latest`, `ubuntu-latest`) instead of relying on one
+Linux runner to cross-compile everything.
+
+Reasoning:
+
+- this reduces cross-target compile edge-case risk
+- it aligns naturally with OS-specific signing/notarization steps
+- it makes per-platform smoke checks easier before asset upload
+- cross-compilation can still be used for non-release smoke/dry-run workflows
+
 ### Version Source Of Truth
 
 Recommendation:
@@ -580,6 +667,13 @@ This enables stable URLs such as:
 - `/releases/latest/download/kato-windows-x64.zip`
 - `/releases/latest/download/kato-update-manifest.json`
 
+Important implementation detail:
+
+- GitHub does not auto-generate stable-name assets
+- every release workflow run must upload stable-name assets explicitly
+  (`kato-windows-x64.zip`, `kato-linux-x64.tar.gz`, etc.) in addition to
+  versioned assets
+
 The manifest asset is especially useful for the updater because it can include:
 
 - current version
@@ -599,6 +693,8 @@ The manifest asset is especially useful for the updater because it can include:
   only what they need.
 - Keep the bundle per-platform and per-arch; do not ship giant multi-platform
   payloads to every user.
+- Expect large compiled artifacts (often tens of MB per executable before
+  compression) and ship compressed archives (`.tar.gz`/`.zip`) for distribution.
 - Sign/notarize binaries to reduce OS trust friction and first-run penalties.
 
 ### Important Performance/Security Tradeoff
@@ -625,6 +721,41 @@ Implication:
 
 This is an inference from the currently documented supported targets.
 
+## Initial Platform Matrix Decision
+
+To avoid Phase 1 CI churn, lock the first binary wave now:
+
+- Windows x64
+- macOS arm64
+- macOS x64
+- Linux x64 (glibc)
+
+Linux arm64 is intentionally deferred to Phase 2, alongside npm channel rollout.
+
+## CLI/Daemon Version-Skew Policy
+
+Policy for direct binary, installer, and updater flows:
+
+- CLI and daemon are expected to be the same released version.
+- If CLI major version differs from daemon major version, CLI should refuse and
+  prompt for daemon restart/update.
+- If major matches but minor/patch differs, CLI may continue with a warning and
+  should recommend daemon restart to converge versions.
+- `kato self-update` should replace both executables together and restart daemon
+  only if it was running pre-update.
+
+## Release Automation Hardening Intake From CI/CD Task
+
+These items were moved from `task.2026.2026-02-22-ci-cd.md` on 2026-03-05 so
+release-automation ownership stays with distribution work:
+
+- [ ] Create `.github/workflows/release-manual.yml` for multi-platform binaries.
+- [ ] Define scoped `deno compile` permission flags aligned with launcher
+  scoping.
+- [ ] Configure GitHub Environment (`release`) with required reviewers.
+- [ ] Evaluate tag-triggered binary release workflow after stable manual
+  releases.
+
 ## What Else You May Be Missing
 
 - rollback behavior when an update fails halfway through
@@ -636,9 +767,6 @@ This is an inference from the currently documented supported targets.
 - release channels (`stable`, maybe `beta`)
 - checksums, signatures, and tamper resistance
 - corporate proxies and blocked GitHub downloads
-- code signing and notarization
-- ARM target priorities
-- CLI/daemon version-skew policy during upgrades
 - migration policy when runtime file layout changes again
 - whether WinGet should become an additional Windows channel after the installer
   exists
@@ -649,18 +777,23 @@ This is an inference from the currently documented supported targets.
 
 - Add release workflow for prebuilt platform binaries.
 - Ship direct binary bundles as the primary install path.
+- Build release binaries on native runner matrix (Windows/macOS/Linux).
+- Enforce Phase 1 signing/notarization policy for documented default installs.
 - Change launcher logic to resolve a sibling `kato-daemon` binary, with
   source-tree fallback for development.
+- Define and write install-channel metadata (`install-channel.json` v1).
+- Define and enforce CLI/daemon version-skew policy (major mismatch blocks).
 - Define uninstall defaults: preserve `~/.kato`, remove program bits only.
+- Upload both versioned and stable-name release assets on every release.
 - Keep updates manual for the first binary release.
 
 ### Phase 2
 
+- Add Linux arm64 release target.
 - Publish npm wrapper plus platform binary packages.
 - Publish JSR package for Deno-native users.
-- Introduce install-channel metadata so the app knows whether it was installed
-  from direct binary, installer, npm, or Deno/JSR.
-- Add stable latest-download assets and update manifest.
+- Extend install-channel metadata writers for npm/JSR/installer channels.
+- Expand update manifest usage and updater channel-routing behavior.
 - Add `kato self-update --check` and `kato self-update --apply` with
   channel-aware behavior.
 
@@ -685,7 +818,9 @@ This is an inference from the currently documented supported targets.
   - macOS arm64
   - macOS x64
   - Linux x64
-- Decide whether Linux arm64 is in the first binary wave or second.
+- Add native-runner matrix release jobs and platform smoke checks.
+- Add signing/notarization steps and secrets handling in release CI.
+- Add Linux arm64 in the second binary wave (Phase 2).
 - Add release asset naming rules for:
   - versioned artifacts
   - stable latest-download artifacts
@@ -696,13 +831,14 @@ This is an inference from the currently documented supported targets.
   - Windows installer
   - npm
   - JSR / Deno
-- Add install-channel metadata so update and uninstall behavior can be
-  channel-aware.
+- Add `~/.kato/shared/install-channel.json` v1 schema and writers.
+- Add missing-metadata fallback handling (`channel=direct-binary`).
 - Add explicit service/autostart cleanup commands.
 - Add checksum/signature verification design for updater work.
 - Add compiled-binary smoke tests.
-- Revisit version policy so release artifacts have one clear user-facing version
-  even if CLI and daemon keep separate internal versions.
+- Implement CLI/daemon major-version mismatch hard fail plus minor/patch warning.
+- Keep one user-facing release version even if CLI and daemon keep separate
+  internal versions.
 
 ## External Reference Notes
 
@@ -717,4 +853,5 @@ This is an inference from the currently documented supported targets.
 - WinGet supports MSI, EXE, ZIP, and other installer types.
 - Windows Installer surfaces per-user installs in Add/Remove Programs for the
   current user.
-
+- Deno compile supports cross-target builds, but native-runner release builds
+  are safer when signing/notarization is in scope.

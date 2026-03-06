@@ -1,5 +1,7 @@
 # Kato - Own your AI conversations.
 
+[![Coverage](https://codecov.io/gh/spectacular-voyage/kato/graph/badge.svg?branch=main)](https://codecov.io/gh/spectacular-voyage/kato)
+
 Kato is your trusty sidekick for capturing chats, whether in your IDE or from a
 code-assistant CLI.
 
