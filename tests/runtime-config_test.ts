@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { stringify } from "@std/yaml";
 import {
@@ -7,14 +7,58 @@ import {
   createDefaultRuntimeConfig,
   createDefaultSharedBehaviorConfig,
   resolveDefaultConfigPath,
+  resolveDefaultProviderSessionRoots,
   resolveDefaultSharedConfigPath,
   RuntimeConfigFileStore,
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
+import { withLockedEnvironment } from "./test_env.ts";
 import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
 
 function makeSandboxRoot(): string {
   return makeTestTempPath("test-runtime-config-");
+}
+
+const CONFIG_ENV_KEYS = [
+  "HOME",
+  "USERPROFILE",
+  "KATO_CLAUDE_SESSION_ROOTS",
+  "KATO_CODEX_SESSION_ROOTS",
+  "KATO_GEMINI_SESSION_ROOTS",
+  "KATO_LOGGING_OPERATIONAL_LEVEL",
+  "KATO_LOGGING_AUDIT_LEVEL",
+  "KATO_DAEMON_MAX_MEMORY_MB",
+  "KATO_CONFIG_PATH",
+] as const;
+
+type ConfigEnvKey = (typeof CONFIG_ENV_KEYS)[number];
+
+function snapshotConfigEnv(): Record<ConfigEnvKey, string | undefined> {
+  return Object.fromEntries(
+    CONFIG_ENV_KEYS.map((key) => [key, Deno.env.get(key)]),
+  ) as Record<ConfigEnvKey, string | undefined>;
+}
+
+function setConfigEnv(
+  values: Partial<Record<ConfigEnvKey, string | undefined>>,
+): void {
+  for (const key of CONFIG_ENV_KEYS) {
+    if (!(key in values)) {
+      continue;
+    }
+    const value = values[key];
+    if (value === undefined) {
+      Deno.env.delete(key);
+      continue;
+    }
+    Deno.env.set(key, value);
+  }
+}
+
+function restoreConfigEnv(
+  snapshot: Record<ConfigEnvKey, string | undefined>,
+): void {
+  setConfigEnv(snapshot);
 }
 
 Deno.test("RuntimeConfigFileStore initializes missing daemon config", async () => {
@@ -124,6 +168,156 @@ Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateSnapsh
   }
 });
 
+Deno.test(
+  "resolveDefaultProviderSessionRoots honors env overrides and expands home paths",
+  async () => {
+    await withLockedEnvironment(async () => {
+      const root = makeSandboxRoot();
+      const homeDir = join(root, "home");
+      const snapshot = snapshotConfigEnv();
+
+      try {
+        await Deno.mkdir(homeDir, { recursive: true });
+        setConfigEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_CLAUDE_SESSION_ROOTS: JSON.stringify([
+            "~/claude/projects",
+            " ~/claude/projects ",
+            "~/claude/alt",
+          ]),
+          KATO_CODEX_SESSION_ROOTS: JSON.stringify([
+            join(homeDir, "codex", "sessions"),
+          ]),
+          KATO_GEMINI_SESSION_ROOTS: JSON.stringify([
+            "~/gemini/tmp",
+          ]),
+        });
+
+        assertEquals(resolveDefaultProviderSessionRoots(), {
+          claude: [
+            join(homeDir, "claude", "projects"),
+            join(homeDir, "claude", "alt"),
+          ],
+          codex: [join(homeDir, "codex", "sessions")],
+          gemini: [join(homeDir, "gemini", "tmp")],
+        });
+      } finally {
+        restoreConfigEnv(snapshot);
+        await removePathIfPresent(root);
+      }
+    });
+  },
+);
+
+Deno.test(
+  "resolveDefaultProviderSessionRoots falls back to home defaults on invalid env values",
+  async () => {
+    await withLockedEnvironment(async () => {
+      const root = makeSandboxRoot();
+      const homeDir = join(root, "home");
+      const snapshot = snapshotConfigEnv();
+
+      try {
+        await Deno.mkdir(homeDir, { recursive: true });
+        setConfigEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_CLAUDE_SESSION_ROOTS: "not-json",
+          KATO_CODEX_SESSION_ROOTS: JSON.stringify([]),
+          KATO_GEMINI_SESSION_ROOTS: JSON.stringify([" "]),
+        });
+
+        assertEquals(resolveDefaultProviderSessionRoots(), {
+          claude: [join(homeDir, ".claude", "projects")],
+          codex: [join(homeDir, ".codex", "sessions")],
+          gemini: [join(homeDir, ".gemini", "tmp")],
+        });
+      } finally {
+        restoreConfigEnv(snapshot);
+        await removePathIfPresent(root);
+      }
+    });
+  },
+);
+
+Deno.test("createDefaultRuntimeConfig applies env defaults and home shorthand", async () => {
+  await withLockedEnvironment(async () => {
+    const root = makeSandboxRoot();
+    const homeDir = join(root, "home");
+    const snapshot = snapshotConfigEnv();
+
+    try {
+      await Deno.mkdir(homeDir, { recursive: true });
+      setConfigEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+        KATO_CODEX_SESSION_ROOTS: JSON.stringify([
+          join(homeDir, "captures", "codex"),
+        ]),
+        KATO_LOGGING_OPERATIONAL_LEVEL: "warn",
+        KATO_LOGGING_AUDIT_LEVEL: "debug",
+        KATO_DAEMON_MAX_MEMORY_MB: "768",
+      });
+
+      const config = createDefaultRuntimeConfig({
+        runtimeDir: join(homeDir, ".kato", "daemon"),
+        useHomeShorthand: true,
+      });
+
+      assertEquals(config.runtimeDir, "~/.kato/daemon");
+      assertEquals(config.katoDir, "~/.kato");
+      assertEquals(config.providerSessionRoots, {
+        claude: ["~/.claude/projects"],
+        codex: ["~/captures/codex"],
+        gemini: ["~/.gemini/tmp"],
+      });
+      assertEquals(config.logging, {
+        operationalLevel: "warn",
+        auditLevel: "debug",
+      });
+      assertEquals(config.daemonMaxMemoryMb, 768);
+      assertEquals(config.providerAutoGenerateSnapshots, { codex: true });
+    } finally {
+      restoreConfigEnv(snapshot);
+      await removePathIfPresent(root);
+    }
+  });
+});
+
+Deno.test("createDefaultRuntimeConfig rejects invalid env logging override", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotConfigEnv();
+    try {
+      setConfigEnv({
+        KATO_LOGGING_OPERATIONAL_LEVEL: "verbose",
+      });
+      assertThrows(
+        () =>
+          createDefaultRuntimeConfig({
+            runtimeDir: "/tmp/kato-daemon",
+          }),
+        Error,
+        "KATO_LOGGING_OPERATIONAL_LEVEL must be one of",
+      );
+    } finally {
+      restoreConfigEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("createDefaultRuntimeConfig rejects invalid daemonMaxMemoryMb override", () => {
+  assertThrows(
+    () =>
+      createDefaultRuntimeConfig({
+        runtimeDir: "/tmp/kato-daemon",
+        daemonMaxMemoryMb: 0,
+      }),
+    Error,
+    "daemonMaxMemoryMb must be a positive integer",
+  );
+});
+
 Deno.test("RuntimeConfigFileStore rejects legacy mixed fields", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "kato-daemon-config.yaml");
@@ -145,6 +339,134 @@ Deno.test("RuntimeConfigFileStore rejects legacy mixed fields", async () => {
       Error,
       "unsupported schema",
     );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config values", async () => {
+  await withLockedEnvironment(async () => {
+    const root = makeSandboxRoot();
+    const homeDir = join(root, "home");
+    const configPath = join(root, "kato-daemon-config.yaml");
+    const store = new RuntimeConfigFileStore(configPath);
+    const snapshot = snapshotConfigEnv();
+
+    try {
+      await Deno.mkdir(homeDir, { recursive: true });
+      setConfigEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+      });
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        stringify({
+          schemaVersion: 1,
+          runtimeDir: "~/.kato/daemon",
+          katoDir: "~/.kato",
+          providerSessionRoots: {
+            codex: ["~/captures/codex"],
+          },
+          globalAutoGenerateSnapshots: true,
+          providerAutoGenerateSnapshots: {
+            claude: false,
+            gemini: true,
+          },
+          cleanSessionStatesOnShutdown: true,
+          daemonFeatureFlags: {
+            captureIncludeSystemEvents: true,
+          },
+          logging: {
+            operationalLevel: " WARN ",
+            auditLevel: "ERROR",
+          },
+          daemonMaxMemoryMb: 1024,
+        }),
+      );
+
+      const loaded = await store.load();
+      assertEquals(loaded.runtimeDir, join(homeDir, ".kato", "daemon"));
+      assertEquals(loaded.katoDir, join(homeDir, ".kato"));
+      assertEquals(loaded.providerSessionRoots, {
+        claude: [join(homeDir, ".claude", "projects")],
+        codex: [join(homeDir, "captures", "codex")],
+        gemini: [join(homeDir, ".gemini", "tmp")],
+      });
+      assertEquals(loaded.providerAutoGenerateSnapshots, {
+        claude: false,
+        codex: true,
+        gemini: true,
+      });
+      assertEquals(loaded.daemonFeatureFlags, {
+        daemonExportEnabled: true,
+        captureIncludeSystemEvents: true,
+      });
+      assertEquals(loaded.logging, {
+        operationalLevel: "warn",
+        auditLevel: "error",
+      });
+      assertEquals(loaded.globalAutoGenerateSnapshots, true);
+      assertEquals(loaded.cleanSessionStatesOnShutdown, true);
+      assertEquals(loaded.daemonMaxMemoryMb, 1024);
+    } finally {
+      restoreConfigEnv(snapshot);
+      await removePathIfPresent(root);
+    }
+  });
+});
+
+Deno.test("RuntimeConfigFileStore rejects invalid YAML and non-yaml paths", async () => {
+  const root = makeSandboxRoot();
+  const yamlPath = join(root, "kato-daemon-config.yaml");
+  const jsonPath = join(root, "kato-daemon-config.json");
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(yamlPath, "schemaVersion: [");
+
+    await assertRejects(
+      () => new RuntimeConfigFileStore(yamlPath).load(),
+      Error,
+      "invalid YAML",
+    );
+    await assertRejects(
+      () =>
+        new RuntimeConfigFileStore(jsonPath).ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir: join(root, "daemon"),
+          }),
+        ),
+      Error,
+      "must end with .yaml",
+    );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("RuntimeConfigFileStore ensureInitialized returns existing config without rewriting", async () => {
+  const root = makeSandboxRoot();
+  const runtimeDir = join(root, "daemon");
+  const configPath = join(runtimeDir, "kato-daemon-config.yaml");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    const initial = createDefaultRuntimeConfig({
+      runtimeDir,
+      daemonMaxMemoryMb: 900,
+    });
+    const fallback = createDefaultRuntimeConfig({
+      runtimeDir,
+      daemonMaxMemoryMb: 100,
+    });
+
+    await store.ensureInitialized(initial);
+    const ensured = await store.ensureInitialized(fallback);
+
+    assertEquals(ensured.created, false);
+    assertEquals(ensured.path, configPath);
+    assertEquals(ensured.config.daemonMaxMemoryMb, 900);
   } finally {
     await removePathIfPresent(root);
   }

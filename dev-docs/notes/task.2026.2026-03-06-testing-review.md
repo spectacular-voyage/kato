@@ -40,12 +40,44 @@ Current signals already visible in the repo today:
   - direct `deno test --parallel ... --frozen`: about `8s` elapsed
   - direct `deno test --parallel --clean --coverage=.coverage-par ... --frozen`:
     about `10s` elapsed
+- Post-initial implementation verification on `2026-03-06`:
+  - `deno task test --frozen --quiet`: `418` passing tests, about `8.4s` real
+  - `deno task test:coverage --frozen --quiet`: `418` passing tests,
+    `74.8%` line coverage, `81.2%` branch coverage, about `10.5s` real
+  - `apps/daemon/src/writer/jsonl_writer.ts` is now at `95.9%` line coverage /
+    `96.9%` branch coverage after adding a direct test file
+  - `apps/daemon/src/orchestrator/session_twin_mapper.ts` is now at `90.8%`
+    line coverage / `83.7%` branch coverage after adding direct mapper tests
+  - `apps/runtime/src/config/runtime_config.ts` is now at `71.0%` line
+    coverage / `81.7%` branch coverage after adding direct config tests
+  - `apps/runtime/src/policy/path_policy.ts` is now at `85.6%` line coverage /
+    `90.6%` branch coverage after adding direct policy tests
+  - the root `test` and `test:coverage` tasks now use `--parallel` by default
+  - `test:coverage` no longer hardcodes `--frozen`, so the documented/CI form
+    `deno task test:coverage --frozen` works again
 - GitHub CI has been adjusted to run the test suite once:
   - `deno task ci:quality` runs `fmt` + `lint` + `check`
   - `deno task test:coverage --frozen` runs the test suite and coverage
 - The current test task uses `tests/**/*.ts`, which also loads helper modules
   with zero tests (`tests/test_env.ts`, `tests/test_temp.ts`) instead of only
   test files.
+- Initial implementation from this review has now started:
+  - root test tasks have been narrowed to `main_test.ts` +
+    `tests/**/*_test.ts`
+  - direct JSONL writer tests have been added so
+    `apps/daemon/src/writer/jsonl_writer.ts` is not covered only indirectly
+  - direct session-twin mapper tests have been added so
+    `apps/daemon/src/orchestrator/session_twin_mapper.ts` is not covered only
+    through runtime/golden tests
+  - direct runtime-config tests have been added so
+    `apps/runtime/src/config/runtime_config.ts` is not covered only through
+    CLI/main config bootstrap tests
+  - direct path-policy tests have been added so
+    `apps/runtime/src/policy/path_policy.ts` is not covered only through
+    CLI/runtime integration paths
+  - root test tasks now allow the env keys exercised by those direct tests
+  - `tests/test_env.ts` now provides a shared env lock so env-mutating tests
+    remain deterministic under `--parallel`
 - GitHub CI trigger behavior today:
   `.github/workflows/ci.yml` runs on `pull_request` and on `push` to `main`.
   That means it runs during PR review/update and again after merge when the
@@ -62,16 +94,18 @@ Current signals already visible in the repo today:
 Coverage triage should distinguish at least three buckets:
 
 - Real logic worth more tests:
-  - `apps/daemon/src/writer/jsonl_writer.ts` (`32.4%` lines)
   - `apps/runtime/src/orchestrator/launcher.ts` (`44.1%`)
-  - `apps/daemon/src/orchestrator/session_twin_mapper.ts` (`49.5%`)
   - `apps/daemon/src/providers/codex/parser.ts` (`54.9%`)
-  - `apps/runtime/src/policy/path_policy.ts` (`59.1%`)
-  - `apps/runtime/src/config/runtime_config.ts` (`60.4%`)
+  - `apps/cli/src/commands/status.ts` (`63.2%`)
 - Mixed/noisy coverage contributors that still need a value judgment:
   - `shared/src/contracts/session_state.ts` (`21.4%`)
   - `shared/src/contracts/session_twin.ts` (`37.4%`)
   - version/entrypoint wrappers such as `apps/web/src/version.ts`
+- Former hotspot files already improved by direct tests in this review:
+  - `apps/daemon/src/writer/jsonl_writer.ts` (`95.9%` lines)
+  - `apps/daemon/src/orchestrator/session_twin_mapper.ts` (`90.8%`)
+  - `apps/runtime/src/config/runtime_config.ts` (`71.0%`)
+  - `apps/runtime/src/policy/path_policy.ts` (`85.6%`)
 - Areas that already have broad suites but may have overlap or expensive
   duplication:
   - `tests/daemon-runtime_test.ts`
@@ -182,7 +216,7 @@ Review work should capture before/after evidence for:
       `provider-ingestion`, `writer-markdown`) for repeated setup, overlapping
       scenarios, and tests that assert implementation detail instead of durable
       behavior.
-- [ ] Take the cheap test-infrastructure wins first, before larger refactors:
+- [x] Take the cheap test-infrastructure wins first, before larger refactors:
       tighten test file selection, keep `--frozen` discipline, evaluate
       `--parallel`, and reduce duplicate CI test execution.
 - [ ] Run a targeted refactor-for-testability pass on the biggest code/test
@@ -208,7 +242,7 @@ Review work should capture before/after evidence for:
       security gates:
       traversal, symlink escape, command confusion, malformed input,
       permission boundaries, lifecycle races, and audit completeness.
-- [ ] Audit helper/test selection hygiene:
+- [x] Audit helper/test selection hygiene:
       confirm whether `tests/**/*.ts` should be narrowed to actual test files so
       helper modules like `tests/test_env.ts` and `tests/test_temp.ts` are not
       run as zero-test modules.
@@ -220,7 +254,7 @@ Review work should capture before/after evidence for:
       reason for each candidate:
       duplicate coverage, weak signal, obsolete behavior, or excessive setup
       cost.
-- [ ] Evaluate enabling Deno module parallelism in both local and CI commands,
+- [x] Evaluate enabling Deno module parallelism in both local and CI commands,
       using the current baseline as comparison and confirming the suite stays
       deterministic under `--parallel`.
 - [x] Add the first security automation slice with OSV-Scanner and CodeQL in

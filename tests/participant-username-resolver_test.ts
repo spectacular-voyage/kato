@@ -4,6 +4,7 @@ import {
   createDefaultUserConfig,
   resolveFrontmatterParticipantUsername,
 } from "../apps/daemon/src/mod.ts";
+import { withLockedEnvironment } from "./test_env.ts";
 
 Deno.test("resolveFrontmatterParticipantUsername respects exclude > workspace map > default > omit", () => {
   const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
@@ -114,31 +115,33 @@ Deno.test("resolveFrontmatterParticipantUsername omits user when addParticipantU
   );
 });
 
-Deno.test("resolveFrontmatterParticipantUsername has no env/home fallback path", () => {
-  const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
-    addParticipantUsernameToFrontmatter: true,
-  });
-  const userConfig = createDefaultUserConfig({
-    defaultUsername: "",
-    workspaceUsernames: {},
-    excludeMeFromParticipantList: false,
-  });
-  const originalHome = Deno.env.get("HOME");
+Deno.test("resolveFrontmatterParticipantUsername has no env/home fallback path", async () => {
+  await withLockedEnvironment(() => {
+    const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
+      addParticipantUsernameToFrontmatter: true,
+    });
+    const userConfig = createDefaultUserConfig({
+      defaultUsername: "",
+      workspaceUsernames: {},
+      excludeMeFromParticipantList: false,
+    });
+    const originalHome = Deno.env.get("HOME");
 
-  try {
-    Deno.env.set("HOME", "/tmp/some-user-home");
-    assertEquals(
-      resolveFrontmatterParticipantUsername({
-        markdownFrontmatter,
-        userConfig,
-      }),
-      undefined,
-    );
-  } finally {
-    if (originalHome === undefined) {
-      Deno.env.delete("HOME");
-    } else {
-      Deno.env.set("HOME", originalHome);
+    try {
+      Deno.env.set("HOME", "/tmp/some-user-home");
+      assertEquals(
+        resolveFrontmatterParticipantUsername({
+          markdownFrontmatter,
+          userConfig,
+        }),
+        undefined,
+      );
+    } finally {
+      if (originalHome === undefined) {
+        Deno.env.delete("HOME");
+      } else {
+        Deno.env.set("HOME", originalHome);
+      }
     }
-  }
+  });
 });

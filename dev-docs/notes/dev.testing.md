@@ -34,6 +34,13 @@ block. If you hard-code a path (e.g. for tests that do not need isolation), use
 2. Full gate:
    - `deno task ci`
 
+The root `test` and `test:coverage` tasks now use Deno module parallelism by
+default. Local verification on 2026-03-06 stayed deterministic with both
+`deno task test --frozen --quiet` and `deno task test:coverage --frozen --quiet`,
+including after adding direct JSONL writer, session-twin mapper,
+runtime-config, and path-policy tests plus a shared env lock in
+`tests/test_env.ts` for env-mutating cases.
+
 GitHub CI uses a split gate:
 
 - `deno task ci:quality` for `fmt` + `lint` + `check`
@@ -41,6 +48,37 @@ GitHub CI uses a split gate:
 
 This keeps local `deno task ci` as the full pre-PR gate while avoiding running
 the full test suite twice in GitHub Actions.
+
+## Test File Selection
+
+The root `deno task test` and `deno task test:coverage` commands intentionally
+run:
+
+- `main_test.ts`
+- `tests/**/*_test.ts`
+
+Helper modules under `tests/` such as `tests/test_env.ts` and
+`tests/test_temp.ts` are shared test utilities, not standalone test modules.
+Import them from test files, but do not point scripted runs at `tests/**/*.ts`
+or they will be loaded as zero-test modules.
+
+## Coverage Workflow
+
+1. Generate a fresh raw coverage profile:
+   - `deno task test:coverage --frozen`
+2. Inspect local hotspots:
+   - `deno coverage --detailed .coverage`
+3. Generate the LCOV artifact used by GitHub CI / Codecov:
+   - `deno task coverage:lcov`
+
+For focused local work, prefer specific `_test.ts` files and `--filter`
+instead of rerunning the whole suite.
+
+Current local timings from 2026-03-06:
+
+- `deno task test --frozen --quiet`: `418` passing tests, about `8.4s` real
+- `deno task test:coverage --frozen --quiet`: `418` passing tests,
+  `74.8%` line coverage, `81.2%` branch coverage, about `10.5s` real
 
 ## Security Automation
 

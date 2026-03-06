@@ -18,6 +18,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
+  withLockedEnvironment,
 } from "./test_env.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
@@ -149,32 +150,34 @@ function makeUserConfigStore(
 }
 
 Deno.test("runDaemonSubprocess fails cleanly when runtime root cannot be resolved", async () => {
-  const snapshot = snapshotRuntimeEnv();
-  const stderr: string[] = [];
-  try {
-    setRuntimeEnv({
-      HOME: undefined,
-      USERPROFILE: undefined,
-      KATO_RUNTIME_DIR: undefined,
-    });
-    const exitCode = await runDaemonSubprocess({
-      writeStderr(text: string) {
-        stderr.push(text);
-      },
-      runtimeLoop() {
-        throw new Error("runtime loop should not be called");
-      },
-    });
+  await withLockedEnvironment(async () => {
+    const snapshot = snapshotRuntimeEnv();
+    const stderr: string[] = [];
+    try {
+      setRuntimeEnv({
+        HOME: undefined,
+        USERPROFILE: undefined,
+        KATO_RUNTIME_DIR: undefined,
+      });
+      const exitCode = await runDaemonSubprocess({
+        writeStderr(text: string) {
+          stderr.push(text);
+        },
+        runtimeLoop() {
+          throw new Error("runtime loop should not be called");
+        },
+      });
 
-    assertEquals(exitCode, 1);
-    assertStringIncludes(
-      stderr.join(""),
-      "Daemon startup failed: unable to resolve runtime directory",
-    );
-    assertStringIncludes(stderr.join(""), "HOME/USERPROFILE is not set");
-  } finally {
-    restoreRuntimeEnv(snapshot);
-  }
+      assertEquals(exitCode, 1);
+      assertStringIncludes(
+        stderr.join(""),
+        "Daemon startup failed: unable to resolve runtime directory",
+      );
+      assertStringIncludes(stderr.join(""), "HOME/USERPROFILE is not set");
+    } finally {
+      restoreRuntimeEnv(snapshot);
+    }
+  });
 });
 
 Deno.test("runDaemonSubprocess fails closed when runtime config cannot be loaded", async () => {
@@ -519,108 +522,112 @@ Deno.test("runDaemonSubprocess respects configured logger min levels", async () 
 });
 
 Deno.test("runDaemonSubprocess applies log-level env overrides", async () => {
-  const runtimeDir = await makeTestTempDir("daemon-main-log-level-env-");
+  await withLockedEnvironment(async () => {
+    const runtimeDir = await makeTestTempDir("daemon-main-log-level-env-");
 
-  const originalOperational = Deno.env.get("KATO_LOGGING_OPERATIONAL_LEVEL");
-  const originalAudit = Deno.env.get("KATO_LOGGING_AUDIT_LEVEL");
+    const originalOperational = Deno.env.get("KATO_LOGGING_OPERATIONAL_LEVEL");
+    const originalAudit = Deno.env.get("KATO_LOGGING_AUDIT_LEVEL");
 
-  try {
-    const config = makeRuntimeConfig(runtimeDir);
-    config.logging = {
-      operationalLevel: "error",
-      auditLevel: "error",
-    };
-    const configStore: RuntimeConfigStoreLike = {
-      load() {
-        return Promise.resolve(config);
-      },
-      ensureInitialized(_defaultConfig) {
-        throw new Error("not used");
-      },
-    };
+    try {
+      const config = makeRuntimeConfig(runtimeDir);
+      config.logging = {
+        operationalLevel: "error",
+        auditLevel: "error",
+      };
+      const configStore: RuntimeConfigStoreLike = {
+        load() {
+          return Promise.resolve(config);
+        },
+        ensureInitialized(_defaultConfig) {
+          throw new Error("not used");
+        },
+      };
 
-    Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", "info");
-    Deno.env.set("KATO_LOGGING_AUDIT_LEVEL", "info");
+      Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", "info");
+      Deno.env.set("KATO_LOGGING_AUDIT_LEVEL", "info");
 
-    const exitCode = await runDaemonSubprocess({
-      configStore,
-      userConfigStore: makeUserConfigStore(),
-      runtimeLoop(options = {}) {
-        return Promise.all([
-          options.operationalLogger?.info("test.operational.info", "allowed"),
-          options.auditLogger?.record("test.audit.info", "allowed"),
-        ]).then(() => undefined);
-      },
-    });
+      const exitCode = await runDaemonSubprocess({
+        configStore,
+        userConfigStore: makeUserConfigStore(),
+        runtimeLoop(options = {}) {
+          return Promise.all([
+            options.operationalLogger?.info("test.operational.info", "allowed"),
+            options.auditLogger?.record("test.audit.info", "allowed"),
+          ]).then(() => undefined);
+        },
+      });
 
-    assertEquals(exitCode, 0);
+      assertEquals(exitCode, 0);
 
-    const operationalLogPath = join(
-      runtimeDir,
-      "logs",
-      "operational.jsonl",
-    );
-    const auditLogPath = join(runtimeDir, "logs", "security-audit.jsonl");
-    const operationalLog = await Deno.readTextFile(operationalLogPath);
-    const auditLog = await Deno.readTextFile(auditLogPath);
+      const operationalLogPath = join(
+        runtimeDir,
+        "logs",
+        "operational.jsonl",
+      );
+      const auditLogPath = join(runtimeDir, "logs", "security-audit.jsonl");
+      const operationalLog = await Deno.readTextFile(operationalLogPath);
+      const auditLog = await Deno.readTextFile(auditLogPath);
 
-    assertStringIncludes(operationalLog, '"event":"test.operational.info"');
-    assertStringIncludes(auditLog, '"event":"test.audit.info"');
-  } finally {
-    if (originalOperational === undefined) {
-      Deno.env.delete("KATO_LOGGING_OPERATIONAL_LEVEL");
-    } else {
-      Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", originalOperational);
+      assertStringIncludes(operationalLog, '"event":"test.operational.info"');
+      assertStringIncludes(auditLog, '"event":"test.audit.info"');
+    } finally {
+      if (originalOperational === undefined) {
+        Deno.env.delete("KATO_LOGGING_OPERATIONAL_LEVEL");
+      } else {
+        Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", originalOperational);
+      }
+      if (originalAudit === undefined) {
+        Deno.env.delete("KATO_LOGGING_AUDIT_LEVEL");
+      } else {
+        Deno.env.set("KATO_LOGGING_AUDIT_LEVEL", originalAudit);
+      }
+      await removePathIfPresent(runtimeDir);
     }
-    if (originalAudit === undefined) {
-      Deno.env.delete("KATO_LOGGING_AUDIT_LEVEL");
-    } else {
-      Deno.env.set("KATO_LOGGING_AUDIT_LEVEL", originalAudit);
-    }
-    await removePathIfPresent(runtimeDir);
-  }
+  });
 });
 
 Deno.test("runDaemonSubprocess fails closed on invalid log-level env override", async () => {
-  const originalOperational = Deno.env.get("KATO_LOGGING_OPERATIONAL_LEVEL");
-  const stderr: string[] = [];
+  await withLockedEnvironment(async () => {
+    const originalOperational = Deno.env.get("KATO_LOGGING_OPERATIONAL_LEVEL");
+    const stderr: string[] = [];
 
-  try {
-    Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", "verbose");
-    const configStore: RuntimeConfigStoreLike = {
-      load() {
-        return Promise.resolve(makeRuntimeConfig());
-      },
-      ensureInitialized(_defaultConfig) {
-        throw new Error("not used");
-      },
-    };
+    try {
+      Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", "verbose");
+      const configStore: RuntimeConfigStoreLike = {
+        load() {
+          return Promise.resolve(makeRuntimeConfig());
+        },
+        ensureInitialized(_defaultConfig) {
+          throw new Error("not used");
+        },
+      };
 
-    const exitCode = await runDaemonSubprocess({
-      configStore,
-      sharedConfigStore: makeSharedConfigStore(),
-      userConfigStore: makeUserConfigStore(),
-      writeStderr(text: string) {
-        stderr.push(text);
-      },
-      runtimeLoop() {
-        throw new Error("runtime loop should not be called");
-      },
-    });
+      const exitCode = await runDaemonSubprocess({
+        configStore,
+        sharedConfigStore: makeSharedConfigStore(),
+        userConfigStore: makeUserConfigStore(),
+        writeStderr(text: string) {
+          stderr.push(text);
+        },
+        runtimeLoop() {
+          throw new Error("runtime loop should not be called");
+        },
+      });
 
-    assertEquals(exitCode, 1);
-    assertStringIncludes(stderr.join(""), "invalid logging level override");
-    assertStringIncludes(
-      stderr.join(""),
-      "KATO_LOGGING_OPERATIONAL_LEVEL must be one of",
-    );
-  } finally {
-    if (originalOperational === undefined) {
-      Deno.env.delete("KATO_LOGGING_OPERATIONAL_LEVEL");
-    } else {
-      Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", originalOperational);
+      assertEquals(exitCode, 1);
+      assertStringIncludes(stderr.join(""), "invalid logging level override");
+      assertStringIncludes(
+        stderr.join(""),
+        "KATO_LOGGING_OPERATIONAL_LEVEL must be one of",
+      );
+    } finally {
+      if (originalOperational === undefined) {
+        Deno.env.delete("KATO_LOGGING_OPERATIONAL_LEVEL");
+      } else {
+        Deno.env.set("KATO_LOGGING_OPERATIONAL_LEVEL", originalOperational);
+      }
     }
-  }
+  });
 });
 
 Deno.test("runDaemonSubprocess prefers runtimeConfig.katoDir for session state paths", async () => {

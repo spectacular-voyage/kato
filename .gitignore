@@ -4,10 +4,9 @@
 # Deno cache and coverage artifacts
 .deno/
 coverage/
-.coverage/
+.coverage*
 coverage.lcov
 .test-tmp/
-.coverage-par/
 
 # Editor and OS artifacts
 .DS_Store

@@ -1,11 +1,111 @@
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
-import { WritePathPolicyGate } from "../apps/daemon/src/mod.ts";
+import {
+  resolveDefaultAllowedWriteRoots,
+  WritePathPolicyGate,
+} from "../apps/daemon/src/mod.ts";
+import { withLockedEnvironment } from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
+
+const PATH_POLICY_ENV_KEYS = [
+  "KATO_ALLOWED_WRITE_ROOT",
+  "KATO_ALLOWED_WRITE_ROOTS_JSON",
+] as const;
+
+type PathPolicyEnvKey = (typeof PATH_POLICY_ENV_KEYS)[number];
+
+function snapshotPathPolicyEnv(): Record<PathPolicyEnvKey, string | undefined> {
+  return Object.fromEntries(
+    PATH_POLICY_ENV_KEYS.map((key) => [key, Deno.env.get(key)]),
+  ) as Record<PathPolicyEnvKey, string | undefined>;
+}
+
+function setPathPolicyEnv(
+  values: Partial<Record<PathPolicyEnvKey, string | undefined>>,
+): void {
+  for (const key of PATH_POLICY_ENV_KEYS) {
+    if (!(key in values)) {
+      continue;
+    }
+    const value = values[key];
+    if (value === undefined) {
+      Deno.env.delete(key);
+      continue;
+    }
+    Deno.env.set(key, value);
+  }
+}
+
+function restorePathPolicyEnv(
+  snapshot: Record<PathPolicyEnvKey, string | undefined>,
+): void {
+  setPathPolicyEnv(snapshot);
+}
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
   await withTestTempDir("path-policy-", run);
 }
+
+Deno.test("resolveDefaultAllowedWriteRoots prefers JSON env and trims entries", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotPathPolicyEnv();
+    try {
+      setPathPolicyEnv({
+        KATO_ALLOWED_WRITE_ROOT: "/tmp/fallback",
+        KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify([
+          " ./notes ",
+          "",
+          7,
+          "/tmp/exports",
+        ]),
+      });
+
+      assertEquals(resolveDefaultAllowedWriteRoots(), [
+        "./notes",
+        "/tmp/exports",
+      ]);
+    } finally {
+      restorePathPolicyEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("resolveDefaultAllowedWriteRoots fails closed on invalid JSON env", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotPathPolicyEnv();
+    try {
+      setPathPolicyEnv({
+        KATO_ALLOWED_WRITE_ROOT: "/tmp/fallback",
+        KATO_ALLOWED_WRITE_ROOTS_JSON: "not-json",
+      });
+
+      assertEquals(resolveDefaultAllowedWriteRoots(), []);
+    } finally {
+      restorePathPolicyEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("resolveDefaultAllowedWriteRoots falls back to single-root env or cwd", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotPathPolicyEnv();
+    try {
+      setPathPolicyEnv({
+        KATO_ALLOWED_WRITE_ROOT: "/tmp/single-root",
+        KATO_ALLOWED_WRITE_ROOTS_JSON: undefined,
+      });
+      assertEquals(resolveDefaultAllowedWriteRoots(), ["/tmp/single-root"]);
+
+      setPathPolicyEnv({
+        KATO_ALLOWED_WRITE_ROOT: undefined,
+        KATO_ALLOWED_WRITE_ROOTS_JSON: undefined,
+      });
+      assertEquals(resolveDefaultAllowedWriteRoots(), ["."]);
+    } finally {
+      restorePathPolicyEnv(snapshot);
+    }
+  });
+});
 
 Deno.test("WritePathPolicyGate allows targets inside allowed root", async () => {
   await withTempDir(async (dir) => {
@@ -21,7 +121,29 @@ Deno.test("WritePathPolicyGate allows targets inside allowed root", async () => 
 
     assertEquals(decision.decision, "allow");
     assertEquals(decision.reason, "Target path is within allowed write roots");
+    assertEquals(
+      decision.canonicalTargetPath,
+      join(await Deno.realPath(allowedRoot), "exports", "session.md"),
+    );
     assertEquals(decision.matchedRoot, await Deno.realPath(allowedRoot));
+  });
+});
+
+Deno.test("WritePathPolicyGate allows the allowed root itself", async () => {
+  await withTempDir(async (dir) => {
+    const allowedRoot = join(dir, "allowed");
+    await Deno.mkdir(allowedRoot, { recursive: true });
+
+    const gate = new WritePathPolicyGate({
+      allowedRoots: [allowedRoot],
+    });
+    const decision = await gate.evaluateWritePath(allowedRoot);
+
+    assertEquals(decision.decision, "allow");
+    assertEquals(
+      decision.canonicalTargetPath,
+      await Deno.realPath(allowedRoot),
+    );
   });
 });
 
@@ -38,7 +160,36 @@ Deno.test("WritePathPolicyGate denies traversal outside allowed root", async () 
     );
 
     assertEquals(decision.decision, "deny");
+    assertEquals(
+      decision.canonicalTargetPath,
+      join(await Deno.realPath(dir), "outside.md"),
+    );
     assertEquals(decision.reason, "Target path is outside allowed write roots");
+  });
+});
+
+Deno.test("WritePathPolicyGate denies empty and null-byte target paths", async () => {
+  await withTempDir(async (dir) => {
+    const allowedRoot = join(dir, "allowed");
+    await Deno.mkdir(allowedRoot, { recursive: true });
+
+    const gate = new WritePathPolicyGate({
+      allowedRoots: [allowedRoot],
+    });
+
+    const emptyDecision = await gate.evaluateWritePath("   ");
+    assertEquals(emptyDecision, {
+      decision: "deny",
+      targetPath: "   ",
+      reason: "Target path is empty",
+    });
+
+    const nullByteDecision = await gate.evaluateWritePath("bad\0path.md");
+    assertEquals(nullByteDecision, {
+      decision: "deny",
+      targetPath: "bad\0path.md",
+      reason: "Target path contains null bytes",
+    });
   });
 });
 

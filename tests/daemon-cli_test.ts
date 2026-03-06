@@ -42,6 +42,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
+  withLockedEnvironment,
 } from "./test_env.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
 
@@ -2006,86 +2007,20 @@ Deno.test(
 Deno.test(
   "runDaemonCli start auto-initializes global config and warns when local .kato exists",
   async () => {
-    const snapshot = snapshotRuntimeEnv();
-    const rootDir = await makeTestTempDir("daemon-cli-start-global-root-");
-    const homeDir = join(rootDir, "home");
-    const projectDir = join(rootDir, "project");
-    const runtimeDir = join(homeDir, ".kato", "daemon");
-    const localKatoDir = join(projectDir, ".kato");
-    try {
-      setRuntimeEnv({
-        HOME: homeDir,
-        USERPROFILE: undefined,
-        KATO_RUNTIME_DIR: undefined,
-      });
-      await Deno.mkdir(localKatoDir, { recursive: true });
-      const harness = makeRuntimeHarness(runtimeDir);
-      harness.runtime.cwdPath = projectDir;
-      const statusStore = makeInMemoryStatusStore();
-      const controlStore = makeInMemoryControlStore();
-      const daemonLauncher = makeDaemonLauncher(
-        31337,
-        makeStartupAckCallback(statusStore, 31337),
-      );
-      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-      const { store: configStore } = makeInMemoryConfigStore();
-      const { store: userConfigStore } = makeInMemoryUserConfigStore(
-        undefined,
-        `${runtimeDir}/kato-user-config.yaml`,
-      );
-
-      const code = await runDaemonCli(["start"], {
-        runtime: harness.runtime,
-        defaultRuntimeConfig,
-        configStore,
-        userConfigStore,
-        statusStore,
-        controlStore: controlStore.store,
-        daemonLauncher: daemonLauncher.launcher,
-        autoInitOnStart: true,
-      });
-
-      assertEquals(code, 0);
-      const output = harness.stdout.join("");
-      assertStringIncludes(
-        output,
-        `initialized runtime config at ${runtimeDir}/kato-daemon-config.yaml`,
-      );
-      assertStringIncludes(output, "warning: detected local state");
-      assertStringIncludes(output, localKatoDir);
-      assertStringIncludes(
-        output,
-        `using global runtime root ${join(homeDir, ".kato")}`,
-      );
-    } finally {
-      restoreRuntimeEnv(snapshot);
-      await removePathIfPresent(rootDir);
-    }
-  },
-);
-
-Deno.test(
-  "runDaemonCli init/start/restart warn when local .kato exists but global root is active",
-  async () => {
-    const snapshot = snapshotRuntimeEnv();
-    const rootDir = await makeTestTempDir("daemon-cli-global-root-warning-");
-    const homeDir = join(rootDir, "home");
-    const projectDir = join(rootDir, "project");
-    const runtimeDir = join(homeDir, ".kato", "daemon");
-    const localKatoDir = join(projectDir, ".kato");
-    try {
-      setRuntimeEnv({
-        HOME: homeDir,
-        USERPROFILE: undefined,
-        KATO_RUNTIME_DIR: undefined,
-      });
-      await Deno.mkdir(localKatoDir, { recursive: true });
-      const commands: Array<"init" | "start" | "restart"> = [
-        "init",
-        "start",
-        "restart",
-      ];
-      for (const command of commands) {
+    await withLockedEnvironment(async () => {
+      const snapshot = snapshotRuntimeEnv();
+      const rootDir = await makeTestTempDir("daemon-cli-start-global-root-");
+      const homeDir = join(rootDir, "home");
+      const projectDir = join(rootDir, "project");
+      const runtimeDir = join(homeDir, ".kato", "daemon");
+      const localKatoDir = join(projectDir, ".kato");
+      try {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+        await Deno.mkdir(localKatoDir, { recursive: true });
         const harness = makeRuntimeHarness(runtimeDir);
         harness.runtime.cwdPath = projectDir;
         const statusStore = makeInMemoryStatusStore();
@@ -2100,7 +2035,8 @@ Deno.test(
           undefined,
           `${runtimeDir}/kato-user-config.yaml`,
         );
-        const code = await runDaemonCli([command], {
+
+        const code = await runDaemonCli(["start"], {
           runtime: harness.runtime,
           defaultRuntimeConfig,
           configStore,
@@ -2113,40 +2049,111 @@ Deno.test(
 
         assertEquals(code, 0);
         const output = harness.stdout.join("");
+        assertStringIncludes(
+          output,
+          `initialized runtime config at ${runtimeDir}/kato-daemon-config.yaml`,
+        );
         assertStringIncludes(output, "warning: detected local state");
         assertStringIncludes(output, localKatoDir);
+        assertStringIncludes(
+          output,
+          `using global runtime root ${join(homeDir, ".kato")}`,
+        );
+      } finally {
+        restoreRuntimeEnv(snapshot);
+        await removePathIfPresent(rootDir);
       }
-    } finally {
-      restoreRuntimeEnv(snapshot);
-      await removePathIfPresent(rootDir);
-    }
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli init/start/restart warn when local .kato exists but global root is active",
+  async () => {
+    await withLockedEnvironment(async () => {
+      const snapshot = snapshotRuntimeEnv();
+      const rootDir = await makeTestTempDir("daemon-cli-global-root-warning-");
+      const homeDir = join(rootDir, "home");
+      const projectDir = join(rootDir, "project");
+      const runtimeDir = join(homeDir, ".kato", "daemon");
+      const localKatoDir = join(projectDir, ".kato");
+      try {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+        await Deno.mkdir(localKatoDir, { recursive: true });
+        const commands: Array<"init" | "start" | "restart"> = [
+          "init",
+          "start",
+          "restart",
+        ];
+        for (const command of commands) {
+          const harness = makeRuntimeHarness(runtimeDir);
+          harness.runtime.cwdPath = projectDir;
+          const statusStore = makeInMemoryStatusStore();
+          const controlStore = makeInMemoryControlStore();
+          const daemonLauncher = makeDaemonLauncher(
+            31337,
+            makeStartupAckCallback(statusStore, 31337),
+          );
+          const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+          const { store: configStore } = makeInMemoryConfigStore();
+          const { store: userConfigStore } = makeInMemoryUserConfigStore(
+            undefined,
+            `${runtimeDir}/kato-user-config.yaml`,
+          );
+          const code = await runDaemonCli([command], {
+            runtime: harness.runtime,
+            defaultRuntimeConfig,
+            configStore,
+            userConfigStore,
+            statusStore,
+            controlStore: controlStore.store,
+            daemonLauncher: daemonLauncher.launcher,
+            autoInitOnStart: true,
+          });
+
+          assertEquals(code, 0);
+          const output = harness.stdout.join("");
+          assertStringIncludes(output, "warning: detected local state");
+          assertStringIncludes(output, localKatoDir);
+        }
+      } finally {
+        restoreRuntimeEnv(snapshot);
+        await removePathIfPresent(rootDir);
+      }
+    });
   },
 );
 
 Deno.test(
   "runDaemonCli fails early when KATO_RUNTIME_DIR is relative",
   async () => {
-    const snapshot = snapshotRuntimeEnv();
-    const stderr: string[] = [];
-    try {
-      setRuntimeEnv({
-        KATO_RUNTIME_DIR: ".kato/daemon",
-      });
-      const code = await runDaemonCli(["start"], {
-        runtime: {
-          writeStderr(text: string) {
-            stderr.push(text);
+    await withLockedEnvironment(async () => {
+      const snapshot = snapshotRuntimeEnv();
+      const stderr: string[] = [];
+      try {
+        setRuntimeEnv({
+          KATO_RUNTIME_DIR: ".kato/daemon",
+        });
+        const code = await runDaemonCli(["start"], {
+          runtime: {
+            writeStderr(text: string) {
+              stderr.push(text);
+            },
           },
-        },
-      });
-      assertEquals(code, 1);
-      assertStringIncludes(
-        stderr.join(""),
-        "KATO_RUNTIME_DIR must resolve to an absolute path",
-      );
-    } finally {
-      restoreRuntimeEnv(snapshot);
-    }
+        });
+        assertEquals(code, 1);
+        assertStringIncludes(
+          stderr.join(""),
+          "KATO_RUNTIME_DIR must resolve to an absolute path",
+        );
+      } finally {
+        restoreRuntimeEnv(snapshot);
+      }
+    });
   },
 );
 
