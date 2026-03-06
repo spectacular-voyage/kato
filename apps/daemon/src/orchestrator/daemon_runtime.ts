@@ -70,6 +70,7 @@ import {
 import {
   createDefaultUserConfig,
   resolveFrontmatterParticipantUsername,
+  resolvePreferredParticipantUsername,
 } from "../config/mod.ts";
 import { DAEMON_APP_VERSION } from "../version.ts";
 import { isRecord } from "../../../runtime/src/config/file_store_utils.ts";
@@ -118,6 +119,7 @@ const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
 const CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES = 5;
 const CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS = 25;
 const FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS = 5_000;
+const UNKNOWN_OUTPUT_USERNAME = "unknown-user";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -519,11 +521,12 @@ function openWorkspaceOutputCycle(
 function applyWorkspaceProfileSnapshot(
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
   profile: ResolvedWorkspaceProfile,
+  resolvedDefaultOutputDir: string,
 ): void {
   output.workspaceAliasSnapshot = profile.alias;
   output.sourceConfigPath = profile.configPath;
   output.workspaceRootSnapshot = profile.workspaceRoot;
-  output.resolvedDefaultOutputDir = profile.resolvedDefaultOutputDir;
+  output.resolvedDefaultOutputDir = resolvedDefaultOutputDir;
   output.filenameTemplate = profile.filenameTemplate;
   output.writerFeatureFlags = { ...profile.writerFeatureFlags };
 }
@@ -534,6 +537,7 @@ function createWorkspaceOutputState(options: {
     SessionMetadataV1["workspaceOutputs"]
   >[number]["currentDestination"];
   resolvedPath: string;
+  resolvedDefaultOutputDir: string;
   desiredState: "on" | "off";
   writeCursor: number;
   nowIso: string;
@@ -546,7 +550,7 @@ function createWorkspaceOutputState(options: {
     currentResolvedPath: options.resolvedPath,
     sourceConfigPath: options.profile.configPath,
     workspaceRootSnapshot: options.profile.workspaceRoot,
-    resolvedDefaultOutputDir: options.profile.resolvedDefaultOutputDir,
+    resolvedDefaultOutputDir: options.resolvedDefaultOutputDir,
     filenameTemplate: options.profile.filenameTemplate,
     writerFeatureFlags: { ...options.profile.writerFeatureFlags },
     writeCursor: options.writeCursor,
@@ -555,24 +559,23 @@ function createWorkspaceOutputState(options: {
   };
 }
 
-function renderWorkspaceFilename(
-  profile: ResolvedWorkspaceProfile,
-  provider: string,
-  sessionId: string,
-  now: Date,
-  options: {
-    snapshotSnippet?: string;
-    boundarySnapshot?: ConversationEvent[];
-  } = {},
-): string {
+function buildWorkspaceTemplateTokens(options: {
+  profile: ResolvedWorkspaceProfile;
+  provider: string;
+  sessionId: string;
+  now: Date;
+  outputUsername: string;
+  snapshotSnippet?: string;
+  boundarySnapshot?: ConversationEvent[];
+}): Record<string, string> {
   const timestampTokens = readTimestampTemplateParts(
-    now,
-    profile.workspaceTimezone,
+    options.now,
+    options.profile.workspaceTimezone,
   );
-  const tokens: Record<string, string> = {
-    provider: sanitizeFilenamePart(provider),
-    sessionId: sanitizeFilenamePart(sessionId),
-    sessionShortId: sanitizeFilenamePart(sessionId.slice(0, 8)),
+  return {
+    provider: sanitizeFilenamePart(options.provider),
+    sessionId: sanitizeFilenamePart(options.sessionId),
+    sessionShortId: sanitizeFilenamePart(options.sessionId.slice(0, 8)),
     YYYY: timestampTokens.YYYY,
     YY: timestampTokens.YY,
     MM: timestampTokens.MM,
@@ -581,11 +584,42 @@ function renderWorkspaceFilename(
     mm: timestampTokens.mm,
     timestampHumane: timestampTokens.timestampHumane,
     snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)),
+    username: sanitizeFilenamePart(options.outputUsername),
   };
-  let rendered = profile.filenameTemplate;
+}
+
+function renderWorkspaceTemplate(
+  template: string,
+  tokens: Record<string, string>,
+): string {
+  let rendered = template;
   for (const [token, replacement] of Object.entries(tokens)) {
     rendered = rendered.replaceAll(`{${token}}`, replacement);
   }
+  return rendered;
+}
+
+function renderWorkspaceFilename(
+  profile: ResolvedWorkspaceProfile,
+  provider: string,
+  sessionId: string,
+  now: Date,
+  outputUsername: string,
+  options: {
+    snapshotSnippet?: string;
+    boundarySnapshot?: ConversationEvent[];
+  } = {},
+): string {
+  const tokens = buildWorkspaceTemplateTokens({
+    profile,
+    provider,
+    sessionId,
+    now,
+    outputUsername,
+    snapshotSnippet: options.snapshotSnippet,
+    boundarySnapshot: options.boundarySnapshot,
+  });
+  const rendered = renderWorkspaceTemplate(profile.filenameTemplate, tokens);
   const normalized = rendered
     .replace(/[\\/]+/g, "-")
     .replace(/[^A-Za-z0-9._-]+/g, "-")
@@ -594,6 +628,25 @@ function renderWorkspaceFilename(
   return normalized.length > 0
     ? normalized
     : `${tokens.timestampHumane}-${tokens.snippetSlug}-${tokens.provider}.md`;
+}
+
+function resolveWorkspaceDefaultOutputDir(options: {
+  profile: ResolvedWorkspaceProfile;
+  provider: string;
+  sessionId: string;
+  now: Date;
+  outputUsername: string;
+  snapshotSnippet?: string;
+  boundarySnapshot?: ConversationEvent[];
+}): string {
+  const tokens = buildWorkspaceTemplateTokens(options);
+  const rendered = renderWorkspaceTemplate(
+    options.profile.defaultOutputDirTemplate,
+    tokens,
+  );
+  return isAbsolute(rendered)
+    ? resolve(rendered)
+    : resolve(options.profile.workspaceRoot, rendered);
 }
 
 async function isDirectoryTargetPath(path: string): Promise<boolean> {
@@ -667,6 +720,7 @@ async function resolveWorkspaceCommandDestination(options: {
   profile: ResolvedWorkspaceProfile;
   provider: string;
   sessionId: string;
+  outputUsername: string;
   snapshotSnippet?: string;
   boundarySnapshot?: ConversationEvent[];
   rawArgument?: string;
@@ -674,20 +728,31 @@ async function resolveWorkspaceCommandDestination(options: {
   now: Date;
 }): Promise<{
   resolvedPath: string;
+  resolvedDefaultOutputDir: string;
   usesGeneratedFilename: boolean;
   binding: NonNullable<
     SessionMetadataV1["workspaceOutputs"]
   >[number]["currentDestination"];
 }> {
+  const resolvedDefaultOutputDir = resolveWorkspaceDefaultOutputDir({
+    profile: options.profile,
+    provider: options.provider,
+    sessionId: options.sessionId,
+    now: options.now,
+    outputUsername: options.outputUsername,
+    snapshotSnippet: options.snapshotSnippet,
+    boundarySnapshot: options.boundarySnapshot,
+  });
   const normalized = normalizeRawCommandTargetPath(options.rawArgument);
   if (!normalized) {
     const generatedPath = join(
-      options.profile.resolvedDefaultOutputDir,
+      resolvedDefaultOutputDir,
       renderWorkspaceFilename(
         options.profile,
         options.provider,
         options.sessionId,
         options.now,
+        options.outputUsername,
         {
           snapshotSnippet: options.snapshotSnippet,
           boundarySnapshot: options.boundarySnapshot,
@@ -699,6 +764,7 @@ async function resolveWorkspaceCommandDestination(options: {
       : generatedPath;
     return {
       resolvedPath: generated,
+      resolvedDefaultOutputDir,
       usesGeneratedFilename: true,
       binding: toWorkspaceDestinationBinding(options.profile, generated),
     };
@@ -720,6 +786,7 @@ async function resolveWorkspaceCommandDestination(options: {
         options.provider,
         options.sessionId,
         options.now,
+        options.outputUsername,
         {
           snapshotSnippet: options.snapshotSnippet,
           boundarySnapshot: options.boundarySnapshot,
@@ -733,6 +800,7 @@ async function resolveWorkspaceCommandDestination(options: {
       : resolvedPathBase;
   return {
     resolvedPath,
+    resolvedDefaultOutputDir,
     usesGeneratedFilename: generatedFromDirectory,
     binding: isAbsolute(normalized)
       ? {
@@ -742,7 +810,6 @@ async function resolveWorkspaceCommandDestination(options: {
       : toWorkspaceDestinationBinding(options.profile, resolvedPath),
   };
 }
-
 function readCommandCursor(metadata: SessionMetadataV1): number {
   const raw = metadata.commandCursor;
   if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) {
@@ -1230,11 +1297,16 @@ function createOutputOverridesFromWorkspaceProfile(
   captureIncludeSystemEvents: boolean,
   userConfig: UserConfig,
 ): RecordingOutputOverrides {
+  const preferredUsername = resolvePreferredParticipantUsername({
+    userConfig,
+    workspaceId: profile.workspaceId,
+  }) ?? UNKNOWN_OUTPUT_USERNAME;
   return createOutputOverrides({
     workspaceId: profile.workspaceId,
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
     workspaceTimezone: profile.workspaceTimezone,
+    preferredUsername,
     captureIncludeSystemEvents,
     userConfig,
   });
@@ -1254,6 +1326,7 @@ function createOutputOverrides(options: {
     writerItalicizeUserMessages: boolean;
   };
   workspaceTimezone: string;
+  preferredUsername: string;
   captureIncludeSystemEvents: boolean;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
@@ -1290,6 +1363,11 @@ function createOutputOverrides(options: {
         options.writerFeatureFlags.writerItalicizeUserMessages,
       includeSystemEvents: options.captureIncludeSystemEvents,
       headingTimestampTimezone: options.workspaceTimezone,
+      ...(options.markdownFrontmatter.addParticipantUsernameToHeadings
+        ? {
+          speakerNames: { user: options.preferredUsername },
+        }
+        : {}),
     },
   };
 }
@@ -1301,6 +1379,10 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
   workspaceProfileResolver: WorkspaceProfileResolverLike;
   userConfig: UserConfig;
 }): Promise<RecordingOutputOverrides> {
+  const preferredUsername = resolvePreferredParticipantUsername({
+    userConfig: options.userConfig,
+    workspaceId: options.output.workspaceId,
+  }) ?? UNKNOWN_OUTPUT_USERNAME;
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
   );
@@ -1332,6 +1414,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           ),
           workspaceTimezone: overrides.workspaceTimezone ??
             DEFAULT_WORKSPACE_TIMEZONE,
+          preferredUsername,
           captureIncludeSystemEvents: options.captureIncludeSystemEvents,
           userConfig: options.userConfig,
         });
@@ -1350,6 +1433,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
       options.output.writerFeatureFlags,
     ),
     workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
+    preferredUsername,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
     userConfig: options.userConfig,
   });
@@ -1602,6 +1686,20 @@ async function applyPersistentControlCommandsForEvent(
           captureIncludeSystemEvents,
           userConfig,
         );
+        const outputUsername = resolvePreferredParticipantUsername({
+          userConfig,
+          workspaceId: workspace.workspaceId,
+        }) ?? UNKNOWN_OUTPUT_USERNAME;
+        const commandNow = now();
+        const resolvedDefaultOutputDir = resolveWorkspaceDefaultOutputDir({
+          profile,
+          provider,
+          sessionId: providerSessionId,
+          now: commandNow,
+          outputUsername,
+          snapshotSnippet,
+          boundarySnapshot,
+        });
         let output = findWorkspaceOutput(metadata, workspace.workspaceId);
 
         if (command.verb === "stop") {
@@ -1623,10 +1721,11 @@ async function applyPersistentControlCommandsForEvent(
               profile,
               provider,
               sessionId: providerSessionId,
+              outputUsername,
               snapshotSnippet,
               boundarySnapshot,
               rawArgument: command.argument,
-              now: now(),
+              now: commandNow,
             });
             const resolvedDestination = await validateDestinationPathForCommand(
               recordingPipeline,
@@ -1641,6 +1740,7 @@ async function applyPersistentControlCommandsForEvent(
                 profile,
                 binding: resolved.binding,
                 resolvedPath: resolvedDestination,
+                resolvedDefaultOutputDir: resolved.resolvedDefaultOutputDir,
                 desiredState: "off",
                 writeCursor,
                 nowIso: now().toISOString(),
@@ -1653,7 +1753,11 @@ async function applyPersistentControlCommandsForEvent(
                 writeCursor,
                 now().toISOString(),
               );
-              applyWorkspaceProfileSnapshot(output, profile);
+              applyWorkspaceProfileSnapshot(
+                output,
+                profile,
+                resolved.resolvedDefaultOutputDir,
+              );
               output.currentDestination = resolved.binding;
               output.currentResolvedPath = resolvedDestination;
               output.writeCursor = writeCursor;
@@ -1671,7 +1775,11 @@ async function applyPersistentControlCommandsForEvent(
           if (output.desiredState === "on" && !retargeted) {
             commandNoop = true;
           } else {
-            applyWorkspaceProfileSnapshot(output, profile);
+            applyWorkspaceProfileSnapshot(
+              output,
+              profile,
+              resolvedDefaultOutputDir,
+            );
             const cycleId = openWorkspaceOutputCycle(
               output,
               writeCursor,
@@ -1708,11 +1816,12 @@ async function applyPersistentControlCommandsForEvent(
             profile,
             provider,
             sessionId: providerSessionId,
+            outputUsername,
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
             ensureGeneratedPathUnique: true,
-            now: now(),
+            now: commandNow,
           });
           let targetPath = await validateDestinationPathForCommand(
             recordingPipeline,
@@ -1771,6 +1880,7 @@ async function applyPersistentControlCommandsForEvent(
               profile,
               binding: targetBinding,
               resolvedPath: targetPath,
+              resolvedDefaultOutputDir: resolved.resolvedDefaultOutputDir,
               desiredState: "off",
               writeCursor,
               nowIso: now().toISOString(),
@@ -1788,7 +1898,11 @@ async function applyPersistentControlCommandsForEvent(
           if (!output) {
             throw new Error("Workspace output state was not created");
           }
-          applyWorkspaceProfileSnapshot(output, profile);
+          applyWorkspaceProfileSnapshot(
+            output,
+            profile,
+            resolved.resolvedDefaultOutputDir,
+          );
           output.currentDestination = targetBinding;
           output.currentResolvedPath = targetPath;
           let activeCycleId = output.activeRecordingCycleId;
@@ -1832,10 +1946,11 @@ async function applyPersistentControlCommandsForEvent(
             profile,
             provider,
             sessionId: providerSessionId,
+            outputUsername,
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
-            now: now(),
+            now: commandNow,
           });
           const targetPath = await validateDestinationPathForCommand(
             recordingPipeline,
@@ -2046,6 +2161,11 @@ async function applyControlCommandsForEvent(
           captureIncludeSystemEvents,
           userConfig,
         );
+        const outputUsername = resolvePreferredParticipantUsername({
+          userConfig,
+          workspaceId: workspace.workspaceId,
+        }) ?? UNKNOWN_OUTPUT_USERNAME;
+        const commandNow = now();
         const existingState = sessionEventState.workspaceOutputs.get(
           workspace.workspaceId,
         );
@@ -2070,10 +2190,11 @@ async function applyControlCommandsForEvent(
               profile,
               provider,
               sessionId,
+              outputUsername,
               snapshotSnippet,
               boundarySnapshot,
               rawArgument: command.argument,
-              now: now(),
+              now: commandNow,
             });
             resolvedDestination = await validateDestinationPathForCommand(
               recordingPipeline,
@@ -2141,11 +2262,12 @@ async function applyControlCommandsForEvent(
             profile,
             provider,
             sessionId,
+            outputUsername,
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
             ensureGeneratedPathUnique: true,
-            now: now(),
+            now: commandNow,
           });
           let resolvedDestination = await validateDestinationPathForCommand(
             recordingPipeline,
@@ -2241,10 +2363,11 @@ async function applyControlCommandsForEvent(
             profile,
             provider,
             sessionId,
+            outputUsername,
             snapshotSnippet,
             boundarySnapshot,
             rawArgument: command.argument,
-            now: now(),
+            now: commandNow,
           });
           const targetPath = await validateDestinationPathForCommand(
             recordingPipeline,

@@ -382,6 +382,9 @@ Participant username precedence for frontmatter is:
    that mapped username.
 3. Otherwise, use `defaultUsername` when non-empty.
 
+Frontmatter user entries are emitted as plain usernames (for example `djradon`)
+without a `user.` prefix.
+
 ## Filename Templating
 
 Supported `filenameTemplate` tokens:
@@ -398,6 +401,11 @@ Supported `filenameTemplate` tokens:
 - `{timestampHumane}`: `YYYY-MM-DD_HHmm` in `workspaceTimezone`
 - `{snippetSlug}`: slugified session snippet (`snapshot.metadata.snippet` first,
   then command-time snippet extraction, then `conversation`)
+
+- `{username}`: resolved username slug (`workspaceUsernames[workspaceId]` ->
+  `defaultUsername` -> `unknown-user`)
+
+defaultOutputDir supports the same template tokens as `filenameTemplate`.
 
 ## Timezone
 
@@ -425,3 +433,4 @@ Supported `filenameTemplate` tokens:
   - `dev-docs/notes/dev.general-guidance.md`
   - `dev-docs/notes/dev.codebase-overview.md`
   - `dev-docs/notes/dev.decision-log.md`
+
