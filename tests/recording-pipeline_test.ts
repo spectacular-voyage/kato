@@ -720,7 +720,7 @@ Deno.test(
     });
 
     assertEquals(writerSpy.renderOptionsByCall[0]?.frontmatterParticipants, [
-      "user.djradon",
+      "djradon",
       "codex.gpt-5.3-codex",
     ]);
   },

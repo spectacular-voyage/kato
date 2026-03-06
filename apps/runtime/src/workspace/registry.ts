@@ -36,6 +36,7 @@ const ALLOWED_FILENAME_TEMPLATE_TOKENS = new Set([
   "mm",
   "timestampHumane",
   "snippetSlug",
+  "username",
 ]);
 const REMOVED_FILENAME_TEMPLATE_TOKENS = new Set([
   "timestampUtc",
@@ -57,6 +58,7 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
   "includeFrontmatterInMarkdownRecordings",
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
+  "addParticipantUsernameToHeadings",
   "includeSessionIds",
   "includeWorkspaceIds",
   "includeRecordingIds",
@@ -130,6 +132,7 @@ export interface ResolvedWorkspaceProfile {
   workspaceRoot: string;
   configPath: string;
   resolvedDefaultOutputDir: string;
+  defaultOutputDirTemplate: string;
   filenameTemplate: string;
   workspaceTimezone: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
@@ -373,9 +376,10 @@ function trimOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function validateFilenameTemplateTokens(
+function validateTemplateTokens(
   template: string,
   configPath: string,
+  field: "filenameTemplate" | "defaultOutputDir",
 ): void {
   for (const match of template.matchAll(FILENAME_TEMPLATE_TOKEN_PATTERN)) {
     const token = match[1];
@@ -387,11 +391,11 @@ function validateFilenameTemplateTokens(
     }
     if (REMOVED_FILENAME_TEMPLATE_TOKENS.has(token)) {
       throw new Error(
-        `filenameTemplate token '{${token}}' is no longer supported: ${configPath}`,
+        `${field} token '{${token}}' is no longer supported: ${configPath}`,
       );
     }
     throw new Error(
-      `filenameTemplate token '{${token}}' is unsupported: ${configPath}`,
+      `${field} token '{${token}}' is unsupported: ${configPath}`,
     );
   }
 }
@@ -461,6 +465,8 @@ export function createDefaultWorkspaceMarkdownFrontmatterConfig(
     includeUpdatedInFrontmatter: overrides.includeUpdatedInFrontmatter ?? false,
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ?? false,
+    addParticipantUsernameToHeadings:
+      overrides.addParticipantUsernameToHeadings ?? false,
     includeSessionIds: overrides.includeSessionIds ?? true,
     includeWorkspaceIds: overrides.includeWorkspaceIds ?? true,
     includeRecordingIds: overrides.includeRecordingIds ?? true,
@@ -599,13 +605,17 @@ async function loadWorkspaceConfigLikeOverrides(
   }
 
   const defaultOutputDirRaw = parsed["defaultOutputDir"];
+  const defaultOutputDir = trimOptionalString(defaultOutputDirRaw);
   if (
     defaultOutputDirRaw !== undefined &&
-    trimOptionalString(defaultOutputDirRaw) === undefined
+    defaultOutputDir === undefined
   ) {
     throw new Error(
       `defaultOutputDir must be a non-empty string: ${configPath}`,
     );
+  }
+  if (defaultOutputDir) {
+    validateTemplateTokens(defaultOutputDir, configPath, "defaultOutputDir");
   }
 
   const filenameTemplateRaw = parsed["filenameTemplate"];
@@ -616,7 +626,7 @@ async function loadWorkspaceConfigLikeOverrides(
     );
   }
   if (filenameTemplate) {
-    validateFilenameTemplateTokens(filenameTemplate, configPath);
+    validateTemplateTokens(filenameTemplate, configPath, "filenameTemplate");
   }
 
   const workspaceTimezone = parseWorkspaceTimezone(
@@ -634,9 +644,7 @@ async function loadWorkspaceConfigLikeOverrides(
   );
 
   return {
-    ...(trimOptionalString(defaultOutputDirRaw)
-      ? { defaultOutputDir: trimOptionalString(defaultOutputDirRaw) }
-      : {}),
+    ...(defaultOutputDir ? { defaultOutputDir } : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
     ...(workspaceTimezone ? { workspaceTimezone } : {}),
     ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
@@ -748,17 +756,18 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
     }
 
     const overrides = await loadWorkspaceConfigOverrides(workspace.configPath);
-    const defaultOutputDir = overrides.defaultOutputDir ??
+    const defaultOutputDirTemplate = overrides.defaultOutputDir ??
       DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE;
-    const resolvedDefaultOutputDir = isAbsolute(defaultOutputDir)
-      ? resolve(defaultOutputDir)
-      : resolve(resolvedWorkspaceRoot, defaultOutputDir);
+    const resolvedDefaultOutputDir = isAbsolute(defaultOutputDirTemplate)
+      ? resolve(defaultOutputDirTemplate)
+      : resolve(resolvedWorkspaceRoot, defaultOutputDirTemplate);
     const profile: ResolvedWorkspaceProfile = {
       workspaceId: workspace.workspaceId,
       alias: workspace.alias,
       workspaceRoot: resolvedWorkspaceRoot,
       configPath: workspace.configPath,
       resolvedDefaultOutputDir,
+      defaultOutputDirTemplate,
       filenameTemplate: overrides.filenameTemplate ??
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
       workspaceTimezone: overrides.workspaceTimezone ??
@@ -889,6 +898,7 @@ export function createWorkspaceConfigScaffold(): string {
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",
     "  addParticipantUsernameToFrontmatter: false",
+    "  addParticipantUsernameToHeadings: false",
     "  includeSessionIds: true",
     "  includeWorkspaceIds: true",
     "  includeRecordingIds: true",

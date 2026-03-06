@@ -38,6 +38,7 @@ const MARKDOWN_FRONTMATTER_KEYS: Array<keyof MarkdownFrontmatterConfig> = [
   "includeFrontmatterInMarkdownRecordings",
   "includeUpdatedInFrontmatter",
   "addParticipantUsernameToFrontmatter",
+  "addParticipantUsernameToHeadings",
   "includeSessionIds",
   "includeWorkspaceIds",
   "includeRecordingIds",
@@ -88,6 +89,7 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     includeFrontmatterInMarkdownRecordings: true,
     includeUpdatedInFrontmatter: false,
     addParticipantUsernameToFrontmatter: false,
+    addParticipantUsernameToHeadings: false,
     includeSessionIds: true,
     includeWorkspaceIds: true,
     includeRecordingIds: true,
@@ -106,6 +108,9 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
     addParticipantUsernameToFrontmatter:
       overrides.addParticipantUsernameToFrontmatter ??
         defaults.addParticipantUsernameToFrontmatter,
+    addParticipantUsernameToHeadings:
+      overrides.addParticipantUsernameToHeadings ??
+        defaults.addParticipantUsernameToHeadings,
     includeSessionIds: overrides.includeSessionIds ??
       defaults.includeSessionIds,
     includeWorkspaceIds: overrides.includeWorkspaceIds ??
