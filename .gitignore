@@ -1,13 +1,17 @@
+# Kato itself
+.kato/
+
 # Deno cache and coverage artifacts
 .deno/
 coverage/
 .coverage/
 coverage.lcov
 .test-tmp/
+.coverage-par/
 
 # Editor and OS artifacts
 .DS_Store
 *.swp
 
-# Kato itself
-.kato/
+# Claude Code working directory
+.claude
