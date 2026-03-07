@@ -501,7 +501,7 @@ Validation workflow before merge:
       header.
 - [x] Add the Workspaces route with register/update flows, including the same
       validation and `allowedWriteRoots` side effects used by CLI today.
-- [ ] Add the Settings route with forms/actions for:
+- [x] Add the Settings route with forms/actions for:
       default username, exclude-me behavior, and workspace username map
       set/delete.
 - [ ] Add a Maintenance route with guided clean flows for logs and sessions:

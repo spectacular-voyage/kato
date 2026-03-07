@@ -144,6 +144,10 @@ a {
   gap: 12px;
 }
 
+.inline-form {
+  margin-top: 12px;
+}
+
 .form-label {
   font-size: 0.9rem;
   color: var(--muted);
@@ -238,6 +242,12 @@ a {
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--paper);
+}
+
+.checkbox-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .mono {

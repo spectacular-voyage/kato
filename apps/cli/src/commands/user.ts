@@ -1,32 +1,16 @@
 import type { UserConfig } from "@kato/shared";
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
+  clearDefaultUsername,
   createDefaultUserConfig,
+  deleteWorkspaceUsernameMapping,
+  loadUserSettings,
+  setDefaultUsername,
+  setExcludeMeFromParticipantList,
+  setWorkspaceUsernameMapping,
   validateAndNormalizeParticipantUsername,
 } from "@kato/runtime";
-import {
-  resolveWorkspaceBySelector,
-  resolveWorkspaceRegistryStore,
-  resolveWorkspaceSelector,
-  WorkspaceNotFoundError,
-} from "./workspace_shared.ts";
-
-interface UserMapListEntry {
-  workspaceId: string;
-  workspaceAlias: string;
-  username: string;
-}
-
-function compareUserMapEntries(
-  a: UserMapListEntry,
-  b: UserMapListEntry,
-): number {
-  const aliasCompare = a.workspaceAlias.localeCompare(b.workspaceAlias);
-  if (aliasCompare !== 0) {
-    return aliasCompare;
-  }
-  return a.workspaceId.localeCompare(b.workspaceId);
-}
+import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
 
 async function loadInitializedUserConfig(
   ctx: DaemonCliCommandContext,
@@ -37,37 +21,6 @@ async function loadInitializedUserConfig(
     config: initialized.config,
     path: initialized.path,
   };
-}
-
-function cloneUserConfig(config: UserConfig): UserConfig {
-  return {
-    schemaVersion: config.schemaVersion,
-    participants: {
-      defaultUsername: config.participants.defaultUsername,
-      workspaceUsernames: { ...config.participants.workspaceUsernames },
-      excludeMeFromParticipantList:
-        config.participants.excludeMeFromParticipantList,
-    },
-  };
-}
-
-function isWorkspaceSelectorNotFoundError(error: unknown): boolean {
-  return error instanceof WorkspaceNotFoundError;
-}
-
-function buildUserMapListEntries(
-  config: UserConfig,
-  workspaceAliasesById: Map<string, string>,
-): UserMapListEntry[] {
-  const mappings = Object.entries(config.participants.workspaceUsernames)
-    .map(([workspaceId, username]) => ({
-      workspaceId,
-      workspaceAlias: workspaceAliasesById.get(workspaceId) ?? "",
-      username,
-    }))
-    .sort(compareUserMapEntries);
-
-  return mappings;
 }
 
 export async function runUserInitCommand(
@@ -106,34 +59,22 @@ export async function runUserMapSetCommand(
   selector: string,
   username: string,
 ): Promise<void> {
-  const workspace = await resolveWorkspaceBySelector(ctx, selector);
   const normalizedUsername = validateAndNormalizeParticipantUsername(
     username,
     "username",
   );
-  const { config } = await loadInitializedUserConfig(ctx);
-  const nextConfig = cloneUserConfig(config);
-  nextConfig.participants.workspaceUsernames[workspace.workspaceId] =
-    normalizedUsername;
-  await ctx.resolveUserConfigStore().save(nextConfig);
-
-  await ctx.operationalLogger.info(
-    "user.map.set",
-    "Updated user workspace username mapping",
-    {
-      workspaceId: workspace.workspaceId,
-      workspaceAlias: workspace.alias,
-      username: normalizedUsername,
-    },
-  );
-  await ctx.auditLogger.command("user-map-set", {
-    workspaceId: workspace.workspaceId,
-    workspaceAlias: workspace.alias,
+  const result = await setWorkspaceUsernameMapping({
+    selector,
     username: normalizedUsername,
+    userConfigStore: ctx.resolveUserConfigStore(),
+    workspaceRegistryStore: resolveWorkspaceRegistryStore(ctx),
+    katoDir: ctx.runtimeConfig.katoDir,
+    operationalLogger: ctx.operationalLogger,
+    auditLogger: ctx.auditLogger,
   });
 
   ctx.runtime.writeStdout(
-    `user mapping set: ${workspace.alias} (${workspace.workspaceId}) -> ${normalizedUsername}\n`,
+    `user mapping set: ${result.workspaceAlias} (${result.workspaceId}) -> ${result.username}\n`,
   );
 }
 
@@ -141,13 +82,11 @@ export async function runUserMapListCommand(
   ctx: DaemonCliCommandContext,
   asJson: boolean,
 ): Promise<void> {
-  const { config } = await loadInitializedUserConfig(ctx);
-  const workspaces = await resolveWorkspaceRegistryStore(ctx).load();
-  const aliasesById = new Map(workspaces.map((workspace) => [
-    workspace.workspaceId,
-    workspace.alias,
-  ]));
-  const mappings = buildUserMapListEntries(config, aliasesById);
+  const { mappings } = await loadUserSettings({
+    userConfigStore: ctx.resolveUserConfigStore(),
+    workspaceRegistryStore: resolveWorkspaceRegistryStore(ctx),
+    katoDir: ctx.runtimeConfig.katoDir,
+  });
 
   if (asJson) {
     ctx.runtime.writeStdout(
@@ -174,49 +113,19 @@ export async function runUserMapDeleteCommand(
   ctx: DaemonCliCommandContext,
   selector: string,
 ): Promise<void> {
-  const trimmedSelector = resolveWorkspaceSelector(selector);
-  let workspaceId = trimmedSelector;
-  let workspaceAlias = trimmedSelector;
-  try {
-    const workspace = await resolveWorkspaceBySelector(ctx, trimmedSelector);
-    workspaceId = workspace.workspaceId;
-    workspaceAlias = workspace.alias;
-  } catch (error) {
-    if (!isWorkspaceSelectorNotFoundError(error)) {
-      throw error;
-    }
-  }
-
-  const { config } = await loadInitializedUserConfig(ctx);
-  const nextConfig = cloneUserConfig(config);
-  const deleted = Object.hasOwn(
-    nextConfig.participants.workspaceUsernames,
-    workspaceId,
-  );
-  delete nextConfig.participants.workspaceUsernames[workspaceId];
-  await ctx.resolveUserConfigStore().save(nextConfig);
-
-  await ctx.operationalLogger.info(
-    "user.map.delete",
-    deleted
-      ? "Deleted user workspace username mapping"
-      : "User workspace username mapping already absent",
-    {
-      workspaceId,
-      workspaceAlias,
-      deleted,
-    },
-  );
-  await ctx.auditLogger.command("user-map-delete", {
-    workspaceId,
-    workspaceAlias,
-    deleted,
+  const result = await deleteWorkspaceUsernameMapping({
+    selector,
+    userConfigStore: ctx.resolveUserConfigStore(),
+    workspaceRegistryStore: resolveWorkspaceRegistryStore(ctx),
+    katoDir: ctx.runtimeConfig.katoDir,
+    operationalLogger: ctx.operationalLogger,
+    auditLogger: ctx.auditLogger,
   });
 
   ctx.runtime.writeStdout(
     `${
-      deleted ? "user mapping deleted" : "user mapping already absent"
-    }: ${workspaceAlias} (${workspaceId})\n`,
+      result.deleted ? "user mapping deleted" : "user mapping already absent"
+    }: ${result.workspaceAlias} (${result.workspaceId})\n`,
   );
 }
 
@@ -224,41 +133,24 @@ export async function runUserDefaultSetCommand(
   ctx: DaemonCliCommandContext,
   username: string,
 ): Promise<void> {
-  const normalizedUsername = validateAndNormalizeParticipantUsername(
+  const result = await setDefaultUsername({
     username,
-    "username",
-  );
-  const { config } = await loadInitializedUserConfig(ctx);
-  const nextConfig = cloneUserConfig(config);
-  nextConfig.participants.defaultUsername = normalizedUsername;
-  await ctx.resolveUserConfigStore().save(nextConfig);
-
-  await ctx.operationalLogger.info(
-    "user.default.set",
-    "Updated default participant username",
-    { username: normalizedUsername },
-  );
-  await ctx.auditLogger.command("user-default-set", {
-    username: normalizedUsername,
+    userConfigStore: ctx.resolveUserConfigStore(),
+    operationalLogger: ctx.operationalLogger,
+    auditLogger: ctx.auditLogger,
   });
 
-  ctx.runtime.writeStdout(`user default username set: ${normalizedUsername}\n`);
+  ctx.runtime.writeStdout(`user default username set: ${result.username}\n`);
 }
 
 export async function runUserDefaultClearCommand(
   ctx: DaemonCliCommandContext,
 ): Promise<void> {
-  const { config } = await loadInitializedUserConfig(ctx);
-  const nextConfig = cloneUserConfig(config);
-  nextConfig.participants.defaultUsername = "";
-  await ctx.resolveUserConfigStore().save(nextConfig);
-
-  await ctx.operationalLogger.info(
-    "user.default.clear",
-    "Cleared default participant username",
-  );
-  await ctx.auditLogger.command("user-default-clear", {});
-
+  await clearDefaultUsername({
+    userConfigStore: ctx.resolveUserConfigStore(),
+    operationalLogger: ctx.operationalLogger,
+    auditLogger: ctx.auditLogger,
+  });
   ctx.runtime.writeStdout("user default username cleared\n");
 }
 
@@ -266,17 +158,13 @@ export async function runUserExcludeMeCommand(
   ctx: DaemonCliCommandContext,
   value: boolean,
 ): Promise<void> {
-  const { config } = await loadInitializedUserConfig(ctx);
-  const nextConfig = cloneUserConfig(config);
-  nextConfig.participants.excludeMeFromParticipantList = value;
-  await ctx.resolveUserConfigStore().save(nextConfig);
-
-  await ctx.operationalLogger.info(
-    "user.exclude_me.set",
-    "Updated excludeMeFromParticipantList setting",
-    { value },
+  const result = await setExcludeMeFromParticipantList({
+    value,
+    userConfigStore: ctx.resolveUserConfigStore(),
+    operationalLogger: ctx.operationalLogger,
+    auditLogger: ctx.auditLogger,
+  });
+  ctx.runtime.writeStdout(
+    `excludeMeFromParticipantList set to ${result.value}\n`,
   );
-  await ctx.auditLogger.command("user-exclude-me", { value });
-
-  ctx.runtime.writeStdout(`excludeMeFromParticipantList set to ${value}\n`);
 }

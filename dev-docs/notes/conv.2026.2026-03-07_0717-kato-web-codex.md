@@ -983,3 +983,212 @@ If you want, I can still help efficiently by tracing specific routes based on:
 - a pasted `curl -i http://localhost:5173/workspaces` result from your machine
 
 For now, the key runtime issue I already fixed was the missing `@kato/runtime` import alias in [apps/web/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json). If `/workspaces` is still failing after restarting the dev server, the next useful artifact is the actual server-side stack trace from your terminal.
+
+# User_2026-03-07_0835_31
+
+Can we allow access through the sandbox somehow? Or perhaps you can just use a real terminal?
+
+# gpt-5.4_2026-03-07_0835_36
+
+Not from inside this session.
+
+Two separate limits are in play:
+
+- The command sandbox here won’t let me bind/listen on local ports reliably.
+- The environment also can’t reach your host’s live dev server over `localhost` or your LAN IP.
+
+A “real terminal” on your machine is exactly what you already have in the IDE; I don’t have a second unrestricted desktop session unless a command specifically gets escalated and even then that does not generally turn this into an interactive browser-capable local user session.
+
+What would help most is either:
+- you paste the server traceback from `deno task dev:web`
+- or I request escalated permission to run a one-off `curl`/`deno task dev:web` outside the sandbox and see if that environment can reach your service
+
+If you want, I can try the escalation path next.
+
+# gpt-5.4_2026-03-07_0835_37
+
+Not from inside this session.
+
+Two separate limits are in play:
+
+- The command sandbox here won’t let me bind/listen on local ports reliably.
+- The environment also can’t reach your host’s live dev server over `localhost` or your LAN IP.
+
+A “real terminal” on your machine is exactly what you already have in the IDE; I don’t have a second unrestricted desktop session unless a command specifically gets escalated and even then that does not generally turn this into an interactive browser-capable local user session.
+
+What would help most is either:
+- you paste the server traceback from `deno task dev:web`
+- or I request escalated permission to run a one-off `curl`/`deno task dev:web` outside the sandbox and see if that environment can reach your service
+
+If you want, I can try the escalation path next.
+
+# User_2026-03-07_0836_54
+
+I turned on "full access" permissions, can you access now?
+
+# gpt-5.4_2026-03-07_0837_06
+
+I’m testing the live dev server directly now that full access is enabled, starting with both base URLs and the `/workspaces` route.
+
+# gpt-5.4_2026-03-07_0837_15
+
+Yes.
+
+I can reach the live server now, and it’s responding correctly at both addresses:
+
+- `http://localhost:5173/` → `302` redirect to `/login`
+- `http://192.168.4.125:5173/` → `302` redirect to `/login`
+- `http://localhost:5173/workspaces` → `302` redirect to `/login`
+- `http://192.168.4.125:5173/workspaces` → `302` redirect to `/login`
+
+So the app is up, and the route is no longer throwing an internal server error in the unauthenticated path. If you want, I can keep using live HTTP checks from here now.
+
+# User_2026-03-07_0837_35
+
+yes please. What's next?
+
+# gpt-5.4_2026-03-07_0837_49
+
+I can validate the live auth flow end-to-end now, then move to the next slice. I’m checking the current login and `/workspaces` path with real HTTP requests, and after that I’ll pick up the Settings workflow.
+
+# gpt-5.4_2026-03-07_0838_03
+
+The next sensible slice is the Settings workflow: default username, exclude-me, and workspace username mappings. I’m reading the current CLI/user-config path and the existing web route patterns so I can extract another shared mutation service instead of baking those rules into a page handler.
+
+# gpt-5.4_2026-03-07_0838_19
+
+I’ve confirmed the current user settings logic is still trapped in the CLI command layer, so I’m extracting that next and then wiring a `/settings` page over it. That keeps default username, exclude-me, and workspace mappings consistent between CLI and web.
+
+# gpt-5.4_2026-03-07_0839_14
+
+I’ve got the shape. I’m editing three pieces now: a shared runtime user-settings service, the `/settings` route/loader, and CLI delegation so those rules don’t diverge.
+
+# gpt-5.4_2026-03-07_0839_39
+
+I’m patching the shared user-settings service and the new `/settings` page now. After that I’ll run focused tests and a live unauthenticated route check against the running dev server.
+
+# gpt-5.4_2026-03-07_0841_41
+
+The service landed cleanly, but I’m doing one code-quality pass before checks: removing a brittle string-based error branch in the delete path and then running formatting and tests.
+
+# gpt-5.4_2026-03-07_0841_45
+
+I’m running format/check/test now. After that I’ll hit `/settings` on the live dev server to confirm the unauthenticated path is wired up correctly.
+
+# gpt-5.4_2026-03-07_0842_05
+
+Two type issues surfaced: one leftover `UserConfig` type import in the CLI helper, and one helper in the new runtime service that should explicitly return `RegisteredWorkspace | undefined`. I’m fixing those now and rerunning the same test/check set.
+
+# gpt-5.4_2026-03-07_0842_08
+
+I’m rerunning the focused tests and then the repo/app checks once those are green.
+
+# gpt-5.4_2026-03-07_0842_18
+
+The focused tests and app-local check are green. I’m running the full repo check now and then I’ll verify the live `/settings` unauthenticated path over HTTP.
+
+# gpt-5.4_2026-03-07_0842_24
+
+The full repo check is finishing cleanly so far. I’m polling it once more and then verifying that the live dev server now exposes `/settings` with the expected auth redirect.
+
+# gpt-5.4_2026-03-07_0842_41
+
+The next slice is done.
+
+I added a shared user-settings service at [user_settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/user_settings.ts), wired the CLI user commands through it in [user.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/user.ts), and added the authenticated Settings page at [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx) with loader [settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/settings.ts). The page covers:
+- default username set/clear
+- `excludeMeFromParticipantList`
+- workspace username map set/delete
+
+I also linked Settings from the Summary and Workspaces pages, and marked the Settings checkbox in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md#L504).
+
+Validation:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/user-settings_test.ts tests/workspace-mutations_test.ts tests/web-cli_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live HTTP check: `http://localhost:5173/settings` now correctly returns `302` to `/login` when unauthenticated
+
+Next I’d do the CLI status integration you asked for earlier: report `Kato Web` runstate and include recent web-app errors in the CLI status error surface. After that, the next page-level slice is `/maintenance`.
+
+# gpt-5.4_2026-03-07_0842_43
+
+The next slice is done.
+
+I added a shared user-settings service at [user_settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/user_settings.ts), wired the CLI user commands through it in [user.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/user.ts), and added the authenticated Settings page at [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx) with loader [settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/settings.ts). The page covers:
+- default username set/clear
+- `excludeMeFromParticipantList`
+- workspace username map set/delete
+
+I also linked Settings from the Summary and Workspaces pages, and marked the Settings checkbox in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md#L504).
+
+Validation:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/user-settings_test.ts tests/workspace-mutations_test.ts tests/web-cli_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live HTTP check: `http://localhost:5173/settings` now correctly returns `302` to `/login` when unauthenticated
+
+Next I’d do the CLI status integration you asked for earlier: report `Kato Web` runstate and include recent web-app errors in the CLI status error surface. After that, the next page-level slice is `/maintenance`.
+
+# User_2026-03-07_0843_02
+
+detailed semver commit message please
+
+# gpt-5.4_2026-03-07_0843_16
+
+Use:
+
+```text
+feat(web): add settings page and shared user settings service
+
+Add an authenticated /settings route to Kato Web for managing user-facing
+participant settings without dropping to the CLI.
+
+This introduces a shared runtime user settings service that handles:
+- default username set/clear
+- excludeMeFromParticipantList updates
+- workspace username mapping set/delete
+- loader-friendly settings reads with registered workspace alias lookup
+
+Refactor the CLI user commands to call the shared service so web and CLI
+mutations stay aligned instead of maintaining parallel validation and
+persistence paths.
+
+Wire the new Settings page into the existing web navigation from the
+Summary and Workspaces surfaces, and keep all form actions behind the
+existing auth and CSRF protections.
+
+Add focused tests for the shared user settings service, and update the
+task note to mark the Settings route/forms slice complete.
+```
+
+`feat` is the right semver signal here because this adds new user-visible functionality without a breaking change.
+
+# gpt-5.4_2026-03-07_0843_17
+
+Use:
+
+```text
+feat(web): add settings page and shared user settings service
+
+Add an authenticated /settings route to Kato Web for managing user-facing
+participant settings without dropping to the CLI.
+
+This introduces a shared runtime user settings service that handles:
+- default username set/clear
+- excludeMeFromParticipantList updates
+- workspace username mapping set/delete
+- loader-friendly settings reads with registered workspace alias lookup
+
+Refactor the CLI user commands to call the shared service so web and CLI
+mutations stay aligned instead of maintaining parallel validation and
+persistence paths.
+
+Wire the new Settings page into the existing web navigation from the
+Summary and Workspaces surfaces, and keep all form actions behind the
+existing auth and CSRF protections.
+
+Add focused tests for the shared user settings service, and update the
+task note to mark the Settings route/forms slice complete.
+```
+
+`feat` is the right semver signal here because this adds new user-visible functionality without a breaking change.

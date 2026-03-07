@@ -1,5 +1,6 @@
 export {
   CliConfigFileStore,
+  clearDefaultUsername,
   type CliConfigStoreLike,
   createDefaultCliConfig,
   createDefaultExportFeatureFlags,
@@ -10,12 +11,14 @@ export {
   createDefaultUserConfig,
   createDefaultWebConfig,
   createInitializedWebConfig,
+  deleteWorkspaceUsernameMapping,
   type EnsureCliConfigResult,
   type EnsureRuntimeConfigResult,
   type EnsureSharedBehaviorConfigResult,
   type EnsureUserConfigResult,
   type EnsureWebConfigResult,
   hashWebPassword,
+  loadUserSettings,
   resolveDefaultCliConfigPath,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
@@ -24,6 +27,9 @@ export {
   resolveDefaultWebConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
+  setDefaultUsername,
+  setExcludeMeFromParticipantList,
+  setWorkspaceUsernameMapping,
   type RuntimeConfigStoreLike,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
@@ -32,6 +38,21 @@ export {
   validateAndNormalizeParticipantUsername,
   WebConfigFileStore,
   type WebConfigStoreLike,
+} from "./config/mod.ts";
+export type {
+  ClearDefaultUsernameOptions,
+  ClearDefaultUsernameResult,
+  DeleteWorkspaceUsernameMappingOptions,
+  DeleteWorkspaceUsernameMappingResult,
+  LoadUserSettingsOptions,
+  LoadUserSettingsResult,
+  SetDefaultUsernameOptions,
+  SetDefaultUsernameResult,
+  SetExcludeMeOptions,
+  SetExcludeMeResult,
+  SetWorkspaceUsernameMappingOptions,
+  SetWorkspaceUsernameMappingResult,
+  UserWorkspaceMappingListEntry,
 } from "./config/mod.ts";
 
 export type {

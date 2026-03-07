@@ -108,6 +108,7 @@ export default define.page(async function WorkspacesPage(ctx) {
           </div>
           <div class="hero-actions">
             <a class="secondary-button" href="/">Back to Summary</a>
+            <a class="secondary-button" href="/settings">Settings</a>
           </div>
         </section>
 
