@@ -219,6 +219,13 @@ Current signals already visible in the repo today:
     `tests/daemon-runtime_test.ts` no longer needs the initial active-cycle,
     missing-pointer stop, and stop-then-resume binding cases just to cover
     workspace-output state policy
+  - the current `daemon_runtime` source/test refactor slice now also extracts
+    command target normalization, destination resolution, and destination policy
+    validation into
+    `apps/daemon/src/orchestrator/runtime_command_destination.ts` with direct
+    coverage in `tests/daemon-command-destination_test.ts`, so
+    `tests/daemon-runtime_test.ts` no longer needs the relative-argument and
+    default-destination runtime-loop cases just to cover destination policy
   - the current `cli status` refactor slice now relies on direct
     `tests/status-workspace_test.ts` coverage for workspace-summary validation
     and unavailable-state behavior, while `tests/daemon-cli_test.ts` keeps only
@@ -440,6 +447,3 @@ Review work should capture before/after evidence for:
       commands, how to inspect hotspots, when to use targeted versus full runs,
       any `--parallel` / CI guidance adopted from this review, and the agreed
       security-testing workflow/tooling.
-
-
-

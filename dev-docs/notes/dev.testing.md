@@ -52,8 +52,8 @@ provider-session-discovery tests, daemon-status-projection tests,
 daemon-export-request tests, and daemon-first-seen tests, daemon-command-state
 tests, daemon-memory-telemetry tests, daemon-workspace-paths tests,
 daemon-workspace-output-state tests, provider-ingestion-resume tests,
-provider-ingestion-merge tests, plus a shared env lock in `tests/test_env.ts`
-for env-mutating cases.
+provider-ingestion-merge tests, daemon-command-destination tests, plus a shared
+env lock in `tests/test_env.ts` for env-mutating cases.
 
 GitHub CI uses a split gate:
 

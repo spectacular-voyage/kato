@@ -18,7 +18,10 @@ import {
   loadWorkspaceStatusSummary,
   type WorkspaceStatusSummary,
 } from "./status_workspace.ts";
-export type { WorkspaceStatusSummary, WorkspaceStatusRow } from "./status_workspace.ts";
+export type {
+  WorkspaceStatusRow,
+  WorkspaceStatusSummary,
+} from "./status_workspace.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -998,15 +1001,13 @@ export async function runStatusCommand(
   const statusErrorCursorPath = resolveStatusErrorCursorPath(
     ctx.runtime.runtimeDir,
   );
-  const workspaceStatus = asJson
-    ? undefined
-    : await loadWorkspaceStatusSummary(
-      () => resolveWorkspaceRegistryStore(ctx).load(),
-      {
-        loadWorkspaceConfigOverrides,
-        readWorkspaceConfigWorkspaceId,
-      },
-    );
+  const workspaceStatus = asJson ? undefined : await loadWorkspaceStatusSummary(
+    () => resolveWorkspaceRegistryStore(ctx).load(),
+    {
+      loadWorkspaceConfigOverrides,
+      readWorkspaceConfigWorkspaceId,
+    },
+  );
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
   const suppressedRecentErrorKeys = asJson

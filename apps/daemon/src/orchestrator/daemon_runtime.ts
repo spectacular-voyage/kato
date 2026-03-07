@@ -6,7 +6,6 @@ import type {
   UserConfig,
 } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
-import { extname, isAbsolute, join, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -58,10 +57,7 @@ import {
   emptySnapshotMemoryStats,
   logMemoryTelemetry,
 } from "./runtime_memory_telemetry.ts";
-import {
-  renderWorkspaceFilename,
-  resolveWorkspaceDefaultOutputDir,
-} from "./runtime_workspace_paths.ts";
+import { resolveWorkspaceDefaultOutputDir } from "./runtime_workspace_paths.ts";
 import {
   activeWorkspaceOutputs,
   applyWorkspaceProfileSnapshot,
@@ -72,7 +68,6 @@ import {
   readWorkspaceOutputs,
   resolveBindingForRetargetedWorkspacePath,
   stopAllWorkspaceOutputs,
-  toWorkspaceDestinationBinding,
 } from "./runtime_workspace_output_state.ts";
 import {
   type FirstSeenSourceFileFreshnessBasis,
@@ -91,6 +86,11 @@ import {
   resolveCommandStartCursor,
   writeCommandCursor,
 } from "./runtime_command_state.ts";
+import {
+  resolveUniqueNonExistingPath,
+  resolveWorkspaceCommandDestination,
+  validateDestinationPathForCommand,
+} from "./runtime_command_destination.ts";
 import {
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
@@ -145,7 +145,6 @@ export interface DaemonRuntimeLoopOptions {
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
-const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
 const CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES = 5;
 const CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS = 25;
 const FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS = 5_000;
@@ -298,38 +297,6 @@ function makeRuntimeEventSignature(event: ConversationEvent): string {
   }
 }
 
-function unwrapMatchingDelimiters(value: string): string {
-  if (value.length < 2) return value;
-  const first = value[0];
-  const last = value[value.length - 1];
-  if (
-    (first === '"' && last === '"') ||
-    (first === "'" && last === "'") ||
-    (first === "`" && last === "`")
-  ) {
-    return value.slice(1, -1).trim();
-  }
-  return value;
-}
-
-function normalizeRawCommandTargetPath(
-  rawArgument: string | undefined,
-): string | undefined {
-  if (!rawArgument) return undefined;
-
-  let normalized = rawArgument.trim();
-  if (normalized.length === 0) return undefined;
-
-  const markdownMatch = normalized.match(MARKDOWN_LINK_PATH_PATTERN);
-  if (markdownMatch?.[1]) {
-    normalized = markdownMatch[1].trim();
-  }
-
-  normalized = unwrapMatchingDelimiters(normalized);
-
-  return normalized.length > 0 ? normalized : undefined;
-}
-
 function resolveConversationTitle(
   events: ConversationEvent[],
   fallback: string,
@@ -366,156 +333,6 @@ interface PersistentRecordingCommandContext {
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
   userConfig: UserConfig;
-}
-
-async function isDirectoryTargetPath(path: string): Promise<boolean> {
-  if (path.endsWith("/") || path.endsWith("\\")) {
-    return true;
-  }
-  try {
-    const stat = await Deno.stat(path);
-    return stat.isDirectory;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function resolveUniqueNonExistingPath(path: string): Promise<string> {
-  if (!(await pathExists(path))) {
-    return path;
-  }
-  const suffix = extname(path);
-  const prefix = suffix.length > 0 ? path.slice(0, -suffix.length) : path;
-  for (let index = 2; index < 10_000; index += 1) {
-    const candidate = `${prefix}-${index}${suffix}`;
-    if (!(await pathExists(candidate))) {
-      return candidate;
-    }
-  }
-  throw new Error(`Unable to resolve unique destination path for: ${path}`);
-}
-
-async function resolveWorkspaceCommandDestination(options: {
-  profile: ResolvedWorkspaceProfile;
-  provider: string;
-  sessionId: string;
-  outputUsername: string;
-  snapshotSnippet?: string;
-  boundarySnapshot?: ConversationEvent[];
-  rawArgument?: string;
-  ensureGeneratedPathUnique?: boolean;
-  now: Date;
-}): Promise<{
-  resolvedPath: string;
-  resolvedDefaultOutputDir: string;
-  usesGeneratedFilename: boolean;
-  binding: NonNullable<
-    SessionMetadataV1["workspaceOutputs"]
-  >[number]["currentDestination"];
-}> {
-  const resolvedDefaultOutputDir = resolveWorkspaceDefaultOutputDir({
-    profile: options.profile,
-    provider: options.provider,
-    sessionId: options.sessionId,
-    now: options.now,
-    outputUsername: options.outputUsername,
-    snapshotSnippet: options.snapshotSnippet,
-    boundarySnapshot: options.boundarySnapshot,
-  });
-  const normalized = normalizeRawCommandTargetPath(options.rawArgument);
-  if (!normalized) {
-    const generatedPath = join(
-      resolvedDefaultOutputDir,
-      renderWorkspaceFilename({
-        profile: options.profile,
-        provider: options.provider,
-        sessionId: options.sessionId,
-        now: options.now,
-        outputUsername: options.outputUsername,
-        snapshotSnippet: options.snapshotSnippet,
-        boundarySnapshot: options.boundarySnapshot,
-      }),
-    );
-    const generated = options.ensureGeneratedPathUnique
-      ? await resolveUniqueNonExistingPath(generatedPath)
-      : generatedPath;
-    return {
-      resolvedPath: generated,
-      resolvedDefaultOutputDir,
-      usesGeneratedFilename: true,
-      binding: toWorkspaceDestinationBinding(options.profile, generated),
-    };
-  }
-  if (normalized.startsWith("@")) {
-    throw new Error(
-      "Path argument must be a filesystem path (mentions are not allowed)",
-    );
-  }
-  const resolvedBase = isAbsolute(normalized)
-    ? resolve(normalized)
-    : resolve(options.profile.workspaceRoot, normalized);
-  const generatedFromDirectory = await isDirectoryTargetPath(resolvedBase);
-  const resolvedPathBase = generatedFromDirectory
-    ? join(
-      resolvedBase,
-      renderWorkspaceFilename({
-        profile: options.profile,
-        provider: options.provider,
-        sessionId: options.sessionId,
-        now: options.now,
-        outputUsername: options.outputUsername,
-        snapshotSnippet: options.snapshotSnippet,
-        boundarySnapshot: options.boundarySnapshot,
-      }),
-    )
-    : resolvedBase;
-  const resolvedPath =
-    options.ensureGeneratedPathUnique && generatedFromDirectory
-      ? await resolveUniqueNonExistingPath(resolvedPathBase)
-      : resolvedPathBase;
-  return {
-    resolvedPath,
-    resolvedDefaultOutputDir,
-    usesGeneratedFilename: generatedFromDirectory,
-    binding: isAbsolute(normalized)
-      ? {
-        kind: "absolute-explicit",
-        absolutePath: resolvedPath,
-      }
-      : toWorkspaceDestinationBinding(options.profile, resolvedPath),
-  };
-}
-async function validateDestinationPathForCommand(
-  recordingPipeline: RecordingPipelineLike,
-  provider: string,
-  sessionId: string,
-  destination: string,
-  commandName: "record" | "capture" | "export",
-): Promise<string> {
-  if (!recordingPipeline.validateDestinationPath) {
-    return destination;
-  }
-  return await recordingPipeline.validateDestinationPath({
-    provider,
-    sessionId,
-    targetPath: destination,
-    commandName,
-  });
 }
 
 async function assertCaptureDestinationDoesNotExist(
