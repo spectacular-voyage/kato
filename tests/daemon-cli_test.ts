@@ -1,4 +1,5 @@
 import {
+  assert,
   assertEquals,
   assertExists,
   assertRejects,
@@ -32,6 +33,10 @@ import {
   type UserConfigStoreLike,
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
+import {
+  createDefaultWebConfig,
+  createDefaultWebServerStatus,
+} from "../apps/runtime/src/mod.ts";
 import {
   CliUsageError,
   parseDaemonCliArgs,
@@ -389,6 +394,21 @@ function makeInMemoryStatusStore(
         providers: [...next.providers],
         recordings: { ...next.recordings },
       };
+      return Promise.resolve();
+    },
+  };
+}
+
+function makeInMemoryWebStatusStore(
+  initial = createDefaultWebServerStatus(new Date("2026-02-22T10:00:00.000Z")),
+) {
+  let state = { ...initial };
+  return {
+    load() {
+      return Promise.resolve({ ...state });
+    },
+    save(next: typeof initial) {
+      state = { ...next };
       return Promise.resolve();
     },
   };
@@ -1274,10 +1294,14 @@ Deno.test(
       assertEquals(jsonCode, 0);
       const filtered = JSON.parse(
         jsonHarness.stdout.join(""),
-      ) as DaemonStatusSnapshot;
+      ) as DaemonStatusSnapshot & {
+        web?: { configured: boolean; state: string };
+      };
       assertEquals(filtered.sessions?.map((session) => session.sessionId), [
         "sess-active",
       ]);
+      assertEquals(filtered.web?.configured, false);
+      assertEquals(filtered.web?.state, "unconfigured");
 
       const allHarness = makeRuntimeHarness(runtimeDir);
       const allCode = await runDaemonCli(["status", "--json", "--all"], {
@@ -1291,11 +1315,127 @@ Deno.test(
       assertEquals(allCode, 0);
       const unfiltered = JSON.parse(
         allHarness.stdout.join(""),
-      ) as DaemonStatusSnapshot;
+      ) as DaemonStatusSnapshot & {
+        web?: { configured: boolean; state: string };
+      };
       assertEquals(unfiltered.sessions?.map((session) => session.sessionId), [
         "sess-active",
         "sess-stale",
       ]);
+      assertEquals(unfiltered.web?.configured, false);
+      assertEquals(unfiltered.web?.state, "unconfigured");
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli status reports Kato Web runstate and recent web errors",
+  async () => {
+    await withTestTempDir("daemon-cli-status-web-", async (tempDir) => {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const webLogsDir = join(katoDir, "web", "logs");
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      await Deno.mkdir(webLogsDir, { recursive: true });
+      await Deno.mkdir(dirname(registryPath), { recursive: true });
+      await Deno.writeTextFile(
+        registryPath,
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            updatedAt: "2026-03-02T10:00:00.000Z",
+            workspaces: [],
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      await Deno.writeTextFile(
+        join(webLogsDir, "operational.jsonl"),
+        `${
+          JSON.stringify({
+            timestamp: "2026-03-02T10:01:00.000Z",
+            level: "error",
+            channel: "operational",
+            event: "web.settings.mutation.failed",
+            message: "invalid username",
+          })
+        }\n`,
+      );
+
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const statusStore = makeInMemoryStatusStore({
+        schemaVersion: 1,
+        generatedAt: "2026-03-02T10:02:00.000Z",
+        heartbeatAt: "2026-03-02T10:02:00.000Z",
+        daemonRunning: true,
+        daemonPid: 4242,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      });
+      const controlStore = makeInMemoryControlStore();
+      const webStatusStore = makeInMemoryWebStatusStore({
+        ...createDefaultWebServerStatus(new Date("2026-03-02T10:02:00.000Z")),
+        running: true,
+        hostname: "127.0.0.1",
+        port: 3173,
+        pid: Deno.pid,
+        startedAt: "2026-03-02T10:00:00.000Z",
+        heartbeatAt: "2026-03-02T10:02:00.000Z",
+        url: "http://127.0.0.1:3173/",
+      });
+      const webConfig = createDefaultWebConfig({
+        hostname: "127.0.0.1",
+        port: 3173,
+      });
+      const webConfigStore = {
+        load() {
+          return Promise.resolve(webConfig);
+        },
+        ensureInitialized(defaultConfig = webConfig) {
+          return Promise.resolve({
+            created: false,
+            config: defaultConfig,
+            path: join(katoDir, "web", "kato-web-config.yaml"),
+          });
+        },
+      };
+
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["status"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+        webConfigStore,
+        webStatusStore,
+      });
+
+      assertEquals(code, 0);
+      const output = harness.stdout.join("");
+      assert(
+        /web: (running|stale status) \(http:\/\/127\.0\.0\.1:3173\//.test(
+          output,
+        ),
+      );
+      assertStringIncludes(
+        output,
+        "ERROR web operational web.settings.mutation.failed",
+      );
+      assertStringIncludes(output, "invalid username");
     });
   },
 );

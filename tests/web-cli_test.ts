@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { join } from "@std/path";
+import { DEFAULT_KATO_WEB_PORT } from "@kato/shared";
 import { parseDaemonCliArgs } from "../apps/cli/src/parser.ts";
 import { runDaemonCli } from "../apps/cli/src/router.ts";
 import type { DaemonCliRuntime } from "../apps/cli/src/types.ts";
@@ -129,6 +130,43 @@ Deno.test("runDaemonCli web start fails closed until web init runs", async () =>
       harness.stderr.join(""),
       "Run `kato web init` before `kato web start`.",
     );
+  });
+});
+
+Deno.test("runDaemonCli web init defaults to the standard web port", async () => {
+  await withTestTempDir("web-cli-default-port-", async (rootDir) => {
+    const runtimeDir = join(rootDir, "daemon");
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const webConfigStore = new WebConfigFileStore(
+      join(rootDir, "web", "kato-web-config.yaml"),
+    );
+    const webStatusStore = new WebServerStatusFileStore(
+      join(rootDir, "web", "kato-web-status.json"),
+      () => new Date("2026-03-07T20:00:00.000Z"),
+    );
+    const harness = makeRuntimeHarness(runtimeDir);
+
+    const code = await runDaemonCli(
+      [
+        "web",
+        "init",
+        "--username",
+        "dj",
+        "--password",
+        "secret-pass",
+      ],
+      {
+        runtime: harness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+      },
+    );
+
+    assertEquals(code, 0);
+    const savedConfig = await webConfigStore.load();
+    assertEquals(savedConfig.port, DEFAULT_KATO_WEB_PORT);
   });
 });
 

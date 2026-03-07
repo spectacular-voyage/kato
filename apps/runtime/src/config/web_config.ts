@@ -1,4 +1,9 @@
-import type { WebAuthConfig, WebConfig } from "@kato/shared";
+import {
+  DEFAULT_KATO_WEB_HOSTNAME,
+  DEFAULT_KATO_WEB_PORT,
+  type WebAuthConfig,
+  type WebConfig,
+} from "@kato/shared";
 import { join } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
@@ -172,8 +177,8 @@ export function createDefaultWebConfig(
 ): WebConfig {
   return {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
-    hostname: options.hostname?.trim() || "127.0.0.1",
-    port: options.port ?? 3173,
+    hostname: options.hostname?.trim() || DEFAULT_KATO_WEB_HOSTNAME,
+    port: options.port ?? DEFAULT_KATO_WEB_PORT,
     auth: {
       username: options.auth?.username?.trim() || "kato",
       passwordSalt: options.auth?.passwordSalt || "placeholder-salt",
@@ -224,8 +229,8 @@ export async function createInitializedWebConfig(
 
   return {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
-    hostname: options.hostname?.trim() || "127.0.0.1",
-    port: options.port ?? 3173,
+    hostname: options.hostname?.trim() || DEFAULT_KATO_WEB_HOSTNAME,
+    port: options.port ?? DEFAULT_KATO_WEB_PORT,
     auth: {
       username: options.username.trim(),
       passwordSalt,

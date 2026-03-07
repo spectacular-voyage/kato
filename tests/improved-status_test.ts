@@ -12,6 +12,7 @@ import {
   isLiveFlushKey,
   renderStatusText,
   type StatusRecentError,
+  type StatusWebState,
   type WorkspaceStatusSummary,
 } from "../apps/cli/src/commands/status.ts";
 import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
@@ -287,6 +288,39 @@ Deno.test("renderStatusText: recent errors section renders warn/error records", 
   assertStringIncludes(out, "ERROR audit recording.command.failed");
   assertStringIncludes(out, "permission denied");
   assertStringIncludes(out, "capture destination already exists");
+});
+
+Deno.test("renderStatusText: web status and web recent errors are labeled distinctly", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "web.settings.mutation.failed",
+    message: "invalid username",
+    scope: "web",
+  }];
+  const webStatus: StatusWebState = {
+    configured: true,
+    running: true,
+    stale: false,
+    state: "running",
+    url: "http://127.0.0.1:3173/",
+    pid: 4242,
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    webStatus,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(out, "web: running (http://127.0.0.1:3173/, pid 4242)");
+  assertStringIncludes(
+    out,
+    "ERROR web operational web.settings.mutation.failed",
+  );
+  assertStringIncludes(out, "invalid username");
 });
 
 Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {

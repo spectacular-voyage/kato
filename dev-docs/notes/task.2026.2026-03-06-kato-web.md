@@ -530,6 +530,6 @@ Validation workflow before merge:
       if not, ship the page as a current-snapshot-only placeholder or defer it.
 - [ ] Add focused tests for loaders, shared projections, mutation services,
       page handlers, Summary render parity, and any adopted local auth flow.
-- [ ] Extend CLI status surfaces to include `Kato Web` runstate and show recent
+- [x] Extend CLI status surfaces to include `Kato Web` runstate and show recent
       web-app operational/auth errors alongside daemon/operator errors where
       appropriate.

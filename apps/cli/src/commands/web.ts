@@ -1,4 +1,5 @@
 import type { DaemonCliCommandContext } from "./context.ts";
+import { DEFAULT_KATO_WEB_HOSTNAME, DEFAULT_KATO_WEB_PORT } from "@kato/shared";
 import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
 
 export async function runWebInitCommand(
@@ -129,8 +130,8 @@ export async function runWebStatusCommand(
   ctx.runtime.writeStdout(
     [
       `kato web: ${effective.running ? "running" : "stopped"}`,
-      `host: ${effective.hostname ?? "127.0.0.1"}`,
-      `port: ${effective.port ?? 3173}`,
+      `host: ${effective.hostname ?? DEFAULT_KATO_WEB_HOSTNAME}`,
+      `port: ${effective.port ?? DEFAULT_KATO_WEB_PORT}`,
       `url: ${effective.url ?? "n/a"}`,
       `pid: ${effective.pid ?? "n/a"}`,
     ].join("\n") + "\n",

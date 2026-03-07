@@ -1192,3 +1192,343 @@ task note to mark the Settings route/forms slice complete.
 ```
 
 `feat` is the right semver signal here because this adds new user-visible functionality without a breaking change.
+
+# User_2026-03-07_0843_27
+
+proceed
+
+# gpt-5.4_2026-03-07_0843_37
+
+Proceeding with the CLI status integration slice: I’m reading the current `status` command and the web status/logging paths so I can add `Kato Web` runstate and recent web errors without disturbing the existing daemon status surface.
+
+# gpt-5.4_2026-03-07_0843_41
+
+I’ve got the recent-error pipeline and render logic in view. Now I’m reading the status text/json model boundaries so I can insert web status and web-log errors in the same place without breaking the existing tests.
+
+# gpt-5.4_2026-03-07_0843_49
+
+The status command today is still daemon-centric. I’m checking how much latitude we have in the JSON shape and whether there are existing CLI status tests I need to preserve before I add a top-level `web` block.
+
+# gpt-5.4_2026-03-07_0843_56
+
+I’m checking the existing status command tests now so I can extend them instead of accidentally shifting the output contract. The main risk here is the JSON shape and the top summary line.
+
+# gpt-5.4_2026-03-07_0844_19
+
+I’m checking the web lifecycle/status implementation itself now, because the CLI can only report good runstate if the underlying `kato web status` semantics are consistent. The main question is whether “running” in the stored web status can drift stale.
+
+# gpt-5.4_2026-03-07_0844_34
+
+I’m checking one last config detail before patching: whether `ctx.runtimeConfig.katoDir` is always available enough to resolve the web logs and status file, or whether I need a fallback path.
+
+# gpt-5.4_2026-03-07_0844_52
+
+I’ve settled the shape: I’m adding a small `web` status model to CLI status, a single summary line in the text view, and web log ingestion into the existing Recent Errors section with a visible `web` label so those records don’t look like daemon errors.
+
+# gpt-5.4_2026-03-07_0844_57
+
+I’ve got the daemon CLI test harness open now. I’m adding a small in-memory web status store there so the new status output is exercised in the same style as the daemon/workspace tests.
+
+# gpt-5.4_2026-03-07_0845_19
+
+I’m checking the task note for the exact status-item wording before I mark anything. This slice should only update the note if it matches what we’re actually shipping now.
+
+# gpt-5.4_2026-03-07_0845_27
+
+I’m editing the status command now: web state model, summary-line rendering, web log ingestion, and JSON output. After that I’ll add focused text/CLI tests around the new behavior.
+
+# gpt-5.4_2026-03-07_0845_59
+
+The status patch drifted on the larger hunk, so I’m splitting it into smaller edits around the exact function boundaries before reapplying.
+
+# gpt-5.4_2026-03-07_0847_16
+
+I’m checking the available web-config helpers before I write the status tests, so I can use an in-memory configured web state rather than touching real files.
+
+# gpt-5.4_2026-03-07_0847_36
+
+I’m adding two focused tests now: one pure render test for the new web status/error labels, and one CLI integration test that reads a real web status file plus web logs through `runDaemonCli status`.
+
+# gpt-5.4_2026-03-07_0848_27
+
+I spotted a path subtlety while patching: if the runtime config ever carries `~` shorthand, the CLI status code needs the expanded `katoDir`, not the serialized one, or it’ll look in the wrong place for web logs. I’m checking the router’s effective path handling before I rely on `ctx.runtimeConfig.katoDir` directly.
+
+# gpt-5.4_2026-03-07_0848_36
+
+The status code and tests are in. I’m formatting the touched files now, then running focused status tests before the full check.
+
+# gpt-5.4_2026-03-07_0848_46
+
+The code formatted cleanly. I’m polling the focused status tests now; if they pass, I’ll run the broader repo checks and then do one live CLI status invocation against the current workspace.
+
+# gpt-5.4_2026-03-07_0849_02
+
+The failures are on the edges I expected: dedupe semantics should keep daemon/workspace duplicates collapsing, but keep web errors distinct, and the live-process check makes the web status test nondeterministic. I’m tightening both now.
+
+# gpt-5.4_2026-03-07_0849_26
+
+I’ve narrowed the failures: dedupe now treats web as distinct but keeps daemon/workspace collapsing, and the web runstate test now accepts either `running` or `stale status` depending on what the OS reports for the tracked PID. I’m rerunning the focused status tests.
+
+# gpt-5.4_2026-03-07_0849_31
+
+The focused status tests are green through the new cases. I’m polling once more for completion, then I’ll run the standard repo/web checks and a live `kato status` from this workspace.
+
+# gpt-5.4_2026-03-07_0849_36
+
+The checks are finishing cleanly. I’m polling once more for the repo check exit, then I’ll do a live `status` invocation in this workspace so we have an actual operator-facing sample, not just tests.
+
+# gpt-5.4_2026-03-07_0849_41
+
+The root `main.ts` is just the monorepo entry banner, not the CLI command surface. I’m invoking the actual CLI entrypoint directly so we can see the new status output in a real run.
+
+# gpt-5.4_2026-03-07_0849_44
+
+I’ve got a real local status sample now and the new web line is showing. I’m doing one quick `--json` invocation too so the top-level `web` block is verified outside of tests.
+
+# gpt-5.4_2026-03-07_0850_32
+
+The status slice is complete. I’m doing one quick worktree check so I can close this out cleanly with exactly what changed and the one important limitation in the current live sample.
+
+# gpt-5.4_2026-03-07_0850_40
+
+CLI status now includes `Kato Web` state and web-app errors.
+
+The implementation lives in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts), with coverage added in [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts) and [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts). I also updated the task note checkbox at [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md#L533).
+
+What changed:
+- text `status` now shows a `web:` summary line
+- `status --json` now includes a top-level `web` block
+- Recent Errors now merges web logs and labels them as `web operational` or `web audit`
+
+Validation:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+I also ran the CLI directly in this workspace. It now prints a real `web:` line, and `status --json` includes the `web` object.
+
+One important nuance: the live sample here shows `web: stopped (http://127.0.0.1:3173/)` because CLI status is reporting the configured `kato web` lifecycle target. Your current dev server is the separate monitor-mode loop on `:5173`, so that is not the same process.
+
+Next sensible slice is `/maintenance`.
+
+# User_2026-03-07_0857_10
+
+CLI looks to be checking on port 3173, but I think 5173 is the default.
+
+# gpt-5.4_2026-03-07_0857_34
+
+Yes. There’s a real mismatch.
+
+Current behavior:
+- `deno task dev:web` uses Vite/Fresh dev defaults, so it serves on `5173` unless you override it in [apps/web/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json).
+- `kato web init/start/status` uses the web lifecycle config default from [web_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/web_config.ts), which is currently `3173`.
+
+So the CLI status line is reporting the managed `kato web` port, not the dev monitor-mode port.
+
+If the goal is “make dev and lifecycle defaults match,” then the clean fix is to change the `kato web` default from `3173` to `5173`. If the goal is “keep dev and managed ports separate,” then the status text should be more explicit so it doesn’t look like it’s checking the Vite dev server.
+
+My read: `5173` is the less surprising default right now.
+
+# User_2026-03-07_0858_55
+
+What about dynamically tracking the port.
+
+# gpt-5.4_2026-03-07_0859_22
+
+Possible, but only if we do it deliberately.
+
+The right version of “dynamic tracking” is:
+- the web process writes its actual bound `host/port/url/pid` to the status file after startup
+- CLI status reads that authoritative value
+
+The wrong version is:
+- CLI guessing by scanning ports
+- parsing random dev-server console output
+
+The main catch is `deno task dev:web`. Right now that’s just `vite`, so if Vite auto-bumps from `5173` to `5174`, the CLI won’t know unless we wrap dev startup in code that can observe the chosen port and publish it.
+
+So the choices are:
+
+- Keep it simple:
+  - make both dev and managed web default to `5173`
+  - use `strictPort` so startup fails instead of drifting
+  - CLI status stays deterministic
+
+- Support dynamic ports:
+  - add a real startup wrapper for web dev/managed mode
+  - have that wrapper write the actual bound address to `kato-web-status.json`
+  - probably distinguish `mode: dev | managed` so the two don’t stomp each other
+
+My recommendation: fix the default mismatch first, and only add dynamic tracking if we actually want auto-fallback ports. If you want, I can make the immediate fix be “standardize on `5173` and make port selection strict.”
+
+# gpt-5.4_2026-03-07_0859_23
+
+Possible, but only if we do it deliberately.
+
+The right version of “dynamic tracking” is:
+- the web process writes its actual bound `host/port/url/pid` to the status file after startup
+- CLI status reads that authoritative value
+
+The wrong version is:
+- CLI guessing by scanning ports
+- parsing random dev-server console output
+
+The main catch is `deno task dev:web`. Right now that’s just `vite`, so if Vite auto-bumps from `5173` to `5174`, the CLI won’t know unless we wrap dev startup in code that can observe the chosen port and publish it.
+
+So the choices are:
+
+- Keep it simple:
+  - make both dev and managed web default to `5173`
+  - use `strictPort` so startup fails instead of drifting
+  - CLI status stays deterministic
+
+- Support dynamic ports:
+  - add a real startup wrapper for web dev/managed mode
+  - have that wrapper write the actual bound address to `kato-web-status.json`
+  - probably distinguish `mode: dev | managed` so the two don’t stomp each other
+
+My recommendation: fix the default mismatch first, and only add dynamic tracking if we actually want auto-fallback ports. If you want, I can make the immediate fix be “standardize on `5173` and make port selection strict.”
+
+# User_2026-03-07_0900_46
+
+ok. proceed
+
+# gpt-5.4_2026-03-07_0900_54
+
+I’m aligning the web defaults now. First I’m checking the current port values in the managed web config path and the dev task so I can make one consistent change instead of introducing a second mismatch.
+
+# gpt-5.4_2026-03-07_0901_10
+
+I followed the status slice through, but your last “proceed” was about the port mismatch. I’m fixing that now by aligning the managed web default with the dev server and making the dev port deterministic instead of silently drifting.
+
+# gpt-5.4_2026-03-07_0901_51
+
+I’m standardizing the web defaults so the managed CLI path and the dev server stop disagreeing about the port. First I’m checking the current config, Vite setup, and any tests that assume `3173`.
+
+# gpt-5.4_2026-03-07_0902_00
+
+The mismatch is exactly where expected: runtime web config defaults still point at `3173`, while Vite is still using its own implicit default. I’m updating both sides to an explicit `5173` contract and checking which tests depend on the old default.
+
+# gpt-5.4_2026-03-07_0902_12
+
+The existing tests mostly pin explicit ports, which is good. I only need to touch the places that rely on the default config value or that should show the new default in human-facing examples.
+
+# gpt-5.4_2026-03-07_0902_21
+
+I also want the dev loop to stop silently sliding to another port, otherwise the CLI will still be wrong the moment `5173` is occupied. I’m checking the task wiring so the Vite config change actually controls the path you’re running.
+
+# gpt-5.4_2026-03-07_0902_28
+
+The task wiring is fine: your `deno task dev:web -- --host ...` path still goes straight to Vite, so an explicit Vite `server.port` and `strictPort` setting will control it cleanly. Now I’m making the code changes and adding a guard test for the managed default.
+
+# gpt-5.4_2026-03-07_0902_32
+
+I’ve narrowed the change to four spots: the runtime default, the initialized config default, the CLI fallback text, and Vite’s dev server settings. I’m also adding one explicit test so this doesn’t drift back to `3173` later.
+
+# gpt-5.4_2026-03-07_0902_50
+
+I’m doing one extra check for another hidden default: if the stored web status file itself falls back to `3173`, the CLI would still surface the wrong port even after the config fix.
+
+# gpt-5.4_2026-03-07_0902_58
+
+There wasn’t another hidden `3173` default in the status store. The remaining question is whether to centralize the port constant now or just align the two existing defaults. I’m leaning toward a small shared constant so this doesn’t drift again in the next slice.
+
+# gpt-5.4_2026-03-07_0903_17
+
+I’m editing the config/runtime/web files now. The change is small, but I’m wiring the default through a shared constant so we don’t end up back in this state the next time one side moves.
+
+# gpt-5.4_2026-03-07_0903_41
+
+The edits are in. I’m formatting and then running the narrow test pass plus full typecheck so we catch both the new default-port path and any fallout from exporting the shared constant.
+
+# gpt-5.4_2026-03-07_0904_04
+
+The code pass is clean. I’m doing one last scan of the exact diff and line locations so I can tell you precisely what changed and what you need to restart.
+
+# gpt-5.4_2026-03-07_0904_33
+
+There’s one more practical issue: changing the default alone does not fix already-written `kato-web-config.yaml` files. I’m checking the config store now to see whether we should add a migration path or at least a safe update behavior for the existing `3173` configs.
+
+# gpt-5.4_2026-03-07_0904_51
+
+The repo change is correct, but it still won’t change an already-created web config. I’m checking your current `~/.kato/web/kato-web-config.yaml` port so I can tell you whether you’ll see the new default immediately or whether you need a one-time config update.
+
+# gpt-5.4_2026-03-07_0905_24
+
+Managed and dev web defaults are now aligned to `127.0.0.1:5173`. I added a shared default in [web_defaults.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/web_defaults.ts#L1), used it for managed config creation in [web_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/web_config.ts#L171), for CLI status fallback text in [web.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/web.ts#L130), and for the Fresh/Vite dev server with `strictPort: true` in [vite.config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/vite.config.ts#L5). I also added a regression test in [web-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-cli_test.ts#L136). `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-cli_test.ts` and `deno task check` both pass.
+
+One important caveat: your existing local web config still says `port: 3173` at [kato-web-config.yaml](/home/djradon/.kato/web/kato-web-config.yaml#L3), so `kato web status` will keep reporting `3173` until that file is updated or recreated. `kato web init` still does not overwrite an existing config. After you change that port to `5173`, restart `deno task dev:web` so Vite picks up the strict-port setting. If you want, the next slice should be a CLI-supported web-config update/migration path so this stops being manual.
+
+# User_2026-03-07_0906_47
+
+I restart dev:web without "--host", can you still see it, i.e., at 127.0.0.1
+
+# gpt-5.4_2026-03-07_0906_55
+
+I’m checking the live server directly on both `127.0.0.1:5173` and `localhost:5173` so we can see what Vite is actually binding after the restart.
+
+# gpt-5.4_2026-03-07_0907_01
+
+Yes. I can reach it on loopback without `--host`.
+
+Right now both respond:
+- `http://127.0.0.1:5173/` → `302` to `/login`
+- `http://localhost:5173/` → `302` to `/login`
+
+So `deno task dev:web` is reachable to me at local loopback. If you want LAN access again, you’d still need `-- --host 0.0.0.0` or your specific LAN IP.
+
+# gpt-5.4_2026-03-07_0907_02
+
+Yes. I can reach it on loopback without `--host`.
+
+Right now both respond:
+- `http://127.0.0.1:5173/` → `302` to `/login`
+- `http://localhost:5173/` → `302` to `/login`
+
+So `deno task dev:web` is reachable to me at local loopback. If you want LAN access again, you’d still need `-- --host 0.0.0.0` or your specific LAN IP.
+
+# User_2026-03-07_0907_11
+
+commit message please
+
+# gpt-5.4_2026-03-07_0907_15
+
+`fix(web): align managed and dev defaults on port 5173`
+
+Body:
+
+```text
+Standardize Kato Web on 127.0.0.1:5173 for both the managed CLI lifecycle
+and the Fresh/Vite dev loop.
+
+Add shared web default host/port constants, use them when creating web
+config, and use the same default in `kato web status` output so the CLI
+no longer implies a different port than the dev server.
+
+Configure the Vite dev server with port 5173 and `strictPort: true` so
+`deno task dev:web` fails instead of silently drifting to another port.
+
+Add a regression test covering the default `kato web init` port to keep
+the managed default from drifting again.
+```
+
+# gpt-5.4_2026-03-07_0907_16
+
+`fix(web): align managed and dev defaults on port 5173`
+
+Body:
+
+```text
+Standardize Kato Web on 127.0.0.1:5173 for both the managed CLI lifecycle
+and the Fresh/Vite dev loop.
+
+Add shared web default host/port constants, use them when creating web
+config, and use the same default in `kato web status` output so the CLI
+no longer implies a different port than the dev server.
+
+Configure the Vite dev server with port 5173 and `strictPort: true` so
+`deno task dev:web` fails instead of silently drifting to another port.
+
+Add a regression test covering the default `kato web init` port to keep
+the managed default from drifting again.
+```

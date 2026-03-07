@@ -2,7 +2,7 @@ import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
 import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isStatusSnapshotStale } from "@kato/runtime";
+import { isProcessAlive, isStatusSnapshotStale } from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -57,6 +57,20 @@ export interface StatusRecentError {
   event: string;
   message: string;
   source?: "log" | "workspace";
+  scope?: "daemon" | "web" | "workspace";
+}
+
+export interface StatusWebState {
+  configured: boolean;
+  running: boolean;
+  stale: boolean;
+  state: "running" | "stopped" | "stale" | "unconfigured";
+  hostname?: string;
+  port?: number;
+  pid?: number;
+  startedAt?: string;
+  heartbeatAt?: string;
+  url?: string;
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -209,6 +223,7 @@ async function readTailText(
 
 function parseStatusRecentError(
   value: unknown,
+  scope: StatusRecentError["scope"] = "daemon",
 ): StatusRecentError | undefined {
   if (
     typeof value !== "object" ||
@@ -245,11 +260,13 @@ function parseStatusRecentError(
       ? sanitizeInlineText(message)
       : "no message",
     source: "log",
+    scope,
   };
 }
 
 async function loadRecentErrorsFromLog(
   filePath: string,
+  scope: StatusRecentError["scope"] = "daemon",
 ): Promise<StatusRecentError[]> {
   const tail = await readTailText(filePath, RECENT_ERRORS_TAIL_BYTES);
   if (!tail) {
@@ -264,7 +281,7 @@ async function loadRecentErrorsFromLog(
     }
     try {
       const parsed = JSON.parse(line) as unknown;
-      const errorRecord = parseStatusRecentError(parsed);
+      const errorRecord = parseStatusRecentError(parsed, scope);
       if (!errorRecord) {
         continue;
       }
@@ -279,6 +296,7 @@ async function loadRecentErrorsFromLog(
 async function loadRecentStatusErrors(
   ctx: DaemonCliCommandContext,
 ): Promise<StatusRecentError[]> {
+  const katoDir = ctx.runtimeConfig.katoDir ?? ctx.runtime.runtimeDir;
   const operationalPath = join(
     ctx.runtime.runtimeDir,
     "logs",
@@ -289,13 +307,87 @@ async function loadRecentStatusErrors(
     "logs",
     SECURITY_AUDIT_LOG_FILENAME,
   );
-  const [operational, securityAudit] = await Promise.all([
-    loadRecentErrorsFromLog(operationalPath),
-    loadRecentErrorsFromLog(securityAuditPath),
-  ]);
-  return [...operational, ...securityAudit]
+  const webOperationalPath = join(
+    katoDir,
+    "web",
+    "logs",
+    OPERATIONAL_LOG_FILENAME,
+  );
+  const webSecurityAuditPath = join(
+    katoDir,
+    "web",
+    "logs",
+    SECURITY_AUDIT_LOG_FILENAME,
+  );
+  const [operational, securityAudit, webOperational, webSecurityAudit] =
+    await Promise.all([
+      loadRecentErrorsFromLog(operationalPath, "daemon"),
+      loadRecentErrorsFromLog(securityAuditPath, "daemon"),
+      loadRecentErrorsFromLog(webOperationalPath, "web"),
+      loadRecentErrorsFromLog(webSecurityAuditPath, "web"),
+    ]);
+  return [
+    ...operational,
+    ...securityAudit,
+    ...webOperational,
+    ...webSecurityAudit,
+  ]
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
+}
+
+async function loadStatusWebState(
+  ctx: DaemonCliCommandContext,
+): Promise<StatusWebState> {
+  const stored = await ctx.webStatusStore.load();
+  const alive = stored.running && isProcessAlive(stored.pid);
+  const stale = stored.running && !alive;
+  const configured = ctx.webConfig !== undefined;
+  const url = ctx.webConfig
+    ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
+    : stored.url;
+  const state = alive
+    ? "running"
+    : stale
+    ? "stale"
+    : configured
+    ? "stopped"
+    : "unconfigured";
+
+  return {
+    configured,
+    running: alive,
+    stale,
+    state,
+    hostname: ctx.webConfig?.hostname ?? stored.hostname,
+    port: ctx.webConfig?.port ?? stored.port,
+    pid: stored.pid,
+    startedAt: stored.startedAt,
+    heartbeatAt: stored.heartbeatAt,
+    url,
+  };
+}
+
+function renderWebSummaryLine(
+  webStatus: StatusWebState | undefined,
+): string | undefined {
+  if (!webStatus) {
+    return undefined;
+  }
+  if (webStatus.state === "unconfigured") {
+    return "web: unconfigured";
+  }
+  if (webStatus.state === "running") {
+    return `web: running (${webStatus.url ?? "url unavailable"}, pid ${
+      webStatus.pid ?? "unknown"
+    })`;
+  }
+  if (webStatus.state === "stale") {
+    return `web: stale status (${webStatus.url ?? "url unavailable"}, pid ${
+      webStatus.pid ?? "unknown"
+    }, heartbeat ${formatLocalTimestamp(webStatus.heartbeatAt)})`;
+  }
+  return `web: stopped (${webStatus.url ?? "url unavailable"})`;
 }
 
 function deriveWorkspaceStatusErrors(
@@ -317,6 +409,7 @@ function deriveWorkspaceStatusErrors(
       event: "workspace.status.unavailable",
       message: sanitizeInlineText(workspaceStatus.unavailableReason),
       source: "workspace",
+      scope: "workspace",
     });
     return errors;
   }
@@ -340,6 +433,7 @@ function deriveWorkspaceStatusErrors(
       event,
       message: `${alias} (${row.workspaceId}): ${reason}`,
       source: "workspace",
+      scope: "workspace",
     });
   }
 
@@ -359,7 +453,9 @@ export function isLiveFlushKey(keyByte: number): boolean {
 export function getStatusRecentErrorKey(error: StatusRecentError): string {
   const event = sanitizeInlineText(error.event);
   const message = sanitizeInlineText(error.message);
-  const base = `${error.level}|${error.channel}|${event}|${message}`;
+  const scopePrefix = error.scope === "web" ? "web|" : "";
+  const base =
+    `${scopePrefix}${error.level}|${error.channel}|${event}|${message}`;
   if (error.source === "workspace") {
     // Workspace-derived rows are synthetic "current state" errors, so keep
     // the key stable across refreshes to suppress until the state changes.
@@ -371,7 +467,8 @@ export function getStatusRecentErrorKey(error: StatusRecentError): string {
 function getRecentErrorDedupeKey(error: StatusRecentError): string {
   const event = sanitizeInlineText(error.event);
   const message = sanitizeInlineText(error.message);
-  return `${error.level}|${error.channel}|${event}|${message}`;
+  const scopePrefix = error.scope === "web" ? "web|" : "";
+  return `${scopePrefix}${error.level}|${error.channel}|${event}|${message}`;
 }
 
 function dedupeRecentErrors(errors: StatusRecentError[]): StatusRecentError[] {
@@ -728,6 +825,7 @@ export function renderStatusText(
     stale: boolean;
     terminalWidth?: number;
     workspaceStatus?: WorkspaceStatusSummary;
+    webStatus?: StatusWebState;
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
     suppressedRecentErrorKeys?: ReadonlySet<string>;
@@ -738,6 +836,7 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
+  const webSummary = renderWebSummaryLine(opts.webStatus);
   const recentErrors = collectRecentErrors(
     now,
     opts.workspaceStatus,
@@ -795,6 +894,9 @@ export function renderStatusText(
   if (workspaceSummary) {
     lines.push(truncate(workspaceSummary, width));
   }
+  if (webSummary) {
+    lines.push(truncate(webSummary, width));
+  }
   lines.push(divider);
   if (opts.showWorkspaceDetails && opts.workspaceStatus) {
     lines.push(...renderWorkspaceSection(opts.workspaceStatus, width));
@@ -805,12 +907,13 @@ export function renderStatusText(
   if (visibleRecentErrors.length > 0) {
     lines.push("");
     for (const recentError of visibleRecentErrors) {
+      const scopePrefix = recentError.scope === "web" ? "web " : "";
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
       const detail = `[${
         formatLocalTimestamp(recentError.timestamp)
-      }] ${recentError.level.toUpperCase()} ${channel} ${
+      }] ${recentError.level.toUpperCase()} ${scopePrefix}${channel} ${
         sanitizeInlineText(recentError.event)
       } · ${sanitizeInlineText(recentError.message)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
@@ -907,7 +1010,7 @@ async function runLiveMode(
         await ctx.statusStore.load(),
         now,
       );
-      const [workspaceStatus, recentErrors] = await Promise.all([
+      const [workspaceStatus, recentErrors, webStatus] = await Promise.all([
         loadWorkspaceStatusSummary(
           () => resolveWorkspaceRegistryStore(ctx).load(),
           {
@@ -916,6 +1019,7 @@ async function runLiveMode(
           },
         ),
         loadRecentStatusErrors(ctx),
+        loadStatusWebState(ctx),
       ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
@@ -953,6 +1057,7 @@ async function runLiveMode(
         stale,
         terminalWidth,
         workspaceStatus,
+        webStatus,
         recentErrors,
         suppressedRecentErrorKeys,
       });
@@ -1008,6 +1113,7 @@ export async function runStatusCommand(
       readWorkspaceConfigWorkspaceId,
     },
   );
+  const webStatus = await loadStatusWebState(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
   const suppressedRecentErrorKeys = asJson
@@ -1050,13 +1156,17 @@ export async function runStatusCommand(
       workspaceInvalidCount: workspaceStatus?.invalidCount,
       workspaceStatusUnavailable:
         workspaceStatus?.unavailableReason !== undefined,
+      webConfigured: webStatus.configured,
+      webState: webStatus.state,
     },
   );
   await ctx.auditLogger.command("status", { asJson, showAll });
 
   if (asJson) {
     const filtered = filterSnapshotForJson(snapshot, showAll);
-    ctx.runtime.writeStdout(`${JSON.stringify(filtered, null, 2)}\n`);
+    ctx.runtime.writeStdout(
+      `${JSON.stringify({ ...filtered, web: webStatus }, null, 2)}\n`,
+    );
     return;
   }
 
@@ -1068,6 +1178,7 @@ export async function runStatusCommand(
       stale,
       terminalWidth,
       workspaceStatus,
+      webStatus,
       showWorkspaceDetails: true,
       recentErrors,
       suppressedRecentErrorKeys,

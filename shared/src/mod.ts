@@ -36,6 +36,10 @@ export type {
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {
+  DEFAULT_KATO_WEB_HOSTNAME,
+  DEFAULT_KATO_WEB_PORT,
+} from "./web_defaults.ts";
+export {
   DEFAULT_STATUS_STALE_AFTER_MS,
   extractSnippet,
   filterSessionsForDisplay,
