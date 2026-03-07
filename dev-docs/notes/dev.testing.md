@@ -26,6 +26,12 @@ get a unique subdirectory under `.test-tmp/` that can be removed in a `finally`
 block. If you hard-code a path (e.g. for tests that do not need isolation), use
 `.test-tmp/` as the parent so it stays out of `.kato/`.
 
+Raw Deno coverage profiles should also stay under `.test-tmp/coverage/` rather
+than top-level `.coverage*` directories. The root `test:coverage` task now uses
+`.test-tmp/coverage/root`, and focused local coverage runs should use a labeled
+subdirectory such as `.test-tmp/coverage/status` or
+`.test-tmp/coverage/provider-ingestion`.
+
 ## Test Levels
 
 1. Fast local verification:
@@ -69,12 +75,14 @@ or they will be loaded as zero-test modules.
 1. Generate a fresh raw coverage profile:
    - `deno task test:coverage --frozen`
 2. Inspect local hotspots:
-   - `deno coverage --detailed .coverage`
+   - `deno coverage --detailed .test-tmp/coverage/root`
 3. Generate the LCOV artifact used by GitHub CI / Codecov:
    - `deno task coverage:lcov`
 
 For focused local work, prefer specific `_test.ts` files and `--filter`
-instead of rerunning the whole suite.
+instead of rerunning the whole suite. If you need a manual raw profile, write
+it under `.test-tmp/coverage/<label>` instead of creating a new top-level
+`.coverage-*` directory.
 
 Current local timings from 2026-03-06:
 
@@ -84,7 +92,7 @@ Current local timings from 2026-03-06:
 
 Current coverage-report caveat:
 
-- `deno coverage --detailed .coverage` currently warns that
+- `deno coverage --detailed .test-tmp/coverage/root` currently warns that
   `apps/runtime/src/orchestrator/launcher.ts` is missing transpiled source and
   attributes the covered launcher code under
   `apps/daemon/src/orchestrator/launcher.ts` instead. Treat that daemon-path

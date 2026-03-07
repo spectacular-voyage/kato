@@ -2305,3 +2305,652 @@ I’m checking how coverage output is configured right now and what’s actually
 # gpt-5.4_2026-03-06_2101_37
 
 I found twelve top-level hidden coverage dirs. I’m going to relocate the default coverage output under `.test-tmp/coverage/`, update the docs/examples to match, and then move the existing root-level coverage directories into that contained area so the repo root stays clean.
+
+# gpt-5.4_2026-03-06_2102_07
+
+I’m patching the task configuration and notes now. The goal is simple: one default raw coverage location under `.test-tmp/coverage/root`, plus documented guidance that any ad hoc focused profiles should live under `.test-tmp/coverage/<label>` instead of spawning more top-level `.coverage-*` directories.
+
+# gpt-5.4_2026-03-06_2102_36
+
+I’ve patched the path conventions. Next I’m physically moving the existing top-level coverage directories into `.test-tmp/coverage/legacy-root/` and then I’ll rerun the coverage tasks once against the new default path to make sure the workflow still works end to end.
+
+# gpt-5.4_2026-03-06_2102_48
+
+`coverage:lcov` failed for the expected reason: I launched it before the fresh coverage run had finished writing `.test-tmp/coverage/root`. I’m letting `test:coverage` finish, then I’ll rerun `coverage:lcov` sequentially and check the contained coverage tree one more time.
+
+# gpt-5.4_2026-03-06_2103_09
+
+The new coverage location is working. I’m doing one last status check so I can tell you exactly what changed and where the old profiles ended up.
+
+# gpt-5.4_2026-03-06_2103_23
+
+Coverage artifacts are now contained under `.test-tmp/coverage/`.
+
+I changed [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) so:
+- `deno task test:coverage` writes to `.test-tmp/coverage/root`
+- `deno task coverage:lcov` reads from `.test-tmp/coverage/root`
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to document the new convention: ad hoc coverage runs should also use `.test-tmp/coverage/<label>` instead of top-level `.coverage-*` dirs.
+
+Existing top-level coverage dirs were moved into:
+- `.test-tmp/coverage/legacy-root/`
+
+Current state:
+- top-level `.coverage*` dirs at repo root: `0`
+- active raw coverage dir: `.test-tmp/coverage/root`
+- old scattered dirs are contained in `.test-tmp/coverage/legacy-root`
+
+Verification:
+- `deno task test:coverage --frozen --quiet` passed
+- `deno task coverage:lcov` passed
+
+One existing caveat is unchanged: `coverage:lcov` still emits the known Deno missing-transpiled-source warnings for `launcher.ts` and `tests/test_env.ts`.
+
+# djradon_2026-03-06_2104_35
+
+Ah, warnings be damned. (Just tell me if there's a security risk).
+
+OK, so ready for #2 [daemon-runtime_test.ts](tests/daemon-runtime_test.ts) refactor?
+
+# gpt-5.4_2026-03-06_2104_51
+
+Those Deno coverage warnings are not a security risk. They’re a coverage-reporting/source-map attribution problem, not an execution or permission-boundary problem.
+
+I’m moving on to the `daemon-runtime_test.ts` refactor now. First I’m locating the repeated runtime-loop setup and the nearest low-risk extraction seam so we can reduce duplication without changing test behavior.
+
+# gpt-5.4_2026-03-06_2105_00
+
+The lowest-risk seam is in the persistent in-chat block near the top of `daemon-runtime_test.ts`: many tests repeat the same temp-dir lifecycle and the same “prepopulate one workspace output for session-1” setup. I’m extracting that first instead of touching the runtime logic or the giant later sections.
+
+# gpt-5.4_2026-03-06_2105_31
+
+I’ve got the extraction shape. I’m adding two test helpers now: one to manage the paired temp-dir cleanup, and one to express “session-1 starts with exactly one workspace output” without re-spelling the same `prepopulate` block in every test. Then I’ll convert the first persistent in-chat cluster to use them.
+
+# gpt-5.4_2026-03-06_2105_58
+
+I’m widening the helper slightly so it also handles tests that only create a runtime state dir. That keeps the refactor local to test scaffolding and avoids introducing useless temp dirs just to satisfy cleanup.
+
+# gpt-5.4_2026-03-06_2107_28
+
+The first extraction landed. I’m checking the rewritten block for shape errors before I refactor more of the same pattern further down.
+
+# gpt-5.4_2026-03-06_2107_33
+
+The helper is already paying off in the first block. I’m converting a few more adjacent capture tests so the whole persistent in-chat cluster uses the same scaffolding instead of mixing styles.
+
+# gpt-5.4_2026-03-06_2108_20
+
+One patch chunk missed because the option order in that block differs slightly. I’m re-reading the exact text and applying the rest as smaller, safer edits rather than forcing a giant diff through.
+
+# gpt-5.4_2026-03-06_2108_35
+
+The extraction is big enough to validate now. I’m formatting the file and running the `daemon-runtime_test.ts` suite before I touch any more of the block.
+
+# gpt-5.4_2026-03-06_2108_41
+
+The file compiles; the suite is still running. I’m polling that now so I can confirm the helper extraction didn’t change behavior before deciding whether to extend the pattern further in this turn.
+
+# gpt-5.4_2026-03-06_2108_54
+
+The extracted helper path is green in the targeted suite. I’m running the full repo test task once to make sure the refactor didn’t introduce any broader harness regressions before I stop.
+
+# gpt-5.4_2026-03-06_2109_04
+
+I’ve finished one safe refactor slice and verified it. I’m syncing the task note with that state so the record reflects that the broader refactor item is in progress, not just planned.
+
+# gpt-5.4_2026-03-06_2109_25
+
+No security risk from those Deno coverage warnings. They’re source-map/reporting noise, not a runtime permission or data-exposure issue.
+
+I started the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). The first slice extracts shared cleanup helpers (`withStateDirCleanup`, `withScenarioDirs`) and a reusable single-workspace-output prepopulation helper, then applies them across the first persistent in-chat cluster so those tests stop repeating the same temp-dir and metadata setup. I also noted that progress in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+The next sensible slice is to keep pushing the same helper pattern through the remaining persistent in-chat cases in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts), then look for a second seam around logger creation or recording-pipeline harness setup.
+
+# gpt-5.4_2026-03-06_2109_29
+
+No security risk from those Deno coverage warnings. They’re source-map/reporting noise, not a runtime permission or data-exposure issue.
+
+I started the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). The first slice extracts shared cleanup helpers (`withStateDirCleanup`, `withScenarioDirs`) and a reusable single-workspace-output prepopulation helper, then applies them across the first persistent in-chat cluster so those tests stop repeating the same temp-dir and metadata setup. I also noted that progress in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+The next sensible slice is to keep pushing the same helper pattern through the remaining persistent in-chat cases in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts), then look for a second seam around logger creation or recording-pipeline harness setup.
+
+# djradon_2026-03-06_2112_36
+
+What next? "same cleanup for daemon-cli_test.ts."?
+
+# gpt-5.4_2026-03-06_2112_43
+
+Not yet.
+
+The right next step is to continue the same extraction pattern in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts) for one more slice, because that refactor is now in progress and the helper shape is proven. Stopping after the first cluster and switching files would leave the biggest suite half-consolidated.
+
+After that, yes: move to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts). The direct command tests already took pressure off `start`, `workspace init`, and `export`, so the next CLI pass should narrow the broad suite toward routing/integration and extract repeated harness/store setup.
+
+So the order I’d use is:
+1. Finish another `daemon-runtime_test.ts` consolidation slice.
+2. Then do the same cleanup for [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+3. Then extract the repeated runner/watch setup in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts).
+
+If you want, I can keep pushing `daemon-runtime_test.ts` now and aim to leave that file in a cleaner, more uniform state before switching.
+
+# gpt-5.4_2026-03-06_2112_49
+
+Not yet.
+
+The right next step is to continue the same extraction pattern in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts) for one more slice, because that refactor is now in progress and the helper shape is proven. Stopping after the first cluster and switching files would leave the biggest suite half-consolidated.
+
+After that, yes: move to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts). The direct command tests already took pressure off `start`, `workspace init`, and `export`, so the next CLI pass should narrow the broad suite toward routing/integration and extract repeated harness/store setup.
+
+So the order I’d use is:
+1. Finish another `daemon-runtime_test.ts` consolidation slice.
+2. Then do the same cleanup for [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+3. Then extract the repeated runner/watch setup in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts).
+
+If you want, I can keep pushing `daemon-runtime_test.ts` now and aim to leave that file in a cleaner, more uniform state before switching.
+
+# djradon_2026-03-06_2112_58
+
+continue
+
+# gpt-5.4_2026-03-06_2113_10
+
+I’m continuing the `daemon-runtime_test.ts` cleanup, not switching files yet. I’m scanning the remaining persistent in-chat block for the same temp-dir and single-workspace prepopulate repetition so I can apply the proven helpers consistently rather than inventing a second refactor style.
+
+# gpt-5.4_2026-03-06_2113_26
+
+I have the next repetition band isolated: it’s the rest of the persistent in-chat capture/export/seed tests. I’m patching that cluster now to use the same scenario cleanup helper and the same single-workspace prepopulate helper, and I’m adding a tiny logger factory so the failure-path cases stop rebuilding identical debug loggers inline.
+
+# gpt-5.4_2026-03-06_2113_45
+
+I’m applying the next cleanup band in two chunks to keep the diff readable and low-risk: first the remaining capture tests, then the idempotent/export/cursor-anchor tests. After that I’ll rerun `daemon-runtime_test.ts` before touching anything else.
+
+# gpt-5.4_2026-03-06_2115_55
+
+The second extraction chunk is in. I’m formatting `daemon-runtime_test.ts` and rerunning that suite now; if it stays green, I’ll update the task note with the widened refactor slice rather than guessing.
+
+# gpt-5.4_2026-03-06_2115_58
+
+The file formatted cleanly. I’m polling the targeted runtime suite now; if the helpers hold, I’ll either extend the note and stop, or do one final repo-level verification depending on runtime.
+
+# gpt-5.4_2026-03-06_2116_19
+
+The widened helper pass is green in `daemon-runtime_test.ts`. I’m doing one repo-level test run now and then I’ll update the task note to reflect that the persistent in-chat cluster has been consolidated further, not just started.
+
+The targeted runtime suite stayed green. I’m doing one repo-level `deno task test --frozen --quiet` pass now so this remains a verified refactor step, not just a file-local cleanup.
+
+# gpt-5.4_2026-03-06_2116_33
+
+The repo-level run is green. I’m updating the task note one more time so it reflects the broader helper extraction that’s now in place across the persistent in-chat cluster, not just the first handful of tests.
+
+# gpt-5.4_2026-03-06_2116_44
+
+I continued the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). The helper extraction is broader now: `withStateDirCleanup`, `withScenarioDirs`, `makeSingleWorkspaceOutputPrepopulate`, and a new `makeDebugLoggers()` helper are applied across a much larger persistent in-chat block, including the capture/export/idempotent/sequential/seed/cursor-anchor cases. This is still test-only cleanup; runtime behavior did not change.
+
+I also updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) so the note reflects that wider `daemon-runtime_test.ts` consolidation slice. The refactor-for-testability item stays open; this was another step, not the end of that pass.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+The next sensible move is still one more `daemon-runtime_test.ts` cleanup pass over the remaining repeated setup outside this cluster, then switch to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+# gpt-5.4_2026-03-06_2116_48
+
+I continued the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). The helper extraction is broader now: `withStateDirCleanup`, `withScenarioDirs`, `makeSingleWorkspaceOutputPrepopulate`, and a new `makeDebugLoggers()` helper are applied across a much larger persistent in-chat block, including the capture/export/idempotent/sequential/seed/cursor-anchor cases. This is still test-only cleanup; runtime behavior did not change.
+
+I also updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) so the note reflects that wider `daemon-runtime_test.ts` consolidation slice. The refactor-for-testability item stays open; this was another step, not the end of that pass.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+The next sensible move is still one more `daemon-runtime_test.ts` cleanup pass over the remaining repeated setup outside this cluster, then switch to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+# djradon_2026-03-06_2144_03
+
+proceed.
+
+# gpt-5.4_2026-03-06_2144_20
+
+I’m continuing the same `daemon-runtime_test.ts` pass. Next I’m targeting the remaining repeated temp-dir and metadata setup just after the cursor-anchor cases, so the persistent in-chat section uses one consistent helper style before I leave this file.
+
+# gpt-5.4_2026-03-06_2144_26
+
+The next remaining repetition is smaller and still in the same persistent in-chat section: a few `withStateDirCleanup` conversions and one more scenario-dir case before the live-workspace tests begin. I’m patching that narrow band now rather than spilling into the later live-update harnesses.
+
+# gpt-5.4_2026-03-06_2144_39
+
+I’m refactoring the remaining first-seen/relative-argument band now. That keeps the whole persistent in-chat section internally consistent: `withStateDirCleanup` for state-only cases, `withScenarioDirs` when the test needs a separate destination root, and `makeDebugLoggers()` for the log-inspection paths.
+
+# gpt-5.4_2026-03-06_2145_23
+
+That band is patched. I’m formatting `daemon-runtime_test.ts` again and rerunning the focused runtime suite before deciding whether to keep going or update the note.
+
+# gpt-5.4_2026-03-06_2145_30
+
+The file still formats cleanly. I’m polling the focused runtime suite now; if it passes, I’ll do one repo-level verification and then record the expanded refactor slice in the task note.
+
+# gpt-5.4_2026-03-06_2145_33
+
+The focused runtime suite is still clean. I’m running the repo-level test task one more time to keep the refactor verified at the suite level, then I’ll update the task note with the expanded scope of the cleanup.
+
+# gpt-5.4_2026-03-06_2145_48
+
+The wider runtime cleanup is verified at repo level too. I’m updating the task note so it explicitly reflects that the persistent in-chat refactor now covers the cursor/first-seen/relative-argument cases as well, not just the early capture cluster.
+
+# gpt-5.4_2026-03-06_2145_57
+
+I continued the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). This pass pushed the shared helper style further through the persistent in-chat section: first-seen command cases, relative-path handling, and more capture/export scenarios now use the same cleanup and logger helpers instead of repeating temp-dir and logger setup inline.
+
+I also updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) so the note matches the wider scope of the current `daemon-runtime_test.ts` cleanup.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+Next likely move is one last runtime-test cleanup slice for the remaining repeated setup outside this persistent in-chat band, then switch to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+# gpt-5.4_2026-03-06_2145_58
+
+I continued the `daemon-runtime_test.ts` refactor in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). This pass pushed the shared helper style further through the persistent in-chat section: first-seen command cases, relative-path handling, and more capture/export scenarios now use the same cleanup and logger helpers instead of repeating temp-dir and logger setup inline.
+
+I also updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) so the note matches the wider scope of the current `daemon-runtime_test.ts` cleanup.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts` passed: `66` tests
+- `deno task test --frozen --quiet` passed: `486` tests
+
+Next likely move is one last runtime-test cleanup slice for the remaining repeated setup outside this persistent in-chat band, then switch to [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+# djradon_2026-03-06_2147_53
+
+proceed
+
+# gpt-5.4_2026-03-06_2148_06
+
+I’m doing the last targeted pass in `daemon-runtime_test.ts` before switching files. I’m checking the remaining repeated temp-dir and logger setup outside the consolidated persistent in-chat block so I can finish that cleanup without mixing in broader test redesign.
+
+# gpt-5.4_2026-03-06_2148_34
+
+I’ve got a clean last slice: the live-workspace tests and the frontmatter end-to-end tests still hand-roll the same temp-dir lifecycle. I’m switching those to the shared cleanup helpers now, without touching their inner assertions or runtime behavior.
+
+# gpt-5.4_2026-03-06_2149_20
+
+I’m continuing the `daemon-runtime_test.ts` cleanup from the last verified slice. I’ll finish the remaining repeated temp-dir lifecycle in the live-workspace and frontmatter end-to-end tests, then rerun the focused and repo test commands before touching the task note again.
+
+# gpt-5.4_2026-03-06_2149_27
+
+I’ve confirmed the remaining duplicated setup is exactly where expected: three live-workspace tests and two frontmatter end-to-end tests still hand-roll temp-dir cleanup. I’m patching only those to the shared helpers, keeping assertions and runtime behavior unchanged.
+
+# gpt-5.4_2026-03-06_2149_33
+
+The live-workspace tests are already on the shared state-dir helper in the current file. The only remaining hand-rolled lifecycle in `daemon-runtime_test.ts` is the two frontmatter end-to-end cases, so I’m reducing this pass to those and then re-verifying.
+
+# gpt-5.4_2026-03-06_2149_37
+
+I’ve narrowed the edit to the last duplicated path in this file. I’m patching the two frontmatter end-to-end tests onto `withScenarioDirs`, then I’ll update the task note so it reflects that the persistent in-chat band cleanup now also covers those end-to-end cases.
+
+# gpt-5.4_2026-03-06_2150_05
+
+The last duplicated lifecycle block is removed from `daemon-runtime_test.ts`. I’m updating the task note to reflect that the current runtime-test refactor now covers the frontmatter end-to-end cases too, then I’ll run formatting and the verification commands.
+
+# gpt-5.4_2026-03-06_2150_16
+
+I’ve finished the code edits for this slice. Next is mechanical verification: format the runtime test file, rerun the focused `daemon-runtime_test.ts` suite, then rerun the repo test task to make sure the refactor stayed behavior-preserving.
+
+# gpt-5.4_2026-03-06_2150_20
+
+The format step is clean. Both test runs are in flight now; I’m waiting on the focused runtime suite and the full repo `test` task before I decide whether to switch to `daemon-cli_test.ts` or stay in this file for any remaining cleanup.
+
+# gpt-5.4_2026-03-06_2150_38
+
+The runtime-test slice is clean: the two frontmatter end-to-end cases now use the shared scenario/state cleanup helpers, and both `tests/daemon-runtime_test.ts` and the full repo test task passed unchanged. I’m switching to `daemon-cli_test.ts` now and looking for the repeated harness/store setup that can be extracted without collapsing test intent.
+
+# gpt-5.4_2026-03-06_2150_44
+
+`daemon-cli_test.ts` is still doing what we expected: many tests rebuild temp dirs and runtime harnesses inline, especially the workspace/user/init/status clusters. I’m reading those blocks now to find the smallest helper seam that removes repetition without hiding command intent.
+
+# gpt-5.4_2026-03-06_2151_04
+
+I’ve got a small, low-risk seam for the CLI suite: a shared temp-dir cleanup helper plus a harnessed `runDaemonCli` helper that creates stdout/stderr capture and optional `cwdPath`. I’m adding those first and using them in the init/workspace/user clusters, which are the noisiest repeated blocks in this file.
+
+# gpt-5.4_2026-03-06_2151_37
+
+I’ve settled on a contained CLI refactor slice: use the existing shared `withTestTempDir` helper from `tests/test_temp.ts`, add one harnessed `runDaemonCli` helper, and apply both across the init/workspace/user tests. That keeps the command assertions visible while stripping the setup/cleanup repetition.
+
+# gpt-5.4_2026-03-06_2152_20
+
+The CLI helper extraction is in. I’m formatting `daemon-cli_test.ts` now and then I’ll run the focused CLI suite before deciding whether to extend the helper to the status/start clusters in the same pass.
+
+# gpt-5.4_2026-03-06_2152_26
+
+Formatting is clean. The focused `daemon-cli_test.ts` run is in progress now; if it stays green, I’ll update the task note and then rerun the full repo `test` task.
+
+# gpt-5.4_2026-03-06_2152_31
+
+The first pass exposed a typing issue in the new helper, not a behavioral one. I’m checking the `runDaemonCli` options type and then I’ll loosen or realign the helper signature so it accepts the same test-only option bag the existing inline calls already use.
+
+# gpt-5.4_2026-03-06_2152_42
+
+I found the mismatch: the helper was inferred from the function parameter list instead of the exported `RunDaemonCliOptions` interface, and that dropped the test option fields. I’m switching the helper to the real `RunDaemonCliOptions` type and rerunning the focused CLI suite.
+
+# gpt-5.4_2026-03-06_2152_55
+
+The helper type is aligned now, and the CLI suite is back under a real test run. I’m waiting on that focused result before updating the task note or broadening the helper further.
+
+# gpt-5.4_2026-03-06_2153_00
+
+The focused CLI suite is green, including the refactored init/workspace/user cases. I’m updating the task note to record this `daemon-cli_test.ts` cleanup slice, then I’ll rerun the full repo `test` task and decide whether the next slice should stay in `daemon-cli_test.ts` or move to `provider-ingestion_test.ts`.
+
+# gpt-5.4_2026-03-06_2153_09
+
+I’m recording the current CLI cleanup slice in the task note now. After that I’ll rerun the full repo `test` task; if it stays green, the next choice is between one more `daemon-cli_test.ts` pass over the status/start cluster or switching to `provider-ingestion_test.ts`.
+
+# gpt-5.4_2026-03-06_2153_16
+
+The note is updated and the repo-wide `test` task is running. While that finishes, I’m checking what repetition is actually left in `daemon-cli_test.ts` so the next move is based on the remaining hotspots, not just the original guess.
+
+# gpt-5.4_2026-03-06_2153_49
+
+`daemon-cli_test.ts` still has one obvious remaining pattern: a bunch of status/workspace blocks still create temp dirs inline and tear them down in `finally`. I’m converting that whole middle cluster to `withTestTempDir` now, leaving the assertions untouched.
+
+# gpt-5.4_2026-03-06_2154_03
+
+The middle status/workspace block is converted. I’m finishing the same cleanup pattern through the remaining start/global-root/clean cases so the file stops mixing helper-based and hand-rolled temp-dir lifecycles.
+
+# gpt-5.4_2026-03-06_2154_52
+
+The remaining manual cases are all still the same pattern, so I’m converting the start/global-root/clean group with a straight lifecycle-only edit. No assertions or command parameters are changing in this pass.
+
+# gpt-5.4_2026-03-06_2155_28
+
+The remaining temp-dir cases are converted. I’m formatting `daemon-cli_test.ts` again now; then I’ll rerun the focused CLI suite to catch any indentation or scope mistakes before deciding whether there’s any value left in another CLI pass.
+
+# gpt-5.4_2026-03-06_2155_43
+
+Formatting is clean again. The focused CLI suite is running with the larger cleanup applied; once that’s green I’ll know whether `daemon-cli_test.ts` is effectively done for this refactor pass or if there’s still a worthwhile seam left.
+
+The larger CLI cleanup held: all `55` `daemon-cli_test.ts` tests still pass. I’m doing one quick scan for leftover hand-rolled temp-dir lifecycles in that file; if only edge cases remain, I’ll stop there and rerun the full repo `test` task.
+
+`daemon-cli_test.ts` no longer has any top-level hand-rolled temp-dir lifecycle left; the helper now covers every temp-dir case in the file. I’m updating the task note to reflect that broader scope, then I’ll run the full repo `test` task one more time on the final CLI refactor state.
+
+# gpt-5.4_2026-03-06_2155_56
+
+The CLI file is effectively cleaned up for this pass, and I removed the now-unused cleanup import. I’m formatting once more and running the full repo `test` task on the final state of the runtime/CLI refactor slices.
+
+# gpt-5.4_2026-03-06_2156_04
+
+The only remaining step in this pass is the repo-wide test run now in flight. If that stays green, I’ll close out this slice and the next sensible target becomes `provider-ingestion_test.ts`, not more churn in `daemon-cli_test.ts`.
+
+# gpt-5.4_2026-03-06_2156_10
+
+The runtime and CLI refactor slices are both stable now, and `daemon-cli_test.ts` is effectively done for this pass. I’m moving to `provider-ingestion_test.ts` next and looking for the repeated runner/watch/snapshot setup we already identified in the task note.
+
+# gpt-5.4_2026-03-06_2156_30
+
+`provider-ingestion_test.ts` already has one useful seam: the same `PersistentSessionStateStore` construction and `FileProviderIngestionRunner` boilerplate repeats with different parsers/discovery callbacks. I’m checking the runner constructor type next so I can add one shared test helper instead of proliferating one-off local `makeRunner` closures.
+
+# gpt-5.4_2026-03-06_2156_40
+
+The constructor type is cleanly exported, so I can build a real shared test helper instead of an ad hoc wrapper. I’m checking whether `mod.ts` re-exports `FileProviderIngestionRunnerOptions`; if it does, I’ll use that directly and refactor the first repeated runner/state-store cluster in `provider-ingestion_test.ts`.
+
+# gpt-5.4_2026-03-06_2156_57
+
+`provider-ingestion_test.ts` has a good first seam: shared runner/state-store construction in the first persisted-cursor/snippet cluster. I’m adding a typed test runner helper and applying it there first so we get a verified pattern before touching the rest of the file.
+
+# gpt-5.4_2026-03-06_2157_20
+
+The provider-ingestion helper is in for the first persisted-state cluster. I’m formatting that file and running the focused `provider-ingestion_test.ts` suite now before I decide whether to expand the helper farther through the file or stop this turn.
+
+# gpt-5.4_2026-03-06_2157_32
+
+Formatting is clean. The focused provider-ingestion suite is running; if that stays green, I’ll record the new helper seam in the task note and likely stop this pass there rather than widening the change without another clear cluster boundary.
+
+# gpt-5.4_2026-03-06_2157_40
+
+The focused provider-ingestion run is green. I’m recording that first helper seam in the task note and then rerunning the repo-wide `test` task so this becomes another verified refactor slice, not just a local cleanup.
+
+# gpt-5.4_2026-03-06_2157_51
+
+The note is updated and the repo-wide test task is running on the combined runtime, CLI, and provider-ingestion refactor state. If that passes, this is a clean checkpoint and the next likely target is either widening the provider-ingestion helper to the remaining local runner factories or stopping for a commit.
+
+# gpt-5.4_2026-03-06_2158_07
+
+I pushed the refactor pass further in three places.
+
+[tests/daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts) now uses the shared cleanup helpers through the frontmatter end-to-end cases, so the persistent in-chat cluster is on one consistent pattern. [tests/daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts) now reuses `withTestTempDir` for every temp-dir case in the file, and the new shared harnessed CLI runner covers the init/workspace/user cluster. I also started the next file, [tests/provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts), by extracting a shared persistent session-state helper plus a typed file-runner factory for the persisted-cursor, workspace-output twin, and snippet-resume scenarios. I updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to reflect those verified refactor slices.
+
+Verification stayed green throughout:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=... tests/daemon-cli_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/provider-ingestion_test.ts`
+- `deno task test --frozen --quiet` passed with `486` tests
+
+I did not rerun coverage for this slice, since these were test-structure refactors rather than new behavior or new coverage targets. The next sensible target is widening the new helper pattern through the remaining local runner factories in [tests/provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts).
+
+# gpt-5.4_2026-03-06_2158_10
+
+I pushed the refactor pass further in three places.
+
+[tests/daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts) now uses the shared cleanup helpers through the frontmatter end-to-end cases, so the persistent in-chat cluster is on one consistent pattern. [tests/daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts) now reuses `withTestTempDir` for every temp-dir case in the file, and the new shared harnessed CLI runner covers the init/workspace/user cluster. I also started the next file, [tests/provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts), by extracting a shared persistent session-state helper plus a typed file-runner factory for the persisted-cursor, workspace-output twin, and snippet-resume scenarios. I updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to reflect those verified refactor slices.
+
+Verification stayed green throughout:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-runtime_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=... tests/daemon-cli_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/provider-ingestion_test.ts`
+- `deno task test --frozen --quiet` passed with `486` tests
+
+I did not rerun coverage for this slice, since these were test-structure refactors rather than new behavior or new coverage targets. The next sensible target is widening the new helper pattern through the remaining local runner factories in [tests/provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts).
+
+# djradon_2026-03-06_2158_18
+
+commit message
+
+# gpt-5.4_2026-03-06_2158_25
+
+```text
+test: refactor runtime, cli, and ingestion test scaffolding
+
+Extract shared temp-dir cleanup and harness helpers across daemon-runtime and
+daemon-cli tests, and start the same cleanup in provider-ingestion tests with
+reusable session-state and file-runner helpers. Refresh the testing-review task
+note to capture the verified refactor-for-testability progress.
+```
+
+# gpt-5.4_2026-03-06_2158_26
+
+```text
+test: refactor runtime, cli, and ingestion test scaffolding
+
+Extract shared temp-dir cleanup and harness helpers across daemon-runtime and
+daemon-cli tests, and start the same cleanup in provider-ingestion tests with
+reusable session-state and file-runner helpers. Refresh the testing-review task
+note to capture the verified refactor-for-testability progress.
+```
+
+# djradon_2026-03-06_2158_57
+
+error[require-await]: Async method 'load' has no 'await' expression or 'await using' declaration.
+  --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:71:7
+   | 
+71 |       async load(): Promise<DaemonStatusSnapshot> {
+   |       ^^^^^
+   = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'load' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:160:7
+    | 
+160 |       async load() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'ensureInitialized' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:163:7
+    | 
+163 |       async ensureInitialized() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'load' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:172:7
+    | 
+172 |       async load() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'ensureInitialized' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:175:7
+    | 
+175 |       async ensureInitialized() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'load' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:187:7
+    | 
+187 |       async load() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'ensureInitialized' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:190:7
+    | 
+190 |       async ensureInitialized() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'list' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:206:7
+    | 
+206 |       async list() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'launchDetached' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:220:7
+    | 
+220 |       async launchDetached() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'evaluateWritePath' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:226:7
+    | 
+226 |       async evaluateWritePath(targetPath: string) {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'load' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:239:7
+    | 
+239 |       async load() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'ensureInitialized' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:244:7
+    | 
+244 |       async ensureInitialized() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async method 'save' has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:249:7
+    | 
+249 |       async save() {
+    |       ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async arrow function has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:451:20
+    | 
+451 |       enqueueImpl: async (request) => {
+    |                    ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async arrow function has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:502:20
+    | 
+502 |       enqueueImpl: async (request) => {
+    |                    ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async arrow function has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:553:20
+    | 
+553 |       enqueueImpl: async (request) => {
+    |                    ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async arrow function has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts:627:22
+    | 
+627 |         enqueueImpl: async (request) => {
+    |                      ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[require-await]: Async arrow function has no 'await' expression or 'await using' declaration.
+   --> /home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts:273:28
+    | 
+273 |   await withTempRuntimeDir(async (runtimeDir) => {
+    |                            ^^^^^
+    = hint: Remove 'async' keyword from the function or use 'await' expression or 'await using' declaration inside.
+
+  docs: https://docs.deno.com/lint/rules/require-await
+
+error[no-unused-vars]: `makeTestTempDir` is never used
+  --> /home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:54:10
+   | 
+54 | import { makeTestTempDir, withTestTempDir } from "./test_temp.ts";
+   |          ^^^^^^^^^^^^^^^
+   = hint: If this is intentional, alias it with an underscore like `makeTestTempDir as _makeTestTempDir`
+
+  docs: https://docs.deno.com/lint/rules/no-unused-vars
+
+Found 19 problems
+
+# gpt-5.4_2026-03-06_2159_05
+
+I’m fixing the lint regressions directly in the test files: remove unnecessary `async` from promise-returning stubs, drop the unused `makeTestTempDir` import, and then rerun a focused lint pass on the touched tests.

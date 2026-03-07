@@ -38,7 +38,7 @@ Current signals already visible in the repo today:
   - `deno task test --frozen`: about `14s` elapsed
   - `deno task test:coverage --frozen`: about `23s` elapsed
   - direct `deno test --parallel ... --frozen`: about `8s` elapsed
-  - direct `deno test --parallel --clean --coverage=.coverage-par ... --frozen`:
+  - direct `deno test --parallel --clean --coverage=.test-tmp/coverage/par ... --frozen`:
     about `10s` elapsed
 - Post-initial implementation verification on `2026-03-06`:
   - `deno task test --frozen --quiet`: `486` passing tests, about `9.4s` real
@@ -135,6 +135,24 @@ Current signals already visible in the repo today:
   - root test tasks now allow the env keys exercised by those direct tests
   - `tests/test_env.ts` now provides a shared env lock so env-mutating tests
     remain deterministic under `--parallel`
+  - raw coverage output now lives under `.test-tmp/coverage/` instead of
+    accumulating new top-level `.coverage*` directories
+  - the current `daemon-runtime_test.ts` refactor slice now extracts shared
+    state-dir/scenario-dir cleanup helpers, a reusable debug-logger factory,
+    and a single-workspace-output prepopulation helper across the persistent
+    in-chat test cluster, including capture/export, cursor-anchor, first-seen
+    command, relative-path, and frontmatter end-to-end cases, without changing
+    runtime behavior
+  - the current `daemon-cli_test.ts` refactor slice now reuses
+    `tests/test_temp.ts` cleanup across every temp-dir case in the file and a
+    shared harnessed CLI runner across the init/workspace/user clusters, so
+    those tests stop rebuilding temp-dir lifecycles and `makeRuntimeHarness`
+    boilerplate inline
+  - the current `provider-ingestion_test.ts` refactor slice now extracts a
+    shared persistent-session-state helper plus a typed file-runner factory
+    across the persisted-cursor, workspace-output twin, and snippet-resume
+    scenarios so those cases stop redefining the same state-store and
+    `FileProviderIngestionRunner` scaffolding inline
 - GitHub CI trigger behavior today:
   `.github/workflows/ci.yml` runs on `pull_request` and on `push` to `main`.
   That means it runs during PR review/update and again after merge when the

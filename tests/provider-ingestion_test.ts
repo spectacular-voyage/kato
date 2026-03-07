@@ -7,6 +7,7 @@ import {
   createCodexIngestionRunner,
   createGeminiIngestionRunner,
   FileProviderIngestionRunner,
+  type FileProviderIngestionRunnerOptions,
   InMemorySessionSnapshotStore,
   type LogRecord,
   mapConversationEventsToTwin,
@@ -209,6 +210,41 @@ async function withTempDir(
   await withTestTempDir(prefix, run);
 }
 
+const INGESTION_TEST_NOW_ISO = "2026-02-26T10:00:00.000Z";
+
+function ingestionTestNow(): Date {
+  return new Date(INGESTION_TEST_NOW_ISO);
+}
+
+function makeSessionStateStore(
+  katoDir: string,
+  sessionId: string,
+): PersistentSessionStateStore {
+  return new PersistentSessionStateStore({
+    katoDir,
+    now: ingestionTestNow,
+    makeSessionId: () => sessionId,
+  });
+}
+
+type FileProviderTestRunnerOptions =
+  & Omit<FileProviderIngestionRunnerOptions, "watchRoots" | "now">
+  & {
+    dir: string;
+    now?: () => Date;
+  };
+
+function makeFileProviderTestRunner(
+  options: FileProviderTestRunnerOptions,
+): FileProviderIngestionRunner {
+  const { dir, now = ingestionTestNow, ...runnerOptions } = options;
+  return new FileProviderIngestionRunner({
+    ...runnerOptions,
+    watchRoots: [dir],
+    now,
+  });
+}
+
 Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch updates", async () => {
   await withTempDir("provider-ingestion-runner-", async (dir) => {
     const sessionFile = join(dir, "session-1.jsonl");
@@ -358,15 +394,14 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
     const parseOffsets: number[] = [];
 
     function makeRunner(store: InMemorySessionSnapshotStore) {
-      return new FileProviderIngestionRunner({
+      return makeFileProviderTestRunner({
+        dir,
         provider: "test-provider",
-        watchRoots: [dir],
         sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-abcdef12",
-        }),
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-uuid-abcdef12",
+        ),
         autoGenerateSnapshots: true,
         discoverSessions() {
           return Promise.resolve([{
@@ -425,11 +460,10 @@ Deno.test(
         const sessionFile = join(dir, "session-workspace-output.jsonl");
         await Deno.writeTextFile(sessionFile, "placeholder\n");
         const stateRoot = join(dir, ".kato");
-        const stateStore = new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-workspace-output-1234",
-        });
+        const stateStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-workspace-output-1234",
+        );
         const metadata = await stateStore.getOrCreateSessionMetadata({
           provider: "test-provider",
           providerSessionId: "session-workspace-output",
@@ -466,15 +500,14 @@ Deno.test(
         await stateStore.saveSessionMetadata(metadata);
 
         const store = new InMemorySessionSnapshotStore();
-        const runner = new FileProviderIngestionRunner({
+        const runner = makeFileProviderTestRunner({
+          dir,
           provider: "test-provider",
-          watchRoots: [dir],
           sessionSnapshotStore: store,
-          sessionStateStore: new PersistentSessionStateStore({
-            katoDir: stateRoot,
-            now: () => new Date("2026-02-26T10:00:00.000Z"),
-            makeSessionId: () => "session-uuid-workspace-output-1234",
-          }),
+          sessionStateStore: makeSessionStateStore(
+            stateRoot,
+            "session-uuid-workspace-output-1234",
+          ),
           autoGenerateSnapshots: false,
           discoverSessions() {
             return Promise.resolve([{
@@ -506,11 +539,10 @@ Deno.test(
         await runner.poll();
         await runner.stop();
 
-        const reloadedStore = new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-workspace-output-1234",
-        });
+        const reloadedStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-workspace-output-1234",
+        );
         const reloaded = await reloadedStore.getOrCreateSessionMetadata({
           provider: "test-provider",
           providerSessionId: "session-workspace-output",
@@ -535,15 +567,14 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
     function makeRunner(
       store: InMemorySessionSnapshotStore,
     ): FileProviderIngestionRunner {
-      return new FileProviderIngestionRunner({
+      return makeFileProviderTestRunner({
+        dir,
         provider: "codex",
-        watchRoots: [dir],
         sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-snippet-persist-uuid",
-        }),
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-snippet-persist-uuid",
+        ),
         autoGenerateSnapshots: false,
         discoverSessions() {
           return Promise.resolve([{
@@ -609,11 +640,10 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
     assertExists(firstSnapshot);
     assertEquals(firstSnapshot.metadata.snippet, "first user message");
 
-    const reloadedStateStore = new PersistentSessionStateStore({
-      katoDir: stateRoot,
-      now: () => new Date("2026-02-26T10:00:00.000Z"),
-      makeSessionId: () => "session-snippet-persist-uuid",
-    });
+    const reloadedStateStore = makeSessionStateStore(
+      stateRoot,
+      "session-snippet-persist-uuid",
+    );
     const reloadedMetadata = await reloadedStateStore
       .getOrCreateSessionMetadata({
         provider: "codex",
