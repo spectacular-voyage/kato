@@ -47,7 +47,10 @@ including after adding direct JSONL writer, session-twin mapper,
 runtime-config, shared-behavior config, path-policy, launcher, status-command,
 control-plane, env-helper, status-error-cursor, CLI parser, direct start /
 workspace-init / export command tests, direct hash tests, and Codex parser
-tests plus a shared env lock in `tests/test_env.ts` for env-mutating cases.
+tests, status-workspace tests, provider-session-discovery tests,
+daemon-status-projection tests, daemon-export-request tests, and
+daemon-first-seen tests plus a shared env lock in `tests/test_env.ts` for
+env-mutating cases.
 
 GitHub CI uses a split gate:
 
@@ -86,9 +89,9 @@ it under `.test-tmp/coverage/<label>` instead of creating a new top-level
 
 Current local timings from 2026-03-06:
 
-- `deno task test --frozen --quiet`: `492` passing tests, about `9.6s` real
+- `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
 - `deno task test:coverage --frozen --quiet`: `492` passing tests,
-  `79.4%` line coverage, `84.2%` branch coverage, about `10.5s` real
+  `80.9%` line coverage, `85.2%` branch coverage, `8.94s` real
 
 Current coverage-report caveat:
 
@@ -98,7 +101,10 @@ Current coverage-report caveat:
   `apps/cli/src/commands/status.ts`,
   `apps/cli/src/commands/status_workspace.ts`,
   `apps/daemon/src/orchestrator/provider_ingestion.ts`, and
-  `apps/daemon/src/orchestrator/provider_session_discovery.ts`. Treat the
+  `apps/daemon/src/orchestrator/provider_session_discovery.ts`, and
+  `apps/daemon/src/orchestrator/runtime_export_request.ts`, and
+  `apps/daemon/src/orchestrator/runtime_first_seen.ts`, and
+  `apps/daemon/src/orchestrator/runtime_status_projection.ts`. Treat the
   summary emitted by `deno task test:coverage --frozen --quiet` as the
   authoritative repo-wide baseline when that reporting quirk appears, and use
   focused coverage runs for per-file work.

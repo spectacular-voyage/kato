@@ -1,17 +1,11 @@
 import type {
   ConversationEvent,
   DaemonFeatureFlags,
-  DaemonSessionStatus,
   MarkdownFrontmatterConfig,
-  ProviderStatus,
   SessionMetadataV1,
   UserConfig,
 } from "@kato/shared";
-import {
-  extractSnippet,
-  projectSessionStatus,
-  sortSessionsByRecency,
-} from "@kato/shared";
+import { extractSnippet } from "@kato/shared";
 import { extname, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   AuditLogger,
@@ -25,12 +19,10 @@ import {
   WritePathPolicyGate,
 } from "../policy/mod.ts";
 import {
-  type ActiveRecording,
   type RecordingOutputOverrides,
   RecordingPipeline,
   type RecordingPipelineLike,
 } from "../writer/mod.ts";
-import { appendExportsLogEntry } from "../utils/exports_log.ts";
 import {
   createDefaultStatusSnapshot,
   type DaemonControlRequest,
@@ -44,7 +36,6 @@ import {
 import type {
   ProviderIngestionRunner,
   RuntimeSessionSnapshot,
-  SessionSnapshotMetadataEntry,
   SessionSnapshotStore,
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
@@ -54,6 +45,22 @@ import {
   type PersistentSessionStateStore,
 } from "./session_state_store.ts";
 import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
+import {
+  summarizeRecordingStatus,
+  toActiveRecordingsFromMetadata,
+  toProviderStatuses,
+  toSessionStatuses,
+} from "./runtime_status_projection.ts";
+import {
+  handleExportControlRequest,
+  type SessionExportSnapshot,
+} from "./runtime_export_request.ts";
+import {
+  type FirstSeenSourceFileFreshnessBasis,
+  isFirstSeenProviderSessionUserEventEligible,
+  resolveFirstSeenProviderSessionCommandCursor,
+  resolveFirstSeenSourceFileFreshness,
+} from "./runtime_first_seen.ts";
 import {
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
@@ -73,12 +80,6 @@ import {
   resolvePreferredParticipantUsername,
 } from "../config/mod.ts";
 import { DAEMON_APP_VERSION } from "../version.ts";
-import { isRecord } from "../../../runtime/src/config/file_store_utils.ts";
-
-interface SessionExportSnapshot {
-  provider: string;
-  events: ConversationEvent[];
-}
 
 export interface DaemonRuntimeLoopOptions {
   statusStore?: DaemonStatusSnapshotStoreLike;
@@ -115,7 +116,6 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS = 5 * 60_000;
 const MARKDOWN_LINK_PATH_PATTERN = /^\[[^\]]+\]\((.+)\)$/;
-const KNOWN_EXPORT_PROVIDER_PREFIXES = new Set(["claude", "codex", "gemini"]);
 const CAPTURE_DESTINATION_CONFLICT_MAX_RETRIES = 5;
 const CAPTURE_DESTINATION_CONFLICT_BACKOFF_MS = 25;
 const FIRST_SEEN_PROVIDER_SESSION_REALTIME_GRACE_MS = 5_000;
@@ -968,116 +968,6 @@ function writeCommandCursor(
   } else {
     delete metadata.commandCursorAnchor;
   }
-}
-
-type FirstSeenSourceFileFreshnessBasis =
-  | "source.birthtime"
-  | "source.mtime"
-  | "metadata.lastObservedMtimeMs";
-
-async function resolveFirstSeenSourceFileFreshness(options: {
-  sourceFilePath: string | undefined;
-  metadataLastObservedMtimeMs: number | undefined;
-}): Promise<{
-  sourceFileFreshnessMs?: number;
-  sourceFileFreshnessBasis?: FirstSeenSourceFileFreshnessBasis;
-}> {
-  const sourceFilePath = readString(options.sourceFilePath);
-  if (sourceFilePath && !sourceFilePath.startsWith("[unknown:")) {
-    try {
-      const sourceFileInfo = await Deno.stat(sourceFilePath);
-      const sourceFileBirthtimeMs = sourceFileInfo.birthtime?.getTime();
-      if (
-        sourceFileBirthtimeMs !== undefined &&
-        Number.isFinite(sourceFileBirthtimeMs)
-      ) {
-        return {
-          sourceFileFreshnessMs: sourceFileBirthtimeMs,
-          sourceFileFreshnessBasis: "source.birthtime",
-        };
-      }
-      const sourceFileMtimeMs = sourceFileInfo.mtime?.getTime();
-      if (
-        sourceFileMtimeMs !== undefined &&
-        Number.isFinite(sourceFileMtimeMs)
-      ) {
-        return {
-          sourceFileFreshnessMs: sourceFileMtimeMs,
-          sourceFileFreshnessBasis: "source.mtime",
-        };
-      }
-    } catch {
-      // Best-effort source freshness check; metadata fallback handles unavailable files.
-    }
-  }
-
-  if (
-    options.metadataLastObservedMtimeMs !== undefined &&
-    Number.isFinite(options.metadataLastObservedMtimeMs)
-  ) {
-    return {
-      sourceFileFreshnessMs: options.metadataLastObservedMtimeMs,
-      sourceFileFreshnessBasis: "metadata.lastObservedMtimeMs",
-    };
-  }
-
-  return {};
-}
-
-function isFirstSeenProviderSessionUserEventEligible(options: {
-  event: ConversationEvent & { kind: "message.user" };
-  daemonStartMs: number;
-  nearRealtimeGraceMs: number;
-  sourceFileFreshnessMs: number | undefined;
-}): boolean {
-  const nearRealtimeThresholdMs = options.daemonStartMs -
-    options.nearRealtimeGraceMs;
-  const eventTimeMs = readTimeMs(options.event.timestamp);
-  if (eventTimeMs !== undefined) {
-    return eventTimeMs >= nearRealtimeThresholdMs;
-  }
-  if (options.sourceFileFreshnessMs !== undefined) {
-    return options.sourceFileFreshnessMs >= nearRealtimeThresholdMs;
-  }
-  return false;
-}
-
-function resolveFirstSeenProviderSessionCommandCursor(options: {
-  events: ConversationEvent[];
-  daemonStartMs: number;
-  nearRealtimeGraceMs: number;
-  sourceFileFreshnessMs: number | undefined;
-}): {
-  commandCursor: number;
-  eligibleUserEvents: number;
-  skippedUserEvents: number;
-} {
-  let commandCursor = options.events.length;
-  let eligibleUserEvents = 0;
-  let skippedUserEvents = 0;
-
-  for (let i = 0; i < options.events.length; i += 1) {
-    const event = options.events[i];
-    if (!event || event.kind !== "message.user") {
-      continue;
-    }
-    const eligible = isFirstSeenProviderSessionUserEventEligible({
-      event,
-      daemonStartMs: options.daemonStartMs,
-      nearRealtimeGraceMs: options.nearRealtimeGraceMs,
-      sourceFileFreshnessMs: options.sourceFileFreshnessMs,
-    });
-    if (!eligible) {
-      skippedUserEvents += 1;
-      continue;
-    }
-    eligibleUserEvents += 1;
-    if (commandCursor === options.events.length) {
-      commandCursor = i;
-    }
-  }
-
-  return { commandCursor, eligibleUserEvents, skippedUserEvents };
 }
 
 function resolveCommandBoundaries(
@@ -2646,30 +2536,6 @@ async function processInChatRecordingUpdates(
   }
 }
 
-function readWorkspaceOutputInitialStartedAt(
-  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
-): string {
-  for (let i = 0; i < output.recordingCycles.length; i += 1) {
-    const cycle = output.recordingCycles[i];
-    if (cycle?.startedAt) {
-      return cycle.startedAt;
-    }
-  }
-  return output.createdAt ?? "";
-}
-
-function readWorkspaceOutputLatestStartedAt(
-  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
-): string | undefined {
-  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
-    const cycle = output.recordingCycles[i];
-    if (cycle?.startedAt) {
-      return cycle.startedAt;
-    }
-  }
-  return undefined;
-}
-
 async function processPersistentRecordingUpdates(
   options: ProcessPersistentRecordingUpdatesOptions,
 ): Promise<boolean> {
@@ -2918,169 +2784,6 @@ async function processPersistentRecordingUpdates(
     }
   }
   return anyMetadataChanged;
-}
-
-function toActiveRecordingsFromMetadata(
-  entries: SessionMetadataV1[],
-): ActiveRecording[] {
-  const recordings: ActiveRecording[] = [];
-  for (const metadata of entries) {
-    for (const output of metadata.workspaceOutputs ?? []) {
-      if (output.desiredState !== "on") {
-        continue;
-      }
-      const startedAt = readWorkspaceOutputInitialStartedAt(output) ||
-        metadata.updatedAt;
-      const restartedAt = readWorkspaceOutputLatestStartedAt(output);
-      recordings.push({
-        recordingId: output.activeRecordingCycleId ?? output.workspaceId,
-        provider: metadata.provider,
-        sessionId: metadata.providerSessionId,
-        workspaceAlias: output.workspaceAliasSnapshot,
-        outputPath: output.currentResolvedPath,
-        startedAt,
-        ...(restartedAt && restartedAt !== startedAt ? { restartedAt } : {}),
-        lastWriteAt: metadata.updatedAt,
-      });
-    }
-  }
-  return recordings;
-}
-
-function summarizeRecordingStatus(
-  activeRecordings: ActiveRecording[],
-  sessions: DaemonSessionStatus[] | undefined,
-): { activeRecordings: number; destinations: number } {
-  if (!sessions || activeRecordings.length === 0) {
-    return { activeRecordings: 0, destinations: 0 };
-  }
-  const activeSessionKeys = new Set(
-    sessions
-      .filter((session) => !session.stale)
-      .map((session) =>
-        makeSessionProcessingKey(
-          session.provider,
-          session.providerSessionId ?? session.sessionId,
-        )
-      ),
-  );
-  const active = activeRecordings.filter((recording) =>
-    activeSessionKeys.has(
-      makeSessionProcessingKey(recording.provider, recording.sessionId),
-    )
-  );
-  return {
-    activeRecordings: active.length,
-    destinations: new Set(
-      active.map((recording) => recording.outputPath),
-    ).size,
-  };
-}
-
-function toProviderStatuses(
-  sessionSnapshots: SessionSnapshotMetadataEntry[],
-  now: Date,
-  staleAfterMs: number,
-): ProviderStatus[] {
-  const nowMs = now.getTime();
-  const byProvider = new Map<
-    string,
-    { activeSessions: number; lastEventAtMs?: number; lastEventAt?: string }
-  >();
-
-  for (const snapshot of sessionSnapshots) {
-    const provider = readString(snapshot.provider);
-    if (!provider) continue;
-
-    const updatedAtMs = readTimeMs(snapshot.metadata.updatedAt);
-    if (updatedAtMs === undefined) continue;
-    if (nowMs - updatedAtMs > staleAfterMs) continue;
-
-    const current = byProvider.get(provider) ?? { activeSessions: 0 };
-    current.activeSessions += 1;
-
-    const lastEventAt = snapshot.metadata.lastEventAt;
-    const lastEventAtMs = readTimeMs(lastEventAt);
-    if (
-      lastEventAt &&
-      lastEventAtMs !== undefined &&
-      (current.lastEventAtMs === undefined ||
-        lastEventAtMs > current.lastEventAtMs)
-    ) {
-      current.lastEventAtMs = lastEventAtMs;
-      current.lastEventAt = lastEventAt;
-    }
-
-    byProvider.set(provider, current);
-  }
-
-  return Array.from(byProvider.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([provider, status]) => ({
-      provider,
-      activeSessions: status.activeSessions,
-      ...(status.lastEventAt ? { lastEventAt: status.lastEventAt } : {}),
-    }));
-}
-
-function toSessionStatuses(
-  sessionSnapshots: SessionSnapshotMetadataEntry[],
-  activeRecordings: ActiveRecording[],
-  now: Date,
-  staleAfterMs: number,
-  sessionMetadataByKey?: Map<string, SessionMetadataV1>,
-): DaemonSessionStatus[] {
-  const recordingsByKey = new Map<string, ActiveRecording[]>();
-  for (const rec of activeRecordings) {
-    const key = makeSessionProcessingKey(rec.provider, rec.sessionId);
-    const existing = recordingsByKey.get(key);
-    if (existing) {
-      existing.push(rec);
-    } else {
-      recordingsByKey.set(key, [rec]);
-    }
-  }
-
-  const statuses = sessionSnapshots.map((snap) => {
-    const metadata = sessionMetadataByKey?.get(
-      `${snap.provider}:${snap.sessionId}`,
-    );
-    const recordings = recordingsByKey.get(
-      makeSessionProcessingKey(snap.provider, snap.sessionId),
-    );
-    return projectSessionStatus({
-      session: {
-        provider: snap.provider,
-        sessionId: metadata?.sessionId ?? snap.sessionId,
-        ...(metadata ? { sessionShortId: metadata.sessionId.slice(0, 8) } : {}),
-        ...(metadata ? { providerSessionId: metadata.providerSessionId } : {}),
-        updatedAt: snap.metadata.updatedAt,
-        lastEventAt: snap.metadata.lastEventAt,
-        fileModifiedAtMs: snap.metadata.fileModifiedAtMs,
-        snippet: snap.metadata.snippet,
-      },
-      recordings: recordings?.map((recording) => ({
-        provider: recording.provider,
-        sessionId: recording.sessionId,
-        ...(recording.recordingId
-          ? { recordingId: recording.recordingId }
-          : {}),
-        ...(recording.recordingId
-          ? { recordingShortId: recording.recordingId.slice(0, 8) }
-          : {}),
-        ...(recording.workspaceAlias
-          ? { workspaceAlias: recording.workspaceAlias }
-          : {}),
-        outputPath: recording.outputPath,
-        startedAt: recording.startedAt,
-        lastWriteAt: recording.lastWriteAt,
-      })),
-      now,
-      staleAfterMs,
-    });
-  });
-
-  return sortSessionsByRecency(statuses);
 }
 
 function emptySnapshotMemoryStats(): SnapshotMemoryStats {
@@ -3769,314 +3472,6 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function readBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function cloneOutputOverrides(
-  value: RecordingOutputOverrides | undefined,
-): RecordingOutputOverrides | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return {
-    ...(value.includeFrontmatter !== undefined
-      ? { includeFrontmatter: value.includeFrontmatter }
-      : {}),
-    ...(value.includeUpdatedInFrontmatter !== undefined
-      ? { includeUpdatedInFrontmatter: value.includeUpdatedInFrontmatter }
-      : {}),
-    ...(value.includeSessionIds !== undefined
-      ? { includeSessionIds: value.includeSessionIds }
-      : {}),
-    ...(value.includeWorkspaceIds !== undefined
-      ? { includeWorkspaceIds: value.includeWorkspaceIds }
-      : {}),
-    ...(value.includeRecordingIds !== undefined
-      ? { includeRecordingIds: value.includeRecordingIds }
-      : {}),
-    ...(value.includeConversationEventKinds !== undefined
-      ? { includeConversationEventKinds: value.includeConversationEventKinds }
-      : {}),
-    ...(value.participantUsername
-      ? { participantUsername: value.participantUsername }
-      : {}),
-    ...(value.renderOptions
-      ? { renderOptions: { ...value.renderOptions } }
-      : {}),
-  };
-}
-
-function resolveExportOutputOverrides(
-  payload: unknown,
-  fallback: RecordingOutputOverrides | undefined,
-): RecordingOutputOverrides | undefined {
-  const resolved = cloneOutputOverrides(fallback) ?? {};
-  if (!isRecord(payload)) {
-    return Object.keys(resolved).length > 0 ? resolved : undefined;
-  }
-
-  const frontmatter = payload["resolvedExportMarkdownFrontmatter"];
-  if (isRecord(frontmatter)) {
-    const includeFrontmatter = readBoolean(
-      frontmatter["includeFrontmatterInMarkdownRecordings"],
-    );
-    if (includeFrontmatter !== undefined) {
-      resolved.includeFrontmatter = includeFrontmatter;
-    }
-    const includeUpdated = readBoolean(
-      frontmatter["includeUpdatedInFrontmatter"],
-    );
-    if (includeUpdated !== undefined) {
-      resolved.includeUpdatedInFrontmatter = includeUpdated;
-    }
-    const includeSessionIds = readBoolean(frontmatter["includeSessionIds"]);
-    if (includeSessionIds !== undefined) {
-      resolved.includeSessionIds = includeSessionIds;
-    }
-    const includeWorkspaceIds = readBoolean(frontmatter["includeWorkspaceIds"]);
-    if (includeWorkspaceIds !== undefined) {
-      resolved.includeWorkspaceIds = includeWorkspaceIds;
-    }
-    const includeRecordingIds = readBoolean(frontmatter["includeRecordingIds"]);
-    if (includeRecordingIds !== undefined) {
-      resolved.includeRecordingIds = includeRecordingIds;
-    }
-    const includeKinds = readBoolean(
-      frontmatter["includeConversationEventKinds"],
-    );
-    if (includeKinds !== undefined) {
-      resolved.includeConversationEventKinds = includeKinds;
-    }
-  }
-
-  const featureFlags = payload["resolvedExportFeatureFlags"];
-  if (isRecord(featureFlags)) {
-    const renderOptions = { ...(resolved.renderOptions ?? {}) };
-    let changed = false;
-    const includeCommentary = readBoolean(
-      featureFlags["writerIncludeCommentary"],
-    );
-    if (includeCommentary !== undefined) {
-      changed = true;
-      renderOptions.includeCommentary = includeCommentary;
-    }
-    const includeThinking = readBoolean(featureFlags["writerIncludeThinking"]);
-    if (includeThinking !== undefined) {
-      changed = true;
-      renderOptions.includeThinking = includeThinking;
-    }
-    const includeToolCalls = readBoolean(
-      featureFlags["writerIncludeToolCalls"],
-    );
-    if (includeToolCalls !== undefined) {
-      changed = true;
-      renderOptions.includeToolCalls = includeToolCalls;
-    }
-    const includeToolResults = readBoolean(
-      featureFlags["writerIncludeToolResults"],
-    );
-    if (includeToolResults !== undefined) {
-      changed = true;
-      renderOptions.includeToolResults = includeToolResults;
-    }
-    const includeDecisionPrompt = readBoolean(
-      featureFlags["writerIncludeDecisionPrompt"],
-    );
-    if (includeDecisionPrompt !== undefined) {
-      changed = true;
-      renderOptions.includeDecisionPrompt = includeDecisionPrompt;
-    }
-    const includeDecisionOptions = readBoolean(
-      featureFlags["writerIncludeDecisionOptions"],
-    );
-    if (includeDecisionOptions !== undefined) {
-      changed = true;
-      renderOptions.includeDecisionOptions = includeDecisionOptions;
-    }
-    const includeDecisionSelection = readBoolean(
-      featureFlags["writerIncludeDecisionSelection"],
-    );
-    if (includeDecisionSelection !== undefined) {
-      changed = true;
-      renderOptions.includeDecisionSelection = includeDecisionSelection;
-    }
-    const italicizeUserMessages = readBoolean(
-      featureFlags["writerItalicizeUserMessages"],
-    );
-    if (italicizeUserMessages !== undefined) {
-      changed = true;
-      renderOptions.italicizeUserMessages = italicizeUserMessages;
-    }
-    if (changed) {
-      resolved.renderOptions = renderOptions;
-    }
-  }
-
-  const resolvedExportTimezone = readString(payload["resolvedExportTimezone"]);
-  if (resolvedExportTimezone) {
-    resolved.renderOptions = {
-      ...(resolved.renderOptions ?? {}),
-      headingTimestampTimezone: resolvedExportTimezone,
-    };
-  }
-
-  return Object.keys(resolved).length > 0 ? resolved : undefined;
-}
-
-type ExportSessionResolutionMatch =
-  | "passthrough"
-  | "provider_session_id"
-  | "session_id"
-  | "session_id_prefix";
-
-interface ExportSessionResolution {
-  lookupSessionId: string;
-  matchedBy: ExportSessionResolutionMatch;
-  ambiguousMatches?: SessionMetadataV1[];
-}
-
-function parseExportSessionSelector(
-  requestedSessionId: string,
-): { provider?: string; selector: string } {
-  const trimmed = requestedSessionId.trim();
-  const slashIndex = trimmed.indexOf("/");
-  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) {
-    return { selector: trimmed };
-  }
-
-  const provider = trimmed.slice(0, slashIndex).trim().toLowerCase();
-  const selector = trimmed.slice(slashIndex + 1).trim();
-  if (
-    selector.length === 0 || !KNOWN_EXPORT_PROVIDER_PREFIXES.has(provider)
-  ) {
-    return { selector: trimmed };
-  }
-
-  return { provider, selector };
-}
-
-function passthroughExportSessionResolution(
-  requestedSessionId: string,
-): ExportSessionResolution {
-  const trimmed = requestedSessionId.trim();
-  return {
-    lookupSessionId: trimmed.length > 0 ? trimmed : requestedSessionId,
-    matchedBy: "passthrough",
-  };
-}
-
-async function resolveExportSessionLookup(
-  requestedSessionId: string,
-  sessionStateStore?: PersistentSessionStateStore,
-): Promise<ExportSessionResolution> {
-  const passthrough = passthroughExportSessionResolution(requestedSessionId);
-  if (!sessionStateStore) {
-    return passthrough;
-  }
-
-  const metadataList = await sessionStateStore.listSessionMetadata();
-  if (metadataList.length === 0) {
-    return passthrough;
-  }
-
-  const parsed = parseExportSessionSelector(passthrough.lookupSessionId);
-  const scopedEntries = parsed.provider
-    ? metadataList.filter((entry) =>
-      entry.provider.toLowerCase() === parsed.provider
-    )
-    : metadataList;
-  if (scopedEntries.length === 0 || parsed.selector.length === 0) {
-    return passthrough;
-  }
-
-  const matchers: Array<{
-    kind: ExportSessionResolutionMatch;
-    matches: SessionMetadataV1[];
-  }> = [{
-    kind: "provider_session_id",
-    matches: scopedEntries.filter((entry) =>
-      entry.providerSessionId === parsed.selector
-    ),
-  }, {
-    kind: "session_id",
-    matches: scopedEntries.filter((entry) =>
-      entry.sessionId === parsed.selector
-    ),
-  }, {
-    kind: "session_id_prefix",
-    matches: scopedEntries.filter((entry) =>
-      entry.sessionId.startsWith(parsed.selector)
-    ),
-  }];
-
-  for (const matcher of matchers) {
-    if (matcher.matches.length === 1) {
-      return {
-        lookupSessionId: matcher.matches[0]!.providerSessionId,
-        matchedBy: matcher.kind,
-      };
-    }
-    if (matcher.matches.length > 1) {
-      return {
-        ...passthrough,
-        matchedBy: matcher.kind,
-        ambiguousMatches: matcher.matches,
-      };
-    }
-  }
-
-  return passthrough;
-}
-
-function formatExportSessionAmbiguousLabel(
-  metadata: SessionMetadataV1,
-): string {
-  return `${metadata.provider}/${
-    metadata.sessionId.slice(0, 8)
-  } (${metadata.providerSessionId})`;
-}
-
-async function warnExportSkipped(
-  event: string,
-  message: string,
-  details: {
-    requestId: string;
-    sessionId?: string;
-    outputPath?: string;
-    [key: string]: unknown;
-  },
-  operationalLogger: StructuredLogger,
-  auditLogger: AuditLogger,
-): Promise<void> {
-  await operationalLogger.warn(event, message, details);
-  await auditLogger.record(event, message, details);
-}
-
-async function appendExportHistoryEntrySafely(
-  exportsLogPath: string | undefined,
-  entry: Parameters<typeof appendExportsLogEntry>[1],
-  operationalLogger: StructuredLogger,
-): Promise<void> {
-  if (!exportsLogPath) {
-    return;
-  }
-  try {
-    await appendExportsLogEntry(exportsLogPath, entry);
-  } catch (error) {
-    await operationalLogger.warn(
-      "daemon.control.export.history_write_failed",
-      "Failed to append export history event",
-      {
-        requestId: entry.requestId,
-        status: entry.status,
-        exportsLogPath,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    );
-  }
-}
-
 async function handleControlRequest(
   options: HandleControlRequestOptions,
 ): Promise<boolean> {
@@ -4111,215 +3506,19 @@ async function handleControlRequest(
   );
 
   if (request.command === "export") {
-    const payload = request.payload;
-    const outputOverrides = resolveExportOutputOverrides(
-      payload,
+    await handleExportControlRequest({
+      request,
+      recordingPipeline,
+      sessionStateStore,
+      loadSessionSnapshot,
+      exportEnabled,
       defaultCliExportOutputOverrides,
-    );
-    const sessionId = isRecord(payload)
-      ? readString(payload["sessionId"])
-      : undefined;
-    const outputPath = isRecord(payload)
-      ? readString(payload["resolvedOutputPath"]) ??
-        readString(payload["outputPath"])
-      : undefined;
-    const formatRaw = isRecord(payload)
-      ? readString(payload["format"])
-      : undefined;
-    const format: "markdown" | "jsonl" | undefined =
-      formatRaw === "markdown" || formatRaw === "jsonl" ? formatRaw : undefined;
-    const baseHistoryEntry = {
-      recordedAt: now().toISOString(),
-      requestId: request.requestId,
-      requestedAt: request.requestedAt,
-      ...(sessionId ? { sessionId } : {}),
-      ...(outputPath ? { outputPath } : {}),
-      ...(format ? { format } : {}),
-    } as const;
-    const recordExportFailed = async (
-      reason: string,
-      extra?: {
-        error?: string;
-        matchedBy?: string;
-      },
-    ): Promise<void> => {
-      await appendExportHistoryEntrySafely(
-        exportsLogPath,
-        {
-          ...baseHistoryEntry,
-          status: "failed",
-          reason,
-          ...(extra?.error ? { error: extra.error } : {}),
-          ...(extra?.matchedBy ? { matchedBy: extra.matchedBy } : {}),
-        },
-        operationalLogger,
-      );
-    };
-    const recordExportSucceeded = async (
-      provider: string,
-      matchedBy?: string,
-    ): Promise<void> => {
-      await appendExportHistoryEntrySafely(
-        exportsLogPath,
-        {
-          ...baseHistoryEntry,
-          status: "succeeded",
-          provider,
-          ...(matchedBy ? { matchedBy } : {}),
-        },
-        operationalLogger,
-      );
-    };
-
-    if (!exportEnabled) {
-      await operationalLogger.warn(
-        "daemon.control.export.disabled",
-        "Export request skipped because feature flag is disabled",
-        { requestId: request.requestId },
-      );
-      await recordExportFailed("export_disabled");
-      await controlStore.markProcessed(request.requestId);
-      return false;
-    }
-
-    if (!sessionId || !outputPath) {
-      await operationalLogger.warn(
-        "daemon.control.export.invalid",
-        "Export request payload is missing required fields",
-        { requestId: request.requestId, payload },
-      );
-      await recordExportFailed("invalid_payload");
-    } else if (!loadSessionSnapshot) {
-      await warnExportSkipped(
-        "daemon.control.export.unhandled",
-        "Export request skipped because session snapshot loader is unavailable",
-        { requestId: request.requestId, sessionId, outputPath },
-        operationalLogger,
-        auditLogger,
-      );
-      await recordExportFailed("snapshot_loader_unavailable");
-    } else {
-      try {
-        const sessionResolution = await resolveExportSessionLookup(
-          sessionId,
-          sessionStateStore,
-        );
-        if (sessionResolution.ambiguousMatches) {
-          await warnExportSkipped(
-            "daemon.control.export.session_ambiguous",
-            "Export request skipped because session selector matched multiple sessions",
-            {
-              requestId: request.requestId,
-              sessionId,
-              outputPath,
-              matchedBy: sessionResolution.matchedBy,
-              candidates: sessionResolution.ambiguousMatches.map((entry) =>
-                formatExportSessionAmbiguousLabel(entry)
-              ),
-            },
-            operationalLogger,
-            auditLogger,
-          );
-          await recordExportFailed("session_selector_ambiguous", {
-            matchedBy: sessionResolution.matchedBy,
-          });
-          await controlStore.markProcessed(request.requestId);
-          return false;
-        }
-
-        const lookupSessionId = sessionResolution.lookupSessionId;
-        const snapshotData = await loadSessionSnapshot(lookupSessionId);
-        if (!snapshotData) {
-          await warnExportSkipped(
-            "daemon.control.export.session_missing",
-            "Export request skipped because session snapshot was not found",
-            {
-              requestId: request.requestId,
-              sessionId,
-              outputPath,
-              ...(lookupSessionId !== sessionId ? { lookupSessionId } : {}),
-              ...(sessionResolution.matchedBy !== "passthrough"
-                ? { matchedBy: sessionResolution.matchedBy }
-                : {}),
-            },
-            operationalLogger,
-            auditLogger,
-          );
-          await recordExportFailed("session_snapshot_not_found", {
-            ...(sessionResolution.matchedBy !== "passthrough"
-              ? { matchedBy: sessionResolution.matchedBy }
-              : {}),
-          });
-          await controlStore.markProcessed(request.requestId);
-          return false;
-        }
-
-        const snapshotProvider = readString(snapshotData.provider);
-        if (!snapshotProvider) {
-          await warnExportSkipped(
-            "daemon.control.export.invalid_snapshot",
-            "Export request skipped because session snapshot provider is invalid",
-            { requestId: request.requestId, sessionId, outputPath },
-            operationalLogger,
-            auditLogger,
-          );
-          await recordExportFailed("invalid_snapshot_provider");
-          await controlStore.markProcessed(request.requestId);
-          return false;
-        }
-
-        if (snapshotData.events.length === 0) {
-          await warnExportSkipped(
-            "daemon.control.export.empty",
-            "Export request skipped because session snapshot had no events",
-            {
-              requestId: request.requestId,
-              sessionId,
-              outputPath,
-              provider: snapshotProvider,
-            },
-            operationalLogger,
-            auditLogger,
-          );
-          await recordExportFailed("session_snapshot_empty");
-          await controlStore.markProcessed(request.requestId);
-          return false;
-        }
-
-        await recordingPipeline.exportSnapshot({
-          provider: snapshotProvider,
-          sessionId,
-          targetPath: outputPath,
-          events: snapshotData.events,
-          title: resolveConversationTitle(snapshotData.events, sessionId),
-          ...(format ? { format } : {}),
-          ...(outputOverrides ? { outputOverrides } : {}),
-        });
-        await recordExportSucceeded(
-          snapshotProvider,
-          sessionResolution.matchedBy !== "passthrough"
-            ? sessionResolution.matchedBy
-            : undefined,
-        );
-      } catch (error) {
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
-        await operationalLogger.error(
-          "daemon.control.export.failed",
-          "Export request failed in daemon runtime",
-          {
-            requestId: request.requestId,
-            sessionId,
-            outputPath,
-            error: errorMessage,
-          },
-        );
-        await recordExportFailed("export_snapshot_failed", {
-          error: errorMessage,
-        });
-      }
-    }
+      exportsLogPath,
+      now,
+      operationalLogger,
+      auditLogger,
+      resolveTitle: resolveConversationTitle,
+    });
   }
 
   await controlStore.markProcessed(request.requestId);

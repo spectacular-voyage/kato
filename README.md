@@ -19,11 +19,11 @@ code-assistant CLI,
 
 ## Compatibility
 
-| Provider | VSCode | CLI | Stand-alone App | Web App |
-| --- | --- | --- | --- | --- |
-| Codex | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![X](https://img.shields.io/badge/-%E2%9C%95-d1242f?style=flat-square) |
+| Provider    | VSCode                                                                     | CLI                                                                        | Local App                                                                  | Web App                                                                |
+| ----------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Codex       | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![X](https://img.shields.io/badge/-%E2%9C%95-d1242f?style=flat-square) |
 | Claude Code | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![X](https://img.shields.io/badge/-%E2%9C%95-d1242f?style=flat-square) |
-| Gemini | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![N/A](https://img.shields.io/badge/N%2FA-Not%20available-9ea7b3?style=flat-square) | ![X](https://img.shields.io/badge/-%E2%9C%95-d1242f?style=flat-square) |
+| Gemini      | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | ![Check](https://img.shields.io/badge/-%E2%9C%93-2ea043?style=flat-square) | N/A                                                                        | ![X](https://img.shields.io/badge/-%E2%9C%95-d1242f?style=flat-square) |
 
 `N/A` means the provider does not currently offer that interface.
 

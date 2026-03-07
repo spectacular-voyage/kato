@@ -41,9 +41,9 @@ Current signals already visible in the repo today:
   - direct `deno test --parallel --clean --coverage=.test-tmp/coverage/par ... --frozen`:
     about `10s` elapsed
 - Post-initial implementation verification on `2026-03-06`:
-  - `deno task test --frozen --quiet`: `492` passing tests, about `9.6s` real
+  - `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
   - `deno task test:coverage --frozen --quiet`: `492` passing tests,
-    `79.4%` line coverage, `84.2%` branch coverage, about `10.5s` real
+    `80.9%` line coverage, `85.2%` branch coverage, `8.94s` real
   - `apps/daemon/src/writer/jsonl_writer.ts` is now at `95.9%` line coverage /
     `96.9%` branch coverage after adding a direct test file
   - `apps/daemon/src/orchestrator/session_twin_mapper.ts` is now at `90.8%`
@@ -163,6 +163,25 @@ Current signals already visible in the repo today:
     coverage in `tests/provider-session-discovery_test.ts`, so the broad
     `tests/provider-ingestion_test.ts` suite no longer needs the two Gemini
     duplicate-winner end-to-end cases
+  - the current `daemon_runtime` source/test refactor slice now extracts
+    status projection into
+    `apps/daemon/src/orchestrator/runtime_status_projection.ts` with direct
+    coverage in `tests/daemon-status-projection_test.ts`, so
+    `tests/daemon-runtime_test.ts` no longer needs four broad provider/session/
+    active-recording projection assertions in the full runtime-loop harness
+  - the current `daemon_runtime` source/test refactor slice now also extracts
+    export-control request handling into
+    `apps/daemon/src/orchestrator/runtime_export_request.ts` with direct
+    coverage in `tests/daemon-export-request_test.ts`, so
+    `tests/daemon-runtime_test.ts` no longer needs the provider-aware,
+    short-selector, missing-snapshot, empty-snapshot, and export-disabled
+    export request cases just to cover daemon export policy
+  - the current `daemon_runtime` source/test refactor slice now also extracts
+    first-seen source-freshness and command-cursor eligibility logic into
+    `apps/daemon/src/orchestrator/runtime_first_seen.ts` with direct coverage
+    in `tests/daemon-first-seen_test.ts`, so
+    `tests/daemon-runtime_test.ts` no longer needs the mixed-backlog and
+    no-timestamp first-seen eligibility cases just to cover cursor policy
   - the current `cli status` refactor slice now relies on direct
     `tests/status-workspace_test.ts` coverage for workspace-summary validation
     and unavailable-state behavior, while `tests/daemon-cli_test.ts` keeps only
@@ -215,15 +234,17 @@ Coverage triage should distinguish at least three buckets:
   - `tests/provider-ingestion_test.ts`
   - `tests/writer-markdown_test.ts`
 - Early heavy-suite review snapshot from the current tree:
-  - `tests/daemon-runtime_test.ts` is about `8.3k` lines across `66` tests and
-    repeatedly rebuilds temp dirs, workspace fixtures, session snapshot stores,
-    and full `runDaemonRuntimeLoop` harnesses for many adjacent in-chat / export
-    / filename-template scenarios
+  - `tests/daemon-runtime_test.ts` is about `6.5k` lines across `53` tests and
+    still repeatedly rebuilds temp dirs, workspace fixtures, session snapshot
+    stores, and full `runDaemonRuntimeLoop` harnesses for many adjacent in-chat
+    / export / filename-template scenarios, even after moving status projection
+    plus export-control and first-seen cursor policy into smaller directly
+    tested helpers
   - `tests/daemon-cli_test.ts` is about `3.2k` lines across `55` tests and
     repeatedly rebuilds `makeRuntimeHarness` plus in-memory config/status/control
     stores even for command internals that now have direct command-level tests
-  - `tests/provider-ingestion_test.ts` is about `2.3k` lines across `24` tests
-    and repeats watch harness + snapshot store + provider-runner setup for
+  - `tests/provider-ingestion_test.ts` is about `2.1k` lines across `22` tests
+    and still repeats watch harness + snapshot store + provider-runner setup for
     discovery, resume, duplicate-resolution, and watch-update cases
   - `tests/writer-markdown_test.ts` is about `1.6k` lines across `32` tests;
     most cases are low-cost pure rendering assertions, so readability splitting

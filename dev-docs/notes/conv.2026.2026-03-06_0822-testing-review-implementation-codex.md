@@ -3417,3 +3417,343 @@ provider-ingestion suite by removing Gemini duplicate-winner end-to-end cases
 that now belong to the focused helper coverage. Refresh testing notes with the
 verified 492-test baseline and updated coverage/timing numbers.
 ```
+
+# djradon_2026-03-06_2232_13
+
+proceed. Can you just keep going, and only stop when you might benefit from my input, or I might benefit from what's going on? I feel like with testing stuff, i just don't have the bandwidth to keep up with many details. Or is it beneficial to you to be able to stop between chunks
+
+# gpt-5.4_2026-03-06_2232_27
+
+Yes. I can keep going autonomously and only stop when there’s an actual decision point, a blocker, or a result you’d benefit from seeing. For this kind of testing/refactor work that’s usually better than forcing a checkpoint every chunk, so I’m going to keep pushing and just surface the meaningful slices.
+
+# gpt-5.4_2026-03-06_2232_47
+
+I found a good next seam in `daemon_runtime`: status projection. There’s a cluster of pure functions that decide what lands in `status.providers`, `status.sessions`, `status.recordings`, and memory summaries, and the broad runtime-loop suite is still carrying that logic indirectly. I’m reading that block plus the existing runtime tests now to see how much I can extract cleanly and replace with direct tests.
+
+# gpt-5.4_2026-03-06_2232_53
+
+This is a good fit. The runtime-loop tests around `status.providers`, stale-session filtering, and active-recording counts are mostly verifying pure projection rules. I’m checking the surrounding imports/types next so I can extract that logic into a small helper module and move those assertions into direct tests without changing runtime behavior.
+
+# gpt-5.4_2026-03-06_2233_09
+
+The status projection block is cleanly separable, but `toActiveRecordingsFromMetadata()` depends on a couple of tiny workspace-output timestamp helpers that are still sitting in `daemon_runtime.ts`. I’m reading those now so I can either move them with the projection code or keep the extraction boundary honest.
+
+# gpt-5.4_2026-03-06_2233_35
+
+I’m making the extraction now. Scope is narrow again: move the pure status-projection logic out of `daemon_runtime.ts`, add direct tests for fresh/stale provider status, active recording summarization, and session-status mapping, then trim the broad runtime-loop tests that were only covering that projection policy indirectly.
+
+# gpt-5.4_2026-03-06_2234_35
+
+I’ve got the extraction boundary. I’m patching in a `runtime_status_projection` helper, adding direct tests for the projection rules, and then deleting the broad runtime-loop cases that were only checking those same rules indirectly.
+
+# gpt-5.4_2026-03-06_2235_23
+
+The first pass at patching `daemon_runtime.ts` missed on context because the import block shifted. I’m re-reading the exact top section and then I’ll apply the extraction in smaller patches so I don’t stomp unrelated worktree changes.
+
+# gpt-5.4_2026-03-06_2236_22
+
+The direct test file will cover four things: fresh/stale provider aggregation, active-recording extraction timestamps, stale-recording summary filtering, and session-status mapping/sorting. That should let me cut the four broad runtime-loop status-projection tests rather than stacking more coverage on top of them.
+
+# gpt-5.4_2026-03-06_2236_42
+
+I’m adding the direct projection tests now. They’re not coverage chaff: these are the actual rules for what users see in `status.json`, and they let us delete the bigger runtime-loop cases that were only reaching those same rules indirectly.
+
+# gpt-5.4_2026-03-06_2238_18
+
+The extraction and test move are in. I’m doing the mechanical pass now: format, lint, then a focused run over the new projection tests plus the trimmed runtime suite to catch any fallout before I touch the broader commands or notes.
+
+# gpt-5.4_2026-03-06_2238_39
+
+The trim left one dead type import in `daemon-runtime_test.ts`. I’m removing that and rerunning lint before the focused tests.
+
+# gpt-5.4_2026-03-06_2239_07
+
+The focused runtime/status-projection slice is running now. If it stays green, I’ll run the full frozen suite and coverage again, then sync the testing-review note to this new direct-helper extraction just like the previous slices.
+
+The new direct test file hit two real issues: I imported a non-reexported session-state type from the wrong module, and the fixture builders were using override spreads in a way TypeScript rightly flagged. I’m fixing those now and rerunning the focused slice.
+
+# gpt-5.4_2026-03-06_2239_51
+
+I’m carrying the current `daemon_runtime` extraction through verification and note sync now. If the full frozen suite and coverage stay green, I’ll update the task/testing notes to reflect the new direct-helper slice and keep moving without stopping.
+
+# gpt-5.4_2026-03-06_2239_57
+
+The focused slice is in the full repo run now. I’ve confirmed the runtime-status extraction is the only code/test delta in this sub-slice, aside from the existing transcript note file that I’m leaving alone.
+
+# gpt-5.4_2026-03-06_2240_04
+
+The full frozen suite stayed green after the extraction. Net test count is `491` now because I removed four broad runtime-loop cases and replaced them with three direct projection tests.
+
+# gpt-5.4_2026-03-06_2240_11
+
+Coverage is running against the same extracted slice now. If it holds, I’ll sync the notes with the new baseline and explicitly describe this as a maintainability refactor, not a stat-chasing addition.
+
+# gpt-5.4_2026-03-06_2240_19
+
+The extraction improved the repo-wide baseline rather than just preserving it: `491` passing tests, `80.9%` line, `85.2%` branch. I’m syncing the notes now, then I’ll keep pushing into the next real seam instead of pausing.
+
+# gpt-5.4_2026-03-06_2240_26
+
+I’m checking whether the new helper shows up in Deno’s “missing transpiled source” quirk before I touch the note, so the caveat stays precise rather than hand-wavy.
+
+# gpt-5.4_2026-03-06_2240_45
+
+I’ve got the new counts and coverage; I’m doing one timing pass so the notes don’t drift into “roughly right” territory. After that I’ll patch the notes and keep moving to the next meaningful extraction seam.
+
+# gpt-5.4_2026-03-06_2241_35
+
+I’m grabbing the current line counts for the big suites before patching the task note. The point is to keep the refactor status factual, not to leave stale “this file is huge” numbers in place after we’ve already trimmed parts out.
+
+# gpt-5.4_2026-03-06_2241_56
+
+I’m patching the notes now. The changes are just baseline numbers plus one new progress bullet that captures the `runtime_status_projection` extraction and the corresponding removal of broad runtime-loop assertions.
+
+# gpt-5.4_2026-03-06_2242_18
+
+The notes are synced. I’m switching straight into the next maintainability seam now: finding another chunk of real policy inside `daemon_runtime` or `provider_ingestion` that can move into a smaller directly tested helper without inventing fake coverage work.
+
+# gpt-5.4_2026-03-06_2242_29
+
+I found the next plausible seam: export-request handling inside `daemon_runtime`. It has real policy in it, and there are already several runtime-loop tests around selector resolution and skip behavior that should be cheaper to cover directly. I’m reading that block now before I decide whether it’s clean enough to extract.
+
+# gpt-5.4_2026-03-06_2242_39
+
+The export-request block is clean enough to extract. I’m pulling the rest of that function now so I can move the whole export policy into its own helper instead of leaving half the behavior in `daemon_runtime`.
+
+# gpt-5.4_2026-03-06_2243_02
+
+I’m going ahead with the export-control seam. The plan is to keep one runtime-loop wiring test, move selector/skip/history behavior into a direct helper test file, and then delete the redundant runtime-loop cases that are only exercising that policy indirectly.
+
+# gpt-5.4_2026-03-06_2244_04
+
+I’m making the code move now. This is the substantive edit for the next slice: a dedicated export-control helper plus direct tests that own selector/skip/history behavior outside the giant runtime-loop harness.
+
+# gpt-5.4_2026-03-06_2246_14
+
+I’m adding the direct helper tests now. They’re focused on actual export-control policy: selector resolution, ambiguity, disabled/missing/empty behavior, and the history/output-override contract. I’m not adding anything that just restates the implementation.
+
+# gpt-5.4_2026-03-06_2248_21
+
+The extraction is in place. I’m on the fast verification pass now: format, lint, then focused tests for the new helper and the trimmed runtime suite before I touch the notes again.
+
+# gpt-5.4_2026-03-06_2248_24
+
+Two leftover imports fell out of `daemon_runtime` with the extraction. I’m stripping those now, then rerunning lint and the focused tests.
+
+# gpt-5.4_2026-03-06_2249_00
+
+The new direct test hit a real type mismatch, not a behavioral issue: the pipeline input allows an optional `title`. I’m normalizing that in the test double and rerunning the focused suite.
+
+# gpt-5.4_2026-03-06_2249_03
+
+The focused slice is green: `5` new direct export-control tests and `57` remaining runtime-loop tests. I’m running the full frozen suite and coverage again now, then I’ll update the notes to reflect this as another extraction-and-trim step, not a net-new pile-on.
+
+# gpt-5.4_2026-03-06_2249_29
+
+Coverage is running on the new export-control split now. Once I have that baseline, I’ll fold this slice into the notes and then keep moving to the next good seam rather than stopping on a commit boundary.
+
+The repo-wide baseline held steady on the test count and line coverage, with a tiny branch-coverage dip (`85.1%` vs `85.2%`) from moving coverage attribution across extracted helpers. I’m checking the detailed-report caveat one more time so the note reflects the current helper set accurately.
+
+# gpt-5.4_2026-03-06_2249_37
+
+I’m syncing the notes to the current verified state now: new export-control helper, trimmed runtime suite, updated timings, and the extra coverage-report caveat for `runtime_export_request.ts`.
+
+# gpt-5.4_2026-03-06_2250_04
+
+The notes are synced. I’m continuing straight into the next likely `daemon_runtime` seam: command-boundary and seed-event policy. That’s another real chunk of behavior currently proven mostly through broad runtime-loop cases.
+
+# gpt-5.4_2026-03-06_2250_10
+
+The basic boundary helpers are easy, but the bigger payoff looks like the first-seen command-cursor logic right above them. I’m reading that block before I pick the next extraction, because it could retire several more runtime-loop cases at once if the seam is clean.
+
+# gpt-5.4_2026-03-06_2250_31
+
+I’m checking the existing first-seen runtime tests against that helper boundary now. If they mostly assert cursor eligibility rather than downstream recording side effects, I’ll extract the cursor logic and retire those broad cases in favor of direct tests.
+
+# gpt-5.4_2026-03-06_2250_55
+
+I’m taking one more clean seam while the context is hot: the first-seen cursor policy. It’s small enough to extract cleanly, and there are four runtime-loop cases that are really about that policy rather than about the runtime harness itself.
+
+# gpt-5.4_2026-03-06_2252_21
+
+The first-seen extraction is in. I’ve removed the four runtime-loop cases that were really cursor-eligibility tests in disguise, and I’m verifying the new helper plus the trimmed runtime suite now.
+
+# gpt-5.4_2026-03-06_2252_36
+
+The extracted helper still had two live call sites in `daemon_runtime`: the debug metadata type and the per-event eligibility guard inside the first-seen loop. I’m wiring those back to the helper and dropping the now-unused test helper.
+
+# gpt-5.4_2026-03-06_2252_52
+
+The first-seen slice is also green: `5` direct helper tests, `53` remaining runtime-loop tests. I’m rerunning the full frozen suite and coverage one more time so the notes land on the post-extraction baseline rather than an intermediate number.
+
+# gpt-5.4_2026-03-06_2253_28
+
+I’ve got the post-first-seen baseline. I’m patching the notes one more time so they reflect the current state: `492` tests, faster runtime, and the new `runtime_first_seen` helper slice.
+
+# gpt-5.4_2026-03-06_2253_53
+
+Two more real refactor slices are landed and verified. I’m doing one last worktree check so I can give you a clean status update with the current baseline and the next likely seam, without making you reconstruct it from the diffs.
+
+# gpt-5.4_2026-03-06_2254_07
+
+I kept going and landed two more worthwhile `daemon_runtime` extractions.
+
+Export-control handling now lives in [runtime_export_request.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_export_request.ts) with direct coverage in [daemon-export-request_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-export-request_test.ts). First-seen source-freshness / command-cursor policy now lives in [runtime_first_seen.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_first_seen.ts) with direct coverage in [daemon-first-seen_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-first-seen_test.ts). I trimmed the corresponding broad cases out of [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts), which is now about `6.5k` lines across `53` tests instead of carrying those policy branches through the full runtime loop. The earlier status-projection extraction in [runtime_status_projection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_status_projection.ts) is still in place.
+
+I updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the current verified baseline: `492` passing tests, `80.9%` line coverage, `85.2%` branch coverage, `7.06s` for `deno task test --frozen --quiet`, and `8.94s` for `deno task test:coverage --frozen --quiet`.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-export-request_test.ts tests/daemon-runtime_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-first-seen_test.ts tests/daemon-runtime_test.ts`
+- `deno task test --frozen --quiet`
+- `deno task test:coverage --frozen --quiet`
+
+Worktree note: the unrelated transcript file [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md) is still modified and untouched by me.
+
+Next likely seam is either the command-boundary seed helpers still inside [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts) or another `provider_ingestion` policy slice.
+
+# gpt-5.4_2026-03-06_2254_11
+
+I kept going and landed two more worthwhile `daemon_runtime` extractions.
+
+Export-control handling now lives in [runtime_export_request.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_export_request.ts) with direct coverage in [daemon-export-request_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-export-request_test.ts). First-seen source-freshness / command-cursor policy now lives in [runtime_first_seen.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_first_seen.ts) with direct coverage in [daemon-first-seen_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-first-seen_test.ts). I trimmed the corresponding broad cases out of [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts), which is now about `6.5k` lines across `53` tests instead of carrying those policy branches through the full runtime loop. The earlier status-projection extraction in [runtime_status_projection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_status_projection.ts) is still in place.
+
+I updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the current verified baseline: `492` passing tests, `80.9%` line coverage, `85.2%` branch coverage, `7.06s` for `deno task test --frozen --quiet`, and `8.94s` for `deno task test:coverage --frozen --quiet`.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-export-request_test.ts tests/daemon-runtime_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/daemon-first-seen_test.ts tests/daemon-runtime_test.ts`
+- `deno task test --frozen --quiet`
+- `deno task test:coverage --frozen --quiet`
+
+Worktree note: the unrelated transcript file [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md) is still modified and untouched by me.
+
+Next likely seam is either the command-boundary seed helpers still inside [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts) or another `provider_ingestion` policy slice.
+
+# djradon_2026-03-06_2305_49
+
+I'm going to branch to a new converation. Do you want to generate a prompt with any helpful context? Are the to-do items updated?
+
+# gpt-5.4_2026-03-06_2306_09
+
+Yes. The progress notes are updated in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) and the baseline/timing notes are updated in [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md). The big refactor-for-testability checkbox is still intentionally unchecked, because that pass is still in progress.
+
+Paste this into the new conversation if you want a clean handoff:
+
+```text
+Continue the testing-review implementation in /home/djradon/hub/spectacular-voyage/kato.
+
+Read:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md
+
+Important user preferences:
+- Keep going autonomously and only stop when user input would actually help.
+- No BS tests just for coverage stats; only add tests that cover real policy, failure modes, or let us remove/bypass heavier integration assertions.
+- Ignore Deno coverage “missing transpiled source” warnings unless they indicate a real runtime/security issue. They are currently treated as reporting noise, not a security problem.
+
+Current verified baseline:
+- `deno task test --frozen --quiet`: 492 passing tests, 7.06s real
+- `deno task test:coverage --frozen --quiet`: 492 passing tests, 80.9% line, 85.2% branch, 8.94s real
+
+Recent extracted seams already in the worktree:
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_status_projection.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-status-projection_test.ts
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_export_request.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-export-request_test.ts
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_first_seen.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-first-seen_test.ts
+
+Those extractions trimmed /home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts down to about 6.5k lines / 53 tests by moving status projection, export-control policy, and first-seen cursor policy out of the full runtime-loop harness.
+
+Notes are already synced:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md
+
+Current likely next seam:
+- command-boundary / seed-event helpers still inside daemon_runtime.ts
+or
+- another provider_ingestion policy extraction
+
+Do not revert unrelated worktree changes. In particular, leave the modified transcript note alone:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md
+```
+
+If you want, I can also give you a one-line “commit-message-style” handoff summary.
+
+# gpt-5.4_2026-03-06_2306_13
+
+Yes. The progress notes are updated in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) and the baseline/timing notes are updated in [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md). The big refactor-for-testability checkbox is still intentionally unchecked, because that pass is still in progress.
+
+Paste this into the new conversation if you want a clean handoff:
+
+```text
+Continue the testing-review implementation in /home/djradon/hub/spectacular-voyage/kato.
+
+Read:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md
+
+Important user preferences:
+- Keep going autonomously and only stop when user input would actually help.
+- No BS tests just for coverage stats; only add tests that cover real policy, failure modes, or let us remove/bypass heavier integration assertions.
+- Ignore Deno coverage “missing transpiled source” warnings unless they indicate a real runtime/security issue. They are currently treated as reporting noise, not a security problem.
+
+Current verified baseline:
+- `deno task test --frozen --quiet`: 492 passing tests, 7.06s real
+- `deno task test:coverage --frozen --quiet`: 492 passing tests, 80.9% line, 85.2% branch, 8.94s real
+
+Recent extracted seams already in the worktree:
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_status_projection.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-status-projection_test.ts
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_export_request.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-export-request_test.ts
+- /home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_first_seen.ts
+- /home/djradon/hub/spectacular-voyage/kato/tests/daemon-first-seen_test.ts
+
+Those extractions trimmed /home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts down to about 6.5k lines / 53 tests by moving status projection, export-control policy, and first-seen cursor policy out of the full runtime-loop harness.
+
+Notes are already synced:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md
+
+Current likely next seam:
+- command-boundary / seed-event helpers still inside daemon_runtime.ts
+or
+- another provider_ingestion policy extraction
+
+Do not revert unrelated worktree changes. In particular, leave the modified transcript note alone:
+- /home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md
+```
+
+If you want, I can also give you a one-line “commit-message-style” handoff summary.
+
+# djradon_2026-03-06_2306_48
+
+commit message please.
+
+# gpt-5.4_2026-03-06_2306_51
+
+```text
+test: extract daemon runtime export and first-seen policy helpers
+
+Move daemon runtime export-control handling and first-seen command eligibility
+into small directly tested helpers, and trim the broad runtime-loop suite by
+removing export selector/skip cases plus first-seen backlog/freshness cases
+that now belong to focused tests. Refresh testing notes with the verified
+492-test baseline, faster runtimes, and the current coverage-report caveats.
+```
+
+# gpt-5.4_2026-03-06_2306_53
+
+```text
+test: extract daemon runtime export and first-seen policy helpers
+
+Move daemon runtime export-control handling and first-seen command eligibility
+into small directly tested helpers, and trim the broad runtime-loop suite by
+removing export selector/skip cases plus first-seen backlog/freshness cases
+that now belong to focused tests. Refresh testing notes with the verified
+492-test baseline, faster runtimes, and the current coverage-report caveats.
+```
