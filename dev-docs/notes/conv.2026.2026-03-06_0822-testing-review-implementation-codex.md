@@ -1903,3 +1903,405 @@ daemon CLI runtime suite. Refresh testing notes with the verified 474-test
 baseline and updated coverage hotspots after the parser and legacy Codex
 request_user_input coverage gains.
 ```
+
+# djradon_2026-03-06_1755_05
+
+proceed
+
+**Planning next steps**
+
+I need to respond to the user with "proceed," according to the developer instructions. It looks like I’ll need to continue working autonomously, focusing on tasks like hash.ts, start.ts, or workspace_init.ts. Since the user mentioned "proceed" after I asked for a commit message, it indicates I should continue with implementation.
+
+I’ll review the tasks and determine what next coverage slice or heavy suite to tackle. I should start reading the relevant files for context and update my task commentary before moving forward!
+
+# gpt-5.4_2026-03-06_1755_19
+
+I’m continuing with the next low-coverage command helpers rather than switching to the heavy-suite refactor work yet. The cheapest likely gain is in `apps/cli/src/commands/start.ts` and `apps/cli/src/commands/workspace_init.ts`, so I’m checking those implementations and the existing CLI tests before I add anything.
+
+# gpt-5.4_2026-03-06_1755_27
+
+The next gain is likely a command-level direct test, not another parser slice. I’m checking what the CLI command modules already export so I can hit `runStartCommand` and `runWorkspaceInitCommand` directly instead of through `runDaemonCli`.
+
+**Exploring logging options**
+
+I need to look into whether I should inspect constructors to create a no-operation logger. Maybe it's easier to use something like StructuredLogger with NoopSink or AuditLogger with NoopSink instead. I think I should also inspect runtime observability exports to see how they’re setup. I might search for examples in existing tests — there could be direct command tests already. Let’s use `rg runStartCommand` to see what I can find.
+
+# gpt-5.4_2026-03-06_1755_47
+
+I’m checking whether there’s already a lightweight command-context harness in the test suite. If not, I’ll build a small one for direct command tests instead of dragging `runDaemonCli` into another large file.
+
+**Considering command context creation**
+
+I'm thinking about how we can create a command context harness using NoopSink. I need to import the relevant types from runtime and shared. I'll also need to inspect `workspace_shared.ts` to figure out what the fake context really needs to work effectively. It seems like there are some specific details I’ll need to pay attention to, so I'll make sure to review everything attentively. This should help me get on the right track!
+
+# gpt-5.4_2026-03-06_1755_55
+
+I’ve got what I need to build a minimal command-context harness. Before editing, I’m checking the workspace-init helper path so I only stub the pieces that command actually uses.
+
+**Creating logging context**
+
+I need to check how the AuditLogger uses the StructuredLogger. So, I'll create an in-memory sink and logger for capturing data. It’s important to set up runtime configuration and include other fields for context, even if some are unused. I’m considering importing various configurations and then constructing a context with dummy stores. The workspace initialization tests might be simpler: I'll test command creation with both new and existing configurations, logging the outputs and loading templates from default paths.
+**Exploring command coverage**
+
+I want to cover the start and workspace_init commands. I’ll inspect command coverage lines—maybe focusing on just one file will be enough. I could also consider covering helper branches in the start function, like handling not-found errors, retries, debugging, and stale detections. It’s essential to have both direct tests and a full suite. I need to confirm if the start command is exported from the apps/cli/src/commands/mod.ts import path or if it’s imported directly from the file.
+
+# gpt-5.4_2026-03-06_1756_17
+
+I’ve got the shape of the direct command harness. Before I patch, I’m checking the few remaining interface types I need to stub cleanly so the new tests stay small and don’t depend on the router.
+
+**Considering command context**
+
+I might need to create a command-context harness, potentially in a new file called tests/cli-command-direct_test.ts, to cover the runStartCommand and runWorkspaceInitCommand functions. I should also look into improving coverage for the start branches in start.ts. It’s worth checking if there are existing tests for direct commands on workspace_shared, like workspace-shared_test. The start direct can utilize a FakeStatusStore sequence and logs, but I must consider using a real date and looking into the log record interface for capturing this.
+
+# gpt-5.4_2026-03-06_1756_27
+
+I’m patching a small direct-command test file now. The goal is to cover `runStartCommand` and `runWorkspaceInitCommand` with a minimal in-memory context so the remaining low-coverage command logic isn’t only exercised through `runDaemonCli`.
+
+# gpt-5.4_2026-03-06_1756_36
+
+I’m checking one last constructor signature before I write the test harness, so I can use the real default config builders instead of hand-rolling shared/runtime config objects.
+
+**Exploring Date.now patching**
+
+I’m looking into whether JavaScript's global Date.now can be monkey patched. In Deno, it seems like it could be writable. I wonder if I could assign Date.now a new function, like Date.now = () => something. That seems writable but may not be the best approach. I could also consider using FakeTime from @std/testing/time, though I’m not sure if it’s imported or available. I’ll need to search the repository for that.
+
+# gpt-5.4_2026-03-06_1756_49
+
+`start.ts` has enough branching that I want to cover the retry/ack path directly, but I’m checking whether the repo already uses fake time before I decide if the timeout branch is worth hitting or if I should just cover the non-timeout logic.
+
+I'm considering creating a helper function to handle status loading. I’m thinking about implementing a TypeScript type called `StatusLoadResponse`, which could be either a `DaemonStatusSnapshot` or an `Error`. The goal is to design a `makeStatusStore` function that accepts a sequence and returns an object with `loadCalls` and a `store`. I envision it working such that it retrieves the next item or the last item, starting with an existing snapshot from the command. This sounds like a solid approach!
+**Evaluating environment configuration**
+
+I'm considering how using `createDefaultRuntimeConfig` might read environment keys. When tests run in parallel, they could potentially mutate the environment under a lock. If `createDefaultRuntimeConfig` reads from the environment, and another test modifies values like HOME, absent a proper lock, my tests might encounter transient values. Direct tests shouldn't alter the environment, but isolated tests using `withLockedEnvironment` could change values temporarily, and without isolation, this can lead to reading unexpected values.
+**Evaluating runtime configuration issues**
+
+I'm exploring how `createDefaultRuntimeConfig` reads various environment variables like `KATO_LOGGING`. It seems there's a possibility that it might not find `HOME`, and I'm wondering about handling memory and logging explicitly to prevent race conditions. It checks env variables unless options are provided, which might lead to flakiness due to concurrent test mutations. I think wrapping our tests in `withLockedEnvironment` could help avoid issues while running concurrently with other tests that might mutate the environment.
+**Exploring runtime configuration for testing**
+
+I’m thinking about how `createDefaultRuntimeConfig` would see a stable environment, which is good since we don't need to set env variables. I should import `withLockedEnvironment` from `test_env.ts` and maybe create a helper function for a stable environment. I need to check if tests running in parallel can handle file system writes without issues, and clarify logging related to errors to ensure that we capture the right debug records while running tests. Overall, doing this carefully should help refine our tests.
+**Assessing launch command assertions**
+
+I’m analyzing the results after running the `runStartCommand`, specifically checking if the stdout confirms "started in background (pid: 9001)" and ensuring the launch count is 1. The sink records should include a debug message for the generic error, an info event for "daemon.start," and an audit event for the "cli.command" with the command name start. I'm also considering if it's necessary to test the snapshot launch when the daemon isn't running, as this may simplify things, but I still need to account for existing conditions regarding daemon status.
+
+# gpt-5.4_2026-03-06_1757_46
+
+I’m writing the direct command tests now. They’ll use a tiny shared context builder with captured logs and stdout so we can assert command behavior without inflating `daemon-cli_test.ts` further.
+
+**Running and compiling issues**
+
+I need to format and run the code. There might be some issues with the path filename since the actual default filename is `.kato-workspace-config.yaml`. I'm considering using an import constant instead of hardcoding the value, which might be a better match. I should also check if the status snapshot requires a schemaVersion. 
+
+There seems to be a potential type error in `resolveUserConfigStore` where the returned object might not match the interface, possibly missing the save. I just need to finalize the commentary before doing any edits and then run `fmt/test`.
+
+# gpt-5.4_2026-03-06_1758_55
+
+The direct command test file is in. I’m formatting it and running just that file first so I can correct any type mismatches in the minimal context before I touch the full suite.
+
+**Considering targeted coverage**
+
+I need to focus on targeted coverage to see improvements. The run start command had a delay of 311ms due to retries involving pauses, which seems fine. I might consider directing coverage more specifically. The next step is to run a focused coverage test just on the file to assess its performance more accurately. This approach should yield better insights!
+
+# gpt-5.4_2026-03-06_1759_15
+
+The direct command file is clean. I’m getting a targeted coverage read for `start.ts` and `workspace_init.ts`; if the movement is real, I’ll rerun the full suite and refresh the notes again.
+
+# gpt-5.4_2026-03-06_1759_26
+
+The targeted numbers are good: `start.ts` is at `91.0%` line / `87.0%` branch and `workspace_init.ts` is fully covered in the focused run. I’m rerunning the full repo test and coverage tasks now so I can update the baseline and trim the remaining low-coverage list again.
+
+**Updating notes on coverage**
+
+I need to focus on updating notes first. I see that I should remove some logic buckets, especially from the workspace. Next, I should look at coverage for runtime/utils/hash and cli/commands/export. It's kind of tricky since line numbers are low, but it seems like runtime_config and control_plane have some updates too. The user mentioned proceeding, but maybe it’s best to update the notes before moving forward. I want to maintain clear task notes and not overshoot my time.
+**Updating testing notes**
+
+I should start by updating the notes before diving deeper into the direct tests for hash.ts. It makes sense since we have already made quite a few edits. I want to focus on marking any updates related to the logic bucket, particularly for runtime_config, which improved from 71.0 to 71.6. I could also mention the coverage for cli start/workspace init and update the totals. There are still other gaps, like export and runtime_config, to note as we move forward.
+**Choosing task priorities**
+
+I’m thinking about which files or tests to focus on next. I could go with hash.ts at line 68.3, export.ts at line 84.2, and runtime_config.ts at 71.6. Including the start resolution might make sense, and I don’t really need to stress the low line against branches. It seems logical to note that the real logic worth testing next includes hash.ts, export.ts for branch behavior, and possibly markdown integration, though broad suites already cover much of this.
+
+# gpt-5.4_2026-03-06_1800_21
+
+The repo baseline moved again, and `start.ts` / `workspace_init.ts` are no longer reasonable “next hotspot” candidates. I’m syncing the testing note and task note to the new verified numbers and pruning those files out of the remaining-logic bucket before I decide on the next slice.
+
+**Planning next steps**
+
+I need to continue from the summary and inspect current files to apply necessary patches since the user said to proceed. I'll likely implement the next coverage slice after updating the documentation. First, I should send a commentary update to clarify where we stand. Then, I can check the current state using git status and look at relevant parts in task/dev testing. Running a hash/export with rg could also be helpful. Let’s tackle the commentary before moving on to those parallel reads!
+
+# gpt-5.4_2026-03-06_1801_22
+
+I’m picking up from the latest direct command coverage pass and checking the notes plus the next remaining coverage target. First step is to read the current task/testing notes and inspect the likely next gap so I can update the docs and keep moving without clobbering any unrelated work.
+
+**Evaluating test coverage**
+
+I need to dive deeper into files like hash.ts and export.ts, especially since the user wants me to proceed. I should also think about adding tests for those files. It might be helpful to check existing tests around hash and see what current coverage looks like. Before I go into more substantial work, I think I should confirm updates on my commentary. After that, I'll explore the relevant code, using a parallel approach for efficiency.
+
+# gpt-5.4_2026-03-06_1801_40
+
+The notes still need the latest `479`-test baseline, and the next cheap gap is `apps/runtime/src/utils/hash.ts`. I’m reading that module and the nearby tests now so I can either add a small direct suite or decide the next best target based on actual logic weight.
+
+**Figuring out testing approach**
+
+I need to read the rest of cli-command-direct_test for context and think about extending it with export direct tests. The summary suggests either hash or export tests next, and since the user wants to proceed, I'm looking at coverage improvements. Hash tests seem straightforward, while export tests might involve more logic and boost overall coverage. I could potentially add both types of tests, but I must keep time constraints in mind, thinking of how to organize the new tests efficiently.
+**Inspecting code coverage**
+
+I need to check the existing coverage and hotspots, focusing on export line/branch 84.2/70 and hash 68.3/73.7. Small tests for the hash could bring coverage close to 100%, while export direct tests might improve the branch coverage. I’ll look into the code for context reuse, as we already have the command context helper in cli-command-direct_test. Maybe I should add runExportCommand imports and tests there, along with inspecting the context interface and how it interacts with the control store methods. Also, I need to understand the status of the task note since it may not be updated.
+**Patching task note**
+
+I need to patch the task note, and this should mark it as modified. It’s possible that changes to deno.json have been committed already since the git status shows only three items. It seems that many previous in-progress files were committed before the context switch, which is good. Now I should check if there are any existing hash tests. I think I’ll search more specifically for stableStringify to see what I can find.
+
+# gpt-5.4_2026-03-06_1802_01
+
+`hash.ts` is a very cheap direct win, and `export.ts` still has real branch logic that’s only partially exercised. I’m going to add one small direct hash suite and extend the command-level CLI tests to cover export rejection/queueing/history-write branches, then I’ll rerun the focused tests plus the full suite and sync the notes.
+
+**Figuring out file issues**
+
+I need to read enough of the remainder to figure out if we can patch the file manually. It seems like I'll need to inspect the types for the control store enqueue interface, especially around the website pattern. There's a process here I need to follow, so I want to make sure I'm thorough in checking everything. I hope I can find a straightforward solution as I dive into this!
+
+# gpt-5.4_2026-03-06_1802_06
+
+I have enough context to patch now. I’m going to extend the direct command test harness so it can model export queueing and path-policy decisions, add a tiny dedicated hash test file, and then refresh the notes to the new baseline after verification.
+
+**Editing and testing**
+
+I’m thinking about editing the file with an apply_patch command. I might need to inspect the entire file to see where I can add tests at the end. Perhaps I’ll use sed to make changes starting from line 240 onwards. I want to make sure I’m thorough with this, checking everything to ensure the tests fit properly. It’s a bit of a process, but I’ll figure it out!
+
+**Evaluating command context**
+
+I need to extend the makeCommandContext to include a custom enqueue for controlStore and an optional path policy decision. It seems like I might need to check the types for the policy decision shape, possibly starting from the gate interface. I should look for WritePathPolicyGateLike or any existing tests related to this. It's about ensuring everything aligns correctly for the implementation—let’s make sure to cross-reference and analyze as I go!
+
+I need to take a closer look at the return type for the enqueue function. It sounds like I’ll be searching the control_plane interface to clarify that. I'm curious if it's properly defined and if it aligns with what I expect. Checking the documentation could be beneficial here to ensure everything’s working smoothly. I'll dig into that and see what I can find out!
+
+**Inspecting export log entry**
+
+I need to check the location of the appendExportsLogEntry and see if there are any existing tests related to it. My first step will be to search for it to gather more information on its implementation. I want to ensure everything functions smoothly, and checking for tests will help determine if any additional testing is necessary. Let's dive in and clarify these details.
+
+**Considering file checks**
+
+I’m looking into whether something was possibly imported incorrectly. If the linter isn’t complaining, that’s interesting—but it could mean they just haven’t run it yet. The `deno task test` won’t catch lint errors either. I'll need to consider if removing the unused `NoopSink` is right. But, what if it’s referenced in some omitted lines? I should do a search to clarify this.
+
+**Inspecting configuration options**
+
+I need to look into the `createDefaultSharedBehaviorConfig` fields for export settings like the timezone. Using defaults might be okay, but I should test the output log file by reading the `exports.jsonl`. I want to ensure the root directory structure is correct. In `runtimeDir`, I'll join with the root to find the `exports` path. 
+
+I’m thinking about extending `makeCommandContext` to include `pathPolicyDecision` and maybe a few other options to enhance flexibility. Also, I'll inspect `runExportCommand` behavior and consider the likely test branches for errors and logs.
+**Examining log entry handling**
+
+I need to ensure that `controlStore.enqueue` returns a request and that the `stdout` request line reflects the original output path and format. Also, I'll read the `exports.jsonl` path and check that the entry output path uses the resolved output path. 
+
+The failure branch for appending to the export log might be tricky since `appendExportsLogEntry` uses the parent directory of `runtimeDir`. I’m wondering if I can make the root non-writable, or perhaps set `runtimeDir` as an existing file to cause `Deno.mkdir` to fail. I need to carefully structure this so that it triggers the necessary errors.
+**Considering failure conditions**
+
+To force a failure, the root path would need to be an existing file. However, if that is the case, joining it with "runtime" seems odd. I need to think through how that might interact with the rest of the directory structure. Creating a scenario where the paths are logically inconsistent, like an existing file as a base for `runtimeDir`, could trigger the desired error behavior. I'll need to explore this further to find a suitable implementation.
+
+**Investigating export tests**
+
+I need to look into existing export tests within daemon-cli or integration bundles. It seems essential to inspect the behavior around the control store. To move forward, I'll search and run a query on "daemon-cli export" to see what I can find. This should help clarify how exports are functioning and if there are any issues that need addressing. Let’s see what the search yields!
+
+**Considering test inspection**
+
+I think I could inspect existing tests to better understand the expected events. It might make things simpler and help avoid unnecessary complexity. This could really streamline the process and provide clearer insights into what I should expect. I’m curious just how much simpler this will be if I take the time to review those tests thoroughly. Let's see if this approach leads to any unexpected insights!
+
+**Updating testing process**
+
+I'm looking at the testing process with symbols and bigints, considering I might need to update notes after running tests with actual metrics. If I add 7 tests, it looks like I'd reach a total of 486 tests. Coverage might be around 78.7%, but I should run the actual numbers to be certain. After patching, I'd focus on running specific tests and the full suite for coverage, which could lead to better metrics. I'll also check the `deno.json` tasks to report on improved metrics after calculating coverage.
+**Preparing for test edits**
+
+The user instructions mention that I should explain my edits before making changes, and I already did that. I'm planning to apply a patch to `tests/cli-command-direct_test.ts` while also considering a new test file that could be named `hash_test.ts`, but I'll stick to `runtime-hash_test.ts` for consistency. I want to ensure the import path is correct. There are a few potential issues to address, like handling stale snapshots and assertions. 
+
+I'll make sure to proceed carefully with the edits!
+
+**Running focused tests**
+
+I need to run some focused tests, ensuring I'm checking specific areas. I’m thinking there might be a possibility that one of the tests could fail due to a mismatch in the error message. So, it would make sense for me to run targeted tests to see if I can isolate any issues. I want to make sure everything is functioning properly before moving on! Let’s get started with those tests.
+
+# gpt-5.4_2026-03-06_1805_01
+
+The direct suites are patched. I’m running the new focused tests first to catch harness mistakes before I touch the notes or rerun the whole repo.
+
+# gpt-5.4_2026-03-06_1805_05
+
+The focused runs are still in flight. I’m polling them now; if one of the new branches is off, I’ll fix that before spending time on the full coverage pass.
+
+**Adjusting error handling**
+
+I need to refine how I'm handling the error for assertRejects related to NotADirectory. It seems I should consider using a more generic approach for the error message. Maybe I can use a general Error type along with a string to clarify? I think Deno.errors.NotADirectory might still be relevant. So, I'll patch this quickly to improve the overall error handling logic. Let's get this fixed!
+
+# gpt-5.4_2026-03-06_1805_12
+
+One export-history assertion was too specific: the filesystem failure comes back as `NotADirectory` on this setup, not `NotFound`. I’m narrowing that check so the direct test still verifies the intended behavior without depending on the exact OS path error beyond “the log file was not created.”
+
+**Considering test strategy**
+
+I need to decide whether to run a full test and coverage together or one after the other. Running them in parallel could cause issues since they might compete for resources. I think it’s better to run them sequentially: first the full test, then the coverage. I’ll use `exec_command` for this. I'm considering using `deno task test --frozen --quiet` followed by `deno task test:coverage --frozen --quiet`. Maybe I could start with coverage since it includes tests? But I prefer having both metrics. Sequential seems simpler.
+
+# gpt-5.4_2026-03-06_1805_26
+
+The focused suites are green now. I’m running the full repo test task and the full coverage task next so the notes use actual verified numbers, not guesses.
+
+**Evaluating test result**
+
+I've got a great test result of 486, which is encouraging! Now, I need to consider the next steps, specifically running a coverage check to ensure everything is working smoothly. It's interesting to analyze results like this and plan what to do next. Coverage runs help identify any potential issues or gaps, so I'll prioritize that to maintain quality. Alright, let's get started on the coverage run!
+
+I'm considering whether I need to conduct another poll to check on completion summaries. It seems there might be some coverage metrics that aren't fully captured yet. I want to ensure I have all the relevant data before moving forward. It’s important to gather as much information as possible to get a clear picture of what’s needed. It'll help me analyze everything thoroughly! Let's figure this out together!
+
+**Reviewing task improvements**
+
+I need to consider whether to run rg or if coverage output is enough. It’s important to patch the documentation with metrics and list the changes, especially regarding export.ts and hash.ts improvements. I want to inspect the task notes around coverage, and maybe patch dev.testing to include direct export/hash tests and update the timings. Notably, the current tests show 486 passed in 3 seconds, but the earlier notes suggested real times around 8.5 seconds. The user might expect accurate timings from these commands.
+**Examining timing reporting**
+
+It seems our run command didn’t include timing. Earlier summaries had precise real times, possibly due to the command wrapper reporting wall time. The exec_command wall time shows around 4.57 to 5.00 seconds, but I suspect the combined time could be around 10 seconds. The task output might just reflect internal time rather than real time. I should consider running with `time deno task ...` or using `/usr/bin/time -p` to catch actual times for accuracy. Since my notes need to track reliable timings, running these commands could be worthwhile.
+**Considering timing methods**
+
+I could use the built-in `time` in exec_command, but it might be tricky with zsh. Instead, using `/usr/bin/time -p deno task test --frozen --quiet` seems more straightforward and probably not too expensive. But I already ran the test and coverage, so re-running might feel a bit redundant, though it’s still okay. It might take some time, but I wonder if using exec_command for wall time could work instead.
+
+# gpt-5.4_2026-03-06_1806_08
+
+The coverage run finished cleanly and the file metrics moved where expected: `export.ts` and `hash.ts` are both at `100%` line coverage now, and repo total is `78.4%` / `83.8%`. I want the notes to keep using real elapsed timings rather than the test runner’s internal `(3s)` figure, so I’m doing one timed pass of the two repo commands before I patch the docs.
+
+**Refining testing strategies**
+
+I think it's important to create a better list of moderate and undercovered logic while making sure that the tests are approachable and targeted. This helps in clarifying the areas we need to focus on for improvement. By doing so, I can ensure the tests truly meet the user's needs and are efficient. It also seems more effective to work on a systematic approach rather than just randomly selecting areas. Let's keep diving deeper into this!
+
+# gpt-5.4_2026-03-06_1806_40
+
+I have the verified timings and coverage numbers now. I’m patching the two notes to reflect the `486`-test baseline, the new `export.ts` / `hash.ts` direct coverage, and the updated “what’s left” bucket so the task note stays accurate as a running record.
+
+**Considering code formatting and tests**
+
+I need to check the git status and possibly note that the task for line coverage doesn't have a formatted decimal. I might want to update the markdown line wrap and ensure there are no syntax issues. Running sed diff or deno fmt could help, although we might want to exclude dev-docs notes. It seems like running tests again after formatting is a good idea, especially for the code files. Let's check if docs are excluded from formatting and run the necessary commands for the test files!
+
+# gpt-5.4_2026-03-06_1807_21
+
+The notes are patched. I’m formatting the two test files I touched and then I’ll do a quick status check so the final summary reflects the exact worktree state.
+
+**Ensuring test integrity**
+
+I need to make sure that the focused tests still pass after formatting changes since formatting shouldn't affect them. I’m thinking I might not need to rerun everything, but it would be wise to check the git diff and status. I should consider using multi_tool parallel for both git status and checking metrics in my notes. This way, I can efficiently assess everything at once!
+
+**Considering task execution**
+
+I’m thinking about whether line 6 is irrelevant, but it seems fine. There's a potential issue with untracked test files, and maybe I should run `git diff --stat`, but that feels optional.
+
+I might want to inspect the command test file for untracked files and consider that in my summary. User mentioned proceeding, so I could move into the next target. 
+
+Since the user hasn't asked me to stop, it's probably best to continue until the task is fully handled. I'll keep going with the next slice, maybe focusing on runtime_config or status.
+**Deciding on coverage targets**
+
+I see that we've already updated our notes, so I could consider moving on to another coverage target. I need to choose the next meaningful and cost-effective target. I could look into `runtime_config`, but I already have direct tests for that. 
+
+Alternatively, I might check `apps/daemon/src/providers/claude/parser.ts` or `gemini/parser.ts`, which seem to have parser branches with existing tests. It's important not to go endlessly, but since the user says to proceed, I might continue until I hit diminishing returns. 
+
+The remaining tasks lean more towards structural reviews of heavy suites and implementing a plan, like reviewing setups and considering test merges while mapping any remaining security baselines, which may still need attention.
+**Evaluating next steps**
+
+I could shift my focus to reviewing the heavy suites instead of adding more tests. A practical next step might be to inspect files like `daemon-cli_test.ts`, `daemon-runtime_test.ts`, `provider-ingestion_test.ts`, and `writer-markdown_test.ts` for any repeated setups. Documenting my findings aligns with the task requirements.
+
+If the user expects code changes, that guidance isn't entirely clear. They mentioned a testing review implementation, so maybe updates to notes rather than actual code might be sufficient. I'll consider documenting my initial review without needing to make code changes.
+**Reviewing task notes**
+
+I need to update my task notes with my findings and identify candidate tests to merge or remove. This feels like a meaningful next step. I could consider adding a section in the task note titled "Heaviest suite review snapshot." Let’s inspect the counts—maybe using the `Deno.test(` to check counts and line counts. I might also look into repeated helper names using `wc -l` and `rg` patterns. This should help clarify the next moves.
+
+# gpt-5.4_2026-03-06_1807_56
+
+The direct-coverage pass is in a good place now. Rather than stop on another arbitrary file, I’m using the remaining time on the next unchecked task item: a quick evidence pass over the heaviest suites so we can record where the real setup duplication is before doing larger refactors or test deletions.
+
+**Gathering evidence counts**
+
+I think we might need stronger evidence, so counting occurrences of `new InMemorySessionSnapshotStore` and `makeTestTempDir` could help. I could use rg for those counts. Also, it seems important to consider `makeRuntimeHarness` in daemon-cli while we're at it. It's all about getting specific numbers to back up our findings. So, I'll focus on gathering those counts to ensure we have solid evidence.
+
+# gpt-5.4_2026-03-06_1808_11
+
+The heavy-suite pass already shows the shape of the problem, but I want one more layer of concrete evidence before I mark anything reviewed. I’m pulling a few repetition counts now so the note can point at actual setup churn instead of vague “this file is big” language.
+
+I’m considering how to analyze the data more effectively. It seems like using each query with alternatives provided overall matches instead of individual counts. Maybe I need to focus on specific patterns. I’m thinking that running separate queries could work better for getting those individual counts. So, let’s aim to try 2 or 3 separate runs to see what results I can get. That sounds more manageable!
+
+**Patching task notes**
+
+I'm thinking I could mark this task as done with a brief evidence bullet. It seems like a sensible approach! But, I’m wondering if I really need to include `dev.testing`; maybe it's not necessary after all. I'll decide to use `apply_patch` to implement these changes. It's a bit of a small adjustment, but I think it will help clarify what I've done. Let's see how it turns out!
+
+# gpt-5.4_2026-03-06_1808_30
+
+I have enough evidence to record the first heavy-suite review pass. I’m adding that snapshot to the task note and checking off the “review the heaviest suites” item, since the repo now has concrete counts and overlap observations to guide the refactor phase instead of just intuition.
+
+**Updating task notes**
+
+I need to update the current task note. I might not need to run any more tests since it’s document-only. Checking the git status seems like a good idea, then moving on to prepare the final summary. The user has been asking me to proceed, so it feels right to continue. We've accomplished another task item, which is great. I should also mention that verification is already done and that there are no new tests run after the final note. I’ll summarize everything concisely for them.
+**Summarizing progress and next steps**
+
+I should mention some likely upcoming targets, like the runtime loop fixture extraction and provider-ingestion harness extraction. The user has asked me to proceed without a specific output, so my final note will read like a progress update. I need to acknowledge relevant files, including absolute paths for tests like `tests/cli-command-direct_test.ts` and `tests/runtime-hash_test.ts`, and include outcomes. I’ll note verification commands without using nested bullets — keeping it clear and concise for the user is key!
+**Updating implementation details**
+
+I could mention that I've implemented another focused slice. The file `[cli-command-direct_test.ts]` now covers the export branches like stale, deny, queue, and history-fail. Additionally, I've included deterministic coverage for `stableStringify` and `FNV` in `[runtime-hash_test.ts]`. As a result, this has improved `[export.ts]` to scores of 98.3 and 94.6, while `[hash.ts]` hits a perfect 100 across the board. It's nice to see those improvements!
+**Updating project notes**
+
+I’ve updated the notes and marked the heavy-suite review item complete, with a concrete snapshot in the task note. Verification shows the transcript file is modified but untouched by me. It’s worth mentioning that new files are currently untracked unless staged or committed, which could be useful for the user. I'll also make sure to reference the direct command file properly, and ensure file references use absolute paths. Plus, I’ll note that the task checkbox is updated.
+**Finalizing concise response**
+
+I’m working on crafting a concise final response, aiming for maybe two paragraphs along with some verification bullets. I don't need to start with "Done," which is good to remember. The goal is to ensure clarity while being informative. I’ll focus on answering the key points effectively in the final version. This approach will enhance readability and keep the user engaged without unnecessary filler. Let’s ensure everything is organized and polished!
+
+# gpt-5.4_2026-03-06_1809_03
+
+I added another focused direct-coverage slice in [cli-command-direct_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts) and a new [runtime-hash_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-hash_test.ts). The new command tests cover export stale-daemon rejection, denied output paths, queue payload resolution, and export-history write failures in [export.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/export.ts); the hash tests cover deterministic `stableStringify` behavior plus known FNV-1a digests in [hash.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/hash.ts). That moved `export.ts` to `98.3%` line / `94.6%` branch and `hash.ts` to `100%` line / `100%` branch, with the repo now at `486` passing tests and `78.4%` line / `83.8%` branch coverage.
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the verified `486`-test baseline, added the new export/hash coverage notes, and recorded a concrete heavy-suite review snapshot. That let me mark the “review the heaviest suites” checkbox complete in the task note.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/runtime-hash_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/cli-command-direct_test.ts`
+- `deno task test --frozen --quiet`: `486` passed, about `9.4s` real
+- `deno task test:coverage --frozen --quiet`: `486` passed, `78.4%` line / `83.8%` branch, about `10.6s` real
+
+Current worktree note: [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md) is still modified and untouched by me.
+
+# djradon_2026-03-06_2043_29
+
+next steps?
+
+# gpt-5.4_2026-03-06_2043_49
+
+If you mean the testing-review task, I’d do this next, in order:
+
+1. Commit the current slice first.
+   The worktree now has the new direct tests in [cli-command-direct_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts) and [runtime-hash_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-hash_test.ts), plus note updates in [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md).
+
+2. Start the highest-ROI refactor pass in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts) and [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts).
+   That suite is still the biggest cost center, and the next win is fixture extraction plus moving logic-specific assertions out of the end-to-end loop.
+
+3. Do the same cleanup for [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+   Now that `start`, `workspace init`, and `export` have direct tests, the broad CLI suite should focus on routing/integration instead of re-testing command internals.
+
+4. Then extract a shared provider-runner harness in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts).
+   That file has obvious repeated setup around watch harnesses, snapshot stores, and runner creation.
+
+5. Only after that, decide what to merge or delete.
+   The task note’s remaining unchecked item should be backed by specific candidates and reasons, not a generic “trim tests” pass.
+
+If you want, I can take step 2 now and start by carving a reusable runtime-loop fixture out of [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts).
+
+# djradon_2026-03-06_2044_33
+
+commit message
+
+# gpt-5.4_2026-03-06_2044_37
+
+```text
+test: add direct export and hash coverage, document suite hotspots
+
+Add focused command-level tests for export rejection, path-policy denial,
+queue payload resolution, and export-history write failures, plus direct
+hash tests for stable stringify normalization and known FNV-1a digests.
+Refresh testing notes with the verified 486-test baseline, improved
+coverage metrics, and a concrete review snapshot of the heaviest suites.
+```
+
+# djradon_2026-03-06_2101_13
+
+There are now like 25 .coverage* folders at the top of my repo. We have to containe those somewhere.
+
+# gpt-5.4_2026-03-06_2101_26
+
+I’m checking how coverage output is configured right now and what’s actually accumulated at repo root. Then I’ll move it to a contained location rather than adding more one-off ignore patterns.
+
+# gpt-5.4_2026-03-06_2101_37
+
+I found twelve top-level hidden coverage dirs. I’m going to relocate the default coverage output under `.test-tmp/coverage/`, update the docs/examples to match, and then move the existing root-level coverage directories into that contained area so the repo root stays clean.

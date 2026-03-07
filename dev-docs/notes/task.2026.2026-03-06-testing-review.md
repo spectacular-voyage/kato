@@ -41,15 +41,15 @@ Current signals already visible in the repo today:
   - direct `deno test --parallel --clean --coverage=.coverage-par ... --frozen`:
     about `10s` elapsed
 - Post-initial implementation verification on `2026-03-06`:
-  - `deno task test --frozen --quiet`: `474` passing tests, about `9.0s` real
-  - `deno task test:coverage --frozen --quiet`: `474` passing tests,
-    `78.0%` line coverage, `83.4%` branch coverage, about `9.1s` real
+  - `deno task test --frozen --quiet`: `486` passing tests, about `9.4s` real
+  - `deno task test:coverage --frozen --quiet`: `486` passing tests,
+    `78.4%` line coverage, `83.8%` branch coverage, about `10.6s` real
   - `apps/daemon/src/writer/jsonl_writer.ts` is now at `95.9%` line coverage /
     `96.9%` branch coverage after adding a direct test file
   - `apps/daemon/src/orchestrator/session_twin_mapper.ts` is now at `90.8%`
     line coverage / `83.7%` branch coverage after adding direct mapper tests
-  - `apps/runtime/src/config/runtime_config.ts` is now at `71.0%` line
-    coverage / `81.7%` branch coverage after adding direct config tests
+  - `apps/runtime/src/config/runtime_config.ts` is now at `71.6%` line
+    coverage / `82.6%` branch coverage after adding direct config tests
   - `apps/runtime/src/policy/path_policy.ts` is now at `85.6%` line coverage /
     `90.6%` branch coverage after adding direct policy tests
   - `apps/daemon/src/providers/codex/parser.ts` is now at `87.4%` line
@@ -57,6 +57,12 @@ Current signals already visible in the repo today:
     tests, including the legacy top-level `request_user_input` shape
   - `apps/cli/src/commands/status.ts` is now at `73.8%` line coverage /
     `84.6%` branch coverage after adding direct command-level status tests
+  - `apps/cli/src/commands/export.ts` is now at `98.3%` line coverage /
+    `94.6%` branch coverage after adding direct command-level export tests
+  - `apps/cli/src/commands/start.ts` is now at `93.6%` line coverage /
+    `92.0%` branch coverage after adding direct command-level start tests
+  - `apps/cli/src/commands/workspace_init.ts` is now at `100%` line coverage /
+    `100%` branch coverage after adding direct workspace-init tests
   - `apps/cli/src/parser.ts` is now at `93.6%` line coverage /
     `96.1%` branch coverage after adding direct parser-only help/usage/arity
     tests
@@ -71,6 +77,8 @@ Current signals already visible in the repo today:
   - `apps/cli/src/commands/status_error_cursor.ts` is now at `77.6%` line
     coverage / `87.2%` branch coverage after adding direct cursor
     normalization and fail-closed tests
+  - `apps/runtime/src/utils/hash.ts` is now at `100%` line coverage /
+    `100%` branch coverage after adding direct hash tests
   - detached launcher branches now have direct tests, and current Deno
     coverage attributes that work under
     `apps/daemon/src/orchestrator/launcher.ts` (`100%`) while warning that
@@ -105,6 +113,11 @@ Current signals already visible in the repo today:
     task-complete edge cases
   - direct status command tests now cover JSON stale filtering plus file-backed
     recent-error and cursor reconciliation behavior
+  - direct export command tests now cover stale-daemon rejection, denied output
+    paths, queue payload resolution, and export-history write failures
+  - direct start / workspace-init command tests now cover daemon
+    acknowledgement/retry behavior plus workspace-config create/idempotent
+    behavior without routing through `runDaemonCli`
   - direct CLI parser tests now cover help topics, usage errors, arity checks,
     and format validation without a runtime harness
   - direct control-plane tests now cover default/override path resolution,
@@ -115,6 +128,8 @@ Current signals already visible in the repo today:
     invalid YAML / non-`.yaml` rejection
   - direct env-helper tests now cover `readOptionalEnv`, `resolveHomeDir`,
     and `expandHomePath` behavior under explicit HOME / USERPROFILE cases
+  - direct hash tests now cover deterministic stable-stringify normalization
+    plus known FNV-1a digests
   - direct status-error cursor tests now cover invalid document shapes,
     key-cap normalization, and recursive parent-dir creation on save
   - root test tasks now allow the env keys exercised by those direct tests
@@ -136,9 +151,9 @@ Current signals already visible in the repo today:
 Coverage triage should distinguish at least three buckets:
 
 - Real logic worth more tests:
-  - `apps/runtime/src/utils/hash.ts` (`68.3%`)
-  - `apps/cli/src/commands/start.ts` (`65.4%`)
-  - `apps/cli/src/commands/workspace_init.ts` (`65.7%`)
+  - `apps/runtime/src/config/runtime_config.ts` (`71.6%`)
+  - `apps/cli/src/commands/status.ts` (`73.8%`)
+  - `apps/daemon/src/orchestrator/provider_ingestion.ts` (`73.7%`)
 - Mixed/noisy coverage contributors that still need a value judgment:
   - `shared/src/contracts/session_state.ts` (`21.4%`)
   - `shared/src/contracts/session_twin.ts` (`37.4%`)
@@ -150,10 +165,14 @@ Coverage triage should distinguish at least three buckets:
   - `apps/runtime/src/policy/path_policy.ts` (`85.6%`)
   - `apps/daemon/src/providers/codex/parser.ts` (`87.4%`)
   - `apps/cli/src/commands/status.ts` (`73.8%`)
+  - `apps/cli/src/commands/export.ts` (`98.3%`)
+  - `apps/cli/src/commands/start.ts` (`93.6%`)
+  - `apps/cli/src/commands/workspace_init.ts` (`100%`)
   - `apps/cli/src/parser.ts` (`93.6%`)
   - `apps/runtime/src/orchestrator/control_plane.ts` (`73.8%`)
   - `apps/runtime/src/config/shared_behavior_config.ts` (`77.9%`)
   - `apps/runtime/src/utils/env.ts` (`82.4%`)
+  - `apps/runtime/src/utils/hash.ts` (`100%`)
   - `apps/cli/src/commands/status_error_cursor.ts` (`77.6%`)
   - launcher coverage no longer appears as a live gap, although Deno currently
     reports it under `apps/daemon/src/orchestrator/launcher.ts`
@@ -163,6 +182,20 @@ Coverage triage should distinguish at least three buckets:
   - `tests/daemon-cli_test.ts`
   - `tests/provider-ingestion_test.ts`
   - `tests/writer-markdown_test.ts`
+- Early heavy-suite review snapshot from the current tree:
+  - `tests/daemon-runtime_test.ts` is about `8.3k` lines across `66` tests and
+    repeatedly rebuilds temp dirs, workspace fixtures, session snapshot stores,
+    and full `runDaemonRuntimeLoop` harnesses for many adjacent in-chat / export
+    / filename-template scenarios
+  - `tests/daemon-cli_test.ts` is about `3.2k` lines across `55` tests and
+    repeatedly rebuilds `makeRuntimeHarness` plus in-memory config/status/control
+    stores even for command internals that now have direct command-level tests
+  - `tests/provider-ingestion_test.ts` is about `2.3k` lines across `24` tests
+    and repeats watch harness + snapshot store + provider-runner setup for
+    discovery, resume, duplicate-resolution, and watch-update cases
+  - `tests/writer-markdown_test.ts` is about `1.6k` lines across `32` tests;
+    most cases are low-cost pure rendering assertions, so readability splitting
+    is likely higher-value than aggressive deletion
 
 Specific observations worth checking during the review:
 
@@ -262,7 +295,7 @@ Review work should capture before/after evidence for:
 - [x] Sort low-coverage files into buckets:
       real logic gaps, acceptable low-value coverage noise, and files that may
       merit coverage exclusion or lower priority.
-- [ ] Review the heaviest suites (`daemon-runtime`, `daemon-cli`,
+- [x] Review the heaviest suites (`daemon-runtime`, `daemon-cli`,
       `provider-ingestion`, `writer-markdown`) for repeated setup, overlapping
       scenarios, and tests that assert implementation detail instead of durable
       behavior.

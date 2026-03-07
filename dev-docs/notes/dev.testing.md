@@ -39,7 +39,8 @@ default. Local verification on 2026-03-06 stayed deterministic with both
 `deno task test --frozen --quiet` and `deno task test:coverage --frozen --quiet`,
 including after adding direct JSONL writer, session-twin mapper,
 runtime-config, shared-behavior config, path-policy, launcher, status-command,
-control-plane, env-helper, status-error-cursor, CLI parser, and Codex parser
+control-plane, env-helper, status-error-cursor, CLI parser, direct start /
+workspace-init / export command tests, direct hash tests, and Codex parser
 tests plus a shared env lock in `tests/test_env.ts` for env-mutating cases.
 
 GitHub CI uses a split gate:
@@ -77,9 +78,9 @@ instead of rerunning the whole suite.
 
 Current local timings from 2026-03-06:
 
-- `deno task test --frozen --quiet`: `474` passing tests, about `9.0s` real
-- `deno task test:coverage --frozen --quiet`: `474` passing tests,
-  `78.0%` line coverage, `83.4%` branch coverage, about `9.1s` real
+- `deno task test --frozen --quiet`: `486` passing tests, about `9.4s` real
+- `deno task test:coverage --frozen --quiet`: `486` passing tests,
+  `78.4%` line coverage, `83.8%` branch coverage, about `10.6s` real
 
 Current coverage-report caveat:
 
