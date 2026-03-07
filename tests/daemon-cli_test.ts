@@ -2789,9 +2789,15 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     const logsDir = `${runtimeDir}/logs`;
     const operationalLogPath = `${logsDir}/operational.jsonl`;
     const auditLogPath = `${logsDir}/security-audit.jsonl`;
+    const webLogsDir = `${dirname(runtimeDir)}/web/logs`;
+    const webOperationalLogPath = `${webLogsDir}/operational.jsonl`;
+    const webAuditLogPath = `${webLogsDir}/security-audit.jsonl`;
     await Deno.mkdir(logsDir, { recursive: true });
+    await Deno.mkdir(webLogsDir, { recursive: true });
     await Deno.writeTextFile(operationalLogPath, '{"old":"operational"}\n');
     await Deno.writeTextFile(auditLogPath, '{"old":"audit"}\n');
+    await Deno.writeTextFile(webOperationalLogPath, '{"old":"web-op"}\n');
+    await Deno.writeTextFile(webAuditLogPath, '{"old":"web-audit"}\n');
 
     const cleanHarness = makeRuntimeHarness(runtimeDir);
     const cleanCode = await runDaemonCli(["clean", "--logs"], {
@@ -2804,10 +2810,12 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     });
     assertEquals(cleanCode, 0);
     assertStringIncludes(cleanHarness.stdout.join(""), "clean completed");
-    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=3");
+    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=5");
     assertEquals(controlStore.requests.length, 1);
     assertEquals(await Deno.readTextFile(operationalLogPath), "");
     assertEquals(await Deno.readTextFile(auditLogPath), "");
+    assertEquals(await Deno.readTextFile(webOperationalLogPath), "");
+    assertEquals(await Deno.readTextFile(webAuditLogPath), "");
     assertEquals(await Deno.readTextFile(exportsLogPath), "");
   });
 });
@@ -2914,38 +2922,52 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
   );
 });
 
-Deno.test("runDaemonCli clean --sessions refuses while daemon is running", async () => {
-  const runtimeDir = ".kato/test-runtime";
-  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
-  const controlStore = makeInMemoryControlStore();
-  const statusStore = makeInMemoryStatusStore({
-    schemaVersion: 1,
-    generatedAt: "2026-02-22T10:00:00.000Z",
-    heartbeatAt: "2026-02-22T10:00:00.000Z",
-    daemonRunning: true,
-    daemonPid: 1234,
-    providers: [],
-    recordings: {
-      activeRecordings: 0,
-      destinations: 0,
-    },
-  });
-  const harness = makeRuntimeHarness(runtimeDir);
+Deno.test("runDaemonCli clean --sessions allows cleanup while daemon is running", async () => {
+  await withTestTempDir("daemon-cli-clean-running-", async (rootDir) => {
+    const runtimeDir = `${rootDir}/runtime`;
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const controlStore = makeInMemoryControlStore();
+    const statusStore = makeInMemoryStatusStore({
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: true,
+      daemonPid: 1234,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    });
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const harness = makeRuntimeHarness(runtimeDir);
 
-  const code = await runDaemonCli(["clean", "--sessions", "7"], {
-    runtime: harness.runtime,
-    defaultRuntimeConfig,
-    configStore,
-    statusStore,
-    controlStore: controlStore.store,
-  });
+    const sessionsDir = resolveDefaultSessionsDir(rootDir);
+    await Deno.mkdir(sessionsDir, { recursive: true });
+    const oldMetaPath = `${sessionsDir}/old.meta.json`;
+    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
+    await Deno.writeTextFile(oldMetaPath, "{}\n");
+    await Deno.writeTextFile(oldTwinPath, "{}\n");
+    const oldTime = new Date("2026-02-01T00:00:00.000Z");
+    await Deno.utime(oldMetaPath, oldTime, oldTime);
+    await Deno.utime(oldTwinPath, oldTime, oldTime);
 
-  assertEquals(code, 1);
-  assertStringIncludes(
-    harness.stderr.join(""),
-    "Refusing clean --sessions while daemon is running",
-  );
+    const code = await runDaemonCli(["clean", "--sessions", "7"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "sessionsDeleted=1");
+    await assertRejects(() => Deno.stat(oldMetaPath), Deno.errors.NotFound);
+    await assertRejects(() => Deno.stat(oldTwinPath), Deno.errors.NotFound);
+  });
 });
 
 Deno.test("runDaemonCli export fails when daemon is not running", async () => {

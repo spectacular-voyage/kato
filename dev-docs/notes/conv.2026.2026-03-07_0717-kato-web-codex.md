@@ -2739,3 +2739,290 @@ I’m shaping this as two guided forms rather than a generic “clean” form: l
 # gpt-5.4_2026-03-07_1208_59
 
 I’m at the editing point. The next patch adds the shared runtime clean service first, then swaps CLI to call it, then adds the `/maintenance` route and nav entry on top.
+
+# gpt-5.4_2026-03-07_1209_10
+
+I’m checking the default runtime/status path helpers once before I write the service, so the runtime version can stand alone without depending on CLI context wiring.
+
+# gpt-5.4_2026-03-07_1209_40
+
+The runtime service shape is settled. I’m reading the existing CLI clean tests now so I can lift the right fixture patterns instead of hand-rolling brittle filesystem setup for maintenance.
+
+# gpt-5.4_2026-03-07_1209_54
+
+The service edge case I’m checking now is custom `KATO_RUNTIME_DIR`. I need the shared cleanup code to derive `status`, `sessions`, and log paths the same way the rest of runtime does, not by assuming `~/.kato/daemon`.
+
+# gpt-5.4_2026-03-07_1210_42
+
+I have enough context now. The implementation is three chunks:
+1. shared runtime clean service and CLI refactor,
+2. `/maintenance` page plus nav and POST handlers,
+3. tests and task-note checkbox update.
+
+I’m editing the runtime/CLI part first, because the web page should sit on top of that shared behavior rather than invent its own cleanup rules.
+
+# gpt-5.4_2026-03-07_1210_43
+
+I’m writing the shared maintenance service now. Once that lands, the CLI wrapper gets very small and the web route can reuse the same cleanup and safety logic directly.
+
+# gpt-5.4_2026-03-07_1212_35
+
+I’m adding a focused runtime test rather than a route test first. It gives us confidence that the destructive behavior and daemon-running safety gate are correct before the web form wiring sits on top of it.
+
+# gpt-5.4_2026-03-07_1212_45
+
+The shared service is in. I’m now layering the web page and the focused maintenance tests on top of it, then I’ll do a live `/maintenance` fetch against your running dev server.
+
+# gpt-5.4_2026-03-07_1213_41
+
+I caught a redirect encoding bug in the new maintenance route before running it: I was pre-encoding values and then handing them to `URLSearchParams`, which would double-encode them. I’m fixing that and switching the numeric inputs to `defaultValue` before the verification pass.
+
+# gpt-5.4_2026-03-07_1213_48
+
+I found one more copy issue from the refactor: the unimplemented-scope warning still said “in CLI”, which would be wrong for the web path. I’m fixing that before the test run.
+
+# gpt-5.4_2026-03-07_1214_00
+
+The code path is ready for verification. I’m formatting the touched files first so the full repo check doesn’t fail on style noise, then I’ll run the maintenance tests and a full `check`.
+
+# gpt-5.4_2026-03-07_1214_07
+
+The new files are compiling so far. I’m waiting on the test and full-check processes to finish, then I’ll do one live authenticated fetch of `/maintenance` so we’re not relying on typecheck alone.
+
+# gpt-5.4_2026-03-07_1214_11
+
+The shared service is behaving correctly; the test fixture was wrong. My “recent” session file was still older than 7 days, so the service counted two candidates. I’m fixing that timestamp and rerunning the maintenance test, then I’ll do the live `/maintenance` fetch.
+
+# gpt-5.4_2026-03-07_1214_15
+
+I’m rerunning the fixed maintenance test plus the full shared/web clean test set now, and then I’ll hit the live `/maintenance` route with an authenticated request.
+
+# gpt-5.4_2026-03-07_1214_21
+
+The maintenance tests are green and the full repo/app check is still running cleanly. I’m waiting for those processes to exit, then I’ll verify the live `/maintenance` page with an authenticated request against your current dev server.
+
+# gpt-5.4_2026-03-07_1214_26
+
+The code and tests are done. I’m doing one live authenticated fetch of `/maintenance` on your running web server now, just to confirm the route is actually reachable end-to-end and not only typechecked.
+
+# gpt-5.4_2026-03-07_1214_32
+
+The live fetch is good: `/maintenance` is serving `200 OK` on your running app, the tab is present, and both dry-run/execute forms render. I’m closing the plan and then I’ll summarize the outcome and the next likely step.
+
+# gpt-5.4_2026-03-07_1214_38
+
+The `/maintenance` slice is in.
+
+I extracted the cleanup logic into a shared runtime service at [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) and refactored the CLI wrapper at [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts) to use it. That keeps CLI and web on the same behavior for log flushing, old session cleanup, dry-run reporting, unimplemented recording scope handling, and the daemon-running safety gate.
+
+On the web side, there’s now an authenticated [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) route plus a `Maintenance` tab in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx). The page has separate guided forms for logs and session artifacts, uses POST/redirect/GET, requires explicit confirmation for execute actions, and defaults session cleanup to a 30-day threshold. I also updated the checkbox in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/maintenance-clean_test.ts tests/daemon-cli_test.ts tests/web-summary-loader_test.ts tests/web-logging_test.ts`
+- `deno task check`
+- live authenticated fetch of `http://127.0.0.1:5173/maintenance` returned `200 OK` and rendered both maintenance forms
+
+One current limitation is intentional: the log-cleanup scope still matches current CLI behavior, so it flushes daemon operational/security and exports logs, not web logs. The next highest-value slice is still the route-backed detail pages (`/sessions`, `/recordings`, `/operational`, `/security`).
+
+# gpt-5.4_2026-03-07_1214_39
+
+The `/maintenance` slice is in.
+
+I extracted the cleanup logic into a shared runtime service at [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) and refactored the CLI wrapper at [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts) to use it. That keeps CLI and web on the same behavior for log flushing, old session cleanup, dry-run reporting, unimplemented recording scope handling, and the daemon-running safety gate.
+
+On the web side, there’s now an authenticated [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) route plus a `Maintenance` tab in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx). The page has separate guided forms for logs and session artifacts, uses POST/redirect/GET, requires explicit confirmation for execute actions, and defaults session cleanup to a 30-day threshold. I also updated the checkbox in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/maintenance-clean_test.ts tests/daemon-cli_test.ts tests/web-summary-loader_test.ts tests/web-logging_test.ts`
+- `deno task check`
+- live authenticated fetch of `http://127.0.0.1:5173/maintenance` returned `200 OK` and rendered both maintenance forms
+
+One current limitation is intentional: the log-cleanup scope still matches current CLI behavior, so it flushes daemon operational/security and exports logs, not web logs. The next highest-value slice is still the route-backed detail pages (`/sessions`, `/recordings`, `/operational`, `/security`).
+
+# User_2026-03-07_1217_40
+
+When I click the dry-run button: "(0 , __vite_ssr_import_1__.runMaintenanceClean) is not a function"
+
+# gpt-5.4_2026-03-07_1222_54
+
+I’m reproducing the POST against the live `/maintenance` route and checking the runtime export path for `runMaintenanceClean`. That error usually means the web app is importing a symbol that didn’t actually land in the runtime module seen by Vite SSR.
+
+# gpt-5.4_2026-03-07_1223_08
+
+I’m checking two things directly now: whether the web app’s import alias sees `runMaintenanceClean` at all, and whether the live `POST /maintenance` still fails on the running dev server. That will tell us whether this is code or a stale Vite module graph.
+
+# gpt-5.4_2026-03-07_1223_25
+
+I reproduced the exact failure. The code is fine; the stale part is the live Vite SSR module graph on `5173`. To make this more robust, I’m changing the route to import the maintenance service directly instead of through the aggregated `@kato/runtime` barrel, then I’ll retry the live POST without restarting your server.
+
+# gpt-5.4_2026-03-07_1223_34
+
+The route import is patched. I’m retrying the live dry-run POST now; if this works on the existing `5173` process, we’ve fixed the dev-loop fragility without needing you to restart.
+
+# gpt-5.4_2026-03-07_1223_42
+
+The live POST works now on your existing `5173` process, which confirms the issue was that Vite SSR export edge. I’m running one last full repo `check` after the import change so this bugfix closes cleanly.
+
+# gpt-5.4_2026-03-07_1223_48
+
+That maintenance dry-run bug is fixed.
+
+Cause: the live Vite SSR process on `5173` was holding a stale view of the newly added `@kato/runtime` barrel export, so the route saw `runMaintenanceClean` as undefined at POST time even though the source tree was correct.
+
+Fix: [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) now imports the shared service directly from [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) instead of through the aggregated runtime barrel. That avoids the export-graph drift in the live dev server.
+
+Verified:
+- live `POST /maintenance` on your existing `127.0.0.1:5173` now returns `303` with a success notice instead of the function error
+- `deno task --cwd apps/web check` passed
+- `deno task check` passed
+
+You should be able to click the dry-run button now without restarting the server.
+
+# gpt-5.4_2026-03-07_1223_50
+
+That maintenance dry-run bug is fixed.
+
+Cause: the live Vite SSR process on `5173` was holding a stale view of the newly added `@kato/runtime` barrel export, so the route saw `runMaintenanceClean` as undefined at POST time even though the source tree was correct.
+
+Fix: [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) now imports the shared service directly from [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) instead of through the aggregated runtime barrel. That avoids the export-graph drift in the live dev server.
+
+Verified:
+- live `POST /maintenance` on your existing `127.0.0.1:5173` now returns `303` with a success notice instead of the function error
+- `deno task --cwd apps/web check` passed
+- `deno task check` passed
+
+You should be able to click the dry-run button now without restarting the server.
+
+# User_2026-03-07_1430_58
+
+Let's expand the log flush to web logs. We're not really flushing from disk, just from display, right? For session artifacts, is "longer than" period in days? We should make that explicit. 
+
+Instead of safety gating on daemon running, let's just allow delete. Safely, so not sure if we need to explicitly stop recordings, etc. But it's really non-destructive because the source files are still there. So... just allow session cleanup whenever.
+
+# gpt-5.4_2026-03-07_1431_21
+
+I’m updating the maintenance semantics in the shared clean service first, because both CLI and web sit on top of it. Then I’ll make the web copy explicit about what gets deleted and what the “days” threshold means.
+
+# gpt-5.4_2026-03-07_1431_55
+
+I’m updating the shared maintenance service to include web logs and to drop the daemon-running gate for session cleanup. Then I’ll rewrite the maintenance copy so it explicitly says “days” and “truncate log files on disk,” and I’ll update the tests and task note to match the new behavior.
+
+# gpt-5.4_2026-03-07_1432_16
+
+The task note still encodes the old gate behavior, and the tests do too. I’m changing both alongside the service so we don’t end up with code that silently diverges from the note or the CLI expectations.
+
+# gpt-5.4_2026-03-07_1432_24
+
+I’m reusing the existing CLI `clean --logs` test to prove web logs are part of the shared flush scope now. That’s a better anchor than a one-off service test because it exercises the end-user command surface too.
+
+# gpt-5.4_2026-03-07_1432_55
+
+I’m editing the shared service, tests, and the maintenance copy together so the behavior, wording, and assertions all move in sync.
+
+# gpt-5.4_2026-03-07_1434_33
+
+I’m updating the maintenance behavior and copy to match your decisions: include web logs in log truncation, make the “days” threshold explicit, and remove the daemon-running cleanup gate. I’m checking the current runtime service, route copy, tests, and task note so I can patch them together cleanly.
+
+# gpt-5.4_2026-03-07_1434_39
+
+I have the runtime and page state. Next I’m patching the shared maintenance service and the CLI/web tests together, then I’ll update the maintenance page copy and the task note so the docs match the new behavior.
+
+# gpt-5.4_2026-03-07_1434_41
+
+I’ve confirmed the remaining references to the old safety gate. I’m patching the service first so the behavior change is real, then I’ll adjust the UI copy and tests around it rather than just changing wording.
+
+# gpt-5.4_2026-03-07_1434_48
+
+I’ve got the exact runtime code now. I’m removing the daemon-status dependency from cleanup and extending the log scope to the web log files under `~/.kato/web/logs`, then I’ll update the callers and expectations around that.
+
+# gpt-5.4_2026-03-07_1435_04
+
+The behavior change is in the shared service. I’m tightening the page language now so it says what it actually does: truncate log files on disk, use a days threshold, and allow session cleanup even while the daemon is running because only Kato-derived artifacts are removed.
+
+# gpt-5.4_2026-03-07_1435_55
+
+The main behavior and test changes are patched. I’m doing one pass for leftover wording and then I’ll run the focused maintenance tests before the full repo check so any mismatch is isolated quickly.
+
+# gpt-5.4_2026-03-07_1436_00
+
+The old gate references are gone from the maintenance codepath. I’m formatting the touched files and then running the focused maintenance/CLI tests first so I can catch any behavioral mismatch before the broader check.
+
+# gpt-5.4_2026-03-07_1436_17
+
+The code and focused tests are green. I’m doing one last grep for stale maintenance wording in the task note and route copy, then I’ll close this out with the exact behavioral changes and verification.
+
+# gpt-5.4_2026-03-07_1436_31
+
+Updated the maintenance flow to match that policy.
+
+`clean --logs` now truncates daemon logs, web logs, and the exports log on disk through the shared service in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts). The maintenance page copy in [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) now says that explicitly, and the session threshold is labeled `Delete sessions older than (days)`.
+
+I also removed the daemon-running gate for session cleanup. Both CLI and web now allow deleting old derived session artifacts while the daemon is running; provider source files are untouched. The CLI wrapper was updated in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts), the tests were updated in [maintenance-clean_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/maintenance-clean_test.ts) and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts), and the task note now reflects the new decision in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/maintenance-clean_test.ts tests/daemon-cli_test.ts`
+- `deno task check`
+
+I did not do an authenticated live browser POST check here, but the shared behavior and route/build checks are passing.
+
+# gpt-5.4_2026-03-07_1436_32
+
+Updated the maintenance flow to match that policy.
+
+`clean --logs` now truncates daemon logs, web logs, and the exports log on disk through the shared service in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts). The maintenance page copy in [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) now says that explicitly, and the session threshold is labeled `Delete sessions older than (days)`.
+
+I also removed the daemon-running gate for session cleanup. Both CLI and web now allow deleting old derived session artifacts while the daemon is running; provider source files are untouched. The CLI wrapper was updated in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts), the tests were updated in [maintenance-clean_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/maintenance-clean_test.ts) and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts), and the task note now reflects the new decision in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/maintenance-clean_test.ts tests/daemon-cli_test.ts`
+- `deno task check`
+
+I did not do an authenticated live browser POST check here, but the shared behavior and route/build checks are passing.
+
+# User_2026-03-07_1552_25
+
+commit message please
+
+# gpt-5.4_2026-03-07_1552_31
+
+```text
+feat(maintenance): include web logs and allow session cleanup while running
+
+Extend shared maintenance cleanup so log truncation covers daemon logs,
+web logs, and the exports log on disk instead of only the daemon-side
+files.
+
+Remove the daemon-running refusal for session artifact cleanup in both
+CLI and web flows. Session cleanup now deletes only Kato-derived
+metadata and twin artifacts, so it can run while the daemon is active
+without touching provider source files.
+
+Update the Maintenance page copy to make the on-disk log truncation
+behavior explicit, label the session age threshold in days, and align
+the task note with the new cleanup policy.
+
+Add and update coverage for the expanded log scope and for successful
+session cleanup while daemon status is running.
+```
+
+# gpt-5.4_2026-03-07_1552_33
+
+```text
+feat(maintenance): include web logs and allow session cleanup while running
+
+Extend shared maintenance cleanup so log truncation covers daemon logs,
+web logs, and the exports log on disk instead of only the daemon-side
+files.
+
+Remove the daemon-running refusal for session artifact cleanup in both
+CLI and web flows. Session cleanup now deletes only Kato-derived
+metadata and twin artifacts, so it can run while the daemon is active
+without touching provider source files.
+
+Update the Maintenance page copy to make the on-disk log truncation
+behavior explicit, label the session age threshold in days, and align
+the task note with the new cleanup policy.
+
+Add and update coverage for the expanded log scope and for successful
+session cleanup while daemon status is running.
+```

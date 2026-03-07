@@ -1,6 +1,6 @@
 export {
-  CliConfigFileStore,
   clearDefaultUsername,
+  CliConfigFileStore,
   type CliConfigStoreLike,
   createDefaultCliConfig,
   createDefaultExportFeatureFlags,
@@ -27,10 +27,10 @@ export {
   resolveDefaultWebConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
+  type RuntimeConfigStoreLike,
   setDefaultUsername,
   setExcludeMeFromParticipantList,
   setWorkspaceUsernameMapping,
-  type RuntimeConfigStoreLike,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
   UserConfigFileStore,
@@ -182,6 +182,12 @@ export {
 } from "./utils/exports_log.ts";
 export { hashStringFNV1a, stableStringify } from "./utils/hash.ts";
 export { normalizeText, utf8ByteLength } from "./utils/text.ts";
+export type {
+  MaintenanceCleanOptions,
+  MaintenanceCleanResult,
+  MaintenanceCleanStats,
+} from "./maintenance/mod.ts";
+export { runMaintenanceClean } from "./maintenance/mod.ts";
 export type {
   WebProcessLauncherLike,
   WebServerStatus,

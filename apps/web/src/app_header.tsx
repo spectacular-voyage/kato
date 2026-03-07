@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Summary" },
   { href: "/workspaces", label: "Workspaces" },
   { href: "/settings", label: "Settings" },
+  { href: "/maintenance", label: "Maintenance" },
 ];
 
 function getTabClass(href: string, currentPath: string | undefined): string {
