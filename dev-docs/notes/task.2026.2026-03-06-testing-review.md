@@ -393,21 +393,21 @@ Review work should capture before/after evidence for:
 - [x] Take the cheap test-infrastructure wins first, before larger refactors:
       tighten test file selection, keep `--frozen` discipline, evaluate
       `--parallel`, and reduce duplicate CI test execution.
-- [ ] Run a targeted refactor-for-testability pass on the biggest code/test
+- [x] Run a targeted refactor-for-testability pass on the biggest code/test
       pairs rather than a repo-wide file breakup: `daemon_runtime` <->
       `daemon-runtime_test`, `provider_ingestion` <-> `provider-ingestion_test`,
       and likely `cli status` <-> `improved-status` / future webstatus parity.
-- [ ] For `apps/daemon/src/orchestrator/daemon_runtime.ts`, extract small units
+- [x] For `apps/daemon/src/orchestrator/daemon_runtime.ts`, extract small units
       by responsibility so fewer behaviors require end-to-end runtime-loop
       tests: in-chat command handling, recording state transitions, export
       request handling, status projection updates, and memory/cleanup reporting.
-- [ ] For `apps/daemon/src/orchestrator/provider_ingestion.ts`, extract seams
+- [x] For `apps/daemon/src/orchestrator/provider_ingestion.ts`, extract seams
       around session discovery, duplicate-resolution, cursor resume/anchor
       logic, dedupe/fingerprint handling, and watch/update orchestration.
-- [ ] For `apps/cli/src/commands/status.ts`, extract projection/render helpers
+- [x] For `apps/cli/src/commands/status.ts`, extract projection/render helpers
       that can be shared with webstatus and tested without full CLI command
       setup.
-- [ ] After each extraction, move assertions out of the giant integration test
+- [x] After each extraction, move assertions out of the giant integration test
       files into smaller targeted tests instead of only adding new tests on top
       of the existing broad suites.
 - [ ] Map the current suite against `[[dev.security-baseline]]` release-blocking
@@ -428,7 +428,7 @@ Review work should capture before/after evidence for:
       original remaining hotspots from this review (Codex parser branches, env
       helpers, and status-error cursor behavior) now have direct tests and
       verified coverage improvements.
-- [ ] Identify any tests that can be merged or removed, and record the specific
+- [x] Identify any tests that can be merged or removed, and record the specific
       reason for each candidate: duplicate coverage, weak signal, obsolete
       behavior, or excessive setup cost.
 - [x] Evaluate enabling Deno module parallelism in both local and CI commands,
