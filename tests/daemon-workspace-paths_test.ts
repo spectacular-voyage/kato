@@ -99,6 +99,35 @@ Deno.test(
 );
 
 Deno.test(
+  "renderWorkspaceFilename falls back when normalization collapses to dot segments",
+  () => {
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile({ filenameTemplate: "." }),
+        provider: "codex",
+        sessionId: "session-filename-dot",
+        now: new Date("2026-02-22T10:00:00.000Z"),
+        outputUsername: "Jane User",
+        boundarySnapshot: makeBoundarySnapshot("Leading Snippet"),
+      }),
+      "2026-02-22_0200-leading-snippet-codex.md",
+    );
+
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile({ filenameTemplate: ".." }),
+        provider: "codex",
+        sessionId: "session-filename-dotdot",
+        now: new Date("2026-02-22T10:00:00.000Z"),
+        outputUsername: "Jane User",
+        boundarySnapshot: makeBoundarySnapshot("Leading Snippet"),
+      }),
+      "2026-02-22_0200-leading-snippet-codex.md",
+    );
+  },
+);
+
+Deno.test(
   "resolveWorkspaceDefaultOutputDir applies template tokens for relative and absolute paths",
   () => {
     const relativeProfile = makeProfile({

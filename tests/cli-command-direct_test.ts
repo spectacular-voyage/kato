@@ -72,7 +72,7 @@ function makeSequencedStatusStore(steps: StatusLoadStep[]) {
         const step = steps[Math.min(index, steps.length - 1)]!;
         index += 1;
         if (step instanceof Error) {
-          throw step;
+          return Promise.reject(step);
         }
         return Promise.resolve(step);
       },

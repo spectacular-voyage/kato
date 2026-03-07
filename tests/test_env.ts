@@ -8,6 +8,7 @@ export const RUNTIME_ENV_KEYS = [
 export type RuntimeEnvKey = (typeof RUNTIME_ENV_KEYS)[number];
 
 const TEST_ENV_LOCK_DIR = join(Deno.cwd(), ".test-tmp", ".env-lock");
+const MAX_LOCK_WAIT_MS = 30_000;
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,12 +16,18 @@ async function sleep(ms: number): Promise<void> {
 
 async function acquireTestEnvLock(): Promise<void> {
   await Deno.mkdir(join(Deno.cwd(), ".test-tmp"), { recursive: true });
+  const startTimeMs = Date.now();
   while (true) {
     try {
       await Deno.mkdir(TEST_ENV_LOCK_DIR);
       return;
     } catch (error) {
       if (error instanceof Deno.errors.AlreadyExists) {
+        if (Date.now() - startTimeMs > MAX_LOCK_WAIT_MS) {
+          throw new Error(
+            `Timed out acquiring test env lock at ${TEST_ENV_LOCK_DIR}; it may be stale`,
+          );
+        }
         await sleep(10);
         continue;
       }

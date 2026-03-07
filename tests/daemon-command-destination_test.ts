@@ -149,6 +149,40 @@ Deno.test("resolveWorkspaceCommandDestination applies unique suffixes for genera
   });
 });
 
+Deno.test("resolveWorkspaceCommandDestination treats trailing-slash arguments as directory intent even before creation", async () => {
+  await withTestTempDir(
+    "daemon-command-destination-trailing-slash-",
+    async (dir) => {
+      const workspaceRoot = resolve(dir, "workspace");
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      const profile = makeProfile(workspaceRoot);
+
+      const destination = await resolveWorkspaceCommandDestination({
+        profile,
+        provider: "codex",
+        sessionId: "session-dir-intent",
+        outputUsername: "user-1",
+        rawArgument: "drafts/",
+        now: new Date("2026-03-07T10:00:00.000Z"),
+      });
+
+      assertEquals(destination.usesGeneratedFilename, true);
+      assertEquals(
+        destination.resolvedPath,
+        join(workspaceRoot, "drafts", "capture.md"),
+      );
+      assertEquals(destination.binding.kind, "workspace-relative");
+      if (destination.binding.kind !== "workspace-relative") {
+        throw new Error("expected workspace-relative binding");
+      }
+      assertEquals(
+        destination.binding.relativePathFromWorkspaceRoot,
+        join("drafts", "capture.md"),
+      );
+    },
+  );
+});
+
 Deno.test("resolveUniqueNonExistingPath adds numeric suffixes after collisions", async () => {
   await withTestTempDir("daemon-command-destination-suffix-", async (dir) => {
     const target = join(dir, "export.md");

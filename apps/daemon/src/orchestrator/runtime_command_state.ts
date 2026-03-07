@@ -190,10 +190,17 @@ export function writeCommandCursor(
   cursor: number,
   events: ConversationEvent[],
 ): void {
-  const normalizedCursor = Math.max(0, Math.floor(cursor));
+  const finiteCursor = Number.isFinite(cursor) ? cursor : 0;
+  const normalizedCursor = Math.min(
+    events.length,
+    Math.max(0, Math.floor(finiteCursor)),
+  );
   metadata.commandCursor = normalizedCursor;
-  const anchor = normalizedCursor > 0
-    ? buildCommandCursorAnchor(events[normalizedCursor - 1])
+  const anchoredEvent = normalizedCursor > 0
+    ? events[normalizedCursor - 1]
+    : undefined;
+  const anchor = anchoredEvent
+    ? buildCommandCursorAnchor(anchoredEvent)
     : undefined;
   if (anchor) {
     metadata.commandCursorAnchor = anchor;

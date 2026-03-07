@@ -143,10 +143,12 @@ export async function resolveWorkspaceCommandDestination(options: {
       "Path argument must be a filesystem path (mentions are not allowed)",
     );
   }
+  const hasTrailingSeparator = /[\\/]$/.test(normalized);
   const resolvedBase = isAbsolute(normalized)
     ? resolve(normalized)
     : resolve(options.profile.workspaceRoot, normalized);
-  const generatedFromDirectory = await isDirectoryTargetPath(resolvedBase);
+  const generatedFromDirectory = hasTrailingSeparator ||
+    await isDirectoryTargetPath(resolvedBase);
   const resolvedPathBase = generatedFromDirectory
     ? join(
       resolvedBase,

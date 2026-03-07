@@ -153,7 +153,7 @@ export function renderWorkspaceFilename(
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return normalized.length > 0
+  return normalized.length > 0 && normalized !== "." && normalized !== ".."
     ? normalized
     : `${tokens.timestampHumane}-${tokens.snippetSlug}-${tokens.provider}.md`;
 }

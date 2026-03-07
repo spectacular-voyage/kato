@@ -258,3 +258,24 @@ Deno.test("writeCommandCursor normalizes the cursor and updates the anchor", () 
     }),
   );
 });
+
+Deno.test("writeCommandCursor clamps invalid and oversized cursor values safely", () => {
+  const metadata = makeMetadata({
+    commandCursor: 1,
+    commandCursorAnchor: {
+      eventId: "stale",
+    },
+  });
+  const events = [
+    makeUserEvent("u-1", "first", "2026-02-22T19:00:00.000Z"),
+    makeUserEvent("u-2", "second", "2026-02-22T19:00:01.000Z"),
+  ];
+
+  writeCommandCursor(metadata, Number.POSITIVE_INFINITY, events);
+  assertEquals(readCommandCursor(metadata), 0);
+  assertEquals(readCommandCursorAnchor(metadata), undefined);
+
+  writeCommandCursor(metadata, 99, events);
+  assertEquals(readCommandCursor(metadata), 2);
+  assertEquals(readCommandCursorAnchor(metadata)?.eventId, "u-2");
+});

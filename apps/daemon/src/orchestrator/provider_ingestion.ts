@@ -1508,13 +1508,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       let nextAnchor: SessionIngestAnchorV1 | undefined = stateMetadata
         .ingestAnchor;
       try {
+        const geminiMessagesArg = this.provider === "gemini"
+          ? (geminiMessagesCache ?? await loadGeminiMessagesForAnchor())
+          : undefined;
         const anchorResolution = resolveNextIngestAnchor({
           provider: this.provider,
           previousAnchor: stateMetadata.ingestAnchor,
           latestCursor,
-          geminiMessages: this.provider === "gemini"
-            ? await loadGeminiMessagesForAnchor(true)
-            : undefined,
+          geminiMessages: geminiMessagesArg,
           codexCompactionAnchor,
         });
         nextAnchor = anchorResolution.nextAnchor;

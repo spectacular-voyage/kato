@@ -9,19 +9,34 @@ function makeEvent(
   kind: "message.user" | "message.assistant",
   content: string,
 ): ConversationEvent {
+  if (kind === "message.user") {
+    return {
+      eventId: id,
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: `2026-03-06T10:00:0${id.endsWith("2") ? "1" : "0"}.000Z`,
+      kind: "message.user",
+      role: "user",
+      content,
+      source: {
+        providerEventType: "user",
+        providerEventId: id,
+      },
+    };
+  }
   return {
     eventId: id,
     provider: "test",
     sessionId: "sess-test",
     timestamp: `2026-03-06T10:00:0${id.endsWith("2") ? "1" : "0"}.000Z`,
-    kind,
-    role: kind === "message.user" ? "user" : "assistant",
+    kind: "message.assistant",
+    role: "assistant",
     content,
     source: {
-      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventType: "assistant",
       providerEventId: id,
     },
-  } as unknown as ConversationEvent;
+  };
 }
 
 function renderExpectedJsonl(events: ConversationEvent[]): string {

@@ -33,6 +33,21 @@ function formatWorkspaceValidationError(error: unknown): string {
   return sanitizeInlineText(String(error));
 }
 
+function formatWorkspaceRegistryValidationError(error: unknown): string {
+  if (error instanceof Deno.errors.NotFound) {
+    return "workspace registry file not found";
+  }
+  if (error instanceof Deno.errors.PermissionDenied) {
+    return "permission denied while reading workspace registry";
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return `workspace registry load failed: ${
+      sanitizeInlineText(error.message)
+    }`;
+  }
+  return `workspace registry load failed: ${sanitizeInlineText(String(error))}`;
+}
+
 function toWorkspaceStatusRow(
   entry: RegisteredWorkspace,
   opts: { valid: boolean; invalidReason?: string },
@@ -126,7 +141,7 @@ export async function loadWorkspaceStatusSummary(
       activeCount: 0,
       invalidCount: 0,
       rows: [],
-      unavailableReason: formatWorkspaceValidationError(error),
+      unavailableReason: formatWorkspaceRegistryValidationError(error),
     };
   }
 

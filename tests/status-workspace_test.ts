@@ -160,7 +160,27 @@ Deno.test(
       activeCount: 0,
       invalidCount: 0,
       rows: [],
-      unavailableReason: "permission denied while reading config",
+      unavailableReason: "permission denied while reading workspace registry",
+    });
+  },
+);
+
+Deno.test(
+  "loadWorkspaceStatusSummary distinguishes missing registry from missing workspace config",
+  async () => {
+    const summary = await loadWorkspaceStatusSummary(
+      () => Promise.reject(new Deno.errors.NotFound("missing")),
+      {
+        loadWorkspaceConfigOverrides,
+        readWorkspaceConfigWorkspaceId,
+      },
+    );
+
+    assertEquals(summary, {
+      activeCount: 0,
+      invalidCount: 0,
+      rows: [],
+      unavailableReason: "workspace registry file not found",
     });
   },
 );

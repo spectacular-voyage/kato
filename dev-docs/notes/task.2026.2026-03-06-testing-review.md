@@ -237,6 +237,33 @@ Current signals already visible in the repo today:
   gates for this repo: path traversal/canonicalization, symlink escapes, command
   confusion, malformed parser input, permission boundaries, daemon lifecycle
   races, and audit completeness.
+- Current `[[dev.security-baseline]]` gate mapping:
+  - path traversal and canonicalization: covered directly in
+    `tests/path-policy_test.ts` (allowed-root canonicalization, traversal
+    denial, Windows separator traversal) and exercised again through
+    export/write path decision tests in `tests/cli-command-direct_test.ts`
+  - symlink escape: covered directly in `tests/path-policy_test.ts`
+  - command confusion / prose-trigger rejection: covered directly in
+    `tests/command-detection_test.ts` and reinforced in
+    `tests/daemon-runtime_test.ts` for unsupported `::init`,
+    unsupported `::init-<alias>`, and malformed `::stop` usage
+  - parser poisoning / malformed input resilience: covered directly in
+    `tests/codex-parser_test.ts` for malformed `request_user_input`, in
+    `tests/provider-ingestion_test.ts` for parse-error continuation and
+    permission-denied reads, and in `tests/daemon-control-plane_test.ts` for
+    malformed/unsupported control queue files
+  - permission boundary tests per process/worker role: partial only; current
+    tests cover deny-by-policy and permission-denied handling/logging, but they
+    do not yet assert a full per-role subprocess/worker permission matrix
+  - daemon lifecycle race tests: partial only; current tests cover watcher
+    abort/shutdown behavior in `tests/daemon-watcher_test.ts` and capture
+    destination collision retry behavior in `tests/daemon-runtime_test.ts`, but
+    not a broader startup/shutdown race matrix
+  - audit completeness: covered directly in `tests/cli-command-direct_test.ts`,
+    `tests/provider-ingestion_test.ts`, `tests/daemon-export-request_test.ts`,
+    `tests/daemon-runtime_test.ts`, and `tests/daemon-main_test.ts` for
+    security-audit logging on denied/fail-closed paths and persisted audit log
+    separation
 - Initial CI rollout decision: start CodeQL and OSV-Scanner in advisory-only
   mode, then tighten later if the signal quality is good enough.
 
@@ -410,7 +437,7 @@ Review work should capture before/after evidence for:
 - [x] After each extraction, move assertions out of the giant integration test
       files into smaller targeted tests instead of only adding new tests on top
       of the existing broad suites.
-- [ ] Map the current suite against `[[dev.security-baseline]]` release-blocking
+- [x] Map the current suite against `[[dev.security-baseline]]` release-blocking
       security gates: traversal, symlink escape, command confusion, malformed
       input, permission boundaries, lifecycle races, and audit completeness.
 - [x] Audit helper/test selection hygiene: confirm whether `tests/**/*.ts`
