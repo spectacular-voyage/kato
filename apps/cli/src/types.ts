@@ -21,7 +21,13 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
-  | { name: "web-init"; hostname?: string; port?: number }
+  | {
+    name: "web-init";
+    hostname?: string;
+    port?: number;
+    username: string;
+    password: string;
+  }
   | { name: "web-start" }
   | { name: "web-stop" }
   | { name: "web-status"; asJson: boolean }

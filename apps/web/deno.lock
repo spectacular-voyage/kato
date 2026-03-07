@@ -15,6 +15,7 @@
     "jsr:@std/fmt@^1.0.8": "1.0.9",
     "jsr:@std/fs@^1.0.19": "1.0.23",
     "jsr:@std/html@^1.0.5": "1.0.5",
+    "jsr:@std/http@1": "1.0.25",
     "jsr:@std/http@^1.0.21": "1.0.25",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/jsonc@^1.0.2": "1.0.2",
@@ -24,7 +25,8 @@
     "jsr:@std/path@^1.1.2": "1.1.4",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/semver@^1.0.6": "1.0.8",
-    "jsr:@std/uuid@^1.0.9": "1.1.0"
+    "jsr:@std/uuid@^1.0.9": "1.1.0",
+    "jsr:@std/yaml@1": "1.0.12"
   },
   "jsr": {
     "@deno/esbuild-plugin@1.2.1": {
@@ -52,7 +54,7 @@
         "jsr:@std/fmt@^1.0.8",
         "jsr:@std/fs",
         "jsr:@std/html",
-        "jsr:@std/http",
+        "jsr:@std/http@^1.0.21",
         "jsr:@std/jsonc",
         "jsr:@std/media-types",
         "jsr:@std/path@^1.1.2",
@@ -121,13 +123,18 @@
       "dependencies": [
         "jsr:@std/bytes"
       ]
+    },
+    "@std/yaml@1.0.12": {
+      "integrity": "7deabca4545bcedd07c5f69ea53acea71b8b4c67562f224e17b90d75944cb20c"
     }
   },
   "workspace": {
     "dependencies": [
       "jsr:@fresh/core@^2.2.0",
       "jsr:@fresh/plugin-vite@^1.0.8",
+      "jsr:@std/http@1",
       "jsr:@std/path@1",
+      "jsr:@std/yaml@1",
       "npm:@preact/signals@^2.5.0",
       "npm:preact@^10.27.2",
       "npm:vite@^7.1.3"

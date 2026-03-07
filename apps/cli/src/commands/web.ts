@@ -1,16 +1,20 @@
 import type { DaemonCliCommandContext } from "./context.ts";
-import { createDefaultWebConfig, isProcessAlive } from "@kato/runtime";
+import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
 
 export async function runWebInitCommand(
   ctx: DaemonCliCommandContext,
   options: {
     hostname?: string;
     port?: number;
-  } = {},
+    username: string;
+    password: string;
+  },
 ): Promise<void> {
-  const defaultConfig = createDefaultWebConfig({
+  const defaultConfig = await createInitializedWebConfig({
     hostname: options.hostname,
     port: options.port,
+    username: options.username,
+    password: options.password,
   });
   const result = await ctx.webConfigStore.ensureInitialized(defaultConfig);
 
@@ -22,6 +26,7 @@ export async function runWebInitCommand(
       webConfigCreated: result.created,
       hostname: result.config.hostname,
       port: result.config.port,
+      username: result.config.auth.username,
     },
   );
   await ctx.auditLogger.command("web.init", {
@@ -29,6 +34,7 @@ export async function runWebInitCommand(
     webConfigCreated: result.created,
     hostname: result.config.hostname,
     port: result.config.port,
+    username: result.config.auth.username,
   });
 
   ctx.runtime.writeStdout(

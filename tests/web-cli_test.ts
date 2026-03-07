@@ -85,6 +85,10 @@ Deno.test("cli parser parses web subcommands", () => {
   const init = parseDaemonCliArgs([
     "web",
     "init",
+    "--username",
+    "dj",
+    "--password",
+    "secret-pass",
     "--host",
     "127.0.0.1",
     "--port",
@@ -96,6 +100,7 @@ Deno.test("cli parser parses web subcommands", () => {
   }
   assertEquals(init.command.hostname, "127.0.0.1");
   assertEquals(init.command.port, 3173);
+  assertEquals(init.command.username, "dj");
 
   const status = parseDaemonCliArgs(["web", "status", "--json"]);
   assertEquals(status.kind, "command");
@@ -146,7 +151,18 @@ Deno.test(
 
       const initHarness = makeRuntimeHarness(runtimeDir);
       const initCode = await runDaemonCli(
-        ["web", "init", "--host", "127.0.0.1", "--port", "3187"],
+        [
+          "web",
+          "init",
+          "--username",
+          "dj",
+          "--password",
+          "secret-pass",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "3187",
+        ],
         {
           runtime: initHarness.runtime,
           defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
@@ -158,6 +174,8 @@ Deno.test(
       );
       assertEquals(initCode, 0);
       assertStringIncludes(initHarness.stdout.join(""), "web config");
+      const savedConfig = await webConfigStore.load();
+      assertEquals(savedConfig.auth.username, "dj");
 
       const startHarness = makeRuntimeHarness(runtimeDir);
       const startCode = await runDaemonCli(["web", "start"], {

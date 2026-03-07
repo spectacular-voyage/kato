@@ -73,12 +73,12 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   ].join("\n"),
   web: [
     "Usage:",
-    "  kato web init [--host <hostname>] [--port <port>]",
+    "  kato web init --username <username> --password <password> [--host <hostname>] [--port <port>]",
     "  kato web start",
     "  kato web stop",
     "  kato web status [--json]",
     "",
-    "Initializes explicit web config and manages the local web server lifecycle.",
+    "Initializes explicit web config, hashed credentials, and the local web server lifecycle.",
     "`kato web start` refuses to run until `kato web init` has created config.",
   ].join("\n"),
   "workspace-init": [

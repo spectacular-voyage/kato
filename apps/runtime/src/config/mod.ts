@@ -49,6 +49,8 @@ export type {
 } from "./web_config.ts";
 export {
   createDefaultWebConfig,
+  createInitializedWebConfig,
+  hashWebPassword,
   resolveDefaultWebConfigPath,
   WebConfigFileStore,
 } from "./web_config.ts";

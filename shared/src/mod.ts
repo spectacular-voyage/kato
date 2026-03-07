@@ -31,6 +31,7 @@ export type {
   SharedBehaviorConfig,
   UserConfig,
   UserParticipantsConfig,
+  WebAuthConfig,
   WebConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";

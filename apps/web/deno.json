@@ -19,7 +19,9 @@
     "**/_fresh/*"
   ],
   "imports": {
+    "@std/http/cookie": "jsr:@std/http@1/cookie",
     "@std/path": "jsr:@std/path@1",
+    "@std/yaml": "jsr:@std/yaml@1",
     "@kato/shared": "../../shared/src/mod.ts",
     "@/": "./",
     "fresh": "jsr:@fresh/core@^2.2.0",

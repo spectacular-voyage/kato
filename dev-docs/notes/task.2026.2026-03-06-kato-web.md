@@ -334,9 +334,9 @@ view, not a generic admin template:
 - Support both auth bootstrap paths over time:
   keep `kato init --interactive` as one entry point, and allow a dedicated web
   auth/bootstrap command as the flow grows.
-- Require auth for mutating routes after explicit setup; read-only localhost
-  browsing may remain available without auth unless a later decision tightens
-  that posture.
+- Require auth for all web access after explicit setup; do not leave read-only
+  localhost browsing unauthenticated, because both conversation data and
+  operator/daemon state are privacy-sensitive.
 - Standardize on separate daemon and web lifecycle commands rather than adding
   daemon/web startup coupling.
 - Include workspace unregister in the first web mutation slice.
@@ -495,7 +495,7 @@ Validation workflow before merge:
       closely as practical in a browser:
       header, recordings/sessions, memory, workspaces summary/details, recent
       errors, and live session rows.
-- [ ] Add a lightweight live-refresh mechanism:
+- [x] Add a lightweight live-refresh mechanism:
       route handler JSON payload plus browser polling on the Summary page.
 - [ ] Wire the supplied logo/wordmark assets into the app shell and Summary
       header.
@@ -513,16 +513,16 @@ Validation workflow before merge:
       console:
       POST-only handlers, origin/CSRF protection, and clear confirmation UX for
       destructive actions.
-- [ ] Decide and document the local auth posture for `Kato Web`:
+- [x] Decide and document the local auth posture for `Kato Web`:
       explicit web setup is required before startup; then decide whether
       configured localhost access is always auth-gated or may explicitly opt
       into unauthenticated mode.
-- [ ] If optional auth is in scope, decide where the credential/config contract
+- [x] If optional auth is in scope, decide where the credential/config contract
       lives and keep stored credentials hash-only.
-- [ ] Keep `kato init` stable for automation, and if auth bootstrap is part of
+- [x] Keep `kato init` stable for automation, and if auth bootstrap is part of
       this slice, add an explicit interactive setup path rather than making
       plain `kato init` unexpectedly prompt.
-- [ ] If lifecycle/auth bootstrap UX is in scope, decide whether the clearer
+- [x] If lifecycle/auth bootstrap UX is in scope, decide whether the clearer
       long-term command is `kato init --interactive`, `kato web init`, or
       `kato web auth init`.
 - [ ] Decide whether Performance is in the first implementation slice:
@@ -530,3 +530,6 @@ Validation workflow before merge:
       if not, ship the page as a current-snapshot-only placeholder or defer it.
 - [ ] Add focused tests for loaders, shared projections, mutation services,
       page handlers, Summary render parity, and any adopted local auth flow.
+- [ ] Extend CLI status surfaces to include `Kato Web` runstate and show recent
+      web-app operational/auth errors alongside daemon/operator errors where
+      appropriate.

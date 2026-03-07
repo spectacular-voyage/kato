@@ -680,6 +680,8 @@ export async function runDaemonCli(
         await runWebInitCommand(commandContext, {
           hostname: intent.command.hostname,
           port: intent.command.port,
+          username: intent.command.username,
+          password: intent.command.password,
         });
         return 0;
       case "web-start":

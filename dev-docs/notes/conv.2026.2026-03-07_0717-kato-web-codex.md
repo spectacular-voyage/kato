@@ -403,3 +403,339 @@ I also updated the task note checkboxes in [task.2026.2026-03-06-kato-web.md](/h
 - initial status loader
 
 I left the broader docs updates, richer Summary parity, shared mutation services, and the rest of the page/workflow work unchecked.
+
+# User_2026-03-07_0734_44
+
+proceed
+
+# gpt-5.4_2026-03-07_0734_49
+
+I’m moving to the next priority: tighten the Summary page toward real `status --live` parity and add the first live-refresh JSON endpoint so the browser surface stops being a static scaffold.
+
+# gpt-5.4_2026-03-07_0735_08
+
+I’ve got the CLI status sources in view. I’m implementing the web-side equivalents directly in `apps/web` now: workspace summary, recent errors, a `/api/summary` endpoint, and client polling so the Summary page actually behaves like a live surface.
+
+# gpt-5.4_2026-03-07_0735_20
+
+I’m editing the web app now: a proper loader-backed Summary model, a live JSON endpoint, and a polling island that renders workspaces and recent errors instead of just counts.
+
+# gpt-5.4_2026-03-07_0736_31
+
+The Summary patch needs to be applied against the current formatted loader, so I’m reopening the live files and patching them in smaller chunks.
+
+# gpt-5.4_2026-03-07_0737_45
+
+The new Summary endpoint and island are in. I’m formatting and validating the web app now; the likely failures are Fresh route typing and the loader test needing the new fields.
+
+# gpt-5.4_2026-03-07_0737_50
+
+The web app check failed for a concrete reason: the new workspace loader reaches into runtime workspace code, which depends on `@std/yaml`, and `apps/web/deno.json` didn’t declare that import. I’m fixing the import map and rerunning the full check.
+
+# gpt-5.4_2026-03-07_0738_04
+
+The Summary page now has a live JSON endpoint and browser polling.
+
+What changed:
+- `/api/summary` returns the current Summary payload from [summary route handler](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/summary.ts)
+- the homepage now renders through [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) and polls every 2 seconds
+- the loader in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts) now includes:
+  - active/stale session counts
+  - workspace summary/validation rows
+  - recent operational/security errors from the daemon logs
+
+Validation:
+- `deno task --cwd apps/web check` passed
+- `deno task check` passed
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts` passed
+
+If you run `deno task dev:web` again, the Summary page should now behave much more like a live operator surface instead of a static scaffold.
+
+# User_2026-03-07_0738_04
+
+Are the json endpoints protected by auth, or will they be?
+
+# gpt-5.4_2026-03-07_0738_09
+
+Right now: no.
+
+The new JSON endpoint at [api/summary.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/summary.ts) is not auth-protected yet. It’s just a local endpoint served by the Fresh app, and the current implementation has no login/session layer at all.
+
+Planned direction from the task note:
+- read-only access may remain available on localhost without auth
+- auth is intended to be mandatory for mutating routes
+- broader auth posture for all web access is still a decision/implementation slice, not done yet
+
+So the current state is:
+- `GET /api/summary`: unprotected
+- future write endpoints: should be auth-gated
+- full app-wide auth: not implemented yet, still open as a later slice
+
+If you want, I can make that explicit in the task note and add a short “current security posture” note so we don’t lose track of it.
+
+# User_2026-03-07_0742_06
+
+Seems like there might be a security risk with unprotect endpoints, even read-only ones. Or can they be limited so only the web client can access them?
+
+# gpt-5.4_2026-03-07_0742_13
+
+Yes, there is some risk.
+
+“Read-only” is not automatically safe here, because the endpoint exposes local operational data. Even on `localhost`, an unrelated page in the same browser can potentially hit local endpoints unless you deliberately block that.
+
+The right posture is not “trust that it’s read-only.” It’s:
+
+- bind only to `127.0.0.1` by default
+- require same-origin checks for app JSON endpoints, not just mutation routes
+- avoid permissive CORS entirely
+- preferably gate all app/API routes behind the same local auth session once auth exists
+
+And no, you generally cannot make an HTTP endpoint accessible “only to the web client” in a strong sense if the browser can call it at all. You can only make it much harder for anything except your own app origin/session to access it:
+- same-origin policy
+- no CORS
+- session cookie/auth
+- CSRF/origin checks
+- optionally a per-session token for XHR/fetch endpoints
+
+So your concern is valid. If we keep any unauthenticated read endpoints, they should at minimum be same-origin only and localhost-bound. The stronger option is simpler conceptually: require auth for all web/API access, not only writes.
+
+# User_2026-03-07_0746_09
+
+Yes, I think requiring auth for all access is appropriate. Privacy is important, and it's as much the conversation data that needs protection as the operational data.
+
+# gpt-5.4_2026-03-07_0746_12
+
+I’m recording that as the current decision in the task note: auth should gate all web access, not only writes, because conversation data and operator state are both sensitive.
+
+# gpt-5.4_2026-03-07_0746_20
+
+Agreed. I updated the decision in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md) to require auth for all web access after setup, not just mutations.
+
+That’s the right bar here. The browser surface exposes:
+- conversation/session data
+- workspace details
+- operational/security logs
+- daemon state
+
+So treating read endpoints as “safe enough” would be the wrong assumption. The next security slice should implement app-wide auth plus same-origin protections for the API routes behind it.
+
+# User_2026-03-07_0747_04
+
+proceed
+
+# gpt-5.4_2026-03-07_0747_20
+
+I’m implementing the auth slice now: extend web config to hold credentials/session material, make `kato web init` provision them, and put app-wide login middleware in front of both pages and JSON endpoints.
+
+# gpt-5.4_2026-03-07_0748_05
+
+I’m extending the web config contract now to carry auth material, then I’ll wire `kato web init --username --password` to provision a hash and secret instead of storing plaintext.
+
+# gpt-5.4_2026-03-07_0748_46
+
+I’ve landed the hashed-auth config layer. Next I’m updating the CLI surface so `kato web init` actually requires credentials and writes a usable auth config instead of placeholders.
+
+# gpt-5.4_2026-03-07_0749_08
+
+The parser formatting drifted, so I’m reopening the exact blocks and patching those pieces precisely.
+
+# gpt-5.4_2026-03-07_0749_27
+
+I hit another drift point in the CLI type shape, so I’m patching the current exact type blocks and then I’ll wire the web app middleware/login routes on top.
+
+# gpt-5.4_2026-03-07_0750_03
+
+I’m wiring the server-side auth layer now: config loading, signed session cookies, login route, and middleware that blocks both page and API access until authenticated.
+
+# gpt-5.4_2026-03-07_0750_40
+
+The auth middleware and login route are in. I’m cleaning up the export/signature edges now, then I’ll update the CLI tests and validate the whole slice.
+
+# gpt-5.4_2026-03-07_0751_00
+
+I’m patching the test file in smaller sections; the current failure is just context drift, not a design problem.
+
+# gpt-5.4_2026-03-07_0751_14
+
+I’ve finished the auth wiring and updated the CLI tests. I’m running formatting, focused tests, and app/root checks now; any remaining failures should be type drift rather than design changes.
+
+# gpt-5.4_2026-03-07_0751_26
+
+The remaining failure is just a Web Crypto typing issue around `BufferSource`, plus formatting in the new auth files. I’m fixing that directly and rerunning the same checks.
+
+# gpt-5.4_2026-03-07_0751_41
+
+The app-local check exposed three concrete issues: a bad relative import from `apps/web`, a Fresh handler typing quirk on `ctx.render`, and the same Web Crypto `BufferSource` typing in the auth helper. I’m fixing those directly.
+
+# gpt-5.4_2026-03-07_0751_52
+
+The web app check is clean. I’m just waiting on the CLI-focused tests now; they’re the main place we’ll catch any drift from making `web init` require credentials.
+
+# gpt-5.4_2026-03-07_0751_54
+
+The focused tests passed. I’m running the repo-level `deno task check` once more to catch any remaining type fallout in non-web tests from the new `WebConfig` shape.
+
+# gpt-5.4_2026-03-07_0752_00
+
+The remaining failure is just the root import map: root `deno check` also sees `apps/web/src/auth.ts`, so `@std/http/cookie` has to be declared at the repo root too. I’m adding that and rerunning the full check.
+
+# gpt-5.4_2026-03-07_0752_11
+
+The root check failed for a network reason while fetching an npm transitive dependency, not because of a code error. I’m rerunning it with escalation so we can distinguish an actual regression from sandbox DNS failure.
+
+# gpt-5.4_2026-03-07_0752_43
+
+I’ve got the auth slice passing checks. I’m updating the task note checkboxes for the pieces that are now actually complete in code before I summarize the outcome.
+
+# gpt-5.4_2026-03-07_0753_04
+
+App-wide auth is now in place for `Kato Web`.
+
+What changed:
+- `kato web init` now requires credentials:
+  - `kato web init --username <username> --password <password> [--host ...] [--port ...]`
+- web config stores hash-only auth material plus a session secret in [web_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/web_config.ts)
+- the Fresh app now has auth middleware in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/main.ts)
+- unauthenticated requests to pages redirect to [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx)
+- unauthenticated requests to `/api/*` now return `401`
+- the Summary page and `/api/summary` are therefore behind auth, not public localhost endpoints
+
+I also updated the task note checkboxes in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md) for:
+- live refresh
+- local auth posture
+- dedicated hash-only credential contract
+- keeping `kato init` stable
+- using `kato web init` as the current bootstrap path
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-cli_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+Current limitation: there is still no logout route yet, and auth is session-cookie based without CSRF/origin hardening for future mutating routes. That should be the next security step before adding write workflows.
+
+# User_2026-03-07_0753_05
+
+Currently getting "Internal server error"
+
+What do you mean "drifted"?
+
+Let's add a to-do for the CLI-based status to report web app runstate and include errors from the web app in its errors display.
+
+# gpt-5.4_2026-03-07_0753_14
+
+I’m checking the current web auth path and recent changes to identify the likely cause of the internal server error, then I’ll add the requested task-note to-do for CLI/web status integration.
+
+# gpt-5.4_2026-03-07_0753_27
+
+The “Internal server error” is likely from a pre-auth `kato-web-config.yaml` that no longer matches the new required schema. I’m patching the web app to fail with a clear setup/config message instead of a generic 500, and I’ll add the CLI status follow-up to the task note.
+
+# gpt-5.4_2026-03-07_0753_44
+
+I’ve replaced the generic 500 path with a clearer config/setup error path and added the requested CLI/web status follow-up to the task note. I’m formatting and checking those files now.
+
+# gpt-5.4_2026-03-07_0753_50
+
+“Drifted” meant the file contents had changed between when I read them and when I applied a patch, so the exact patch context no longer matched. In practice here, that was usually from formatter output or from my own earlier edits landing in smaller steps.
+
+For the current “Internal server error”, the likely cause was exactly the kind of config mismatch I’d expect after the auth change: an older `kato-web-config.yaml` without the new `auth` section. I patched the web app so that case no longer falls through as a generic 500. It should now return a clear config/setup message telling you to re-run `kato web init --username <username> --password <password>`.
+
+I also added the task-note to-do you asked for in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md):
+- extend CLI status to report `Kato Web` runstate
+- include recent web-app operational/auth errors in CLI error display
+
+If you want the quickest path to confirm the fix locally, re-run:
+
+```bash
+kato web init --username <username> --password <password>
+deno task dev:web
+```
+
+If you still get an error after that, I’ll trace the exact request path next.
+
+# User_2026-03-07_0756_28
+
+OK, http://127.0.0.1:5173/login is now a blank page
+
+# gpt-5.4_2026-03-07_0756_36
+
+I’m fixing the login route render path now. The blank page is almost certainly from the `ctx.render(null)` workaround I used to satisfy Fresh’s handler typing.
+
+# gpt-5.4_2026-03-07_0756_57
+
+Fresh’s handler typing here is narrower than expected. I’m simplifying the route: keep only the `POST` handler for login, and let the page render normally on `GET` instead of forcing a typed `ctx.render(...)` path.
+
+# gpt-5.4_2026-03-07_0757_12
+
+The blank `/login` page should be fixed now.
+
+Cause:
+- the login route was using a forced `ctx.render(...)` workaround to satisfy Fresh typing
+- that ended up breaking normal page rendering, so the route loaded but rendered nothing
+
+Fix:
+- `GET /login` now uses the normal page render path again
+- only `POST /login` is handled explicitly for authentication
+- `deno task --cwd apps/web check` passes after the fix
+
+Reload `http://127.0.0.1:5173/login`. You should now see the login form.
+
+If it still comes up blank, the next thing I’d check is whether the dev server is still serving an older hot-reload state, in which case restarting `deno task dev:web` is the right move.
+
+# User_2026-03-07_0757_27
+
+working.
+
+# gpt-5.4_2026-03-07_0757_33
+
+Next sensible step is logout plus CSRF/origin hardening for future POST routes, then we can safely start adding the first write workflows.
+
+# User_2026-03-07_0758_34
+
+proceed
+
+# gpt-5.4_2026-03-07_0758_52
+
+I’m taking the next security step now: add logout and put actual request-origin/CSRF checks in front of authenticated POST routes so we have a usable baseline before any write workflows land.
+
+# gpt-5.4_2026-03-07_0759_03
+
+I’ve got a clean path: signed CSRF token derived from the authenticated session, same-origin checks on unsafe methods, and a logout `POST` with a hidden token in the Summary page. I’m editing those pieces now.
+
+# gpt-5.4_2026-03-07_0759_33
+
+The logout and CSRF/origin layer is in. I’m validating it now; the main thing to watch is whether Fresh’s server-side route state typing accepts the new `csrfToken` flow cleanly.
+
+# gpt-5.4_2026-03-07_0759_36
+
+There’s one lint-only failure in the new logout handler. I’m fixing that and rerunning the checks.
+
+# gpt-5.4_2026-03-07_0759_50
+
+Logout and request hardening are now in.
+
+What changed:
+- added `POST /logout` at [logout.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/logout.tsx)
+- added a logout button to the authenticated Summary page in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx)
+- added same-origin enforcement plus CSRF-token validation for authenticated non-GET requests in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/main.ts)
+- added signed CSRF token helpers in [auth.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/auth.ts)
+
+Current security posture:
+- all pages and API routes require auth
+- auth uses signed session cookies
+- authenticated `POST` routes now require both same-origin and a valid CSRF token
+- this is enough baseline to start adding write workflows without leaving POST endpoints wide open
+
+Validation:
+- `deno task --cwd apps/web check` passed
+- `deno task check` passed
+
+You can test it now by logging in, then using the new `Log Out` button in the Summary header.
+
+# User_2026-03-07_0800_51
+
+commit message
+
+# gpt-5.4_2026-03-07_0800_57
+
+`add kato web auth login logout and csrf protection`

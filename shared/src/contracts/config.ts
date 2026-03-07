@@ -70,10 +70,19 @@ export interface CliConfig {
   logging: RuntimeLoggingConfig;
 }
 
+export interface WebAuthConfig {
+  username: string;
+  passwordSalt: string;
+  passwordHash: string;
+  sessionSecret: string;
+  cookieName: string;
+}
+
 export interface WebConfig {
   schemaVersion: 1;
   hostname: string;
   port: number;
+  auth: WebAuthConfig;
 }
 
 export interface RuntimeConfig {
