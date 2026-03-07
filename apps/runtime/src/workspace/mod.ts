@@ -32,3 +32,13 @@ export {
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
 } from "./registry.ts";
+export type {
+  RegisterWorkspaceMutationOptions,
+  RegisterWorkspaceMutationResult,
+  UnregisterWorkspaceMutationOptions,
+  UnregisterWorkspaceMutationResult,
+} from "./mutations.ts";
+export {
+  registerWorkspace,
+  unregisterWorkspace,
+} from "./mutations.ts";

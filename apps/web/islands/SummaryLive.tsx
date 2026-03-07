@@ -100,6 +100,7 @@ export default function SummaryLive(
           </p>
         </div>
         <div class="hero-actions">
+          <a class="secondary-button" href="/workspaces">Workspaces</a>
           <div class="status-chip">
             <span>{data.stale ? "degraded" : "live"}</span>
             <strong>{data.daemon}</strong>

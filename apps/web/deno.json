@@ -23,6 +23,7 @@
     "@std/path": "jsr:@std/path@1",
     "@std/yaml": "jsr:@std/yaml@1",
     "@kato/shared": "../../shared/src/mod.ts",
+    "@kato/runtime": "../../apps/runtime/src/mod.ts",
     "@/": "./",
     "fresh": "jsr:@fresh/core@^2.2.0",
     "preact": "npm:preact@^10.27.2",

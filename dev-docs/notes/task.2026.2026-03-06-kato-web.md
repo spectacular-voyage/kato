@@ -499,7 +499,7 @@ Validation workflow before merge:
       route handler JSON payload plus browser polling on the Summary page.
 - [ ] Wire the supplied logo/wordmark assets into the app shell and Summary
       header.
-- [ ] Add the Workspaces route with register/update flows, including the same
+- [x] Add the Workspaces route with register/update flows, including the same
       validation and `allowedWriteRoots` side effects used by CLI today.
 - [ ] Add the Settings route with forms/actions for:
       default username, exclude-me behavior, and workspace username map

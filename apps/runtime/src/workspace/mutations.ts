@@ -1,0 +1,367 @@
+import type { SharedBehaviorConfig } from "@kato/shared";
+import { join, resolve } from "@std/path";
+import type { SharedBehaviorConfigStoreLike } from "../config/shared_behavior_config.ts";
+import {
+  resolveDefaultSharedConfigPath,
+  SharedBehaviorConfigFileStore,
+} from "../config/shared_behavior_config.ts";
+import type { AuditLogger } from "../observability/audit_logger.ts";
+import type { StructuredLogger } from "../observability/logger.ts";
+import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
+import {
+  DEFAULT_WORKSPACE_CONFIG_FILENAME,
+  ensureWorkspaceConfigWorkspaceId,
+  findNearestWorkspaceConfig,
+  isPathWithinRoots,
+  readWorkspaceConfigWorkspaceId,
+  resolveDefaultWorkspaceRegistryPath,
+  resolveWorkspaceConfigPath,
+  type RegisteredWorkspace,
+  type WorkspaceRegistryStoreLike,
+  WorkspaceRegistryFileStore,
+} from "./registry.ts";
+
+function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
+  return {
+    workspaceId: entry.workspaceId,
+    alias: entry.alias,
+    workspaceRoot: entry.workspaceRoot,
+    configPath: entry.configPath,
+    registeredAt: entry.registeredAt,
+    ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
+  };
+}
+
+function cloneSharedConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
+  return {
+    schemaVersion: config.schemaVersion,
+    allowedWriteRoots: [...config.allowedWriteRoots],
+    exportTimezone: config.exportTimezone,
+    exportMarkdownFrontmatter: { ...config.exportMarkdownFrontmatter },
+    exportFeatureFlags: { ...config.exportFeatureFlags },
+  };
+}
+
+function validateWorkspaceAlias(alias: string): string {
+  const trimmed = alias.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Workspace alias must be a non-empty string");
+  }
+  if (/\s/.test(trimmed)) {
+    throw new Error("Workspace alias must not contain spaces");
+  }
+  return trimmed;
+}
+
+function findWorkspaceByRoot(
+  entries: RegisteredWorkspace[],
+  workspaceRoot: string,
+  configPath: string,
+): RegisteredWorkspace | undefined {
+  const resolvedRoot = resolve(workspaceRoot);
+  const resolvedConfigPath = resolve(configPath);
+  return entries.find((entry) =>
+    resolve(entry.workspaceRoot) === resolvedRoot ||
+    resolve(entry.configPath) === resolvedConfigPath
+  );
+}
+
+async function resolveRegisterTarget(
+  options: {
+    cwdPath?: string;
+    workspacePath?: string;
+  },
+): Promise<{ workspaceRoot: string; configPath: string }> {
+  const { cwdPath, workspacePath } = options;
+
+  if (workspacePath && workspacePath.trim().length > 0) {
+    if (
+      !cwdPath &&
+      !workspacePath.startsWith("/") &&
+      !/^[A-Za-z]:[\\/]/.test(workspacePath)
+    ) {
+      throw new Error("Relative workspace paths require a current working directory");
+    }
+    const workspaceRoot = cwdPath
+      ? resolve(cwdPath, workspacePath)
+      : resolve(workspacePath);
+    const configPath = await resolveWorkspaceConfigPath(workspaceRoot);
+    if (!configPath) {
+      throw new Error(
+        `No workspace config found at ${
+          join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)
+        }. Run \`kato workspace init ${workspacePath}\` first.`,
+      );
+    }
+    return { workspaceRoot, configPath };
+  }
+
+  if (!cwdPath) {
+    throw new Error("Workspace path is required");
+  }
+  const located = await findNearestWorkspaceConfig(cwdPath);
+  if (!located) {
+    throw new Error(
+      `No workspace config found. Run \`kato workspace init\` to create ./${DEFAULT_WORKSPACE_CONFIG_FILENAME} from the default template first.`,
+    );
+  }
+  return located;
+}
+
+async function ensureWorkspaceRootWriteCoverage(
+  sharedConfig: SharedBehaviorConfig,
+  sharedConfigStore: SharedBehaviorConfigStoreLike,
+  workspaceRoot: string,
+): Promise<SharedBehaviorConfig | undefined> {
+  if (isPathWithinRoots(workspaceRoot, sharedConfig.allowedWriteRoots)) {
+    return undefined;
+  }
+
+  const nextSharedConfig = cloneSharedConfig(sharedConfig);
+  nextSharedConfig.allowedWriteRoots.push(workspaceRoot);
+  await sharedConfigStore.save(nextSharedConfig);
+  return nextSharedConfig;
+}
+
+export interface RegisterWorkspaceMutationOptions {
+  alias: string;
+  workspacePath?: string;
+  cwdPath?: string;
+  katoDir?: string;
+  now?: () => Date;
+  sharedConfigStore?: SharedBehaviorConfigStoreLike;
+  registryStore?: WorkspaceRegistryStoreLike;
+  runtimeAllowedWriteRoots?: string[];
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface RegisterWorkspaceMutationResult {
+  entry: RegisteredWorkspace;
+  created: boolean;
+  changed: boolean;
+  restartRequired: boolean;
+  sharedWriteRootsUpdated: boolean;
+  runningDaemonMayDenyWrites: boolean;
+  sharedConfig: SharedBehaviorConfig;
+}
+
+export async function registerWorkspace(
+  options: RegisterWorkspaceMutationOptions,
+): Promise<RegisterWorkspaceMutationResult> {
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const now = options.now ?? (() => new Date());
+  const registryStore = options.registryStore ??
+    new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath(katoDir));
+  const sharedConfigStore = options.sharedConfigStore ??
+    new SharedBehaviorConfigFileStore(resolveDefaultSharedConfigPath(katoDir));
+
+  const target = await resolveRegisterTarget({
+    cwdPath: options.cwdPath,
+    workspacePath: options.workspacePath,
+  });
+  const entries = await registryStore.load();
+  const sharedConfig = await sharedConfigStore.load();
+  const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
+    target.configPath,
+    { allowMissing: true },
+  );
+  const requestedAlias = validateWorkspaceAlias(options.alias);
+
+  const existingByAlias = entries.find((entry) => entry.alias === requestedAlias);
+  const existingByWorkspaceIdAlias = entries.find((entry) =>
+    entry.workspaceId === requestedAlias
+  );
+  const existingByWorkspaceId = configuredWorkspaceId
+    ? entries.find((entry) => entry.workspaceId === configuredWorkspaceId)
+    : undefined;
+  const existingByRoot = findWorkspaceByRoot(
+    entries,
+    target.workspaceRoot,
+    target.configPath,
+  );
+  if (
+    existingByWorkspaceId &&
+    existingByRoot &&
+    existingByWorkspaceId.workspaceId !== existingByRoot.workspaceId
+  ) {
+    throw new Error(
+      "Workspace config conflicts with an existing registry entry at this path",
+    );
+  }
+  const existingWorkspace = existingByWorkspaceId ?? existingByRoot;
+
+  if (existingByWorkspaceIdAlias) {
+    throw new Error(`Workspace alias already registered: ${requestedAlias}`);
+  }
+
+  if (
+    existingByAlias &&
+    (!existingWorkspace ||
+      existingByAlias.workspaceId !== existingWorkspace.workspaceId)
+  ) {
+    throw new Error(`Workspace alias already registered: ${requestedAlias}`);
+  }
+
+  const nowIso = now().toISOString();
+  let changed = false;
+  let created = false;
+  let restartRequired = false;
+  let nextEntries: RegisteredWorkspace[];
+  let finalEntry: RegisteredWorkspace;
+
+  if (!existingWorkspace) {
+    created = true;
+    finalEntry = {
+      workspaceId: configuredWorkspaceId ?? crypto.randomUUID(),
+      alias: requestedAlias,
+      workspaceRoot: target.workspaceRoot,
+      configPath: target.configPath,
+      registeredAt: nowIso,
+    };
+    nextEntries = [...entries, cloneEntry(finalEntry)];
+    changed = true;
+  } else {
+    const updated: RegisteredWorkspace = {
+      ...existingWorkspace,
+      alias: requestedAlias,
+      workspaceRoot: target.workspaceRoot,
+      configPath: target.configPath,
+      updatedAt: nowIso,
+    };
+    changed = updated.alias !== existingWorkspace.alias ||
+      updated.workspaceRoot !== existingWorkspace.workspaceRoot ||
+      updated.configPath !== existingWorkspace.configPath;
+    restartRequired = changed;
+    finalEntry = updated;
+    nextEntries = entries.map((entry) =>
+      entry.workspaceId === existingWorkspace.workspaceId
+        ? cloneEntry(updated)
+        : cloneEntry(entry)
+    );
+  }
+
+  if (changed) {
+    await registryStore.save(nextEntries);
+  }
+  await ensureWorkspaceConfigWorkspaceId(target.configPath, finalEntry.workspaceId);
+
+  const runningDaemonRoots = options.runtimeAllowedWriteRoots ??
+    sharedConfig.allowedWriteRoots;
+  const runningDaemonMayDenyWrites = !isPathWithinRoots(
+    finalEntry.workspaceRoot,
+    runningDaemonRoots,
+  );
+  const nextSharedConfig = await ensureWorkspaceRootWriteCoverage(
+    sharedConfig,
+    sharedConfigStore,
+    finalEntry.workspaceRoot,
+  );
+  const resolvedSharedConfig = nextSharedConfig ?? sharedConfig;
+  const sharedWriteRootsUpdated = nextSharedConfig !== undefined;
+
+  await options.operationalLogger?.info(
+    created
+      ? "workspace.register.created"
+      : changed
+      ? "workspace.register.updated"
+      : "workspace.register.unchanged",
+    created
+      ? "Registered workspace alias"
+      : changed
+      ? "Updated registered workspace alias"
+      : "Workspace alias already registered",
+    {
+      workspaceId: finalEntry.workspaceId,
+      alias: finalEntry.alias,
+      workspaceRoot: finalEntry.workspaceRoot,
+      configPath: finalEntry.configPath,
+      created,
+      changed,
+      restartRequired,
+      sharedWriteRootsUpdated,
+      runningDaemonMayDenyWrites,
+    },
+  );
+  await options.auditLogger?.record(
+    "workspace.register",
+    "Workspace registration mutation invoked",
+    {
+      workspaceId: finalEntry.workspaceId,
+      alias: finalEntry.alias,
+      workspaceRoot: finalEntry.workspaceRoot,
+      configPath: finalEntry.configPath,
+      created,
+      changed,
+      restartRequired,
+      sharedWriteRootsUpdated,
+      runningDaemonMayDenyWrites,
+    },
+  );
+
+  return {
+    entry: finalEntry,
+    created,
+    changed,
+    restartRequired,
+    sharedWriteRootsUpdated,
+    runningDaemonMayDenyWrites,
+    sharedConfig: resolvedSharedConfig,
+  };
+}
+
+export interface UnregisterWorkspaceMutationOptions {
+  selector: string;
+  katoDir?: string;
+  registryStore?: WorkspaceRegistryStoreLike;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface UnregisterWorkspaceMutationResult {
+  entry: RegisteredWorkspace;
+}
+
+export async function unregisterWorkspace(
+  options: UnregisterWorkspaceMutationOptions,
+): Promise<UnregisterWorkspaceMutationResult> {
+  const trimmed = options.selector.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Workspace selector must be a non-empty string");
+  }
+
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const registryStore = options.registryStore ??
+    new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath(katoDir));
+  const entries = await registryStore.load();
+  const match = entries.find((entry) =>
+    entry.alias === trimmed || entry.workspaceId === trimmed
+  );
+  if (!match) {
+    throw new Error(`Workspace not found: ${trimmed}`);
+  }
+
+  const nextEntries = entries.filter((entry) => entry.workspaceId !== match.workspaceId);
+  await registryStore.save(nextEntries);
+
+  await options.operationalLogger?.info(
+    "workspace.unregister",
+    "Removed workspace alias from registry",
+    {
+      workspaceId: match.workspaceId,
+      alias: match.alias,
+      workspaceRoot: match.workspaceRoot,
+    },
+  );
+  await options.auditLogger?.record(
+    "workspace.unregister",
+    "Workspace unregister mutation invoked",
+    {
+      workspaceId: match.workspaceId,
+      alias: match.alias,
+      workspaceRoot: match.workspaceRoot,
+    },
+  );
+
+  return { entry: cloneEntry(match) };
+}

@@ -119,12 +119,20 @@ export {
   loadDefaultWorkspaceConfigOverrides,
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
+  registerWorkspace,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
+  unregisterWorkspace,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
+} from "./workspace/mod.ts";
+export type {
+  RegisterWorkspaceMutationOptions,
+  RegisterWorkspaceMutationResult,
+  UnregisterWorkspaceMutationOptions,
+  UnregisterWorkspaceMutationResult,
 } from "./workspace/mod.ts";
 
 export type {

@@ -106,7 +106,7 @@ export async function loadSummaryPageData(
   };
 }
 
-async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
+export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
   const store = new WorkspaceRegistryFileStore(
     resolveDefaultWorkspaceRegistryPath(),
   );
@@ -176,7 +176,7 @@ async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
   };
 }
 
-function formatWorkspaceRegistryError(error: unknown): string {
+export function formatWorkspaceRegistryError(error: unknown): string {
   if (error instanceof Deno.errors.NotFound) {
     return "workspace registry file not found";
   }
