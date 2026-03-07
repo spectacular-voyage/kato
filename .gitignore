@@ -8,6 +8,8 @@ coverage/
 .coverage.*
 coverage.lcov
 .test-tmp/
+apps/web/_fresh/
+apps/web/node_modules/
 
 # Editor and OS artifacts
 .DS_Store

@@ -310,42 +310,42 @@ view, not a generic admin template:
 
 ## Open Issues
 
-- Should the initial Summary page include the full Workspaces section by
-  default, or keep only the workspaces summary line and link through to the
-  detailed page? (summary line)
-- Do we want page navigation rendered as top-level tabs, left-nav sections, or
-  route links styled as tabs? Route-backed tabs are the current recommendation. (route-backed tabs)
-- Should cleanup live under a dedicated `/maintenance` page or inside the
-  Operational Details section? (maintenance)
-- Should the first lifecycle slice ship only `kato web start|stop|status`, or
-  also include `kato web open`? (defer open)
-- Should recent errors on the Summary page show only the current `8`-item view
-  from CLI parity, or a slightly larger browser-friendly window?(slightly larger browser-friendly)
-- For the Recordings page, do we want only active + known historical recording
-  cycles, or also direct links to output files when they still exist? (what do you think?)
-- Should workspace registration in the web UI automatically extend
-  `allowedWriteRoots` exactly the way the CLI does today, or should that be a
-  separate explicit confirmation step? (automatic)
-- What local-only protection is enough for mutating routes:
-  localhost binding only, origin checks, CSRF token, or some combination? (localhost only, auth required)
-- Where should optional web auth config live:
-  user config, CLI config, or a dedicated web config file under `~/.kato`? (dedicated)
-- Should the optional auth bootstrap live in `kato init --interactive`, or in a
-  separate dedicated command such as a later `kato web auth init` flow? (both, interactive will eventually be more in-depth and cover things other than auth)
-- After explicit setup, is auth mandatory for all web access, or may setup
-  allow an explicitly unauthenticated localhost mode? (auth is mandatory for writes)
-- Should we ever add a convenience coupling between daemon and web startup
-  later, or explicitly standardize on separate lifecycle commands only? ( separate)
-- Should the first web mutation slice also include workspace unregister, or is
-  register/update enough for now? (include unregister)
-- How should the Performance page obtain memory history?
-  - new persisted ring buffer file (yes)
-  - append-only status history JSONL
-  - derived from operational debug logs
-- This task intentionally broadens `apps/web` beyond the earlier "read-only
-  status surface" description. Which shared docs should be updated as part of
-  the same implementation slice besides `[[dev.codebase-overview]]` and
-  `[[dev.decision-log]]`?
+- None currently recorded.
+
+## Decisions
+
+- Keep the Summary page workspace surface to the summary line plus navigation
+  into the dedicated Workspaces page, rather than embedding the full detailed
+  Workspaces section on the homepage.
+- Use route-backed navigation styled as tabs.
+- Put cleanup flows on a dedicated `/maintenance` page.
+- Defer `kato web open` from the first lifecycle slice; ship
+  `kato web start|stop|status` first.
+- Let recent-error panels on the Summary page use a slightly larger
+  browser-friendly window than the current CLI `8`-item view.
+- On the Recordings page, include direct links to output files when they still
+  exist, alongside active and historical recording-cycle data.
+- Keep web workspace registration behavior aligned with CLI behavior by
+  automatically extending `allowedWriteRoots` when the existing CLI flow would
+  do so.
+- For the first local-only protection slice, require localhost binding plus web
+  auth for mutating routes.
+- Store web auth/config in a dedicated web config file under `~/.kato`.
+- Support both auth bootstrap paths over time:
+  keep `kato init --interactive` as one entry point, and allow a dedicated web
+  auth/bootstrap command as the flow grows.
+- Require auth for mutating routes after explicit setup; read-only localhost
+  browsing may remain available without auth unless a later decision tightens
+  that posture.
+- Standardize on separate daemon and web lifecycle commands rather than adding
+  daemon/web startup coupling.
+- Include workspace unregister in the first web mutation slice.
+- Use a new persisted ring buffer file as the source of memory history for the
+  Performance page if that page ships in this task.
+- Update `[[dev.codebase-overview]]`, `[[dev.decision-log]]`,
+  `[[dev.general-guidance]]`, and `[[dev.testing]]` as part of the same slice;
+  update `[[dev.security-baseline]]` too if auth or request-origin protections
+  change the normative security contract.
 
 ## Contract Changes
 
