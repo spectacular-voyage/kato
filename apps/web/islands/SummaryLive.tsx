@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import AppHeader from "../src/app_header.tsx";
 import type { SummaryPageData } from "../src/loaders/status.ts";
 
 const POLL_INTERVAL_MS = 2_000;
@@ -57,12 +58,18 @@ function relativeTimestamp(value: string | undefined): string {
 }
 
 export default function SummaryLive(
-  {
-    initialData,
-    csrfToken,
-  }: { initialData: SummaryPageData; csrfToken?: string },
+  { initialData }: { initialData: SummaryPageData },
 ) {
   const [data, setData] = useState(initialData);
+  const twinGenerationProviders = data.providers
+    .filter((provider) => provider.activeSessions > 0)
+    .map((provider) => provider.provider);
+  const workspaceCount = data.workspaceSummary.unavailableReason
+    ? "n/a"
+    : String(data.workspaceSummary.activeCount);
+  const workspaceInactive = data.workspaceSummary.unavailableReason
+    ? "Inactive: unavailable"
+    : `Inactive: ${data.workspaceSummary.invalidCount}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -90,65 +97,40 @@ export default function SummaryLive(
 
   return (
     <div class="shell">
-      <section class="hero">
-        <div>
-          <p class="mono muted">localhost operator console</p>
-          <h1>Kato Web</h1>
-          <p>
-            Browser access to the daemon snapshot with live polling, workspace
-            health, and recent operator-visible errors.
-          </p>
-        </div>
-        <div class="hero-actions">
-          <a class="secondary-button" href="/workspaces">Workspaces</a>
-          <a class="secondary-button" href="/settings">Settings</a>
-          <div class="status-chip">
-            <span>{data.stale ? "degraded" : "live"}</span>
-            <strong>{data.daemon}</strong>
-          </div>
-          <form method="post" action="/logout">
-            <input type="hidden" name="csrfToken" value={csrfToken ?? ""} />
-            <button class="form-button logout-button" type="submit">
-              Log Out
-            </button>
-          </form>
-        </div>
-      </section>
+      <AppHeader
+        title="Summary"
+        description="Browser access to the daemon snapshot with live polling, workspace health, and recent operator-visible errors."
+        currentPath="/"
+        showLogout
+        appStatus={{
+          daemon: data.daemon,
+          snapshot: data.stale ? "stale" : "current",
+        }}
+      />
 
       <section class="grid">
         <article class="card span-7">
-          <h2>Summary</h2>
+          <h2>Activity</h2>
           <div class="metrics">
             <div class="metric">
               <span class="label">Sessions</span>
-              <span class="value mono">{data.sessionCount}</span>
+              <span class="value mono">{data.activeSessionCount}</span>
+              <span class="metric-note mono">
+                Inactive: {data.staleSessionCount}
+              </span>
             </div>
             <div class="metric">
               <span class="label">Recordings</span>
               <span class="value mono">{data.recordingCount}</span>
-            </div>
-            <div class="metric">
-              <span class="label">Memory RSS</span>
-              <span class="value mono">
-                {formatBytes(data.memory?.process.rss)}
+              <span class="metric-note mono">
+                Inactive: {data.inactiveRecordingCount}
               </span>
             </div>
-          </div>
-          <div class="summary-line-grid">
-            <p class="mono">
-              Active: <strong>{data.activeSessionCount}</strong>
-            </p>
-            <p class="mono">
-              Stale: <strong>{data.staleSessionCount}</strong>
-            </p>
-            <p class="mono">
-              Workspace health:{" "}
-              <strong>
-                {data.workspaceSummary.unavailableReason
-                  ? "unavailable"
-                  : `${data.workspaceSummary.activeCount} active / ${data.workspaceSummary.invalidCount} invalid`}
-              </strong>
-            </p>
+            <div class="metric">
+              <span class="label">Workspaces</span>
+              <span class="value mono">{workspaceCount}</span>
+              <span class="metric-note mono">{workspaceInactive}</span>
+            </div>
           </div>
         </article>
 
@@ -159,14 +141,24 @@ export default function SummaryLive(
               ? "Snapshot is stale or daemon heartbeat is unavailable."
               : "Snapshot heartbeat is current."}
           </p>
-          <p class="mono">Generated: {formatTimestamp(data.generatedAt)}</p>
           <p class="mono">Heartbeat: {formatTimestamp(data.heartbeatAt)}</p>
+          <p class="mono">
+            Memory RSS: {formatBytes(data.memory?.process.rss)}
+          </p>
           <p class="mono">PID: {data.daemonPid ?? "n/a"}</p>
           <p class="mono">Source: {data.statusPath}</p>
         </article>
 
         <article class="card span-4">
           <h3>Providers</h3>
+          <p class="muted">
+            Twin generation:{" "}
+            <span class="mono">
+              {twinGenerationProviders.length > 0
+                ? twinGenerationProviders.join(", ")
+                : "none"}
+            </span>
+          </p>
           <ul class="provider-list">
             {data.providers.length === 0
               ? <li class="muted">No provider activity recorded.</li>
@@ -176,6 +168,7 @@ export default function SummaryLive(
                   <div class="muted">
                     {provider.activeSessions} active session(s)
                   </div>
+                  <div class="muted">twin generation active</div>
                 </li>
               ))}
           </ul>
@@ -233,7 +226,8 @@ export default function SummaryLive(
               : data.recentErrors.map((error) => (
                 <li key={`${error.timestamp}:${error.event}:${error.message}`}>
                   <div class="mono">
-                    {error.level} · {error.channel} · {error.event}
+                    {error.level} · {error.scope} · {error.channel} ·{" "}
+                    {error.event}
                   </div>
                   <div>{error.message}</div>
                   <div class="muted">

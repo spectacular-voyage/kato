@@ -140,7 +140,8 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon`);
+  assertStringIncludes(out, `kato CLI (v${CLI_APP_VERSION})`);
+  assertStringIncludes(out, "kato daemon");
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -304,6 +305,7 @@ Deno.test("renderStatusText: web status and web recent errors are labeled distin
     running: true,
     stale: false,
     state: "running",
+    version: CLI_APP_VERSION,
     url: "http://127.0.0.1:3173/",
     pid: 4242,
   };
@@ -315,7 +317,10 @@ Deno.test("renderStatusText: web status and web recent errors are labeled distin
     webStatus,
     terminalWidth: 160,
   });
-  assertStringIncludes(out, "web: running (http://127.0.0.1:3173/, pid 4242)");
+  assertStringIncludes(
+    out,
+    `kato web (v${CLI_APP_VERSION}): running (http://127.0.0.1:3173/, pid 4242)`,
+  );
   assertStringIncludes(
     out,
     "ERROR web operational web.settings.mutation.failed",
@@ -675,10 +680,11 @@ Deno.test("renderStatusText: memory summary line present", () => {
     showAll: false,
     now: NOW,
     stale: false,
+    terminalWidth: 140,
   });
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
   assertStringIncludes(out, "MB /");
-  assertStringIncludes(out, "snapshots");
+  assertStringIncludes(out, "session data size:");
 });
 
 Deno.test("renderStatusText: over-budget shows warning", () => {
@@ -737,9 +743,9 @@ Deno.test("renderStatusText: narrow width keeps lines within width", () => {
   });
   const tooWideLine = out.split("\n").find((line) => line.length > width);
   assertEquals(tooWideLine, undefined);
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
   assertStringIncludes(out, "recordings:");
-  assertStringIncludes(out, "stale sessions");
+  assertStringIncludes(out, "inactive");
 });
 
 Deno.test("renderStatusText: wide width keeps two-column summary", () => {
@@ -750,14 +756,19 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     terminalWidth: 120,
   });
   assertStringIncludes(out, "kato daemon");
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
+  assertStringIncludes(out, "session data size:");
   const daemonLineCount =
     out.split("\n").filter((line) => line.includes("kato daemon")).length;
   assertEquals(daemonLineCount, 1);
   assert(
     out.split("\n").some((line) =>
-      line.includes("recordings:") && line.includes("memory:")
+      line.includes("recordings:") && line.includes("daemon memory:")
     ),
+  );
+  assertEquals(
+    out.split("\n").some((line) => line.includes("session data size:")),
+    true,
   );
 });
 

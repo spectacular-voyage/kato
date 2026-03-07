@@ -1,7 +1,4 @@
-import {
-  assertEquals,
-  assertRejects,
-} from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   readWorkspaceConfigWorkspaceId,
@@ -72,46 +69,93 @@ Deno.test("registerWorkspace creates registry entry and updates shared write roo
   });
 });
 
+Deno.test("registerWorkspace defaults alias to the workspace folder name", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "workspace-mutation-default-alias-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const sharedDir = join(homeDir, ".kato", "shared");
+          const workspaceRoot = join(homeDir, "demo-workspace");
+          const configPath = join(workspaceRoot, ".kato-workspace-config.yaml");
+          await Deno.mkdir(sharedDir, { recursive: true });
+          await Deno.mkdir(workspaceRoot, { recursive: true });
+          await Deno.writeTextFile(
+            join(sharedDir, "kato-shared-config.yaml"),
+            [
+              "schemaVersion: 1",
+              "allowedWriteRoots: []",
+              "exportTimezone: local",
+              "exportMarkdownFrontmatter: {}",
+              "exportFeatureFlags: {}",
+            ].join("\n") + "\n",
+          );
+          await Deno.writeTextFile(configPath, "defaultOutputDir: notes\n");
+
+          const result = await registerWorkspace({
+            workspacePath: workspaceRoot,
+            now: () => new Date("2026-03-07T20:00:00.000Z"),
+          });
+
+          assertEquals(result.entry.alias, "demo-workspace");
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
 Deno.test("unregisterWorkspace removes an existing registry entry", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
     try {
-      await withTestTempDir("workspace-mutation-unregister-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
+      await withTestTempDir(
+        "workspace-mutation-unregister-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
 
-        const sharedDir = join(homeDir, ".kato", "shared");
-        await Deno.mkdir(sharedDir, { recursive: true });
-        await Deno.writeTextFile(
-          join(sharedDir, "workspace-registry.json"),
-          JSON.stringify({
-            schemaVersion: 1,
-            updatedAt: "2026-03-07T20:00:00.000Z",
-            workspaces: [{
-              workspaceId: "ws-1",
-              alias: "demo",
-              workspaceRoot: join(homeDir, "demo-workspace"),
-              configPath: join(
-                homeDir,
-                "demo-workspace",
-                ".kato-workspace-config.yaml",
-              ),
-              registeredAt: "2026-03-07T20:00:00.000Z",
-            }],
-          }),
-        );
+          const sharedDir = join(homeDir, ".kato", "shared");
+          await Deno.mkdir(sharedDir, { recursive: true });
+          await Deno.writeTextFile(
+            join(sharedDir, "workspace-registry.json"),
+            JSON.stringify({
+              schemaVersion: 1,
+              updatedAt: "2026-03-07T20:00:00.000Z",
+              workspaces: [{
+                workspaceId: "ws-1",
+                alias: "demo",
+                workspaceRoot: join(homeDir, "demo-workspace"),
+                configPath: join(
+                  homeDir,
+                  "demo-workspace",
+                  ".kato-workspace-config.yaml",
+                ),
+                registeredAt: "2026-03-07T20:00:00.000Z",
+              }],
+            }),
+          );
 
-        const result = await unregisterWorkspace({ selector: "demo" });
-        assertEquals(result.entry.workspaceId, "ws-1");
+          const result = await unregisterWorkspace({ selector: "demo" });
+          assertEquals(result.entry.workspaceId, "ws-1");
 
-        const registry = await new WorkspaceRegistryFileStore(
-          join(sharedDir, "workspace-registry.json"),
-        ).load();
-        assertEquals(registry, []);
-      });
+          const registry = await new WorkspaceRegistryFileStore(
+            join(sharedDir, "workspace-registry.json"),
+          ).load();
+          assertEquals(registry, []);
+        },
+      );
     } finally {
       restoreRuntimeEnv(env);
     }

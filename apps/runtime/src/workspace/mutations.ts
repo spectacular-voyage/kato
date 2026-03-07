@@ -1,5 +1,5 @@
 import type { SharedBehaviorConfig } from "@kato/shared";
-import { join, resolve } from "@std/path";
+import { basename, join, resolve } from "@std/path";
 import type { SharedBehaviorConfigStoreLike } from "../config/shared_behavior_config.ts";
 import {
   resolveDefaultSharedConfigPath,
@@ -14,11 +14,11 @@ import {
   findNearestWorkspaceConfig,
   isPathWithinRoots,
   readWorkspaceConfigWorkspaceId,
+  type RegisteredWorkspace,
   resolveDefaultWorkspaceRegistryPath,
   resolveWorkspaceConfigPath,
-  type RegisteredWorkspace,
-  type WorkspaceRegistryStoreLike,
   WorkspaceRegistryFileStore,
+  type WorkspaceRegistryStoreLike,
 } from "./registry.ts";
 
 function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
@@ -53,6 +53,17 @@ function validateWorkspaceAlias(alias: string): string {
   return trimmed;
 }
 
+function resolveRequestedWorkspaceAlias(
+  alias: string | undefined,
+  workspaceRoot: string,
+): string {
+  const trimmed = alias?.trim() ?? "";
+  if (trimmed.length > 0) {
+    return validateWorkspaceAlias(trimmed);
+  }
+  return validateWorkspaceAlias(basename(workspaceRoot));
+}
+
 function findWorkspaceByRoot(
   entries: RegisteredWorkspace[],
   workspaceRoot: string,
@@ -80,7 +91,9 @@ async function resolveRegisterTarget(
       !workspacePath.startsWith("/") &&
       !/^[A-Za-z]:[\\/]/.test(workspacePath)
     ) {
-      throw new Error("Relative workspace paths require a current working directory");
+      throw new Error(
+        "Relative workspace paths require a current working directory",
+      );
     }
     const workspaceRoot = cwdPath
       ? resolve(cwdPath, workspacePath)
@@ -124,7 +137,7 @@ async function ensureWorkspaceRootWriteCoverage(
 }
 
 export interface RegisterWorkspaceMutationOptions {
-  alias: string;
+  alias?: string;
   workspacePath?: string;
   cwdPath?: string;
   katoDir?: string;
@@ -152,7 +165,9 @@ export async function registerWorkspace(
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
   const now = options.now ?? (() => new Date());
   const registryStore = options.registryStore ??
-    new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath(katoDir));
+    new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
   const sharedConfigStore = options.sharedConfigStore ??
     new SharedBehaviorConfigFileStore(resolveDefaultSharedConfigPath(katoDir));
 
@@ -166,9 +181,14 @@ export async function registerWorkspace(
     target.configPath,
     { allowMissing: true },
   );
-  const requestedAlias = validateWorkspaceAlias(options.alias);
+  const requestedAlias = resolveRequestedWorkspaceAlias(
+    options.alias,
+    target.workspaceRoot,
+  );
 
-  const existingByAlias = entries.find((entry) => entry.alias === requestedAlias);
+  const existingByAlias = entries.find((entry) =>
+    entry.alias === requestedAlias
+  );
   const existingByWorkspaceIdAlias = entries.find((entry) =>
     entry.workspaceId === requestedAlias
   );
@@ -244,7 +264,10 @@ export async function registerWorkspace(
   if (changed) {
     await registryStore.save(nextEntries);
   }
-  await ensureWorkspaceConfigWorkspaceId(target.configPath, finalEntry.workspaceId);
+  await ensureWorkspaceConfigWorkspaceId(
+    target.configPath,
+    finalEntry.workspaceId,
+  );
 
   const runningDaemonRoots = options.runtimeAllowedWriteRoots ??
     sharedConfig.allowedWriteRoots;
@@ -332,7 +355,9 @@ export async function unregisterWorkspace(
 
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
   const registryStore = options.registryStore ??
-    new WorkspaceRegistryFileStore(resolveDefaultWorkspaceRegistryPath(katoDir));
+    new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
   const entries = await registryStore.load();
   const match = entries.find((entry) =>
     entry.alias === trimmed || entry.workspaceId === trimmed
@@ -341,7 +366,9 @@ export async function unregisterWorkspace(
     throw new Error(`Workspace not found: ${trimmed}`);
   }
 
-  const nextEntries = entries.filter((entry) => entry.workspaceId !== match.workspaceId);
+  const nextEntries = entries.filter((entry) =>
+    entry.workspaceId !== match.workspaceId
+  );
   await registryStore.save(nextEntries);
 
   await options.operationalLogger?.info(

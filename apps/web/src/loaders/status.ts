@@ -3,12 +3,15 @@ import type {
   MemoryStatus,
   ProviderStatus,
 } from "@kato/shared";
+import { summarizeRecordingActivity } from "@kato/shared";
+import { join } from "@std/path";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   isStatusSnapshotStale,
   resolveDefaultStatusPath,
 } from "../../../runtime/src/orchestrator/control_plane.ts";
+import { resolveDefaultKatoDir } from "../../../runtime/src/orchestrator/session_state_store.ts";
 import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
@@ -40,8 +43,14 @@ export interface SummaryRecentError {
   timestamp: string;
   level: "warn" | "error";
   channel: "operational" | "security-audit";
+  scope: "daemon" | "web";
   event: string;
   message: string;
+}
+
+export interface AppChromeStatus {
+  daemon: "running" | "stopped";
+  snapshot: "current" | "stale";
 }
 
 export interface SummaryPageData {
@@ -54,6 +63,7 @@ export interface SummaryPageData {
   activeSessionCount: number;
   staleSessionCount: number;
   recordingCount: number;
+  inactiveRecordingCount: number;
   sessions: DaemonSessionStatus[];
   providers: ProviderStatus[];
   memory?: MemoryStatus;
@@ -70,6 +80,27 @@ export interface LoadSummaryPageDataOptions {
   statusStore?: DaemonStatusSnapshotStoreLike;
 }
 
+export interface LoadAppChromeStatusOptions {
+  now?: () => Date;
+  statusPath?: string;
+  statusStore?: DaemonStatusSnapshotStoreLike;
+}
+
+export async function loadAppChromeStatus(
+  options: LoadAppChromeStatusOptions = {},
+): Promise<AppChromeStatus> {
+  const now = options.now ?? (() => new Date());
+  const statusPath = options.statusPath ?? resolveDefaultStatusPath();
+  const statusStore = options.statusStore ??
+    new DaemonStatusSnapshotFileStore(statusPath, now);
+  const snapshot = await statusStore.load();
+
+  return {
+    daemon: snapshot.daemonRunning ? "running" : "stopped",
+    snapshot: isStatusSnapshotStale(snapshot, now()) ? "stale" : "current",
+  };
+}
+
 export async function loadSummaryPageData(
   options: LoadSummaryPageDataOptions = {},
 ): Promise<SummaryPageData> {
@@ -81,6 +112,13 @@ export async function loadSummaryPageData(
   const viewModel = toStatusViewModel(snapshot, {
     includeStale: options.includeStale,
   });
+  const allSessions = snapshot.sessions ?? [];
+  const activeSessionCount = allSessions.filter((session) => !session.stale)
+    .length;
+  const recordingActivity = summarizeRecordingActivity(
+    allSessions,
+    snapshot.recordings,
+  );
   const workspaceSummary = await loadWorkspaceSummary();
   const recentErrors = await loadRecentErrors(statusPath);
 
@@ -90,12 +128,11 @@ export async function loadSummaryPageData(
     daemon: viewModel.daemon,
     daemonPid: snapshot.daemonPid,
     daemonVersion: snapshot.daemonVersion,
-    sessionCount: viewModel.sessionCount,
-    activeSessionCount: viewModel.sessions.filter((session) => !session.stale)
-      .length,
-    staleSessionCount: viewModel.sessions.filter((session) => session.stale)
-      .length,
-    recordingCount: viewModel.recordingCount,
+    sessionCount: allSessions.length,
+    activeSessionCount,
+    staleSessionCount: allSessions.length - activeSessionCount,
+    recordingCount: recordingActivity.activeRecordings,
+    inactiveRecordingCount: recordingActivity.inactiveRecordings,
     sessions: viewModel.sessions,
     providers: snapshot.providers,
     memory: viewModel.memory,
@@ -206,12 +243,33 @@ async function loadRecentErrors(
   statusPath: string,
 ): Promise<SummaryRecentError[]> {
   const runtimeDir = resolveRuntimeDirFromStatusPath(statusPath);
-  const [operational, securityAudit] = await Promise.all([
-    loadRecentErrorsFromLog(`${runtimeDir}/logs/operational.jsonl`),
-    loadRecentErrorsFromLog(`${runtimeDir}/logs/security-audit.jsonl`),
-  ]);
+  const katoDir = resolveDefaultKatoDir();
+  const [operational, securityAudit, webOperational, webSecurityAudit] =
+    await Promise.all([
+      loadRecentErrorsFromLog(
+        join(runtimeDir, "logs", "operational.jsonl"),
+        "daemon",
+      ),
+      loadRecentErrorsFromLog(
+        join(runtimeDir, "logs", "security-audit.jsonl"),
+        "daemon",
+      ),
+      loadRecentErrorsFromLog(
+        join(katoDir, "web", "logs", "operational.jsonl"),
+        "web",
+      ),
+      loadRecentErrorsFromLog(
+        join(katoDir, "web", "logs", "security-audit.jsonl"),
+        "web",
+      ),
+    ]);
 
-  return [...operational, ...securityAudit]
+  return [
+    ...operational,
+    ...securityAudit,
+    ...webOperational,
+    ...webSecurityAudit,
+  ]
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
 }
@@ -226,6 +284,7 @@ function resolveRuntimeDirFromStatusPath(statusPath: string): string {
 
 async function loadRecentErrorsFromLog(
   filePath: string,
+  scope: SummaryRecentError["scope"],
 ): Promise<SummaryRecentError[]> {
   const tail = await readTailText(filePath, RECENT_ERRORS_TAIL_BYTES);
   if (!tail) {
@@ -255,6 +314,7 @@ async function loadRecentErrorsFromLog(
         timestamp,
         level,
         channel,
+        scope,
         event: typeof parsed["event"] === "string"
           ? parsed["event"]
           : "unknown",

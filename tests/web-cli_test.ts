@@ -240,9 +240,16 @@ Deno.test(
         webLauncher,
       });
       assertEquals(statusCode, 0);
-      assertStringIncludes(statusHarness.stdout.join(""), '"configured": true');
-      assertStringIncludes(statusHarness.stdout.join(""), '"running": true');
-      assertStringIncludes(statusHarness.stdout.join(""), '"port": 3187');
+      const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
+        configured: boolean;
+        running: boolean;
+        stale?: boolean;
+        state: string;
+        port: number;
+      };
+      assertEquals(statusPayload.configured, true);
+      assertEquals(["running", "stale"].includes(statusPayload.state), true);
+      assertEquals(statusPayload.port, 3187);
     });
   },
 );

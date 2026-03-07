@@ -62,19 +62,25 @@ Deno.test("cli parser parses workspace init optional dir and rejects extra args"
   );
 });
 
-Deno.test("cli parser trims workspace register alias and supports help", () => {
+Deno.test("cli parser supports workspace register with optional alias", () => {
   assertHelpTopic(["workspace", "register", "--help"], "workspace-register");
 
-  const command = parseCommand([
+  const withAlias = parseCommand([
     "workspace",
     "register",
     "--alias",
     "  docs  ",
     "./notes",
   ]);
-  assertEquals(command, {
+  assertEquals(withAlias, {
     name: "workspace-register",
     alias: "docs",
+    dirPath: "./notes",
+  });
+
+  const withoutAlias = parseCommand(["workspace", "register", "./notes"]);
+  assertEquals(withoutAlias, {
+    name: "workspace-register",
     dirPath: "./notes",
   });
 });

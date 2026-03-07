@@ -103,16 +103,21 @@ export async function runWebStatusCommand(
   asJson: boolean,
 ): Promise<void> {
   const status = await ctx.webStatusStore.load();
+  const alive = status.running && isProcessAlive(status.pid);
+  const stale = status.running && !alive;
   const effective = {
     configured: ctx.webConfig !== undefined,
-    running: status.running,
+    running: alive,
+    stale,
+    state: alive ? "running" : stale ? "stale" : "stopped",
     hostname: ctx.webConfig?.hostname ?? status.hostname,
     port: ctx.webConfig?.port ?? status.port,
-    pid: status.running ? status.pid : undefined,
+    pid: alive || stale ? status.pid : undefined,
     url: ctx.webConfig
       ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
       : status.url,
-    startedAt: status.running ? status.startedAt : undefined,
+    startedAt: alive || stale ? status.startedAt : undefined,
+    version: status.version,
   };
 
   if (asJson) {
@@ -129,7 +134,14 @@ export async function runWebStatusCommand(
 
   ctx.runtime.writeStdout(
     [
-      `kato web: ${effective.running ? "running" : "stopped"}`,
+      `kato web: ${
+        effective.state === "stale"
+          ? "stale status"
+          : effective.running
+          ? "running"
+          : "stopped"
+      }`,
+      `version: ${effective.version ?? "unknown"}`,
       `host: ${effective.hostname ?? DEFAULT_KATO_WEB_HOSTNAME}`,
       `port: ${effective.port ?? DEFAULT_KATO_WEB_PORT}`,
       `url: ${effective.url ?? "n/a"}`,

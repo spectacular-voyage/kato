@@ -1,9 +1,10 @@
-import type { PageProps } from "fresh";
 import {
   loadWebConfigState,
   setSessionCookie,
   verifyPassword,
 } from "../src/auth.ts";
+import AppHeader from "../src/app_header.tsx";
+import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { define } from "../utils.ts";
 
 export const handler = define.handlers({
@@ -33,18 +34,18 @@ export const handler = define.handlers({
   },
 });
 
-export default function LoginPage(props: PageProps) {
-  const error = new URL(props.url).searchParams.get("error") === "1";
+export default define.page(async function LoginPage(ctx) {
+  const error = ctx.url.searchParams.get("error") === "1";
+  const appStatus = await loadAppChromeStatus();
 
   return (
     <div class="shell">
-      <section class="hero">
-        <div>
-          <p class="mono muted">localhost operator console</p>
-          <h1>Kato Web Login</h1>
-          <p>Authenticate to access conversation data and operator state.</p>
-        </div>
-      </section>
+      <AppHeader
+        title="Login"
+        description="Authenticate to access conversation data and operator state."
+        showLogout
+        appStatus={appStatus}
+      />
 
       <section class="grid">
         <article class="card span-5">
@@ -73,4 +74,4 @@ export default function LoginPage(props: PageProps) {
       </section>
     </div>
   );
-}
+});

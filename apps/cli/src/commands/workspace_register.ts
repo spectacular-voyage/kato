@@ -4,7 +4,7 @@ import { formatWorkspaceEntry } from "./workspace_shared.ts";
 
 export async function runWorkspaceRegisterCommand(
   ctx: DaemonCliCommandContext,
-  alias: string,
+  alias?: string,
   dirPath?: string,
 ): Promise<void> {
   const result = await registerWorkspace({

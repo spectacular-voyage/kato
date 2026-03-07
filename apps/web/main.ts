@@ -8,8 +8,25 @@ import {
   readCsrfTokenFromRequest,
   verifyCsrfToken,
 } from "./src/auth.ts";
+import { logUnhandledWebRequestError } from "./src/logging.ts";
+import { startWebServerStatusHeartbeat } from "./src/server_status.ts";
 
 export const app = new App<State>();
+
+startWebServerStatusHeartbeat();
+
+app.use(async (ctx) => {
+  try {
+    return await ctx.next();
+  } catch (error) {
+    try {
+      await logUnhandledWebRequestError(ctx.req, error);
+    } catch {
+      // Keep the original request failure as the primary error path.
+    }
+    throw error;
+  }
+});
 
 app.use(staticFiles());
 

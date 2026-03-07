@@ -6,6 +6,8 @@ import {
   setWorkspaceUsernameMapping,
 } from "@kato/runtime";
 import { Head } from "fresh/runtime";
+import AppHeader from "../src/app_header.tsx";
+import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSettingsPageData } from "../src/loaders/settings.ts";
 import { createWebLoggers } from "../src/logging.ts";
 import { define } from "../utils.ts";
@@ -148,7 +150,10 @@ export const handler = define.handlers({
 });
 
 export default define.page(async function SettingsPage(ctx) {
-  const pageData = await loadSettingsPageData();
+  const [pageData, appStatus] = await Promise.all([
+    loadSettingsPageData(),
+    loadAppChromeStatus(),
+  ]);
   const notice = decodeMessage(ctx.url.searchParams.get("notice"));
   const error = decodeMessage(ctx.url.searchParams.get("error"));
 
@@ -158,20 +163,13 @@ export default define.page(async function SettingsPage(ctx) {
         <title>Kato Web · Settings</title>
       </Head>
       <div class="shell">
-        <section class="hero">
-          <div>
-            <p class="mono muted">localhost operator console</p>
-            <h1>Settings</h1>
-            <p>
-              Manage participant defaults, exclude-me behavior, and workspace
-              username mappings.
-            </p>
-          </div>
-          <div class="hero-actions">
-            <a class="secondary-button" href="/">Back to Summary</a>
-            <a class="secondary-button" href="/workspaces">Workspaces</a>
-          </div>
-        </section>
+        <AppHeader
+          title="Settings"
+          description="Manage participant defaults, exclude-me behavior, and workspace username mappings."
+          currentPath="/settings"
+          showLogout
+          appStatus={appStatus}
+        />
 
         {notice ? <p class="notice-banner ok">{notice}</p> : null}
         {error ? <p class="notice-banner stale">{error}</p> : null}

@@ -1,5 +1,13 @@
-import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
-import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
+import type {
+  DaemonSessionStatus,
+  DaemonStatusSnapshot,
+  RecordingActivitySummary,
+} from "@kato/shared";
+import {
+  filterSessionsForDisplay,
+  isSessionStale,
+  summarizeRecordingActivity,
+} from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isProcessAlive, isStatusSnapshotStale } from "@kato/runtime";
@@ -71,6 +79,7 @@ export interface StatusWebState {
   startedAt?: string;
   heartbeatAt?: string;
   url?: string;
+  version?: string;
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -365,29 +374,41 @@ async function loadStatusWebState(
     startedAt: stored.startedAt,
     heartbeatAt: stored.heartbeatAt,
     url,
+    version: stored.version,
   };
 }
 
-function renderWebSummaryLine(
+function renderWebStatusText(
   webStatus: StatusWebState | undefined,
 ): string | undefined {
   if (!webStatus) {
     return undefined;
   }
   if (webStatus.state === "unconfigured") {
-    return "web: unconfigured";
+    return "unconfigured";
   }
   if (webStatus.state === "running") {
-    return `web: running (${webStatus.url ?? "url unavailable"}, pid ${
+    return `running (${webStatus.url ?? "url unavailable"}, pid ${
       webStatus.pid ?? "unknown"
     })`;
   }
   if (webStatus.state === "stale") {
-    return `web: stale status (${webStatus.url ?? "url unavailable"}, pid ${
+    return `stale status (${webStatus.url ?? "url unavailable"}, pid ${
       webStatus.pid ?? "unknown"
     }, heartbeat ${formatLocalTimestamp(webStatus.heartbeatAt)})`;
   }
-  return `web: stopped (${webStatus.url ?? "url unavailable"})`;
+  return `stopped (${webStatus.url ?? "url unavailable"})`;
+}
+
+function renderWebHeaderLine(
+  webStatus: StatusWebState | undefined,
+): string | undefined {
+  const webText = renderWebStatusText(webStatus);
+  if (!webText) {
+    return undefined;
+  }
+  const version = webStatus?.version ?? CLI_APP_VERSION;
+  return `kato web (v${version}): ${webText}`;
 }
 
 function deriveWorkspaceStatusErrors(
@@ -568,7 +589,10 @@ async function persistSuppressedRecentErrorKeysBestEffort(
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   const mem = snapshot.memory;
   if (!mem) {
-    return ["memory: unavailable"];
+    return [
+      "daemon memory: unavailable",
+      "session data size: unavailable",
+    ];
   }
 
   const budgetMb = Math.round(mem.daemonMaxMemoryBytes / (1024 * 1024));
@@ -576,29 +600,11 @@ function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   const snapshotBytes = formatBytes(mem.snapshots.estimatedBytes);
   const overBudget = mem.snapshots.overBudget ? "  ⚠ OVER BUDGET" : "";
 
-  const line1 =
-    `memory: ${rssMb} MB / ${budgetMb} MB${overBudget}  ·  snapshots ${snapshotBytes}`;
-  const line2 =
-    `sessions ${mem.snapshots.sessionCount}  ·  events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
-  return [line1, line2];
-}
-
-function summarizeRecordingsFromSessions(
-  sessions: DaemonSessionStatus[] | undefined,
-  fallback: DaemonStatusSnapshot["recordings"],
-): DaemonStatusSnapshot["recordings"] {
-  if (!sessions) {
-    return fallback ?? { activeRecordings: 0, destinations: 0 };
-  }
-  const activeRecordings = sessions.flatMap((session) =>
-    !session.stale ? (session.recordings ?? []) : []
-  );
-  return {
-    activeRecordings: activeRecordings.length,
-    destinations:
-      new Set(activeRecordings.map((recording) => recording.outputPath))
-        .size,
-  };
+  const line1 = `daemon memory: ${rssMb} MB / ${budgetMb} MB${overBudget}`;
+  const line2 = `session data size: ${snapshotBytes}`;
+  const line3 =
+    `events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
+  return [line1, line2, line3];
 }
 
 function normalizeSnapshotForStatusDisplay(
@@ -614,13 +620,17 @@ function normalizeSnapshotForStatusDisplay(
       ? session.stale
       : true,
   }));
+  const recordingActivity = summarizeRecordingActivity(
+    normalizedSessions,
+    snapshot.recordings,
+  );
   return {
     ...snapshot,
     sessions: normalizedSessions,
-    recordings: summarizeRecordingsFromSessions(
-      normalizedSessions,
-      snapshot.recordings,
-    ),
+    recordings: {
+      activeRecordings: recordingActivity.activeRecordings,
+      destinations: recordingActivity.destinations,
+    },
   };
 }
 
@@ -630,13 +640,13 @@ function renderTopSummarySection(
     activeCount: number;
     staleCount: number;
     width: number;
-    recordingSummary: DaemonStatusSnapshot["recordings"];
+    recordingActivity: RecordingActivitySummary;
   },
 ): string[] {
-  const { activeCount, staleCount, width, recordingSummary } = opts;
+  const { activeCount, staleCount, width, recordingActivity } = opts;
   const memoryLines = buildMemoryLines(snapshot);
   const recordingLine =
-    `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale sessions`;
+    `recordings: ${recordingActivity.activeRecordings} active, ${recordingActivity.inactiveRecordings} inactive`;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
     return [
@@ -647,7 +657,7 @@ function renderTopSummarySection(
   }
 
   const leftLines = [
-    `recordings: ${recordingSummary.activeRecordings} active`,
+    recordingLine,
     `sessions: ${activeCount} active, ${staleCount} stale`,
   ];
   const rightLines = memoryLines;
@@ -836,7 +846,7 @@ export function renderStatusText(
   const width = resolveRenderWidth(opts.terminalWidth);
   const divider = "─".repeat(width);
   const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
-  const webSummary = renderWebSummaryLine(opts.webStatus);
+  const webHeaderLine = renderWebHeaderLine(opts.webStatus);
   const recentErrors = collectRecentErrors(
     now,
     opts.workspaceStatus,
@@ -862,7 +872,7 @@ export function renderStatusText(
   const allSessions = snapshot.sessions ?? [];
   const activeCount = allSessions.filter((s) => !s.stale).length;
   const staleCount = allSessions.length - activeCount;
-  const recordingSummary = summarizeRecordingsFromSessions(
+  const recordingActivity = summarizeRecordingActivity(
     allSessions,
     snapshot.recordings,
   );
@@ -878,24 +888,27 @@ export function renderStatusText(
   const daemonVersion = snapshot.daemonVersion ?? "unknown";
   lines.push(
     truncate(
-      `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon (v${daemonVersion}): ${daemonText}  ·  refreshed ${refreshedAt}`,
+      `kato CLI (v${CLI_APP_VERSION})  ·  refreshed ${refreshedAt}`,
       width,
     ),
   );
+  lines.push(
+    truncate(`kato daemon (v${daemonVersion}): ${daemonText}`, width),
+  );
+  if (webHeaderLine) {
+    lines.push(truncate(webHeaderLine, width));
+  }
   lines.push(divider);
   lines.push(
     ...renderTopSummarySection(snapshot, {
       activeCount,
       staleCount,
       width,
-      recordingSummary,
+      recordingActivity,
     }),
   );
   if (workspaceSummary) {
     lines.push(truncate(workspaceSummary, width));
-  }
-  if (webSummary) {
-    lines.push(truncate(webSummary, width));
   }
   lines.push(divider);
   if (opts.showWorkspaceDetails && opts.workspaceStatus) {
@@ -1164,8 +1177,25 @@ export async function runStatusCommand(
 
   if (asJson) {
     const filtered = filterSnapshotForJson(snapshot, showAll);
+    const recordingActivity = summarizeRecordingActivity(
+      snapshot.sessions,
+      snapshot.recordings,
+    );
     ctx.runtime.writeStdout(
-      `${JSON.stringify({ ...filtered, web: webStatus }, null, 2)}\n`,
+      `${
+        JSON.stringify(
+          {
+            ...filtered,
+            recordings: {
+              ...filtered.recordings,
+              inactiveRecordings: recordingActivity.inactiveRecordings,
+            },
+            web: webStatus,
+          },
+          null,
+          2,
+        )
+      }\n`,
     );
     return;
   }

@@ -1,5 +1,7 @@
 import { registerWorkspace, unregisterWorkspace } from "@kato/runtime";
 import { Head } from "fresh/runtime";
+import AppHeader from "../src/app_header.tsx";
+import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadWorkspacesPageData } from "../src/loaders/workspaces.ts";
 import { createWebLoggers } from "../src/logging.ts";
 import { define } from "../utils.ts";
@@ -87,7 +89,10 @@ export const handler = define.handlers({
 });
 
 export default define.page(async function WorkspacesPage(ctx) {
-  const pageData = await loadWorkspacesPageData();
+  const [pageData, appStatus] = await Promise.all([
+    loadWorkspacesPageData(),
+    loadAppChromeStatus(),
+  ]);
   const notice = decodeMessage(ctx.url.searchParams.get("notice"));
   const error = decodeMessage(ctx.url.searchParams.get("error"));
 
@@ -97,20 +102,13 @@ export default define.page(async function WorkspacesPage(ctx) {
         <title>Kato Web · Workspaces</title>
       </Head>
       <div class="shell">
-        <section class="hero">
-          <div>
-            <p class="mono muted">localhost operator console</p>
-            <h1>Workspaces</h1>
-            <p>
-              Register, review, and remove workspace aliases using the same
-              registry and config rules as the CLI.
-            </p>
-          </div>
-          <div class="hero-actions">
-            <a class="secondary-button" href="/">Back to Summary</a>
-            <a class="secondary-button" href="/settings">Settings</a>
-          </div>
-        </section>
+        <AppHeader
+          title="Workspaces"
+          description="Register, review, and remove workspace aliases using the same registry and config rules as the CLI."
+          currentPath="/workspaces"
+          showLogout
+          appStatus={appStatus}
+        />
 
         {notice ? <p class="notice-banner ok">{notice}</p> : null}
         {error ? <p class="notice-banner stale">{error}</p> : null}
@@ -119,8 +117,9 @@ export default define.page(async function WorkspacesPage(ctx) {
           <article class="card span-5">
             <h2>Register Workspace</h2>
             <p class="muted">
-              Enter an alias and an absolute workspace path containing
-              `.kato-workspace-config.yaml`.
+              Workspace Path is required and must be an absolute path containing
+              `.kato-workspace-config.yaml`. Alias is optional here. If you
+              leave it blank, Kato will use the workspace folder name.
             </p>
             <form method="post" class="login-form">
               <input type="hidden" name="action" value="register" />
@@ -135,7 +134,7 @@ export default define.page(async function WorkspacesPage(ctx) {
                 id="alias"
                 name="alias"
                 type="text"
-                required
+                placeholder="defaults to workspace folder name"
               />
               <label class="form-label" for="workspacePath">
                 Workspace Path

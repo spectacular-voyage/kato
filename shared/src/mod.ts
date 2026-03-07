@@ -46,8 +46,10 @@ export {
   isSessionStale,
   projectSessionStatus,
   sortSessionsByRecency,
+  summarizeRecordingActivity,
 } from "./status_projection.ts";
 export type {
+  RecordingActivitySummary,
   RecordingProjectionInput,
   SessionProjectionInput,
 } from "./status_projection.ts";

@@ -145,17 +145,14 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
     );
   }
 
-  const alias = typeof parsed.alias === "string" ? parsed.alias.trim() : "";
-  if (alias.length === 0) {
-    throw new CliUsageError(
-      "Command 'workspace register' requires --alias <alias>",
-    );
-  }
+  const alias = typeof parsed.alias === "string"
+    ? parsed.alias.trim() || undefined
+    : undefined;
   return {
     kind: "command",
     command: {
       name: "workspace-register",
-      alias,
+      ...(alias ? { alias } : {}),
       ...(positionals[0] ? { dirPath: positionals[0] } : {}),
     },
   };

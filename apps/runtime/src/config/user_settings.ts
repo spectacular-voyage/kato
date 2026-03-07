@@ -97,7 +97,7 @@ async function resolveWorkspaceBySelector(
   const trimmedSelector = resolveWorkspaceSelector(selector);
   if (!workspace) {
     throw new Error(
-      `Workspace not found: ${trimmedSelector}. Register it first with \`kato workspace register --alias <alias>\`.`,
+      `Workspace not found: ${trimmedSelector}. Register it first with \`kato workspace register [<dir>] [--alias <alias>]\`.`,
     );
   }
   return workspace;

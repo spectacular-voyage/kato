@@ -1532,3 +1532,1210 @@ Configure the Vite dev server with port 5173 and `strictPort: true` so
 Add a regression test covering the default `kato web init` port to keep
 the managed default from drifting again.
 ```
+
+# User_2026-03-07_0907_57
+
+For commit messages, please include the summary message with the body so it's just one copy and paste for me.
+
+# gpt-5.4_2026-03-07_0908_00
+
+```text
+fix(web): align managed and dev defaults on port 5173
+
+Standardize Kato Web on 127.0.0.1:5173 for both the managed CLI lifecycle
+and the Fresh/Vite dev loop.
+
+Add shared web default host/port constants, use them when creating web
+config, and use the same default in `kato web status` output so the CLI
+no longer implies a different port than the dev server.
+
+Configure the Vite dev server with port 5173 and `strictPort: true` so
+`deno task dev:web` fails instead of silently drifting to another port.
+
+Add a regression test covering the default `kato web init` port to keep
+the managed default from drifting again.
+```
+
+# User_2026-03-07_0908_03
+
+what's next?
+
+# gpt-5.4_2026-03-07_0908_11
+
+I’m checking the remaining task-note checkboxes so I can give you the next slice in the right order instead of guessing from memory.
+
+# gpt-5.4_2026-03-07_0908_23
+
+Next highest-value slice is `/maintenance`.
+
+That would let us close three meaningful gaps together:
+- extract the remaining shared mutation service from the CLI clean flows
+- add the authenticated Maintenance page with dry-run first, explicit confirmation, and the same daemon-running safety gate as CLI
+- add the destructive-action UX/tests that go with it
+
+After that, I’d do:
+- Summary parity and shared status view-model cleanup
+- detail pages for sessions/recordings/workspaces/security
+- docs updates in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md), `dev.decision-log`, and `dev.codebase-overview`
+
+Separate small fix: existing web configs like [kato-web-config.yaml](/home/djradon/.kato/web/kato-web-config.yaml#L3) still keep the old port, so we should eventually add a `kato web` config update/migration path instead of relying on manual edits.
+
+# User_2026-03-07_0910_19
+
+On http://127.0.0.1:5173/workspaces, should we note that "workspace path" is not optional, and maybe add some text stating that if alias isn't specified, the leaf folder name will be used as the alias.
+
+No need for upgrade/migration path, I'm the only user.
+
+# gpt-5.4_2026-03-07_0910_29
+
+I’m checking the current `/workspaces` form markup so I can add the constraint and alias-default hints in the right place instead of speaking abstractly.
+
+# gpt-5.4_2026-03-07_0910_36
+
+I’m checking whether alias-defaulting is already true anywhere in the shared mutation layer or CLI, because if it isn’t, the right fix is either “document the current rule” or actually change the shared behavior.
+
+# gpt-5.4_2026-03-07_0910_41
+
+Alias-defaulting is not true today. The shared mutation service still requires a non-empty alias, and the CLI parser also requires `--alias`, so the web hint you suggested would currently be lying unless I change behavior. I’m checking the tests around workspace registration to see how much surface that behavior change would touch.
+
+# gpt-5.4_2026-03-07_0911_06
+
+I’m going to make the web form explicit about the required path, and I’m also wiring the web registration flow so a blank alias actually does fall back to the workspace folder name. That keeps the helper text honest instead of aspirational.
+
+# gpt-5.4_2026-03-07_0911_09
+
+I’ve got what I need. I’m changing the shared registration rule so a blank alias resolves from the workspace folder name, then I’ll update the `/workspaces` form text to match and add a focused test for that fallback.
+
+# gpt-5.4_2026-03-07_0911_17
+
+The shared behavior change is in. I’m updating the web page now so the form stops implying the old alias-required rule and explicitly says the path is required and absolute.
+
+# gpt-5.4_2026-03-07_0911_21
+
+I’m adding a small mutation test for the alias fallback so the new UI promise is backed by the shared service, not just the web form.
+
+# gpt-5.4_2026-03-07_0911_32
+
+The code edits are done. I’m running format, the focused workspace tests, and the web app check to make sure the optional alias path and the updated TSX both compile cleanly.
+
+# gpt-5.4_2026-03-07_0911_41
+
+The focused pass is clean. I’m doing one full repo check as a last guard, because the alias type changed in the shared mutation layer and I want to catch any indirect compile fallout before I tell you this is done.
+
+# gpt-5.4_2026-03-07_0911_49
+
+Yes. I changed it so the page is explicit and the behavior matches the text.
+
+On [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), the form now says:
+- `Workspace Path` is required and must be absolute
+- `Alias` is optional
+- if alias is left blank, Kato uses the workspace folder name
+
+I also wired that fallback into the shared registration logic in [mutations.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts), so the web form is not just cosmetic, and added coverage in [workspace-mutations_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts).
+
+Checks passed:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/workspace-mutations_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+One nuance: the CLI still requires `--alias` today. The fallback is now in the shared service and the web UI, but I did not change the CLI parser surface.
+
+# gpt-5.4_2026-03-07_0911_50
+
+Yes. I changed it so the page is explicit and the behavior matches the text.
+
+On [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), the form now says:
+- `Workspace Path` is required and must be absolute
+- `Alias` is optional
+- if alias is left blank, Kato uses the workspace folder name
+
+I also wired that fallback into the shared registration logic in [mutations.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts), so the web form is not just cosmetic, and added coverage in [workspace-mutations_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts).
+
+Checks passed:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/workspace-mutations_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+One nuance: the CLI still requires `--alias` today. The fallback is now in the shared service and the web UI, but I did not change the CLI parser surface.
+
+# User_2026-03-07_0914_12
+
+Instead of "localhost operator console" let's say "kato operator console"
+
+We need to fix the heading and tabs so they're consistent across pages. "live running" - is that for the web app or the daemon. Try putting it in upper-right and "un-buttoning it" so it's not confused with the navigation tabs/logout button.
+
+Let's update the CLI so --alias is optional.
+
+# gpt-5.4_2026-03-07_0914_24
+
+I’m tightening the app shell first, because the header/text issue spans multiple routes. After that I’ll make the CLI `workspace register --alias` optional so the interface matches the new shared behavior.
+
+# gpt-5.4_2026-03-07_0914_42
+
+I’ve got two separate changes to make: a shared page chrome for the web app, and a small CLI contract change for `workspace register`. I’m scanning the parser/usage/tests now so the alias change doesn’t leave stale help text or broken assertions behind.
+
+# gpt-5.4_2026-03-07_0914_48
+
+The CLI surface still has several hard assumptions that `--alias` is mandatory, including help text and one parser test that explicitly expects an error. I’m adjusting those together so the web and CLI don’t diverge.
+
+# gpt-5.4_2026-03-07_0914_55
+
+The CLI change is small but not trivial: it touches the parser, command type, help text, one not-found hint, and the register command dispatch. I’m checking the router/handler signatures now so I can change the optional alias cleanly instead of relying on structural typing.
+
+# gpt-5.4_2026-03-07_0915_16
+
+I’m standardizing the authenticated pages around one header model: brand line, page title, tabs, and a separate utility/status area. That will also let me make the Summary title behave like the other routes instead of being its own special case.
+
+# gpt-5.4_2026-03-07_0915_36
+
+I’m checking the Summary loader contract before I wire the new status panel, just to make sure I label the daemon state correctly and don’t hardcode assumptions about that field.
+
+# gpt-5.4_2026-03-07_0916_31
+
+I’ve got the web-shell shape. Before I edit, I’m doing one last scan for tests or error strings that hardcode the old `--alias` requirement so I can update them in the same pass.
+
+# gpt-5.4_2026-03-07_0916_36
+
+I found the web-only strings. One grep failed because of shell quoting around backticks, so I’m rerunning the CLI string search cleanly before I patch.
+
+# gpt-5.4_2026-03-07_0917_03
+
+I’m about to patch the web shell and the CLI together. I checked one more runtime string and found the same outdated `workspace register --alias` hint in the user-settings path, so I’m updating that too.
+
+# gpt-5.4_2026-03-07_0918_25
+
+The edits are in. I’m formatting first, then I’ll run the parser/CLI tests plus the web app check so we catch both the new header component and the optional-alias CLI path.
+
+# gpt-5.4_2026-03-07_0918_33
+
+Format is clean. I’m running the CLI parser tests, the workspace-heavy daemon CLI tests, and the web app check in parallel so we can catch any breakage from both the shell refactor and the alias contract change.
+
+# gpt-5.4_2026-03-07_0918_39
+
+The web-side check passed, and the string sweep came back clean, which means the old branding and mandatory-alias hints are gone from code. I’m waiting on the broader CLI test run now.
+
+# gpt-5.4_2026-03-07_0918_42
+
+The targeted tests are clean. I’m doing one full repo `check` now because the CLI type change touched shared command plumbing, and I want the final answer to reflect the whole tree, not just the focused tests.
+
+# gpt-5.4_2026-03-07_0918_52
+
+The full check passed. I’m doing one live HTML fetch against `/login` so I can verify the branding/header change on the running dev server, not just from static code.
+
+# gpt-5.4_2026-03-07_0919_06
+
+The web shell is standardized now. I added a shared header in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx) and switched [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx), and [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx) over to it. The brand line now reads `kato operator console`, the tabs are consistent across authenticated pages, and the old ambiguous `live running` chip is gone. Summary now shows a plain upper-right status block that explicitly separates `Daemon: running|stopped` from `Snapshot: live|stale`, so it no longer reads like a nav button.
+
+I also updated the CLI so `--alias` is optional for `kato workspace register`. The parser/type/help changes are in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts), [types.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/types.ts), and [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts). If alias is omitted, the shared workspace mutation layer uses the leaf folder name, which is now covered in [workspace-mutations_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts) and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts). I also updated the stale user-facing hints in [workspace_shared.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_shared.ts) and [user_settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/user_settings.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/cli-parser_test.ts tests/daemon-cli_test.ts tests/workspace-mutations_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live fetch of `http://127.0.0.1:5173/login`, which now shows `kato operator console` and the new header layout
+
+# gpt-5.4_2026-03-07_0919_09
+
+The web shell is standardized now. I added a shared header in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx) and switched [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx), and [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx) over to it. The brand line now reads `kato operator console`, the tabs are consistent across authenticated pages, and the old ambiguous `live running` chip is gone. Summary now shows a plain upper-right status block that explicitly separates `Daemon: running|stopped` from `Snapshot: live|stale`, so it no longer reads like a nav button.
+
+I also updated the CLI so `--alias` is optional for `kato workspace register`. The parser/type/help changes are in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts), [types.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/types.ts), and [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts). If alias is omitted, the shared workspace mutation layer uses the leaf folder name, which is now covered in [workspace-mutations_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts) and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts). I also updated the stale user-facing hints in [workspace_shared.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_shared.ts) and [user_settings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/user_settings.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/cli-parser_test.ts tests/daemon-cli_test.ts tests/workspace-mutations_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live fetch of `http://127.0.0.1:5173/login`, which now shows `kato operator console` and the new header layout
+
+# User_2026-03-07_0925_14
+
+The CLI shows "5 stale" but the web says 0
+
+# gpt-5.4_2026-03-07_0925_24
+
+I’m tracing the stale-session count path in both surfaces. First I’m comparing the CLI status aggregation against the web summary loader to see whether the web is filtering stale rows before it counts them.
+
+# gpt-5.4_2026-03-07_0925_35
+
+The mismatch is likely what it looked like: the web loader builds `staleSessionCount` from the already-filtered session list, while CLI status computes stale counts from the full snapshot. I’m confirming the exact CLI logic now and then I’ll patch the web loader to count from the underlying snapshot instead of the filtered display list.
+
+# gpt-5.4_2026-03-07_0925_47
+
+The immediate bug is the stale count, but I’m checking whether the web’s top-line `Sessions` metric is also using the filtered active-only list. If it is, I’ll fix both together so Summary matches CLI semantics instead of only partially.
+
+# gpt-5.4_2026-03-07_0926_16
+
+I found the concrete bug. The web loader was computing `staleSessionCount` from the already-filtered active-only list, so it could never be nonzero in the default Summary view. I’m patching the loader to count from the full snapshot and adding a regression test.
+
+# gpt-5.4_2026-03-07_0926_28
+
+The loader fix is in. I’m running the summary-loader test plus full check so we confirm the count semantics changed without breaking the web build.
+
+# gpt-5.4_2026-03-07_0926_34
+
+The regression test passed. I’m just waiting for the tail end of the full `check`, but the actual stale-count fix is already verified.
+
+# gpt-5.4_2026-03-07_0926_41
+
+You were right. The web Summary loader was counting stale sessions from the already-filtered active-only list, so it would report `0` stale whenever the page was in its default active-only mode.
+
+I fixed that in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts#L72). Summary now:
+- counts `sessionCount`, `activeSessionCount`, and `staleSessionCount` from the full snapshot
+- still renders only active session rows by default
+
+I added a regression test in [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts#L66), and both `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts` and `deno task check` pass.
+
+If the page is already open, give it one refresh. After that, the stale count should line up with CLI.
+
+# User_2026-03-07_0929_24
+
+What does "snapshot live" mean?
+
+# gpt-5.4_2026-03-07_0929_33
+
+I’m checking the exact staleness rule in the runtime status code so I can answer with the real threshold instead of hand-waving.
+
+# gpt-5.4_2026-03-07_0929_46
+
+It means the daemon status snapshot is considered fresh, not that the web app itself is “live”.
+
+Specifically:
+- the Summary header shows `Snapshot live` when [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L94) gets `data.stale === false`
+- `data.stale` comes from [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts#L101)
+- that uses [isStatusSnapshotStale()](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts#L235), which marks the snapshot stale only if the daemon is running and its `heartbeatAt` is older than 11 seconds
+
+So “Snapshot live” currently means:
+- the latest `status.json` heartbeat is fresh enough
+- not that the browser has a websocket/session
+- not that all sessions are active
+- not that the web app itself is the thing that is running
+
+Also, the wording is a bit muddy. “Daemon running / Snapshot current” would be clearer than “Snapshot live”.
+
+# gpt-5.4_2026-03-07_0929_47
+
+It means the daemon status snapshot is considered fresh, not that the web app itself is “live”.
+
+Specifically:
+- the Summary header shows `Snapshot live` when [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L94) gets `data.stale === false`
+- `data.stale` comes from [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts#L101)
+- that uses [isStatusSnapshotStale()](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts#L235), which marks the snapshot stale only if the daemon is running and its `heartbeatAt` is older than 11 seconds
+
+So “Snapshot live” currently means:
+- the latest `status.json` heartbeat is fresh enough
+- not that the browser has a websocket/session
+- not that all sessions are active
+- not that the web app itself is the thing that is running
+
+Also, the wording is a bit muddy. “Daemon running / Snapshot current” would be clearer than “Snapshot live”.
+
+# User_2026-03-07_0931_33
+
+Can we have:
+
+logout
+DAEMON: running
+SNAPSHOT: current
+
+and put it on every page. We can have "log out" on the same horizontal line as as the navigation. 
+
+I also want to surface which providers currently have "twin generation" running.
+
+# gpt-5.4_2026-03-07_0931_47
+
+I’m tracing two things: how to make the header/status consistent across all routes, and where the daemon exposes provider twin-generation state so we can surface it in Summary without inventing new semantics.
+
+# gpt-5.4_2026-03-07_0932_00
+
+I found the header/status side cleanly. The twin-generation part needs one more trace, because the current web data only exposes provider name, active sessions, and last event time. I’m checking where daemon provider status is built to see whether twin-generation state already exists or whether we need to add it.
+
+# gpt-5.4_2026-03-07_0932_06
+
+The daemon status snapshot does not currently carry a provider-level twin-generation bit. I’m checking whether the existing provider snapshot/autogeneration flags are the intended proxy, or whether we need to add an explicit provider status field for this.
+
+# gpt-5.4_2026-03-07_0932_15
+
+The only provider-level knob I found is `providerAutoGenerateSnapshots`, but that is not the same thing as “twin generation currently running.” I’m checking the ingestion code now, because it looks like twin persistence may already be unconditional when session state is enabled.
+
+# gpt-5.4_2026-03-07_0932_21
+
+Twin persistence is in fact unconditional once `sessionStateStore` exists. That means the clean user-facing signal is probably “providers with active ingestion and session-state enabled,” not the old auto-snapshot flag. I’m checking whether session state is always on in the current daemon wiring.
+
+# gpt-5.4_2026-03-07_0932_46
+
+I’ve got the semantics now. The clean implementation is:
+- a lightweight app-chrome status loader so every route can show `DAEMON` and `SNAPSHOT`
+- a header layout where tabs sit on the left and `Log Out / DAEMON / SNAPSHOT` sit on the same nav row on the right
+- an explicit Summary hint for twin generation based on active providers, since twin persistence is currently always on when the daemon is running
+
+I’m wiring that now.
+
+# gpt-5.4_2026-03-07_0933_20
+
+I’m editing the shared header and status loader now. The main change is to move the utility/status strip into a single toolbar row and feed it from a lightweight daemon snapshot loader on non-Summary pages.
+
+# gpt-5.4_2026-03-07_0933_24
+
+The loader is in. I’m refactoring the header component next so authenticated pages and `/login` can share the same `DAEMON` and `SNAPSHOT` strip, with logout on the same row as the tabs instead of in the title block.
+
+# gpt-5.4_2026-03-07_0933_44
+
+Next I’m updating the three route pages and Summary to feed the new header contract, and I’m adding the twin-generation indicator to the Providers panel based on active providers.
+
+# User_2026-03-07_0934_00
+
+I was actually thinking that logout/daemon/snapshot would be on the same row as the title and description, so the navigation could take the whole row.
+
+# gpt-5.4_2026-03-07_0934_11
+
+That’s a better split. I was mid-refactor toward the nav-row layout, so I’m correcting it now: title/description on the left with `Log Out / DAEMON / SNAPSHOT` on the same top row, and the tabs get the full row underneath.
+
+# gpt-5.4_2026-03-07_0934_21
+
+I found one concrete break from the mid-refactor: `/login` was temporarily importing the chrome-status loader from the wrong module. I’m correcting that along with the header layout you just specified, then I’ll re-run the web checks before touching anything else.
+
+# gpt-5.4_2026-03-07_0934_48
+
+The layout correction is in. I’m formatting and running the web checks now, then I’ll do a quick live fetch to confirm the login page is rendering the new header structure instead of the half-finished refactor.
+
+# gpt-5.4_2026-03-07_0934_56
+
+The page-level web check is clean and the live `/login` fetch now shows the top-row `DAEMON:` / `SNAPSHOT:` status exactly where you described. I’m doing one full repo check now because this header refactor touched shared loader exports as well.
+
+# gpt-5.4_2026-03-07_0935_05
+
+Adjusted to the layout you wanted.
+
+`Log Out / DAEMON / SNAPSHOT` now live on the same top row as the title and description via [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx), and the navigation gets the full row underneath on authenticated pages. I also put the `DAEMON: ...` / `SNAPSHOT: ...` strip on `/login`, `/`, `/workspaces`, and `/settings` by adding a lightweight header-status loader in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts).
+
+I also surfaced twin-generation state in the Summary Providers card at [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx): it now shows `Twin generation: ...` based on the currently active providers, and each active provider row is labeled `twin generation active`.
+
+Validation:
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live fetch of `/login` confirms the new top-row status layout
+
+Reload the pages and you should now see the header split the way you described.
+
+# gpt-5.4_2026-03-07_0935_07
+
+Adjusted to the layout you wanted.
+
+`Log Out / DAEMON / SNAPSHOT` now live on the same top row as the title and description via [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx), and the navigation gets the full row underneath on authenticated pages. I also put the `DAEMON: ...` / `SNAPSHOT: ...` strip on `/login`, `/`, `/workspaces`, and `/settings` by adding a lightweight header-status loader in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts).
+
+I also surfaced twin-generation state in the Summary Providers card at [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx): it now shows `Twin generation: ...` based on the currently active providers, and each active provider row is labeled `twin generation active`.
+
+Validation:
+- `deno task --cwd apps/web check`
+- `deno task check`
+- live fetch of `/login` confirms the new top-row status layout
+
+Reload the pages and you should now see the header split the way you described.
+
+# User_2026-03-07_0935_07
+
+I've been confused by this before, but when could the "generated" and "heartbeat" timestamps have different values?
+
+# gpt-5.4_2026-03-07_0935_15
+
+I’m checking the daemon status write path so I can answer from the actual code path, not intuition.
+
+# gpt-5.4_2026-03-07_0935_26
+
+I found the stale-check rule. I’m looking at the daemon’s actual status writes now, because that determines whether `generatedAt` and `heartbeatAt` can diverge in practice or only in theory.
+
+# gpt-5.4_2026-03-07_0935_42
+
+Under the current implementation: effectively never.
+
+In the daemon’s real status writes, both fields are set to the same timestamp on each heartbeat update and on shutdown:
+- [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2412)
+- [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2519)
+
+The intended distinction is:
+- `generatedAt`: when this snapshot payload was produced
+- `heartbeatAt`: when the daemon most recently proved it was still alive
+
+But right now the daemon regenerates and rewrites the whole snapshot on each heartbeat, so they collapse to the same value. Also, staleness is based on `heartbeatAt`, not `generatedAt`: [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts#L235).
+
+So if you see them differ in a real runtime file, that would currently be unusual and likely a bug, test fixture, or manually edited status file.
+
+If you want, I’d simplify the UI by either:
+- showing only `Heartbeat`, or
+- renaming them to `Snapshot written` and `Daemon heartbeat` once they actually diverge in code.
+
+# User_2026-03-07_0937_06
+
+Log out is just a link. Daemon and Snapshot on separate lines. Add a mouseover explanation tooltip that explains what Snapshot current means. 
+
+Yes, simplify to only show Heartbeat.
+
+# gpt-5.4_2026-03-07_0937_21
+
+I’m updating the header/status strip and the Summary daemon card together so the wording and behavior stay consistent. That means a real link-style logout, stacked `DAEMON` / `SNAPSHOT` lines with a hover explanation, and removing `Generated` from the Summary card in favor of `Heartbeat` only.
+
+# gpt-5.4_2026-03-07_0937_26
+
+I’m switching logout to a real link now, which means the route needs a `GET` path that clears the session cookie safely before redirecting back to `/login`.
+
+# gpt-5.4_2026-03-07_0938_21
+
+I’m updating the shared header and Summary status presentation now: logout becomes a plain link, daemon/snapshot stack vertically with a tooltip, and the Summary daemon card will only show `Heartbeat`.
+
+# gpt-5.4_2026-03-07_0938_28
+
+I’ve confirmed the header still uses a POST logout button and the Summary card still shows both `Generated` and `Heartbeat`. I’m patching the shared header, logout route, and Summary view together so the change is consistent across pages.
+
+# gpt-5.4_2026-03-07_0939_21
+
+I’m editing the shared header API now so the layout and tooltip behavior come from one place instead of being hand-built per page. After that I’ll run the web checks and a live fetch against `/login` to confirm the new header markup.
+
+# gpt-5.4_2026-03-07_0939_51
+
+The edits are in. I’m running typechecks and a live fetch now to catch any prop mismatches and confirm the new header exposes the logout link and snapshot tooltip on `/login`.
+
+# gpt-5.4_2026-03-07_0939_55
+
+There’s one lint regression from the header cleanup: `routes/index.tsx` still takes `ctx` after I removed its last use. I’m trimming that and re-running the checks.
+
+# gpt-5.4_2026-03-07_0940_18
+
+One small consistency tweak remains: `/login` can still know whether you already have an authenticated session, so I’m wiring the header there to show the plain logout link when that session exists.
+
+# gpt-5.4_2026-03-07_0940_28
+
+The header is rendering the new snapshot tooltip on `/login`, and `GET /logout` now redirects cleanly. I’m doing one final repo-wide check so this lands as a coherent slice.
+
+# gpt-5.4_2026-03-07_0940_46
+
+I’m making one last consistency tweak: `/login` will show the same plain `Log Out` link as the rest of the shell, even before authentication, so the header really is uniform across pages.
+
+# gpt-5.4_2026-03-07_0941_01
+
+The header/status shell is updated.
+
+`Log Out` is now a plain link, `DAEMON` and `SNAPSHOT` render on separate lines with a hover tooltip on `SNAPSHOT`, and the shared header now drives that layout everywhere via [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx#L22) and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L55). I also changed [logout.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/logout.tsx#L4) so `GET /logout` clears the session and redirects, which is what makes the plain link work. `/login` uses the same header shell now at [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx#L43).
+
+I also removed the redundant `Generated` timestamp from the Summary daemon card, so it now only shows `Heartbeat` in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L142).
+
+Verification:
+- `deno task check`
+- live fetch of `http://127.0.0.1:5173/login` confirmed `Log Out`, stacked `DAEMON` / `SNAPSHOT`, and the tooltip text
+- `GET /logout` returns `302` to `/login`
+
+# User_2026-03-07_0942_06
+
+Decrease the title (e.g. "Settings") font size by 50%. 
+
+To avoid nav wobble, have the description area take up space for two lines, even when the description is only one line. 
+
+No separate "?" icon for snapshot explanation, just mousing over the text. "Log out" should be directly above Daemon.
+
+# gpt-5.4_2026-03-07_0942_19
+
+I’m tightening the shared header again: smaller page titles, fixed two-line description height, the snapshot tooltip moves onto the text itself, and the right-side stack becomes `Log Out` above `DAEMON`.
+
+# gpt-5.4_2026-03-07_0942_28
+
+I’ve got the current header markup in view. I’m patching the shared component so the tooltip sits on `SNAPSHOT` itself, the right side becomes a vertical stack with `Log Out` above the status lines, and the title/description sizing is stabilized in CSS.
+
+# gpt-5.4_2026-03-07_0942_35
+
+The patch context drifted after formatting. I’m reopening the shared header and applying the change against the current formatted shape.
+
+# gpt-5.4_2026-03-07_0942_56
+
+The CSS and shared header changes are in. I’m formatting and live-checking `/login` now so I can verify the title size, the two-line description reservation, and that the snapshot tooltip moved off the `?` and onto the label text.
+
+# gpt-5.4_2026-03-07_0943_02
+
+The shared header is updated.
+
+Page titles now render at half the previous size in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L70), the description reserves two lines via [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L82), and the right-side utility block is stacked so `Log Out` sits directly above `DAEMON` in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx#L22). I also removed the separate `?` icon; the snapshot explanation is now the hover tooltip on `SNAPSHOT:` itself in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx#L52).
+
+Verification:
+- `deno task check`
+- live fetch of `http://127.0.0.1:5173/login` confirmed `Log Out` above `DAEMON`, stacked status lines, and the tooltip on `SNAPSHOT:` itself
+
+# User_2026-03-07_0956_30
+
+Let's change the Sumary box to "Activity", include workspaces, and make the big "counts" for active, and then have "Inactive: n" text below.
+
+# gpt-5.4_2026-03-07_0956_42
+
+I’m updating the top summary card now. First I’m checking what counts the loader already exposes so I can rename it to `Activity`, add workspaces cleanly, and switch the big numbers to active counts with explicit inactive text underneath.
+
+# gpt-5.4_2026-03-07_0956_51
+
+The loader already gives me active/inactive workspace and session numbers, and recordings are already an active count. I’m reshaping that top card accordingly: `Activity`, three tiles including workspaces, and the smaller line under each tile will read `Inactive: n` where that concept exists.
+
+# gpt-5.4_2026-03-07_0957_08
+
+I’m going to treat the top tiles as current-state activity counts. That means sessions and workspaces get real inactive numbers, and recordings stays an active-only tile with a neutral inactive line instead of inventing a false count.
+
+# gpt-5.4_2026-03-07_0957_37
+
+I’m moving `Memory RSS` out of the top activity strip and into the Daemon card so the three activity tiles can be Sessions, Recordings, and Workspaces without dropping that information entirely.
+
+# gpt-5.4_2026-03-07_0957_52
+
+The activity-card changes are in. I’m formatting and running checks now, then I’ll do a quick source grep to confirm the old `Summary` title and the removed summary-line grid are actually gone.
+
+# gpt-5.4_2026-03-07_0957_59
+
+The top card is now `Activity` in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L110). Its three tiles are now:
+- `Sessions` with the big number set to active sessions and `Inactive: <stale count>` below
+- `Recordings` with the big number set to active recordings and `Inactive: not tracked` below
+- `Workspaces` with the big number set to active workspaces and `Inactive: <invalid count>` below
+
+I moved `Memory RSS` into the Daemon card so that information stays visible at [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L143), and I added the smaller metric-note styling in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L183).
+
+`deno task check` passes. The one intentional nuance is recordings: the runtime only exposes active recording count right now, so I kept the inactive line explicit instead of inventing a fake number.
+
+# User_2026-03-07_0958_00
+
+Let's make log out/daemon/snapshot right-aligned.
+
+# gpt-5.4_2026-03-07_0958_11
+
+I’m adjusting the shared header alignment in CSS so the utility block stays flush right instead of left-stacked. Then I’ll run the web check to make sure the shell still compiles cleanly.
+
+The current CSS is still explicitly left-aligning the whole utility stack, including on mobile. I’m flipping those rules to right alignment at the shared shell layer.
+
+# gpt-5.4_2026-03-07_0958_19
+
+The alignment change is in. I’m running the web check now and then I’ll inspect the rendered login HTML/CSS markers to confirm the shared shell is serving the right-aligned rules.
+
+# gpt-5.4_2026-03-07_0958_24
+
+The utility block is right-aligned now in the shared shell.
+
+I flipped [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L55) so `Log Out`, `DAEMON`, and `SNAPSHOT` align to the right on desktop and in the mobile breakpoint as well. The status lines themselves now justify to the right too.
+
+Verification:
+- `deno task --cwd apps/web check`
+- live fetch of `http://127.0.0.1:5173/login` confirmed the served CSS includes `align-items: flex-end`, `text-align: right`, and `justify-items: end`
+
+# User_2026-03-07_0958_54
+
+I think we can get an inactive count for recordings... the CLI live status lists recordings per session with a dot indicating activity.
+
+# gpt-5.4_2026-03-07_0959_00
+
+I’m checking the daemon snapshot shape and the CLI live-status projection now. If inactive recordings are already derivable from per-session recording entries, I’ll wire that into the Activity card instead of leaving it as “not tracked.”
+
+# gpt-5.4_2026-03-07_0959_07
+
+The CLI hint was useful. I found that the live-status summary currently does not have a true “inactive recordings” count; it prints `stale sessions`, not stale recordings. I’m verifying whether per-session `recordings[]` survives on stale sessions before I change the web tile.
+
+# gpt-5.4_2026-03-07_0959_22
+
+The daemon snapshot does preserve per-session recording rows on stale sessions, so we can derive a real inactive-recordings count as “recordings attached to stale sessions.” I’m wiring that into the Summary loader and replacing the placeholder note in the Activity card.
+
+# gpt-5.4_2026-03-07_0959_40
+
+The loader and UI are patched. I’m running the focused loader test plus full checks now to make sure the new `inactiveRecordingCount` field is consistent everywhere the summary payload flows.
+
+# gpt-5.4_2026-03-07_0959_45
+
+The focused test passed. I’m just waiting for the repo-wide check to finish cleanly before I close this out, because the summary payload shape changed.
+
+# gpt-5.4_2026-03-07_0959_54
+
+Yes. The CLI summary line was only using `stale sessions`, but the per-session rows do preserve recording entries on stale sessions, so we can derive a real inactive-recordings count from the snapshot.
+
+I wired that into the web Summary loader at [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts#L49) as `inactiveRecordingCount`, defined as recordings attached to stale sessions. The Activity card now shows `Inactive: n` for recordings in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx#L123), and I added regression coverage in [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts#L62).
+
+Checks passed:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts`
+- `deno task check`
+
+One nuance: this is “recordings on stale sessions,” which is the closest real inactive count exposed by the current snapshot model.
+
+# User_2026-03-07_1002_15
+
+essentially a recording is inactive if it is stopped, so either not recording in an active session + inactive session recordings.
+
+Let's update the CLI to include inactive recordings too. 
+
+CLI still looks to be reporting web as stopped
+
+# gpt-5.4_2026-03-07_1002_35
+
+I’m looking at two things together: how recordings are summarized today in the web/CLI status code, and why CLI status still says the web app is stopped when your dev server is clearly up on `5173`.
+
+# gpt-5.4_2026-03-07_1002_44
+
+I’ve confirmed the current web count is still too narrow for the definition you just gave. I’m broadening it to `active sessions with no recording + recordings on stale sessions`, and I’m updating the CLI summary text to use the same definition so the two surfaces stay aligned.
+
+# gpt-5.4_2026-03-07_1002_59
+
+I’m going to pull the recording activity math into shared code instead of duplicating it in the web loader and CLI separately. That keeps the “active vs inactive recording” definition in one place.
+
+# gpt-5.4_2026-03-07_1003_05
+
+I’ve got the shared projection module open. Next I’m adding a pure recording-activity summary helper there, then I’ll thread it through both the web loader and CLI renderer/tests.
+
+# gpt-5.4_2026-03-07_1003_24
+
+I found the immediate reason for the `web: stopped` confusion: your dev loop is clearly responding on `127.0.0.1:5173`, but there is no `~/.kato/web/kato-web-status.json` at all right now, so CLI can only see “configured, not managed” and falls back to stopped. I’m fixing that by teaching CLI status to probe the configured web URL before declaring it stopped.
+
+# gpt-5.4_2026-03-07_1004_01
+
+I’m also checking the JSON status path, not just text mode. If we can add `inactiveRecordings` there as an additive field, the CLI’s machine-readable output won’t lag behind the human-readable status line.
+
+# gpt-5.4_2026-03-07_1004_17
+
+I’m taking the low-friction route on the web runstate fix: add a probe dependency with a fetch-based default, so the CLI can detect a responding dev server without forcing our tests to start real network listeners.
+
+# gpt-5.4_2026-03-07_1005_56
+
+I’ve identified one test-shape mismatch too: a few fixtures claim `activeRecordings > 0` while their session rows have no `recordings[]` entries. I’m fixing those fixtures so the new inactive-recordings math reflects the real daemon snapshot shape instead of a contradictory test setup.
+
+# User_2026-03-07_1005_57
+
+in the CLI, let's move "web: stopped (http://127.0.0.1:5173/)" up to the top and include version, similar to CLI and Daemon.
+
+CLI shouldn't be allowed any web access, so it'll have to infer status from kato-web-status.json. Why is it missing?
+
+# gpt-5.4_2026-03-07_1006_13
+
+You’re right. CLI status should stay filesystem-based, not probe the web server.
+
+I’m checking the web startup path now to see why `kato-web-status.json` is never written during `deno task dev:web`, and I’ll then move the web status line into the top summary with version info instead of leaving it lower in the output.
+
+# gpt-5.4_2026-03-07_1006_21
+
+I’m checking the Fresh/Vite startup config next. If the app module can see the bound host/port at startup, we can make `dev:web` write and refresh `kato-web-status.json` directly instead of waiting for a request to hit middleware.
+
+# gpt-5.4_2026-03-07_1006_54
+
+The status-file problem is real: `dev:web` is just starting Vite/Fresh right now, and nothing in the app ever writes `kato-web-status.json`. I’m wiring a best-effort web heartbeat into the app itself so both dev mode and managed mode leave a filesystem runstate for CLI to read.
+
+# gpt-5.4_2026-03-07_1007_20
+
+I’m tracing the write path now. If the web app can persist its own pid/heartbeat/version at startup, CLI can stay purely local-state driven and still know the dev server is up.
+
+# gpt-5.4_2026-03-07_1007_39
+
+I’m reworking the CLI layout at the same time: web status moves into the header block and the lower duplicate `web:` line will go away. That keeps the top-of-screen identity/status area consistent for CLI, daemon, and web.
+
+# gpt-5.4_2026-03-07_1008_06
+
+I’ve got the CLI render path isolated now. After the status-file heartbeat lands, I’m switching the header to a three-line block: CLI, daemon, and web, with the old lower `web:` summary line removed.
+
+# gpt-5.4_2026-03-07_1013_55
+
+I’m starting with the shared recording math so the web card and CLI renderer can consume the same definition instead of drifting again.
+
+# gpt-5.4_2026-03-07_1014_38
+
+The shared recording helper is in. I’m moving to the web runstate plumbing now: add a proper web-status heartbeat writer and expose version in the status file so CLI can stay filesystem-only.
+
+# gpt-5.4_2026-03-07_1014_44
+
+I’m dropping the earlier probe idea entirely. The CLI path is staying file- and pid-based only, so I’m stripping that back out while keeping the status-file version field.
+
+# gpt-5.4_2026-03-07_1015_01
+
+The missing-file fix is going into the web app itself. I’m adding a lightweight status heartbeat module that writes pid/version/url to `~/.kato/web/kato-web-status.json` as soon as the Fresh server boots.
+
+# gpt-5.4_2026-03-07_1015_41
+
+I’m in the CLI renderer now. This is where the three pieces come together: new recording math, `kato web (v...)` in the header, and removal of the lower duplicate web line.
+
+# gpt-5.4_2026-03-07_1016_06
+
+The status renderer has drifted enough that I need to patch it in smaller chunks. I’m reopening the exact sections for recording summary, web-state loading, and header rendering before I edit further.
+
+# gpt-5.4_2026-03-07_1016_48
+
+I’ve updated the main CLI renderer. I’m making `kato web status` expose the same version field too so the dedicated web subcommand and the general status view don’t disagree.
+
+# gpt-5.4_2026-03-07_1017_01
+
+I’m updating the CLI-facing tests now. The expected text is changing in two places: the recording summary line now says `inactive`, and the web identity moves into the header as `kato web (v...)`.
+
+# gpt-5.4_2026-03-07_1017_03
+
+The test file drifted too. I’m reopening just the affected blocks and patching those exact assertions rather than guessing at the current formatting.
+
+# gpt-5.4_2026-03-07_1017_44
+
+The daemon CLI test file has moved around enough that I need the exact current blocks before patching again. I’m reopening the two status tests and patching them surgically.
+
+# gpt-5.4_2026-03-07_1018_27
+
+I found a smaller consistency bug while I was in the web CLI: `kato web status` was trusting the raw `running` bit without checking whether the pid is still alive. I’m fixing that too so the dedicated subcommand and the main `status` view read the file the same way.
+
+# gpt-5.4_2026-03-07_1018_38
+
+The new app heartbeat module is pure enough to unit-test one important piece. I’m adding a small parser test so the host/port inference path for `dev:web -- --host ... --port ...` doesn’t become guesswork later.
+
+# gpt-5.4_2026-03-07_1019_08
+
+I caught one consistency detail in the JSON path: top-level recording counts should stay global even when the session list is filtered. I’m correcting that now so `status --json` matches the text summary instead of hiding stale-session recordings by accident.
+
+# gpt-5.4_2026-03-07_1019_33
+
+All the code paths are touched now. I’m formatting and running the focused tests/checks next, then I’ll hit the live dev server once to see whether `~/.kato/web/kato-web-status.json` is finally appearing.
+
+# gpt-5.4_2026-03-07_1019_40
+
+The shared/unit tests and typecheck are underway cleanly so far. I’m waiting on the CLI-heavy test bundle and the full repo check, then I’ll verify the live web status file on disk.
+
+# gpt-5.4_2026-03-07_1019_49
+
+Two tests need cleanup after the behavior change: one still expects the old single-line CLI/daemon header, and one `web status` test is brittle around whether the stub pid counts as alive in this environment. I’m updating those expectations rather than backing out the new behavior.
+
+# gpt-5.4_2026-03-07_1020_08
+
+The failing expectations are patched. I’m rerunning the CLI-heavy tests and the full repo check, then I’ll verify whether the live dev server has actually produced `~/.kato/web/kato-web-status.json`.
+
+# gpt-5.4_2026-03-07_1020_13
+
+The web heartbeat file is now present and populated with pid/port/version, which was the missing piece. I’m waiting on the last test/check processes to exit cleanly, then I’ll summarize exactly what changed and why the file had been absent.
+
+# gpt-5.4_2026-03-07_1020_32
+
+`kato status` is now filesystem-only for web runstate. I did not add any web probing.
+
+Why `kato-web-status.json` was missing: `deno task dev:web` was only starting Vite/Fresh, and nothing in the web app ever wrote a status file. Only `kato web start` had been touching web lifecycle state. That gap is now fixed by [server_status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/server_status.ts#L1), which writes and refreshes [kato-web-status.json](/home/djradon/.kato/web/kato-web-status.json#L1) from the web app itself, including pid, host, port, heartbeat, url, and version. I also fixed the web version source by giving [apps/web/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json#L1) a real version and reading it from [version.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/version.ts#L1).
+
+On the CLI side, [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L1) now puts web in the top identity block as `kato web (v...): ...` instead of the lower `web:` line, and recordings now use the shared inactive definition from [status_projection.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/status_projection.ts#L34): active sessions with no recording plus recordings on stale sessions. The web Activity card uses the same logic via [apps/web/src/loaders/status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts#L1).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/status-projection_test.ts tests/web-summary-loader_test.ts tests/web-server-status_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts tests/web-cli_test.ts`
+- `deno task check`
+- live check after hitting `http://127.0.0.1:5173/login` confirmed [kato-web-status.json](/home/djradon/.kato/web/kato-web-status.json#L1) now exists and contains `running`, `pid`, `port: 5173`, and `version: "0.2.2"`
+
+# User_2026-03-07_1020_32
+
+CLI has "snpashots 3". That refers to in-memory representation of sessions? Why is it 3? I think we need to straighten out "status snapshot" vs "runtime snapshot"
+
+# gpt-5.4_2026-03-07_1020_44
+
+I’m tracing that `snapshots 3` line through the daemon memory telemetry and the shared status contract so I can answer precisely what it counts and where the naming is muddy.
+
+# gpt-5.4_2026-03-07_1020_51
+
+I’ve traced it. The CLI `memory:` section is talking about daemon ingestion-memory state, not the status.json file itself. I’m pulling the exact producer code for `sessionCount` so I can answer the “why 3?” part without hand-waving.
+
+# gpt-5.4_2026-03-07_1021_04
+
+I’m checking your live `status.json` now, because the exact `3` is runtime data, not a static code fact. Then I’ll separate the terminology: status snapshot file vs in-memory runtime session snapshots.
+
+# gpt-5.4_2026-03-07_1021_24
+
+Yes, the naming is muddy.
+
+What the CLI means today:
+- `snapshots` on the first memory line is **bytes**, not a count. It comes from `memory.snapshots.estimatedBytes` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L595).
+- The **count** is on the second line as `sessions N`, and that comes from `memory.snapshots.sessionCount` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L602).
+
+What that data actually is:
+- It is **not** the `status.json` file itself.
+- It is the daemon’s **in-memory session snapshot store** telemetry. The producer is [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts#L184), where:
+  - `estimatedBytes` is the estimated total memory of retained runtime session snapshots
+  - `sessionCount` is `this.snapshots.size`
+  - `eventCount` is the total retained events across those snapshots
+
+So the terminology split should be:
+
+- **Status snapshot**
+  - the single serialized daemon status payload in `~/.kato/shared/status.json`
+  - schema: [DaemonStatusSnapshot](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L52)
+
+- **Runtime snapshots**
+  - the daemon’s in-memory per-session snapshot objects used by ingestion/runtime logic
+  - exposed under `memory.snapshots.*` in the status payload
+
+For your current runtime specifically, [status.json](/home/djradon/.kato/shared/status.json#L110) shows:
+- `memory.snapshots.estimatedBytes = 3811440`
+- `memory.snapshots.sessionCount = 5`
+- `memory.snapshots.eventCount = 1987`
+
+So if you saw `snapshots 3`, that would have been referring to roughly **3 MB of estimated snapshot memory**, not “3 snapshots”. The actual current count is `5` sessions.
+
+I agree we should straighten this out. The clean fix is to rename the CLI memory block to something like:
+- `snapshot memory: 4 MB`
+- `runtime sessions: 5 · events 1987 · evictions 0`
+
+That would separate file-level “status snapshot” from in-memory “runtime snapshots” much more clearly.
+
+# gpt-5.4_2026-03-07_1021_26
+
+Yes, the naming is muddy.
+
+What the CLI means today:
+- `snapshots` on the first memory line is **bytes**, not a count. It comes from `memory.snapshots.estimatedBytes` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L595).
+- The **count** is on the second line as `sessions N`, and that comes from `memory.snapshots.sessionCount` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L602).
+
+What that data actually is:
+- It is **not** the `status.json` file itself.
+- It is the daemon’s **in-memory session snapshot store** telemetry. The producer is [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts#L184), where:
+  - `estimatedBytes` is the estimated total memory of retained runtime session snapshots
+  - `sessionCount` is `this.snapshots.size`
+  - `eventCount` is the total retained events across those snapshots
+
+So the terminology split should be:
+
+- **Status snapshot**
+  - the single serialized daemon status payload in `~/.kato/shared/status.json`
+  - schema: [DaemonStatusSnapshot](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L52)
+
+- **Runtime snapshots**
+  - the daemon’s in-memory per-session snapshot objects used by ingestion/runtime logic
+  - exposed under `memory.snapshots.*` in the status payload
+
+For your current runtime specifically, [status.json](/home/djradon/.kato/shared/status.json#L110) shows:
+- `memory.snapshots.estimatedBytes = 3811440`
+- `memory.snapshots.sessionCount = 5`
+- `memory.snapshots.eventCount = 1987`
+
+So if you saw `snapshots 3`, that would have been referring to roughly **3 MB of estimated snapshot memory**, not “3 snapshots”. The actual current count is `5` sessions.
+
+I agree we should straighten this out. The clean fix is to rename the CLI memory block to something like:
+- `snapshot memory: 4 MB`
+- `runtime sessions: 5 · events 1987 · evictions 0`
+
+That would separate file-level “status snapshot” from in-memory “runtime snapshots” much more clearly.
+
+# User_2026-03-07_1028_35
+
+Agreed with the rename. "runtime sessions" is already captured, so you can remove it from the right side.
+
+# gpt-5.4_2026-03-07_1028_46
+
+I’m changing the CLI memory wording now: `snapshots` becomes `snapshot memory`, and I’ll drop the redundant `sessions N` from the second memory line. Then I’ll run the status tests and full check.
+
+# gpt-5.4_2026-03-07_1028_50
+
+I’ve got the exact formatter path. I’m patching the CLI memory copy to `snapshot memory` and trimming the second line down to `events / evictions` only.
+
+# gpt-5.4_2026-03-07_1029_00
+
+The wording change is in. I’m running the focused status tests and full check now so we don’t leave any stale expectations behind.
+
+# gpt-5.4_2026-03-07_1029_06
+
+The wording change is holding under tests and typecheck so far. I’m just waiting for the two long-running processes to exit cleanly before I close this out.
+
+# gpt-5.4_2026-03-07_1029_10
+
+The CLI memory copy is updated.
+
+In [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L595), the first memory line now says `snapshot memory` instead of `snapshots`, and the second line no longer repeats runtime session count; it only shows `events` and `evictions`.
+
+I also updated the relevant expectation in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts#L684).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts`
+- `deno task check`
+
+So the CLI wording now better matches the real distinction:
+- `status snapshot` = the file in `~/.kato/shared/status.json`
+- `snapshot memory` = estimated memory used by retained in-memory runtime session snapshots
+
+# User_2026-03-07_1034_10
+
+Maybe we say "session memory" instead of "snapshot memory". I'm still surprised that the the session memory is so small compared to the daemon memory.
+
+# gpt-5.4_2026-03-07_1034_20
+
+I’m switching the CLI label from `snapshot memory` to `session memory`, then I’ll run the focused status tests and full check. After that I’ll explain why it can still look much smaller than process RSS.
+
+# gpt-5.4_2026-03-07_1034_57
+
+I’m changing the CLI label from `snapshot memory` to `session memory`, then I’ll run the status tests and sanity-check the wording against the current memory telemetry.
+
+# gpt-5.4_2026-03-07_1034_59
+
+I found the two spots that need the rename. After that I’m rerunning the CLI status tests and a full `check` so the wording change doesn’t regress anything else.
+
+# gpt-5.4_2026-03-07_1035_10
+
+The rename is in. I’m waiting on the last test/check processes to finish cleanly, then I’ll summarize why the session-memory estimate is much smaller than daemon RSS.
+
+# gpt-5.4_2026-03-07_1035_19
+
+I’ve got the test results. I’m pulling the exact estimator location now so the explanation can be concrete instead of hand-wavy.
+
+# gpt-5.4_2026-03-07_1035_28
+
+Changed. The CLI now says `session memory` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts#L601), and the expectation was updated in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts#L686).
+
+The size gap is expected with the current telemetry. `session memory` is not total in-memory session cost; it is just the estimated serialized size of retained runtime session snapshots, computed as `utf8ByteLength(JSON.stringify(snapshot))` in [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts#L197). Daemon RSS is the whole process footprint, from [status.json](/home/djradon/.kato/shared/status.json#L104), while session memory comes from [status.json](/home/djradon/.kato/shared/status.json#L110). Right now that’s about 403 MB RSS versus about 3.7 MB of session memory, so the latter is intentionally much narrower and undercounts JS/object overhead.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts` and `deno task check`.
+
+# User_2026-03-07_1035_55
+
+"Internal server error"  for web
+
+# gpt-5.4_2026-03-07_1036_02
+
+I’m reproducing the failure against the live web app first, then I’ll pull the web-side error details from the local runtime files so we can fix the actual fault instead of guessing.
+
+# gpt-5.4_2026-03-07_1036_09
+
+The unauthenticated paths are healthy, so this looks like a failure after login or on one authenticated route. I’m checking the web logging path next and then I’ll inspect the authenticated route handlers for the most likely throw points.
+
+# gpt-5.4_2026-03-07_1036_19
+
+I found there are no persisted web logs yet, which usually means the failure is happening before the route is hitting the app logger. I’m checking the authenticated Summary and Settings/Workspaces loaders for unhandled `NotFound` paths next.
+
+# gpt-5.4_2026-03-07_1036_30
+
+The authenticated pages are the likely failure surface. I’m checking the session-cookie implementation now so I can hit the protected routes directly and reproduce the exact 500 without needing your browser session.
+
+# gpt-5.4_2026-03-07_1036_35
+
+I can mint a valid session cookie from the local web config, so I’m using that to hit the authenticated routes directly. That should tell us exactly which page is throwing instead of relying on the browser error screen.
+
+# gpt-5.4_2026-03-07_1036_50
+
+I reproduced it. The failure is isolated to the Summary data path: authenticated `/` and `/api/summary` both 500, while `/settings` and `/workspaces` are fine. I’m narrowing that to the Summary loader and endpoint implementation now.
+
+# gpt-5.4_2026-03-07_1036_57
+
+I’ve isolated it to `loadSummaryPageData()`. I’m calling that loader directly in the current runtime now so I can capture the actual exception and patch the right branch.
+
+# gpt-5.4_2026-03-07_1037_07
+
+I’m spinning up a second local dev server on another port so I can hit the broken route and capture the actual stack trace from stdout. That’s the fastest way to get from generic 500 to a precise fix.
+
+# gpt-5.4_2026-03-07_1037_34
+
+The code itself is healthy. A fresh dev server on `127.0.0.1:5174` serves both Summary routes correctly, which points to your existing `5173` Vite process being in a bad hot-reload/import-map state rather than the current source tree being broken. I’m confirming that difference now and then I’ll tell you the shortest recovery path.
+
+# gpt-5.4_2026-03-07_1038_03
+
+I reproduced it and isolated it.
+
+Current state:
+- `http://127.0.0.1:5173/settings` and `/workspaces` are fine
+- authenticated `http://127.0.0.1:5173/` and `/api/summary` return `500 Internal Server Error`
+- a fresh dev server from the same working tree on `http://127.0.0.1:5174/` serves both routes correctly
+
+So this is not a current source-tree bug. Your existing `5173` Vite process is in a bad/stale dev state, most likely from import-map/config/HMR drift.
+
+Shortest fix:
+```bash
+# stop the current dev:web process
+# then start it again
+deno task dev:web
+```
+
+If port `5173` stays occupied after that, the stuck listener is currently PID `189980`.
+
+I did not make any code changes for this one. If you want, I can add persistent web-route error logging next so the next server-side failure lands in `~/.kato/web/logs/...` instead of just showing the generic 500 page.
+
+# User_2026-03-07_1040_11
+
+Yes, let's improve logging. Web is working now. Maybe instead of "session memory" we say "session size"? or ???
+
+# gpt-5.4_2026-03-07_1040_24
+
+I’m adding server-side error logging for unhandled web failures first, then I’ll tighten the CLI label so it doesn’t imply real memory accounting.
+
+# gpt-5.4_2026-03-07_1040_32
+
+I’ve got the right hook point: a top-level middleware can catch any downstream route/render failure and write it to the web operational log before the 500 response goes out. I’m checking the sink behavior once so the logging path doesn’t become its own failure mode.
+
+# gpt-5.4_2026-03-07_1040_51
+
+I’m making the logging change as a reusable helper so we can test it directly. I’m also changing the CLI copy from `session memory` to `session data size`; that’s closer to what the number actually is than either “memory” or bare “size”.
+
+# gpt-5.4_2026-03-07_1040_58
+
+The CLI already reads `~/.kato/web/logs/*.jsonl`, so once unhandled request failures land there they’ll automatically show up in `kato status` too. I’m patching that logging path now, plus the label tweak.
+
+# gpt-5.4_2026-03-07_1041_16
+
+I’m editing four small pieces: the web logging helper, a top-level catch-and-log middleware, the CLI copy tweak, and one focused test that proves an unhandled request error actually creates a web log entry.
+
+# gpt-5.4_2026-03-07_1041_30
+
+The code changes are in. I’m running the new logging test, the status tests, and a full check so we know both the web path and the CLI wording are clean.
+
+# gpt-5.4_2026-03-07_1041_33
+
+The change set is compiling cleanly. I’m waiting on the last test process to finish, then I’ll give you the exact files and the wording decision.
+
+# gpt-5.4_2026-03-07_1041_43
+
+One status test is failing for a good reason: the rendered line is width-truncated, so the full phrase doesn’t fit. I’m loosening that expectation instead of changing the actual output back.
+
+# gpt-5.4_2026-03-07_1041_50
+
+I’m just widening that one assertion case so it checks the real label instead of a truncated prefix. After that I’ll rerun the same test/check set.
+
+# gpt-5.4_2026-03-07_1042_00
+
+The targeted tests are passing now. I’m just waiting on the full `check` process to exit, then I’ll wrap this with the exact wording change and what the new logging buys you.
+
+# gpt-5.4_2026-03-07_1042_11
+
+I added unhandled web-request logging and changed the CLI label to `session data size`.
+
+The web change is in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/main.ts) and [logging.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/logging.ts). Any uncaught route/render failure now gets written to `~/.kato/web/logs/operational.jsonl` before the 500 goes out, so the next “Internal server error” should leave a usable record. I also added a focused test in [web-logging_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-logging_test.ts).
+
+For the CLI wording, I went with `session data size` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) rather than `session size`. `session size` reads like a per-session number; `session data size` better matches what it actually is: an aggregate estimate of retained serialized session snapshot data, not true process memory. The expectation was updated in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-logging_test.ts tests/improved-status_test.ts tests/daemon-cli_test.ts`
+- `deno task check`
+
+If you want, the next small follow-up is to surface those web unhandled errors in the web UI’s Recent Errors list too, not just in CLI status.
+
+# gpt-5.4_2026-03-07_1042_12
+
+I added unhandled web-request logging and changed the CLI label to `session data size`.
+
+The web change is in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/main.ts) and [logging.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/logging.ts). Any uncaught route/render failure now gets written to `~/.kato/web/logs/operational.jsonl` before the 500 goes out, so the next “Internal server error” should leave a usable record. I also added a focused test in [web-logging_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-logging_test.ts).
+
+For the CLI wording, I went with `session data size` in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) rather than `session size`. `session size` reads like a per-session number; `session data size` better matches what it actually is: an aggregate estimate of retained serialized session snapshot data, not true process memory. The expectation was updated in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-logging_test.ts tests/improved-status_test.ts tests/daemon-cli_test.ts`
+- `deno task check`
+
+If you want, the next small follow-up is to surface those web unhandled errors in the web UI’s Recent Errors list too, not just in CLI status.
+
+# User_2026-03-07_1044_09
+
+yes please
+
+# gpt-5.4_2026-03-07_1044_22
+
+I’m wiring web-app logs into the Summary Recent Errors feed now, and I’ll label daemon-vs-web scope in the UI so the merged list stays readable.
+
+# gpt-5.4_2026-03-07_1044_54
+
+I’ve got the shape. I’m merging `~/.kato/web/logs/*.jsonl` into the Summary loader, adding a `scope` field to each recent-error row, and covering it with a loader test so the UI change is anchored in data rather than just rendering.
+
+# gpt-5.4_2026-03-07_1045_19
+
+The loader patch drifted under me, so I’m reopening the exact section and applying a narrower edit instead of forcing it.
+
+# gpt-5.4_2026-03-07_1045_23
+
+I’ve got the exact loader section now. I’m applying this as smaller patches so we don’t trip on another stale context mismatch.
+
+# gpt-5.4_2026-03-07_1045_58
+
+The data and UI changes are in. I’m running the Summary loader tests plus a full `check` so we catch any type drift from the new `scope` field before you hit it in the browser.
+
+# gpt-5.4_2026-03-07_1046_05
+
+One file just needs formatting. I’m running `deno fmt` on the touched files and then re-running `check`.
+
+# gpt-5.4_2026-03-07_1046_08
+
+The formatter issue is cleared. I’m just waiting for the full repo/app check to exit cleanly, then I’ll close this out with what changed on the page.
+
+# gpt-5.4_2026-03-07_1046_14
+
+The Summary page now merges web-app errors into `Recent Errors` and labels each row as `daemon` or `web`.
+
+The data change is in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts), which now reads both `~/.kato/daemon/logs/*.jsonl` and `~/.kato/web/logs/*.jsonl`. The UI change is in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), where each row now shows `level · scope · channel · event`. I also added regression coverage in [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-logging_test.ts`
+- `deno task check`
+
+Reload the Summary page and future unhandled web errors should show up there once they’re written to `~/.kato/web/logs/operational.jsonl`.
+
+# User_2026-03-07_1046_14
+
+Let's change in CLI, "memory: " -> "daemon memory", and but session data size on its own line
+
+# gpt-5.4_2026-03-07_1046_20
+
+I’m splitting the CLI memory block into two lines: `daemon memory` on the first line, `session data size` on its own second line, then I’ll update the status tests to match.
+
+# gpt-5.4_2026-03-07_1046_24
+
+There are a couple layout tests that also key off the old `memory:` label, so I’m updating those together with the formatter to avoid brittle breakage.
+
+# gpt-5.4_2026-03-07_1046_42
+
+I’ve confirmed there aren’t any other hardcoded expectations beyond the layout tests. I’m making the formatter return explicit `daemon memory` and `session data size` lines now.
+
+# gpt-5.4_2026-03-07_1046_55
+
+The formatter change is in. I’m rerunning the CLI status tests and full `check` now to catch any wrapping/layout regressions from the extra summary line.
+
+# gpt-5.4_2026-03-07_1046_59
+
+The targeted tests are green. I’m waiting on the last `check` process to exit cleanly, then I’ll close with the exact formatting change.
+
+# gpt-5.4_2026-03-07_1047_05
+
+I have the test pass. I’m doing one quick confirmation that the full `check` process really exited cleanly before I summarize it as done.
+
+# gpt-5.4_2026-03-07_1047_10
+
+The CLI summary block is updated in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts). It now renders `daemon memory: ...` on one line, `session data size: ...` on its own line, and keeps `events · evictions` on the following line. When memory telemetry is unavailable, it now shows separate `daemon memory: unavailable` and `session data size: unavailable` lines as well.
+
+I updated the layout expectations in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts) to match the new wording and line split. Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts` and `deno task check`.
+
+# gpt-5.4_2026-03-07_1047_12
+
+The CLI summary block is updated in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts). It now renders `daemon memory: ...` on one line, `session data size: ...` on its own line, and keeps `events · evictions` on the following line. When memory telemetry is unavailable, it now shows separate `daemon memory: unavailable` and `session data size: unavailable` lines as well.
+
+I updated the layout expectations in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts) to match the new wording and line split. Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts` and `deno task check`.
+
+# User_2026-03-07_1048_26
+
+ok, what's next
+
+# gpt-5.4_2026-03-07_1048_42
+
+Next highest-value slice is `/maintenance`.
+
+That’s the best next move because it closes the remaining guided write-workflow gap in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md): we already have read-only Summary plus Workspaces and Settings, but we still don’t have the browser equivalent of the CLI clean/maintenance actions.
+
+I’d do it in this order:
+- Extract the remaining clean/maintenance logic into a shared runtime service so CLI and web use the same rules.
+- Add `/maintenance` with dry-run first, explicit confirmation, and the same “refuse while daemon is running” safeguards as CLI.
+- Add tests for destructive-action safety and error logging.
+
+After that:
+- Add drill-down/detail pages for sessions, recordings, workspaces, and security/logs.
+- Do the docs sweep in [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md) and the task note.
+
+If you want, I can start the `/maintenance` slice now.
+
+# User_2026-03-07_1206_59
+
+proceed
+
+# gpt-5.4_2026-03-07_1207_09
+
+I’m picking up the `/maintenance` slice by reading the existing CLI clean flow and the task note requirements first. Then I’ll extract shared runtime logic before adding the web route, so we don’t duplicate destructive behavior in two places.
+
+# gpt-5.4_2026-03-07_1207_16
+
+I’ve confirmed the current clean logic is still CLI-only in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts), and the web header still has no Maintenance tab. I’m reading the task note slice next so the new page matches the agreed scope instead of improvising.
+
+# gpt-5.4_2026-03-07_1207_31
+
+I’ve got the CLI clean output and the runtime exports. I’m reading the command context shape now so the shared service can take only the runtime pieces it actually needs, instead of dragging CLI concerns into `apps/runtime`.
+
+# gpt-5.4_2026-03-07_1207_35
+
+I’ve confirmed the existing web mutation routes all follow the same POST/redirect/GET pattern, so I’m keeping Maintenance aligned with that instead of inventing a special flow. Next step is extracting the shared clean service into `apps/runtime`.
+
+# gpt-5.4_2026-03-07_1207_57
+
+I’m deciding the Maintenance UX against the existing CLI semantics now. The main constraint is that session cleanup has to preserve the same safety behavior as CLI, so I’m checking the actual option/default surface instead of guessing.
+
+# gpt-5.4_2026-03-07_1208_11
+
+I’m shaping this as two guided forms rather than a generic “clean” form: logs and old session artifacts separately. That fits the task note better and keeps the execute confirmation explicit without adding client-side state machinery.
+
+# gpt-5.4_2026-03-07_1208_59
+
+I’m at the editing point. The next patch adds the shared runtime clean service first, then swaps CLI to call it, then adds the `/maintenance` route and nav entry on top.

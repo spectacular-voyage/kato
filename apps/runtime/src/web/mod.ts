@@ -14,6 +14,7 @@ export interface WebServerStatus {
   startedAt?: string;
   heartbeatAt: string;
   url?: string;
+  version?: string;
 }
 
 export interface WebServerStatusStoreLike {
@@ -60,6 +61,11 @@ function isWebServerStatus(value: unknown): value is WebServerStatus {
     return false;
   }
   if (value["url"] !== undefined && typeof value["url"] !== "string") {
+    return false;
+  }
+  if (
+    value["version"] !== undefined && typeof value["version"] !== "string"
+  ) {
     return false;
   }
   return true;

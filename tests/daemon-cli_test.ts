@@ -638,8 +638,6 @@ Deno.test("cli parser accepts workspace commands", () => {
   const register = parseDaemonCliArgs([
     "workspace",
     "register",
-    "--alias",
-    "My.Proj",
   ]);
   assertEquals(register.kind, "command");
   if (
@@ -648,7 +646,7 @@ Deno.test("cli parser accepts workspace commands", () => {
   ) {
     throw new Error("expected workspace-register command");
   }
-  assertEquals(register.command.alias, "My.Proj");
+  assertEquals(register.command.alias, undefined);
   const registerWithDir = parseDaemonCliArgs([
     "workspace",
     "register",
@@ -705,21 +703,15 @@ Deno.test("cli parser preserves Windows-style workspace register path input", ()
   assertEquals(parsed.command.alias, "Win.Proj");
 });
 
-Deno.test("cli parser requires non-empty workspace register alias", () => {
-  assertThrows(
-    () => parseDaemonCliArgs(["workspace", "register"]),
-    CliUsageError,
-  );
-  assertThrows(
-    () =>
-      parseDaemonCliArgs([
-        "workspace",
-        "register",
-        "--alias",
-        "   ",
-      ]),
-    CliUsageError,
-  );
+Deno.test("cli parser allows workspace register without alias", () => {
+  const parsed = parseDaemonCliArgs(["workspace", "register"]);
+  assertEquals(parsed.kind, "command");
+  if (
+    parsed.kind !== "command" || parsed.command.name !== "workspace-register"
+  ) {
+    throw new Error("expected workspace-register command");
+  }
+  assertEquals(parsed.command.alias, undefined);
 });
 
 Deno.test("cli parser accepts user commands", () => {
@@ -1119,6 +1111,61 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli workspace register defaults alias to the workspace folder name",
+  async () => {
+    await withTestTempDir(
+      "daemon-cli-workspace-default-alias-",
+      async (tempDir) => {
+        const runtimeDir = join(tempDir, "runtime");
+        const katoDir = join(tempDir, ".kato");
+        const workspaceDir = join(tempDir, "default-alias-workspace");
+        const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+        await Deno.mkdir(workspaceDir, { recursive: true });
+
+        const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+          ...makeDefaultRuntimeConfig(runtimeDir),
+          katoDir,
+          allowedWriteRoots: [tempDir, katoDir],
+        };
+
+        assertEquals(
+          (
+            await runDaemonCliWithHarness(
+              ["workspace", "init"],
+              runtimeDir,
+              {
+                cwdPath: workspaceDir,
+                defaultRuntimeConfig,
+              },
+            )
+          ).code,
+          0,
+        );
+
+        const { code: registerCode, harness: registerHarness } =
+          await runDaemonCliWithHarness(
+            ["workspace", "register"],
+            runtimeDir,
+            {
+              cwdPath: workspaceDir,
+              defaultRuntimeConfig,
+            },
+          );
+        assertEquals(registerCode, 0);
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "workspace registered: default-alias-workspace (",
+        );
+        assertStringIncludes(
+          await Deno.readTextFile(registryPath),
+          `"alias": "default-alias-workspace"`,
+        );
+      },
+    );
+  },
+);
+
+Deno.test(
   "runDaemonCli status reports workspace validity with mappings",
   async () => {
     await withTestTempDir("daemon-cli-status-workspaces-", async (tempDir) => {
@@ -1266,7 +1313,11 @@ Deno.test(
             updatedAt: "2026-02-22T09:59:00.000Z",
             lastEventAt: "2026-02-22T09:59:00.000Z",
             stale: false,
-            recordings: [],
+            recordings: [{
+              outputPath: "/tmp/active.md",
+              startedAt: "2026-02-22T09:30:00.000Z",
+              lastWriteAt: "2026-02-22T09:59:00.000Z",
+            }],
           },
           {
             provider: "claude",
@@ -1276,7 +1327,11 @@ Deno.test(
             updatedAt: "2026-02-20T10:00:00.000Z",
             lastEventAt: "2026-02-20T10:00:00.000Z",
             stale: false,
-            recordings: [],
+            recordings: [{
+              outputPath: "/tmp/stale.md",
+              startedAt: "2026-02-20T09:30:00.000Z",
+              lastWriteAt: "2026-02-20T10:00:00.000Z",
+            }],
           },
         ],
       });
@@ -1300,6 +1355,11 @@ Deno.test(
       assertEquals(filtered.sessions?.map((session) => session.sessionId), [
         "sess-active",
       ]);
+      assertEquals(
+        (filtered.recordings as { inactiveRecordings?: number })
+          .inactiveRecordings,
+        1,
+      );
       assertEquals(filtered.web?.configured, false);
       assertEquals(filtered.web?.state, "unconfigured");
 
@@ -1322,6 +1382,11 @@ Deno.test(
         "sess-active",
         "sess-stale",
       ]);
+      assertEquals(
+        (unfiltered.recordings as { inactiveRecordings?: number })
+          .inactiveRecordings,
+        1,
+      );
       assertEquals(unfiltered.web?.configured, false);
       assertEquals(unfiltered.web?.state, "unconfigured");
     });
@@ -1427,9 +1492,11 @@ Deno.test(
       assertEquals(code, 0);
       const output = harness.stdout.join("");
       assert(
-        /web: (running|stale status) \(http:\/\/127\.0\.0\.1:3173\//.test(
-          output,
-        ),
+        new RegExp(
+          `kato web \\(v${
+            CLI_APP_VERSION.replaceAll(".", "\\.")
+          }\\): (running|stale status) \\(http://127\\.0\\.0\\.1:3173/`,
+        ).test(output),
       );
       assertStringIncludes(
         output,
@@ -2641,13 +2708,14 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
     daemonRunning: boolean;
     heartbeatAt: string;
     daemonPid?: number;
-    recordings: { activeRecordings: number };
+    recordings: { activeRecordings: number; inactiveRecordings?: number };
   };
   assertEquals(statusPayload.schemaVersion, 1);
   assertEquals(statusPayload.daemonRunning, true);
   assertEquals(statusPayload.daemonPid, 31337);
   assertEquals(statusPayload.heartbeatAt, "2026-02-22T10:00:00.000Z");
   assertEquals(statusPayload.recordings.activeRecordings, 3);
+  assertEquals(statusPayload.recordings.inactiveRecordings, 0);
 
   const stopHarness = makeRuntimeHarness(runtimeDir);
   const stopCode = await runDaemonCli(["stop"], {
