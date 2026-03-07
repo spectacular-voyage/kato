@@ -524,6 +524,191 @@ Deno.test("SharedBehaviorConfigFileStore rejects unknown keys", async () => {
   }
 });
 
+Deno.test("createDefaultSharedBehaviorConfig applies home shorthand and nested overrides", async () => {
+  await withLockedEnvironment(async () => {
+    const root = makeSandboxRoot();
+    const homeDir = join(root, "home");
+    const snapshot = snapshotConfigEnv();
+
+    try {
+      await Deno.mkdir(homeDir, { recursive: true });
+      setConfigEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+      });
+
+      const config = createDefaultSharedBehaviorConfig({
+        allowedWriteRoots: [
+          join(homeDir, "notes"),
+          join(homeDir, "notes"),
+          join(homeDir, "exports"),
+        ],
+        exportTimezone: "UTC",
+        exportMarkdownFrontmatter: {
+          includeRecordingIds: false,
+          addParticipantUsernameToHeadings: true,
+        },
+        exportFeatureFlags: {
+          writerIncludeToolCalls: true,
+          writerItalicizeUserMessages: true,
+        },
+        useHomeShorthand: true,
+      });
+
+      assertEquals(config.allowedWriteRoots, ["~/notes", "~/exports"]);
+      assertEquals(config.exportTimezone, "UTC");
+      assertEquals(
+        config.exportMarkdownFrontmatter.addParticipantUsernameToHeadings,
+        true,
+      );
+      assertEquals(
+        config.exportMarkdownFrontmatter.includeRecordingIds,
+        false,
+      );
+      assertEquals(config.exportMarkdownFrontmatter.includeSessionIds, true);
+      assertEquals(config.exportFeatureFlags.writerIncludeToolCalls, true);
+      assertEquals(config.exportFeatureFlags.writerItalicizeUserMessages, true);
+      assertEquals(config.exportFeatureFlags.writerIncludeCommentary, true);
+    } finally {
+      restoreConfigEnv(snapshot);
+      await removePathIfPresent(root);
+    }
+  });
+});
+
+Deno.test("createDefaultSharedBehaviorConfig rejects invalid export timezones", () => {
+  assertThrows(
+    () =>
+      createDefaultSharedBehaviorConfig({
+        allowedWriteRoots: ["/tmp"],
+        exportTimezone: "Mars/Phobos",
+      }),
+    Error,
+    'exportTimezone must be "local", "UTC", or a valid IANA timezone',
+  );
+});
+
+Deno.test("SharedBehaviorConfigFileStore loads expanded roots and nested shared settings", async () => {
+  await withLockedEnvironment(async () => {
+    const root = makeSandboxRoot();
+    const homeDir = join(root, "home");
+    const configPath = join(root, "shared", "kato-shared-config.yaml");
+    const store = new SharedBehaviorConfigFileStore(configPath);
+    const snapshot = snapshotConfigEnv();
+
+    try {
+      await Deno.mkdir(join(root, "shared"), { recursive: true });
+      await Deno.mkdir(homeDir, { recursive: true });
+      setConfigEnv({
+        HOME: homeDir,
+        USERPROFILE: undefined,
+      });
+
+      await Deno.writeTextFile(
+        configPath,
+        stringify({
+          schemaVersion: 1,
+          allowedWriteRoots: ["~/.kato/exports", "~/.kato/exports"],
+          exportTimezone: "America/Los_Angeles",
+          exportMarkdownFrontmatter: {
+            includeSessionIds: false,
+            addParticipantUsernameToFrontmatter: true,
+          },
+          exportFeatureFlags: {
+            writerIncludeToolCalls: true,
+            writerIncludeToolResults: true,
+          },
+        }),
+      );
+
+      const loaded = await store.load();
+      assertEquals(loaded.allowedWriteRoots, [
+        join(homeDir, ".kato", "exports"),
+      ]);
+      assertEquals(loaded.exportTimezone, "America/Los_Angeles");
+      assertEquals(
+        loaded.exportMarkdownFrontmatter.includeSessionIds,
+        false,
+      );
+      assertEquals(
+        loaded.exportMarkdownFrontmatter.addParticipantUsernameToFrontmatter,
+        true,
+      );
+      assertEquals(
+        loaded.exportMarkdownFrontmatter.includeWorkspaceIds,
+        true,
+      );
+      assertEquals(loaded.exportFeatureFlags.writerIncludeToolCalls, true);
+      assertEquals(loaded.exportFeatureFlags.writerIncludeToolResults, true);
+      assertEquals(loaded.exportFeatureFlags.writerIncludeCommentary, true);
+    } finally {
+      restoreConfigEnv(snapshot);
+      await removePathIfPresent(root);
+    }
+  });
+});
+
+Deno.test("SharedBehaviorConfigFileStore ensureInitialized returns existing config without rewriting", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "shared", "kato-shared-config.yaml");
+  const initial = createDefaultSharedBehaviorConfig({
+    allowedWriteRoots: [join(root, "allowed")],
+    exportTimezone: "UTC",
+  });
+  const fallback = createDefaultSharedBehaviorConfig({
+    allowedWriteRoots: [join(root, "fallback")],
+    exportTimezone: "local",
+  });
+  const store = new SharedBehaviorConfigFileStore(configPath);
+
+  try {
+    await store.ensureInitialized(initial);
+    const ensured = await store.ensureInitialized(fallback);
+
+    assertEquals(ensured.created, false);
+    assertEquals(ensured.path, configPath);
+    assertEquals(ensured.config.allowedWriteRoots, [join(root, "allowed")]);
+    assertEquals(ensured.config.exportTimezone, "UTC");
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("SharedBehaviorConfigFileStore rejects invalid YAML and non-.yaml paths", async () => {
+  const root = makeSandboxRoot();
+  const yamlPath = join(root, "shared", "kato-shared-config.yaml");
+  const jsonPath = join(root, "shared", "kato-shared-config.json");
+  const defaultConfig = createDefaultSharedBehaviorConfig({
+    allowedWriteRoots: [root],
+  });
+
+  try {
+    await Deno.mkdir(join(root, "shared"), { recursive: true });
+    await Deno.writeTextFile(yamlPath, "allowedWriteRoots: [");
+
+    await assertRejects(
+      () => new SharedBehaviorConfigFileStore(yamlPath).load(),
+      Error,
+      "invalid YAML",
+    );
+    await assertRejects(
+      () =>
+        new SharedBehaviorConfigFileStore(jsonPath).ensureInitialized(
+          defaultConfig,
+        ),
+      Error,
+      "must end with .yaml",
+    );
+    await assertRejects(
+      () => new SharedBehaviorConfigFileStore(jsonPath).save(defaultConfig),
+      Error,
+      "must end with .yaml",
+    );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
 Deno.test("CliConfigFileStore initializes missing CLI config", async () => {
   const root = makeSandboxRoot();
   const configPath = join(root, "cli", "kato-cli-config.yaml");

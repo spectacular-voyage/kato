@@ -41,9 +41,9 @@ Current signals already visible in the repo today:
   - direct `deno test --parallel --clean --coverage=.coverage-par ... --frozen`:
     about `10s` elapsed
 - Post-initial implementation verification on `2026-03-06`:
-  - `deno task test --frozen --quiet`: `427` passing tests, about `8.5s` real
-  - `deno task test:coverage --frozen --quiet`: `427` passing tests,
-    `76.1%` line coverage, `82.0%` branch coverage, about `10.1s` real
+  - `deno task test --frozen --quiet`: `474` passing tests, about `9.0s` real
+  - `deno task test:coverage --frozen --quiet`: `474` passing tests,
+    `78.0%` line coverage, `83.4%` branch coverage, about `9.1s` real
   - `apps/daemon/src/writer/jsonl_writer.ts` is now at `95.9%` line coverage /
     `96.9%` branch coverage after adding a direct test file
   - `apps/daemon/src/orchestrator/session_twin_mapper.ts` is now at `90.8%`
@@ -52,11 +52,25 @@ Current signals already visible in the repo today:
     coverage / `81.7%` branch coverage after adding direct config tests
   - `apps/runtime/src/policy/path_policy.ts` is now at `85.6%` line coverage /
     `90.6%` branch coverage after adding direct policy tests
-  - `apps/daemon/src/providers/codex/parser.ts` is now at `69.1%` line
-    coverage / `84.7%` branch coverage after adding direct parser edge-case
-    tests
+  - `apps/daemon/src/providers/codex/parser.ts` is now at `87.4%` line
+    coverage / `85.4%` branch coverage after adding direct parser edge-case
+    tests, including the legacy top-level `request_user_input` shape
   - `apps/cli/src/commands/status.ts` is now at `73.8%` line coverage /
     `84.6%` branch coverage after adding direct command-level status tests
+  - `apps/cli/src/parser.ts` is now at `93.6%` line coverage /
+    `96.1%` branch coverage after adding direct parser-only help/usage/arity
+    tests
+  - `apps/runtime/src/orchestrator/control_plane.ts` is now at `73.8%` line
+    coverage / `82.4%` branch coverage after adding direct control-plane
+    store/path/staleness tests
+  - `apps/runtime/src/config/shared_behavior_config.ts` is now at `77.9%`
+    line coverage / `84.5%` branch coverage after adding direct shared-config
+    parser/default/store tests
+  - `apps/runtime/src/utils/env.ts` is now at `82.4%` line coverage /
+    `96.2%` branch coverage after adding direct env-helper tests
+  - `apps/cli/src/commands/status_error_cursor.ts` is now at `77.6%` line
+    coverage / `87.2%` branch coverage after adding direct cursor
+    normalization and fail-closed tests
   - detached launcher branches now have direct tests, and current Deno
     coverage attributes that work under
     `apps/daemon/src/orchestrator/launcher.ts` (`100%`) while warning that
@@ -87,9 +101,22 @@ Current signals already visible in the repo today:
   - direct launcher tests now cover home-resolution and PowerShell branches for
     detached daemon startup
   - direct Codex parser tests now cover additional `response_item`,
-    `request_user_input`, and task-complete edge cases
+    `request_user_input`, legacy top-level `request_user_input`, and
+    task-complete edge cases
   - direct status command tests now cover JSON stale filtering plus file-backed
     recent-error and cursor reconciliation behavior
+  - direct CLI parser tests now cover help topics, usage errors, arity checks,
+    and format validation without a runtime harness
+  - direct control-plane tests now cover default/override path resolution,
+    snapshot staleness, invalid snapshot fallback, queue cloning, malformed
+    queue files, and queue-length enforcement
+  - direct shared-behavior config tests now cover home-shorthand defaults,
+    nested flag/frontmatter parsing, existing-config ensure behavior, and
+    invalid YAML / non-`.yaml` rejection
+  - direct env-helper tests now cover `readOptionalEnv`, `resolveHomeDir`,
+    and `expandHomePath` behavior under explicit HOME / USERPROFILE cases
+  - direct status-error cursor tests now cover invalid document shapes,
+    key-cap normalization, and recursive parent-dir creation on save
   - root test tasks now allow the env keys exercised by those direct tests
   - `tests/test_env.ts` now provides a shared env lock so env-mutating tests
     remain deterministic under `--parallel`
@@ -109,9 +136,9 @@ Current signals already visible in the repo today:
 Coverage triage should distinguish at least three buckets:
 
 - Real logic worth more tests:
-  - `apps/daemon/src/providers/codex/parser.ts` (`69.1%`)
-  - `apps/runtime/src/orchestrator/control_plane.ts` (`65.2%`)
-  - `apps/runtime/src/config/shared_behavior_config.ts` (`67.1%`)
+  - `apps/runtime/src/utils/hash.ts` (`68.3%`)
+  - `apps/cli/src/commands/start.ts` (`65.4%`)
+  - `apps/cli/src/commands/workspace_init.ts` (`65.7%`)
 - Mixed/noisy coverage contributors that still need a value judgment:
   - `shared/src/contracts/session_state.ts` (`21.4%`)
   - `shared/src/contracts/session_twin.ts` (`37.4%`)
@@ -121,7 +148,13 @@ Coverage triage should distinguish at least three buckets:
   - `apps/daemon/src/orchestrator/session_twin_mapper.ts` (`90.8%`)
   - `apps/runtime/src/config/runtime_config.ts` (`71.0%`)
   - `apps/runtime/src/policy/path_policy.ts` (`85.6%`)
+  - `apps/daemon/src/providers/codex/parser.ts` (`87.4%`)
   - `apps/cli/src/commands/status.ts` (`73.8%`)
+  - `apps/cli/src/parser.ts` (`93.6%`)
+  - `apps/runtime/src/orchestrator/control_plane.ts` (`73.8%`)
+  - `apps/runtime/src/config/shared_behavior_config.ts` (`77.9%`)
+  - `apps/runtime/src/utils/env.ts` (`82.4%`)
+  - `apps/cli/src/commands/status_error_cursor.ts` (`77.6%`)
   - launcher coverage no longer appears as a live gap, although Deno currently
     reports it under `apps/daemon/src/orchestrator/launcher.ts`
 - Areas that already have broad suites but may have overlap or expensive
@@ -267,12 +300,13 @@ Review work should capture before/after evidence for:
       where missing tests appear meaningful:
       JSONL writing, session-twin mapping, runtime-config validation,
       path-policy denial cases, detached launcher branches, command-level
-      status behavior, and additional Codex parser edge cases are now covered
-      directly.
-- [ ] Continue focused coverage work for the remaining undercovered logic:
-      runtime control-plane behavior, remaining Codex parser branches, and
-      other meaningful gaps that still remain after the initial direct-test
-      pass.
+      status behavior, direct control-plane behavior, direct shared-behavior
+      config behavior, direct env-helper and status-error-cursor behavior, and
+      additional Codex parser edge cases are now covered directly.
+- [x] Continue focused coverage work for the remaining undercovered logic:
+      the original remaining hotspots from this review
+      (Codex parser branches, env helpers, and status-error cursor behavior)
+      now have direct tests and verified coverage improvements.
 - [ ] Identify any tests that can be merged or removed, and record the specific
       reason for each candidate:
       duplicate coverage, weak signal, obsolete behavior, or excessive setup

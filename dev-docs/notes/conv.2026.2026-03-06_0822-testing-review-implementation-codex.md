@@ -1279,3 +1279,627 @@ coverage attribution caveat.
 # djradon_2026-03-06_1308_32
 
 proceed
+
+# gpt-5.4_2026-03-06_1308_43
+
+I’m picking up from the updated task note and moving to the next remaining hotspot rather than stopping at the docs. First step is to inspect the current control-plane coverage gap and the existing tests so the next slice lands on uncovered behavior instead of duplicating what’s already there.
+
+**Inspecting control plane file**
+
+I need to take a closer look at the remainder of the control_plane file since I think there's relevant information beyond the 280 limit. It’s essential to understand the full content to ensure I’m not missing anything important. I’m curious about what insights might be present in the rest of the file, so it's worth the effort to dig deeper. Let’s see what I can find when I inspect it!
+
+# gpt-5.4_2026-03-06_1308_49
+
+The gap is where expected: `control_plane.ts` is still low and the existing tests are mostly path resolution plus basic store round-trips. I’m reading the rest of the file now to identify the untested fail-closed and queue-management branches instead of guessing.
+
+**Investigating untested branches**
+
+I need to identify untested branches in the control plane. I could inspect coverage details, possibly using Deno coverage or lcov for in-depth analysis. Using tools like nl can help reveal file lines as well. The control plane has about 328 lines, but there are many untested paths. These include aspects like resolve overrides, handling invalid schemas, and managing payload clone semantics. I should also consider tests for creating default status snapshots and checking if they are stale. It seems there’s a lot to address!
+**Planning direct tests**
+
+I think I should add direct tests for several functions. For instance, I need to verify if `createDefaultStatusSnapshot` correctly sets defaults, though it might be unnecessary if loading a missing status covers that. The `isStatusSnapshotStale` function should return false for stopped status and true for an invalid heartbeat or exceeding thresholds. 
+
+I also want to ensure the `DaemonStatusSnapshotFileStore` handles unsupported schemas and surfaces permission errors effectively. Finally, I'll explore how `enqueue` should reject requests if the queue length exceeds the limit and check how payloads are cloned. It seems there's a lot to cover!
+**Investigating file renaming and testing**
+
+I’m exploring whether `Deno.rename` on Unix overwrites existing files, and it seems like on POSIX it does, but possibly not on Windows. I want to avoid any cross-platform issues, so I’m considering how to handle that. 
+
+I’m also thinking that I might not be able to test the internal function directly. I should inspect exact line coverage—maybe using `deno coverage --lcov`. The command `deno coverage --detailed .coverage | rg -n` doesn’t give specific line numbers, so perhaps I’ll try `deno coverage --html`, though that could be tricky to inspect directly.
+**Evaluating control plane patches**
+
+I’m looking at the `control_plane.ts` file and noticing it’s small enough that I can address a lot of branch debt without much hassle. I’m going to check the untested sections closely and then I plan to update the control-plane test file with fail-closed and override-path cases. This seems like a better approach than creating a whole new test file to manage everything. It’s all about efficiency!
+
+# gpt-5.4_2026-03-06_1309_21
+
+The current control-plane test file only failed because I intentionally ran it without the env permissions it already relies on. I’ve got the target surface now; next I’m patching direct tests for path overrides, stale-status logic, invalid snapshot schema fallback, queue cloning, and queue-limit handling.
+
+**Managing environment variables**
+
+I'm thinking about how to manage extra environment variables in the test file using try/finally. It's essential to ensure that the environment lock protects them too since the general lock withLockedEnvironment isn't specific to keys. So, I only need to update the deno.json env allowlist to include those override variables. It's a straightforward solution, but I want to be careful to cover all bases.
+**Evaluating test variables**
+
+I see that existing tests using the helper won’t restore new variables. In the daemon-control-plane_test, if I manage additional variables manually, that seems okay. However, when using `setRuntimeEnv`, I can’t set new variables since the type only includes three. It might be possible to manage environment variables for status and control paths in the test using `Deno.env.set/delete`. I think this approach could work!
+**Updating environment settings**
+
+I'm looking into new tests with Deno related to KATO_DAEMON_STATUS_PATH and CONTROL_PATH. It seems I need to extend the root task allowlist in deno.json. I also need to include allow-env flags in the direct test command. Since the user wants me to proceed, I’ll make those code changes, including updating the deno.json file. After that, I might need to update the documentation once everything is verified. Let's take a look at the current allow-env lines in deno.json.
+
+# gpt-5.4_2026-03-06_1310_11
+
+This next slice needs two extra env vars if I cover the override-path branches directly. I’m checking the root task config before editing so I can keep the new tests runnable through the normal `deno task test` path rather than only through one-off commands.
+
+**Evaluating test options**
+
+I noticed the status snapshot validator doesn't consider the optional daemonVersion if it's undefined. I think I could add some details to the existing persist test, maybe including daemonVersion and provider.lastEventAt. That should activate some specific lines in the code. Instead of creating a whole new test, I could just patch the existing one. That sounds like a solid plan!
+
+# gpt-5.4_2026-03-06_1310_44
+
+I’ve got the concrete edits. I’m patching the control-plane tests and the root env allowlist together so the new override-path cases work through the normal repo tasks instead of only through an ad hoc command.
+
+**Formatting and Testing**
+
+I think I need to format maybe just the test file and the deno.json? I’ll run `deno fmt` on both of those. After that, it’s important to run some targeted tests with an updated `allow-env` list. I should also check to make sure there are no type errors. So, the plan is clear: first, format the files, and then proceed with the targeted tests. Let's get started!
+
+# gpt-5.4_2026-03-06_1311_55
+
+The control-plane tests and env allowlist are patched. I’m formatting and running that test file directly now so I can fix any mistakes locally before another full-suite pass.
+
+**Checking coverage**
+
+I need to make sure I'm checking the targeted coverage effectively. It’s crucial to understand what specific areas I should focus on to ensure that everything is being addressed properly. I want to confirm if there are particular demographics or regions that require more attention. It feels essential to clarify this to meet the user's needs fully. Let's see how I can gather the right information to support this check!
+
+# gpt-5.4_2026-03-06_1312_02
+
+The direct control-plane file is green. I’m checking focused coverage for that file now to confirm this actually closes the hotspot before I spend time updating notes and rerunning the full repo.
+
+# gpt-5.4_2026-03-06_1312_16
+
+The control-plane slice paid off in the focused run: `apps/runtime/src/orchestrator/control_plane.ts` is now `73.8%` line / `82.4%` branch. I’m re-running the full repo tasks now so I can update the task note and testing doc with the actual repo-wide post-change numbers, not just the focused-run delta.
+
+**Investigating test failures**
+
+I’m seeing this interesting failure that might be due to changes in the environment allowlist causing a flake. I need to inspect the failing test, particularly around certain lines. It might stem from the environment lock, as tests in the control plane could mutate specific environment variables without locking them. The tests use `withLockedEnvironment`, but maybe the daemon-main process runs in parallel and isn’t properly accounted for. I’ll definitely need to examine the failing test further!
+
+# gpt-5.4_2026-03-06_1312_33
+
+The full suite exposed a regression risk immediately, which is useful: one daemon-main logging test now fails under the expanded env surface. I’m reading that test and the neighboring harness code before touching anything so I can tell whether this is a real race introduced by the new control-plane env work or just an existing flaky assumption that the parallel run finally exposed.
+
+**Identifying test issues**
+
+I’ve discovered the problem. The new control-plane tests are changing `KATO_DAEMON_STATUS_PATH` and `KATO_DAEMON_CONTROL_PATH` while under the environment lock. However, the daemon-main log test wasn’t using that same lock. I’m going to update `tests/daemon-main_test.ts` to ensure that the log-file cases go through the shared environment lock. This way, the parallel test suite will remain deterministic. Let’s see how this fix works out!
+
+**Inspecting environment tests**
+
+I realize that runDaemonSubprocess uses environment overrides, regardless of configuration. This means daemon-main tests should probably have an environment lock and reset these overrides after testing. To simplify things, I think wrapping all tests that could be impacted by env vars in withLockedEnvironment could help. I need to identify which tests are affected—likely those not already in withLockedEnvironment. It might be easier to inspect the file for the Deno.test names!
+
+**Evaluating test modifications**
+
+I'm considering modifying the code to accept status/control path options, but that doesn't seem ideal. I could run control-plane tests serially with sanitizeOps to prevent interleaving, since they use the withLockedEnvironment lock. I need to check for daemon-main tests that might be sensitive to the environment. There’s a thought about defining a helper function to ensure isolated tests run properly without interference from environment overrides. I’ll inspect the tests to see how they're currently locked.
+**Exploring environment modifications**
+
+I'm thinking about wrapping the helper function in a way that preserves the existing environment. It seems like this approach could clear out control-plane overrides while still allowing logging-level environment overrides to function. That sounds fine! This setup could improve test reliability without losing important configurations for logging. I just need to ensure it's implemented correctly to avoid any issues with dependencies between environment variables.
+**Considering testing environments**
+
+I'm thinking about the use of `withLockedEnvironment` in tests that involve runtime directory environments. It seems like nesting it with `withIsolatedControlPlaneEnv` might lead to deadlocks since the lock is non-reentrant. So, instead, it could be better to create a helper that does both. I’m also considering extending the lock helper in `tests/test_env.ts` to include new environment variables in the snapshot. 
+
+Additionally, I might need to modify tests to use this new helper, especially for tests like `runDaemonSubprocess`. It feels like there's a lot to patch, particularly focusing on the tests after 429.
+**Isolating subprocess tests**
+
+I’m realizing that any `runDaemonSubprocess` test could fail if the control-plane override environment is set to a temporary directory that gets removed during the test. Since these tests derive file stores from environment paths, they could fail if the path becomes unwritable, even without assertions. 
+
+To tackle this, the plan is to isolate all `runDaemonSubprocess` tests in `daemon-main_test` with a lock. I’m thinking about creating a helper function, `withLockedDaemonPathEnv`, to manage environment variables safely during tests. Each test in `Deno.test` body will need to wrap around this helper to ensure a smooth execution. It sounds manageable since there are 11 tests in total!
+**Planning test patches**
+
+I’m considering patching multiple blocks carefully for the 11 tests, which might be a bit large but manageable. Using search and replace patterns could help streamline this process, making it more efficient. It's important to be meticulous, as I want to ensure everything works smoothly without causing any issues. The goal is to make these patches effectively, so testing afterward will confirm that everything functions as expected. It's all about keeping things organized!
+
+# gpt-5.4_2026-03-06_1313_21
+
+I’m fixing the race at the test layer, not in production code: `runDaemonSubprocess()` always consults the control-plane path env vars, so the daemon-main tests need to participate in the same env lock as the control-plane tests. I’m adding a local helper in `daemon-main_test.ts` and routing the subprocess cases through it.
+
+**Planning a large patch**
+
+I need to patch many tests, and I'm thinking of adding a helper to wrap all except perhaps the first one with `withLockedEnvironment`. I could add this helper after `makeUserConfigStore`. For tests already locked, I'd replace `await withLockedEnvironment(async () => { ...` with `await withIsolatedDaemonPathEnv(async () => { ...`. For unwrapped tests, I'd wrap the whole body in `await withIsolatedDaemonPathEnv(async () => { ... existing ...});`. This is a significant patch. To be safe, I’ll patch all `runDaemonSubprocess` tests in this file, being careful not to double-lock.
+**Adding a new helper**
+
+I’m thinking about adding a helper function called `withIsolatedDaemonPathEnv`. This will manage an isolated environment while executing a function. It’ll temporarily delete certain environment variables and then restore them afterward. 
+
+Next, I need to patch each test. Perhaps it would be easier to use Perl, but my instruction is to apply patches only. I’ll break it down into chunks, possibly three patches. I also have to include `allow-env` variables for direct daemon-main tests, so maybe I’ll start by patching the helper and the first few tests.
+
+# gpt-5.4_2026-03-06_1313_41
+
+The safest version is to make every `runDaemonSubprocess` test in `daemon-main_test.ts` use the same env lock and explicitly clear the control-path overrides while it runs. I’m patching that helper and routing the subprocess tests through it now.
+
+**Fixing test issues**
+
+I need to patch the remaining tests starting from 429, along with 524 and 589. I might want to replace them with a helper function. Additionally, I'll check 633 and 681 too. It seems like there's a lot to address, but organizing everything into helper functions could streamline the process! I'll sort through these tests to ensure everything aligns better. Let's see how it all comes together!
+
+**Testing with formats**
+
+I think I need to run tests 524 and 589, using `withIsolatedDaemonPathEnv` which is nested with a lock. It seems like I've cleaned up the old locked versions, so that should be good. I also need to format `daemon-main_test`, which might still be alright. I'll plan to run the targeted `daemon-main` and then the full suite, just to ensure everything's working properly. Let's get to it!
+
+# gpt-5.4_2026-03-06_1316_02
+
+The env race fix is in. I’m formatting `daemon-main_test.ts` and re-running that file first; if it’s stable again, I’ll go back to the full repo run and then refresh the notes.
+
+# gpt-5.4_2026-03-06_1316_08
+
+The race fix has a trivial typing bug: the helper needs to return the wrapped result. I’m patching that and rerunning the daemon-main file immediately.
+
+**Adjusting callback types**
+
+I'm considering how to handle a callback that returns void. Should I make it more generic to allow for void? I think we can define the run function as `run: () => Promise<T> | T`, which gives us some flexibility. Then, I can return from the callback using `return await run();`. I’ll need to implement that patch for clarity and functionality. It's just a bit of type tweaking!
+
+# gpt-5.4_2026-03-06_1316_27
+
+The helper still inferred `void` because the callback body didn’t return the wrapped call. I’m fixing that signature/body properly and rerunning the file again.
+
+**Rerunning tests and coverage**
+
+I'm considering rerunning the full test and coverage suite. It seems like it might be beneficial to run the tests quickly, but I need to weigh if it's necessary given the time involved. However, the documentation does require metrics, so a complete run might be important for that aspect. I’ll plan for a full test suite and thorough coverage to ensure everything is properly verified.
+
+# gpt-5.4_2026-03-06_1316_46
+
+The daemon-main race is fixed and the file is green again. I’m back to the full repo runs now; once those pass, I’ll update the notes with the control-plane improvement and the new verified totals.
+
+# gpt-5.4_2026-03-06_1317_33
+
+I’ve got the full verification numbers now: `436` tests, `76.3%` line, `82.2%` branch, and `control_plane.ts` is out of the hotspot list. I’m patching the notes one more time so the baseline, hotspot section, and remaining focused-coverage todo all match the verified state.
+
+**Reviewing implementation details**
+
+I need to clarify patch numbers and make adjustments to the control-plane logic, maybe improving the item handling as well. I’m considering whether to note the daemon-main environment lock. It's not clear if it’s really necessary. Oh, and I could mention that root tasks now allow for KATO_DAEMON_STATUS_PATH and CONTROL_PATH environment variables. That’s a helpful update, plus they support env keys with direct tests. I also need to inspect the remaining implementation plan.
+
+**Updating behavior config**
+
+I think I need to update the remaining shared behavior config. Maybe I should add “control-plane covered” to the initial item or make that another bullet point. It could make sense to change the initial text to include “runtime control-plane behavior.” Also, I might note that “root test tasks now allow env keys exercised by those direct tests.” It seems like updating the dev.testing text to mention control-plane tests could be good too, especially after adding all those tests. Alright, let’s patch this!
+
+# gpt-5.4_2026-03-06_1317_46
+
+I’m only doing note updates now: new totals, control-plane out of the hotspot bucket, and the remaining-focused-coverage text narrowed accordingly. After that I’ll decide whether there’s enough room left in this turn for one more code slice or whether to stop with the verified control-plane improvement.
+
+**Considering next steps**
+
+I’m thinking about verifying my notes and possibly mentioning the environment allowlist. The user asked me to proceed, which makes me want to continue with another code slice, possibly looking into shared_behavior_config next. But should I stop after this turn? The user’s request to proceed seems clear, so maybe I’ll keep going unless something stops me. I need to inspect shared_behavior_config, but I’m also aware that we've done quite a bit already. Let’s see how we can leverage our time effectively and maybe conduct some targeted tests.
+**Checking runtime hotspots**
+
+I’m glad we’re back in sync; the documentation now accurately reflects the `436`/`76.3`/`82.2` state. Plus, the focused-coverage item doesn't include the completed control-plane work anymore, which is refreshing. I have one more targeted aspect to check, so I'll look at `shared_behavior_config.ts` next. It seems to be the clearest remaining runtime hotspot, and I'm curious to see what insights I can gather from it.
+
+I need to inspect the rest of the shared_behavior_config file. There could be important settings or details in there that I need to consider. It’s a good idea to make sure I understand everything in the file before moving forward. I want to ensure everything is working smoothly and nothing is overlooked. Okay, I’ll take my time checking it out to get a thorough understanding of the configurations!
+
+**Evaluating configuration tests**
+
+I think I need to focus on testing various configurations. This includes creating default shared behavior configurations and checking the save/load paths using home shorthand. I'll also need to consider invalid timezones, invalid frontmatter or flags, non-YAML paths, and ensuring that existing configurations don't get rewritten if they’re already initialized. Looks like the current runtime-config_test might have some earlier tests, so I should search for shared behavior specifics for a comprehensive view.
+**Evaluating shared_behavior_config**
+
+I’m noticing that `shared_behavior_config.ts` lacks its direct parser and default-path serialization cases, which makes it a great option for my next steps. Right now, I’m reviewing the existing coverage in `runtime-config_test.ts` to identify where those cases are missing. My plan is to add just the necessary shared-config cases instead of re-testing the runtime config entirely, saving me time and effort while still ensuring coverage.
+
+# gpt-5.4_2026-03-06_1319_07
+
+`shared_behavior_config.ts` looks like another cheap win, mostly defaults and parser branches. I’m adding direct shared-config tests now for home-shorthand serialization, nested flag/frontmatter parsing, existing-config `ensureInitialized`, and the fail-closed YAML/path branches.
+
+**Executing runtime configuration test**
+
+I need to format and run the targeted runtime configuration test. I’m considering the environment allowlist, which might need to include the root allowlist with just essential directories like HOME, etc. I think we probably don’t need to add any new environment variables. So, my next step is to run the targeted test to ensure everything is set up correctly. Just want to get this right!
+
+# gpt-5.4_2026-03-06_1319_45
+
+The shared-config tests are in. I’m formatting `runtime-config_test.ts` and running that file directly before I decide whether this slice is worth another full-suite pass.
+
+I'm thinking I might need to focus on targeted coverage to see if improvements can be made before implementing the full suite. It feels like a wise strategy to test things out gradually, rather than diving right into everything at once. I wonder if that approach will help identify any necessary adjustments early on. This way, I believe we can make better decisions moving forward, ensuring a smoother process overall. Let’s see how it unfolds!
+
+# gpt-5.4_2026-03-06_1319_52
+
+The shared-config file is green. I’m doing one focused coverage check on `runtime-config_test.ts` now so I can confirm `shared_behavior_config.ts` actually moved before deciding whether to pay for another repo-wide coverage run.
+
+**Considering test coverage**
+
+I’m thinking about whether we need to run the full suite again since we've made changes. It might be necessary because the documentation is outdated. Running full tests for verification is somewhat costly, but it could be worthwhile to ensure everything is functioning correctly. I’m leaning towards completing the full runs, as the user might expect that level of thoroughness. I could consider only running it once more as a backup plan. Let's go ahead!
+
+# gpt-5.4_2026-03-06_1320_03
+
+The shared-config slice was worth it: `shared_behavior_config.ts` moved to `74.8%` line / `81.9%` branch in the focused run. I’m doing one last full-suite and full-coverage verification now so the repo-level numbers and notes end the turn in a consistent state instead of halfway between slices.
+
+**Considering timing for tests**
+
+I think I might need to capture timing information that isn't recorded properly since I'm not using the /usr/bin/time command. I could rerun the command, but it's debatable whether that's necessary. The documentation tracks timings, and we already have a plain test run without timing from the last pass. It might be worth rerunning the tests with timing to ensure we document everything accurately. Although I could infer some timing from outputs, it seems best to rerun tests with /usr/bin/time.
+**Deciding on timing for documentation**
+
+I’m weighing whether it’s necessary to run timed tests since the documentation values accuracy, but maybe counts and coverage can suffice without exact times. Still, the format seems to require those timings. I could use previous approximate times of 8.0 and 11.1, but since counts have changed, it makes sense to remeasure. I think I should proceed with timed commands now, possibly running both tests one after the other, while still including coverage for the documentation.
+
+# gpt-5.4_2026-03-06_1320_36
+
+The last full verification changed the totals again because of the shared-config additions, so I need fresh timings before I touch the notes. I’m doing the timed plain and coverage runs now; after that the docs will be authoritative instead of approximate.
+
+**Considering timed coverage**
+
+I need to think about whether we need timed coverage since we already have coverage without time. It might make sense to rerun timed coverage again. We just did it without timing, but the documentation only provides approximations. Maybe I can use some previous numbers, like 8.0 from the test and 11.1 from prior coverage, but those counts changed. Ultimately, it feels better to rerun the timed coverage just to be sure.
+
+# gpt-5.4_2026-03-06_1320_50
+
+The plain-suite timing is updated. I’m doing the timed coverage run once so the docs can carry the real post-`441` numbers instead of mixing fresh counts with stale timing.
+
+# gpt-5.4_2026-03-06_1321_07
+
+The final numbers are in: `441` tests, `76.5%` line, `82.3%` branch, with `shared_behavior_config.ts` now up to `77.9%` line / `84.5%` branch. I’m doing the last doc sync now so the hotspot list and remaining TODOs reflect the end-of-turn state instead of the earlier mid-pass snapshot.
+
+**Considering final updates**
+
+I think I need to mention the current state, but the user asked me to proceed, not necessarily for a final summary. It feels like stopping after finishing a chunk would be good. Since we've made significant progress, I want to summarize what we've done so far. Also, it might be important to note the checkbox has been updated, while keeping it concise. I should mention that not all tasks are completed and highlight the changed files and tests, plus the modified transcript file.
+**Checking modifications**
+
+I see that the conversation notes are modified, possibly due to the record, but I might not need to mention everything that hasn’t been touched. I definitely need to mention that we modified the note docs, tests, and deno.json files. It could also be good to provide an update on the worktree state. So, I think I'll check the git status to clarify what has been changed and what needs attention moving forward.
+
+# gpt-5.4_2026-03-06_1321_40
+
+The notes are synced to the verified `441`-test baseline. I’m taking a quick status snapshot now and then I’ll close this turn with the concrete outcome, remaining hotspot direction, and the commands that passed.
+
+I'm considering how to structure my output. I think I should use paragraphs or possibly bullet points for clarity. It's important to mention the task checkbox has been updated, probably to indicate progress. I also need to include a verification statement, just to confirm everything is in order. Plus, I should keep the overall length under 70 lines to ensure it’s easily readable. I want to deliver useful and concise information!
+
+# gpt-5.4_2026-03-06_1321_58
+
+I continued the testing-review implementation and kept the task note updated as the verified slices landed. This turn added direct coverage for [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts) in [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts), expanded shared-config coverage in [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts), and hardened [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts) against the new env-sensitive parallel cases by isolating the control-plane path env vars under the shared env lock. I also extended the root test env allowlist in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) for `KATO_DAEMON_STATUS_PATH` and `KATO_DAEMON_CONTROL_PATH`.
+
+The direct improvements were meaningful:
+- [control_plane.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/control_plane.ts) is now `73.8%` line / `82.4%` branch
+- [shared_behavior_config.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/config/shared_behavior_config.ts) is now `77.9%` line / `84.5%` branch
+- repo totals are now `441` passing tests with `76.5%` line / `82.3%` branch
+
+I updated [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) and [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) to match the verified state and to narrow the remaining focused-coverage work to Codex parser branches plus env/status-error-cursor helpers.
+
+Verification:
+- `deno test ... tests/daemon-control-plane_test.ts` passed: `22` tests
+- `deno test ... tests/daemon-main_test.ts` passed: `13` tests
+- `deno test ... tests/runtime-config_test.ts` passed: `23` tests
+- `deno task test --frozen --quiet` passed: `441` tests, `7.99s` real
+- `deno task test:coverage --frozen --quiet` passed: `441` tests, `76.5%` line / `82.3%` branch, `10.69s` real
+
+Unrelated modified worktree file still present:
+- [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md)
+
+# djradon_2026-03-06_1333_27
+
+continue
+
+**Inspecting code coverage**
+
+I'm thinking about running some commentary and then executing parallel tasks. I should open `env.ts`, `status_error_cursor.ts`, and check if there are existing tests or any coverage details missing potentially from branches.
+
+I need to consider if the user sees outputs—probably not, but it's something to summarize later. I'll inspect the runtime utils for `env` and `status_error_cursor`, as those seem simpler. Also, it might be good to run small tests to increase line coverage a bit. Let's dive into that!
+
+# gpt-5.4_2026-03-06_1333_48
+
+I’m moving to the next cheap hotspot rather than broadening the scope. First I’m checking the low-coverage helper modules the task note still calls out, so the next slice lands on small, meaningful branches instead of another large integration area.
+
+**Evaluating testing strategy**
+
+I'm considering creating a directory with no permissions, but I realize that's not very portable. I might want to test with an invalid document using a non-string key list. I wonder about line coverage — maybe I already have that covered. It could be a good idea to check if `saveSuppressedRecentErrorKeys` preserves the trimmed order. Also, I think adding environment helper tests would be wise, and I should look into existing file naming conventions while adding `tests/runtime-env_test.ts`.
+
+# gpt-5.4_2026-03-06_1334_11
+
+There are effectively no direct tests for `apps/runtime/src/utils/env.ts`, so that’s the cleanest next move. I’m adding a small dedicated env-helper test file now rather than trying to force another platform-dependent `status_error_cursor` branch.
+
+**Continuing the summary process**
+
+I need to inspect the current state, maybe by running a git diff to confirm there are no inconsistencies. I should provide commentary before diving into substantial work, and it’s probably a good idea to perform environment tests too. Since the user asked me to continue, I should proceed autonomously. First, I’ll send an update with my understanding and the first step, and then likely use parallel reads while utilizing the commentary channel tool.
+
+# gpt-5.4_2026-03-06_1335_15
+
+I’m continuing from the remaining hotspot list and starting with `apps/runtime/src/utils/env.ts`, since it’s a clean direct-coverage target with little behavioral risk. I’m checking the helper implementation and existing test support, then I’ll add a small isolated test file and rerun targeted plus full verification.
+
+**Creating tests and inspecting patterns**
+
+I need to focus on creating tests and could start by inspecting patterns related to imports and test helpers. Maybe I should look for runtime environment tests that might be similar to what I need. I think using a tool like "rg" could help me search effectively. It's all about finding the right patterns to ensure everything works as intended!
+
+# gpt-5.4_2026-03-06_1335_24
+
+The env helpers are exported cleanly and the shared env lock is already in place, so I’m adding a dedicated test file rather than forcing these branches through higher-level config tests. After that I’ll run the new file directly, then the full suite and coverage, and update the task notes if the hotspot moves enough to be worth recording.
+
+**Designing environment tests**
+
+I'm designing tests for various functions related to environment variables. I want to check that `readOptionalEnv` correctly handles unset variables, empty strings, and non-empty values. For `resolveHomeDir`, I need it to prioritize HOME over USERPROFILE, and return undefined when neither is set. I'm also considering how `expandHomePath` should react to different inputs, like paths with or without tildes. It’s essential to manage restoring the environment state during testing, possibly with a local helper to streamline the process.
+**Creating test files**
+
+I’m thinking about creating a dedicated test file, maybe named `runtime-env_test.ts` within the tests folder. I want to use `assertEquals` for my assertions. For the scenario without a home directory, I'll need to unset both HOME and USERPROFILE. If I'm considering USERPROFILE as a fallback, should I set HOME to an empty string or leave it undefined? I think defining it as undefined is likely the better option to keep things consistent.
+
+# gpt-5.4_2026-03-06_1335_27
+
+I’ve got the minimal branch set for `env.ts`. I’m writing a small dedicated test file now so the behavior is explicit and isolated under the existing env lock, then I’ll run it directly before touching the notes.
+
+# gpt-5.4_2026-03-06_1335_45
+
+The new env-helper file is in. I’m formatting it and running the file directly first so I can catch any permission or cross-platform path assumptions before the full suite.
+
+# gpt-5.4_2026-03-06_1335_51
+
+The direct test run is still in flight. If it stays clean, I’ll go straight to the full test and coverage tasks rather than do another intermediate pass.
+
+**Adapting expectations for path joining**
+
+I need to adjust my expectations about how the standard path joins on POSIX might handle backslashes. It seems like using `join(home, path.slice(2))` produces a path like "/tmp/runtime-home/projects\\current". I should definitely expect that literal outcome. To clarify, I might use `join(home, "projects\\current")`, but adding a comment about this might not be necessary. Instead, I'll just apply the patch without any extra notes.
+
+# gpt-5.4_2026-03-06_1335_57
+
+The direct run exposed a platform detail rather than a logic bug: on this POSIX host, the `~\\...` branch only strips the prefix and preserves the remaining backslashes. I’m tightening the expectation to match the actual implementation, then I’ll rerun the file and the full verification.
+
+**Evaluating test coverage**
+
+I need to run full tests and get coverage details. First, maybe I'll check targeted coverage for env.ts to get some numbers. I can run targeted coverage for new tests, using a command that specifies the path. If I want to know improvement, I should check the output. Since document tasks need updates if file hotspots change, I might want to inspect the deno.json tasks later. For now, targeted coverage seems most straightforward. Let’s proceed with the coverage command!
+
+# gpt-5.4_2026-03-06_1336_15
+
+The isolated env tests are clean. I’m grabbing a targeted coverage reading for `env.ts` so I can tell whether it’s worth updating the hotspot notes, then I’ll rerun the full repo test and coverage tasks.
+
+**Running coverage command**
+
+I'm considering running a targeted coverage command and thinking about using the directory `.coverage-runtime-env`. To do this, I might need to include `--clean --coverage=.coverage-runtime-env`. There's a need to allow writing to `.test-tmp` because coverage typically writes to a directory. The default command might allow that, but I can specify it in the targeted command as `--allow-write=.test-tmp,.coverage-runtime-env`. After running this, I’ll make sure to include the coverage report in the results.
+
+# gpt-5.4_2026-03-06_1336_45
+
+The full suite is running. If this stays green, the only remaining work this turn is syncing the testing note to the new baseline and deciding whether the remaining unchecked item should now drop `env.ts` from the hotspot list.
+
+The full suite is green at `453` tests, so the new env file is integrated cleanly. Coverage is running now; once that’s done I’ll update the notes and task checkbox state to match the new baseline and the reduced hotspot list.
+
+# gpt-5.4_2026-03-06_1337_00
+
+The new coverage run confirms the env-helper slice is worthwhile: repo branch coverage nudged up to `82.4%`, and `apps/runtime/src/utils/env.ts` is no longer a real hotspot. I’m updating the notes now so the remaining unchecked work only points at the still-meaningful gaps.
+
+**Considering update notes**
+
+I need to think about the patch notes and whether to include updated timestamps. It seems like it might not be necessary, especially if the YAML frontmatter isn’t maintained manually. On one hand, consistency is good, but the user might not care about the update mechanism. Previous assistants didn't update this, so I might just leave it as is. I also need to adjust some current timing values and make notes about testing additions and coverage quirks.
+**Updating bullet points**
+
+I want to make sure to mention `apps/runtime/src/utils/env.ts` at 82.4% line and 96.2% branch after the env-helper tests. I need to remove it from the note about "real logic worth more tests" and maybe add that this area is improved by direct tests. The current list says runtime env at 58.8%, but I’m pondering whether to replace it with just status_error_cursor and codex parser. I should also look into updating unchecked item text to reflect progress on items.
+**Revising descriptions and lists**
+
+I think I can rewrite the description to refer to "remaining Codex parser branches, status-error cursor behavior, and other meaningful gaps." The unchecked items can stay as they are for now. I should definitely update the "Current signals visible" bullet point from the initial implementation to mention the env helper tests. I might also consider adding this to either the initial implementation list or the post-implementation bullet list. Lastly, it's worth updating "Former hotspot files improved by direct tests" to include env.ts.
+**Evaluating test coverage**
+
+I'm considering whether to continue with the status_error_cursor tests, even though I know the next candidate includes environment tests. Since the user said to continue, it might be best to keep going with another slice instead of stopping. We have enough time for this! The status_error_cursor has decent coverage, but I need to inspect the source for any missing branches. Maybe we can add tests for parsing failures and invalid key values. Let's make a plan!
+**Planning source inspection**
+
+If I decide to continue, it makes sense to inspect the source first for any additional branches that are easy to test. This way, I can add more tests and update the notes all at once. I’ll start by looking at `apps/cli/src/commands/status_error_cursor.ts`, since I’ve already seen tests without diving into the source. It could be worthwhile to also check `codex/parser.ts`, but I think focusing on status_error_cursor is a more efficient choice. Let’s open the source!
+
+# gpt-5.4_2026-03-06_1337_26
+
+`env.ts` is done, but there’s still an obvious cheap follow-up in `status_error_cursor.ts`. I’m reading that helper next before I touch the notes, because if there are a few clear fail-closed branches left I can fold them into the same verification pass and avoid churn in the docs.
+
+**Clarifying function expectations**
+
+I realize that the function expects `runtimeDir`, and I could use `join(dir, "nested", "runtime")` for that. Then, the save path would be `resolveStatusErrorCursorPath(runtimeDir)` which should create the necessary nested directories. I'm thinking of testing `loadSuppressedRecentErrorKeys` to see if it ignores non-object documents, and I might add one for a top-level array since it seems simple. After that, targeted coverage would be essential. I'll ensure to include commentary before making any edits.
+
+# gpt-5.4_2026-03-06_1337_47
+
+`status_error_cursor.ts` still has a few cheap fail-closed and normalization branches that aren’t directly asserted. I’m adding a small set of focused cases there now: invalid document shapes, max-key truncation, and parent-dir creation on save.
+
+# gpt-5.4_2026-03-06_1338_18
+
+I added two more direct cursor tests. I’m formatting and running that file in isolation first, then I’ll grab a targeted coverage reading to see if it meaningfully moves `status_error_cursor.ts` before I rerun the full repo commands.
+
+**Running tests and coverage**
+
+I realize I need to run the full tests again because things have changed. The total could be around 455, and I'm estimating maybe an 82.6% coverage on branches? It feels like I should conduct the complete suite of tests now to ensure everything is covered properly. Having all this sorted out is important before moving on to anything else. Let’s get that done and see how it turns out!
+
+# gpt-5.4_2026-03-06_1338_37
+
+`status_error_cursor.ts` moved cleanly in the focused run to `77.6%` line / `87.2%` branch, so it’s worth reflecting in the repo baseline. I’m rerunning the full test and coverage tasks now to lock the final numbers before updating the notes.
+
+**Updating metrics and patches**
+
+I’m thinking we can update dev.testing with the current metrics and mention the env/status error cursor tests. That seems enough for now. I need to use apply_patch to patch both. Updating the timestamps could be beneficial, but maybe I should skip that for now. I’ll carefully craft the relevant chunk for dev.testing, which includes a paragraph about adding a direct JSONL writer, control-plane, and Codex parser tests along with the shared env lock.
+
+# gpt-5.4_2026-03-06_1339_23
+
+I’ve got the final verified numbers. I’m patching the testing note and the task note together so the baseline, hotspot list, and remaining unchecked item all stay in sync with the same evidence.
+
+I'm considering how to approach the task of making updates. It seems like I might need to do multiple updates, but I think it’s important to handle each patch carefully. Maybe starting with just one update could be the way to go to ensure I don't overlook anything. I want to make sure each patch is thorough and well-done. Let's see what this will look like as I go along!
+
+# gpt-5.4_2026-03-06_1340_05
+
+The note patches are in. I’m doing one quick readback to make sure the remaining hotspot wording and the new baseline numbers are internally consistent before I close this turn.
+
+**Evaluating testing approach**
+
+I’m considering how to assess the parser's source and existing tests. The line coverage is at 69.1% and branch coverage is 84.7%, which suggests there may be untested lines. Targeted tests could improve that, but it might take time. I wonder if the user prefers iterative commits. It might be better to pause after a coherent piece and check in. Ultimately, I have the capacity to inspect the codex parser quickly if needed, but I’m not sure if we have enough time.
+
+# gpt-5.4_2026-03-06_1340_32
+
+I added direct env-helper coverage in [runtime-env_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-env_test.ts) and expanded cursor fail-closed coverage in [status-error-cursor_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts). That moved [env.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/env.ts) to `82.4%` line / `96.2%` branch and [status_error_cursor.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status_error_cursor.ts) to `77.6%` line / `87.2%` branch. I also synced [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the new verified baseline and removed env helpers from the remaining hotspot list; the unchecked focused-coverage item now mainly points at remaining Codex parser work.
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/runtime-env_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/status-error-cursor_test.ts`
+- `deno task test --frozen --quiet`: `455` passed, `8.14s` real
+- `deno task test:coverage --frozen --quiet`: `455` passed, `76.6%` line / `82.5%` branch, `11.95s` real
+
+Worktree still includes earlier in-progress changes in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json), [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts), [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts), [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts), plus the unrelated transcript file [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md).
+
+# djradon_2026-03-06_1355_29
+
+proceed
+
+**Continuing task inspection**
+
+I need to continue from the current state and inspect the task notes. I might proceed to the next hotspot, like the Codex parser or heavy suites. It’s important to obey the commentary updates, and I should check the existing task state and relevant files. The user has asked me to proceed. So, I’ll focus on the implementation, inspect the worktree, and see if any new tests are available. Let’s start with a commentary update and examine the Codex parser and coverage!
+
+# gpt-5.4_2026-03-06_1355_46
+
+I’m continuing with the remaining focused-coverage item in the task note. The most direct next slice is `apps/daemon/src/providers/codex/parser.ts`, so I’m reviewing its uncovered helper paths and the existing parser tests before I add anything else.
+
+**Inspecting parser source**
+
+I need to take a closer look at the rest of the parser source beyond line 320, as well as the remaining tests. There might be synthetic branches that require attention. It's always a good idea to ensure I've covered everything thoroughly. I'll make a note to open that up later and dive deeper into it. Let's make sure nothing gets overlooked!
+
+# gpt-5.4_2026-03-06_1355_58
+
+The parser already has decent edge-case coverage, so I’m looking for specific helper branches that still only get hit indirectly. I need the rest of the parser and the later synthetic cases in the test file before deciding whether there’s a cheap next gain or if the better move is to switch from coverage work to the heavy-suite review items.
+
+**Figuring out code coverage**
+
+I need to identify uncovered areas in my code. I might consider running targeted coverage tests and comparing my current coverage of 69.1/84.7. Perhaps I could use `deno coverage --include` for this. I want to see if I can pinpoint specific line numbers instead of just a summary, maybe using `deno coverage --detailed`. I should check if `deno coverage --lcov` offers another way, but I'm concerned about time constraints. I suspect the remaining uncovered lines are around older functions like `request_user_input`.
+
+# gpt-5.4_2026-03-06_1356_06
+
+I’ve got enough context to see why the Codex parser is stubborn: most of the obvious `response_item` branches are already covered, and the likely remaining gap is the older top-level `request_user_input` event shape plus a few “ignore/empty” paths. I’m reading the tail of the parser and then I’ll decide whether there’s a cheap direct test or if the better use of time is to switch to the heavy-suite review work.
+
+I'm considering creating an answersRecord with deploy_mode set to "Blue" and using an adhoc_key of "Staging only." This setup will let me accept a deploy decision while including metadata options from the questionEntry. It seems good to accept the adhoc decision without needing the questionEntry. Additionally, I'll need to confirm that I can assert the results, which will be in JSON format when I stringify the answers. It's all coming together!
+
+# gpt-5.4_2026-03-06_1356_36
+
+The oldest uncovered parser path is the legacy top-level `request_user_input` entry shape. I’m adding direct tests for that now, including both the answered-object case and the non-object-answer fallback, because they exercise code that the current `response_item` fixtures don’t touch.
+
+**Running tests on the parser**
+
+I need to set up the format properly to run a targeted test, potentially focusing on coverage for the codex parser file. I'm thinking through how to ensure it's comprehensive yet specific enough to catch any issues. This might take a bit of time, but hopefully, it'll provide valuable insights! I need to step through the process methodically to avoid missing anything crucial. Let's see how this goes!
+
+# gpt-5.4_2026-03-06_1357_00
+
+The new legacy-shape parser cases are in. I’m formatting that test file and running it directly first; if the parser percentage actually moves, I’ll rerun full verification and sync the notes one more time.
+
+**Assessing test coverage**
+
+I'm looking at our parser tests, and it seems like we're getting good targeted coverage, possibly pushing the overall percentage above 69, maybe even 70+. I definitely need to rerun the full suite to verify this. Right now, we have 457 tests, so I’ll note any changes in the parser line percent in the report. It could shift from around 69.1 to maybe 72. Let’s run that full test again and see what we find!
+
+# gpt-5.4_2026-03-06_1357_11
+
+The targeted parser run was worth it: in isolation, `parser.ts` moved to `87.4%` line / `85.4%` branch, which means the legacy `request_user_input` path was a real blind spot. I’m rerunning the full repo test and coverage tasks now so I can update the baseline and the remaining hotspot wording with the actual repo-wide number.
+
+**Updating task notes**
+
+I’m thinking about updating the task notes. I want to post the initial verification numbers. Also, I've noticed that the Codex parser is now at 87.4 for the line and 85.4 for the branch after adding those edge-case tests for the legacy request_user_input and so on. That’s a big change from the previous version, which was at 69.1. It feels significant, and I want to make sure that’s noted!
+**Evaluating coverage triage**
+
+I'm thinking about whether to add `apps/runtime/src/utils/hash.ts (68.3%)` and `apps/cli/src/parser.ts (67.5%)`. These weren't the initial hotspots, but they might fit in if we're trying to avoid an empty bucket, which feels awkward. Maybe I can change the wording to clarify the three buckets and suggest that we list plausible candidates, even if they're not fully reviewed. I have to be careful not to assert anything with certainty though.
+**Analyzing coverage buckets**
+
+I’m considering the three existing buckets, but it feels off since none of the original hotspots remain. A list with no items looks odd. I could rephrase it to "Real logic worth more tests after the current focused pass:" and suggest `apps/runtime/src/utils/hash.ts (68.3%)` and `apps/cli/src/parser.ts (67.5%)`. Adding the parser feels like a low-risk move since it's definitely a real logic component. Maybe I should only list the parser for simplicity, but that might not satisfy the "at least three buckets" requirement.
+**Updating coverage notes**
+
+I’m considering marking the focused coverage item as "X" to indicate that I've addressed the initial targeted gaps. This seems like a clear step to ensure everything is documented properly. By revising the notes, I'm making it easier to see what has changed since the focus has shifted to these items. However, I want to make sure that the updates accurately reflect what I’ve accomplished and highlight any previous gaps that have now been addressed.
+
+# gpt-5.4_2026-03-06_1357_59
+
+The Codex parser moved enough that the notes need one more sync. I’m updating the baseline and marking the original focused-coverage hotspot pass as complete, since the parser/env/cursor items that were still open are now directly covered.
+
+# gpt-5.4_2026-03-06_1358_32
+
+The original hotspot pass is now closed out in the task note. I’m doing a quick readback of the new baseline and bucket wording, then I’ll stop unless the note needs one more correction.
+
+**Deciding on next steps**
+
+I'm weighing whether to continue or wrap up now. The user may want to proceed, as we've completed the initial focused coverage. The next tasks involve reviewing and refactoring a heavy suite. I think I could suggest next likely targets to the user, like reviewing `apps/cli/src/parser.ts` or `apps/runtime/src/utils/hash.ts`. I’ll include that the full suite has 457 tests passed, with scores of 77.4/82.5, and the Codex parser at 87.4/85.4.
+**Updating task notes**
+
+I've updated the task notes and checked off the focused coverage item. Now I want to mention other remaining candidates I might need to tackle next. There are also untouched worktree modifications that still exist, so I should keep that in mind. I think it's best to keep this concise for clarity, so the user can easily see what’s next on the list.
+
+# gpt-5.4_2026-03-06_1358_51
+
+I continued with the last original focused-coverage hotspot and added legacy `request_user_input` coverage in [codex-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/codex-parser_test.ts). That moved [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/providers/codex/parser.ts) to `87.4%` line / `85.4%` branch in the full repo coverage run, so the original parser/env/cursor hotspot set is now directly covered.
+
+I also synced [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the new baseline and marked the remaining focused-coverage checkbox complete. The next meaningful buckets in the task note are now the heavier suite/refactor review items plus lower-priority logic gaps like [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts) and [hash.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/hash.ts).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/codex-parser_test.ts`
+- `deno task test --frozen --quiet`: `457` passed, `8.39s` real
+- `deno task test:coverage --frozen --quiet`: `457` passed, `77.4%` line / `82.5%` branch, `9.54s` real
+
+Current worktree still includes the earlier in-progress files in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json), [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts), [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts), [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts), [status-error-cursor_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts), [runtime-env_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-env_test.ts), and the unrelated transcript file [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md).
+
+# djradon_2026-03-06_1539_31
+
+proceed
+
+**Continuing task progress**
+
+I need to keep going and follow the instructions, starting with a commentary update before moving into the substantial work. The user has confirmed I can proceed. My focus now is on the heavy suite review items. I could either address code changes related to the heavy suite's repeated setup or work on areas like the CLI parser or hash. The user expects implementation, so I'll likely review the heavy suites to identify candidates for merging or removing, which might help refactor for testability.
+**Reviewing heavy suites**
+
+I need to inspect the heavy suites, specifically `tests/daemon-cli_test.ts` and `tests/daemon-runtime_test.ts`, to check for repeated setups or runtime duplications. Gathering context here is key. I could also look at `apps/cli/src/parser.ts`, which has low coverage, as a potential logic gap. The task note emphasizes reviewing heavy suites for repeated setups and overlapping scenarios, focusing on analysis rather than immediate code edits. Since the user said to proceed, I might focus on the next actionable step that advances the task.
+**Planning the review process**
+
+I can conduct a review and document my findings, but I also want to ensure progress on the task. Reviewing heavy suites might help, and I could note any check items. There might be duplicated setups in `daemon-cli_test.ts` related to workspace commands and config scaffolding, which could benefit from extracting helper functions. However, modifying tests without solid evidence could be risky. Alternatively, I could focus on logic gaps in `apps/cli/src/parser.ts` and `apps/runtime/src/utils/hash.ts`, adding direct tests for these areas to address them meaningfully.
+**Addressing logic gaps in tests**
+
+I need to tackle some new logic gaps and consider updating the task notes with any new optional items. But for now, I can add meaningful coverage to the next low-coverage files. I need to choose between `parser.ts` and `hash.ts`. Upon inspecting `parser.ts`, it appears to be a CLI argument parser with low coverage, which suggests that adding tests there could be beneficial. I should check for existing tests in `daemon-cli_test` and `improved-status_test` to possibly add targeted tests for different variants or errors.
+**Inspecting coverage and parser code**
+
+I need to identify the uncovered branches, but there aren't direct coverage details for those lines. I could run `deno test --clean --coverage=... tests/daemon-cli_test.ts tests/improved-status_test.ts`, but getting too much detail might not be helpful. Instead, I think it's better to inspect the parser code first to understand it better. I should update my commentary and maybe look at the parser and the related tests in parallel for a more efficient approach.
+
+# gpt-5.4_2026-03-06_1539_57
+
+I’m moving past the original hotspot pass and taking the next cheap logic gap: the CLI argument parser. I’m reading the parser and its existing test coverage first so I can add direct cases instead of piling more behavior onto the broad CLI integration file.
+
+# gpt-5.4_2026-03-06_1540_04
+
+The CLI parser has a lot of subcommand-specific validation that’s still only exercised through the large CLI test file. I’m reading the rest of `parser.ts` now; if the branch shapes are clean, I’ll split a direct parser-only test file out of those broad cases.
+
+**Designing test assertions**
+
+I'm thinking we might need to use a combination of `assertThrows` and `assertEquals` for our tests. I wonder about creating a helper like `assertCommand` to simplify things. Avoiding nested bullets might be a good idea too. I need to maximize branches in our test design, which includes handling cases like no arguments leading to help, version errors, valid and invalid topics, and various commands returning expected outcomes. Maybe we can loop for dynamic Deno tests or simply assert with an array.
+
+# gpt-5.4_2026-03-06_1540_31
+
+I’m splitting parser-only coverage out into a dedicated test file instead of adding more branch assertions to the big CLI integration suite. The goal is to cover help/usage/arity/format paths directly so `apps/cli/src/parser.ts` stops depending on runtime harness tests for basic argument validation.
+
+**Testing and parsing**
+
+I need to run formatting and direct tests first. After that, I might consider targeted coverage to examine parser.ts. It seems like I’ll need to run a parse test or two. It’s all about ensuring everything is functioning as it should be, so I want to be thorough. Hopefully, this will give me a clearer understanding of how well the code is working overall. Let’s get to it!
+
+# gpt-5.4_2026-03-06_1541_13
+
+The parser-only test file is in. I’m formatting and running it directly first; if it behaves, I’ll grab a targeted parser coverage reading before deciding whether this is enough to justify another full repo pass and note update.
+
+**Deciding on parser updates**
+
+The targeted parser is quite extensive. I need to decide whether to rerun the full suite and update the documentation. It seems likely that yes, I should, because the parser was still in the remaining real-logic bucket. A full run could maybe increase line coverage from 77.4 to perhaps 78.x. So, I think I’ll go ahead and proceed with it. It feels like the right move!
+
+# gpt-5.4_2026-03-06_1541_35
+
+The direct parser file did exactly what I wanted: `apps/cli/src/parser.ts` is `85.3%` line / `89.2%` branch in the focused run, which should materially change the repo-wide low-coverage list. I’m rerunning the full suite and full coverage now so I can update the notes and remove it from the remaining-logic bucket if the full report holds.
+
+**Evaluating parser logic**
+
+I'm considering the logic in `start.ts` and `workspace_init.ts`. They might still be wrappers with some logic. That's acceptable. After the direct parser pass, I think the next small target could be those scripts. I need to update the discussion bullet for the parser to reflect new results from parser-only tests. I should also include a new bullet about the direct CLI parser tests covering help, usage, arity, and format validation. It might be good to mention these tests in the dev.testing section too.
+
+# gpt-5.4_2026-03-06_1542_10
+
+The parser moved enough that it should come off the remaining-logic list. I’m updating the notes again so the baseline, hotspot buckets, and direct-test inventory all reflect the parser-only pass instead of the earlier state.
+
+**Checking consistency**
+
+I'm thinking I need to check for consistency in my work. It seems like a good idea to use read snippets as a way to verify what I've done. I could also run a git status to see if everything is aligned. It feels important to ensure that everything matches up. I don't want any surprises down the line, so I’ll take the time for this check!
+
+# gpt-5.4_2026-03-06_1542_40
+
+The parser is off the low-coverage list now, and I’ve shifted the “real logic” bucket to the next likely candidates. I’m doing a quick consistency pass on those note edits and then I’ll stop unless something looks off.
+
+**Deciding next steps**
+
+I'm trying to decide whether to continue or stop for now. I think we’ve completed another chunk, which feels sufficient. I should summarize that we have a new cli-parser_test file and parser coverage with a suite of 474 tests passed, at 78.0/83.4. I should also note that the docs have been updated. It might be worthwhile to mention next targets like start, workspace_init, and hash, while keeping it concise. Additionally, I want to highlight that the worktree includes earlier changes and that tests have been run.
+
+# gpt-5.4_2026-03-06_1542_57
+
+I added direct CLI parser coverage in [cli-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-parser_test.ts). That moved [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts) to `93.6%` line / `96.1%` branch in the full repo coverage run, so it’s no longer in the remaining low-coverage logic bucket.
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the new verified baseline and shifted the “real logic worth more tests” list to the next likely candidates: [hash.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/hash.ts), [start.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/start.ts), and [workspace_init.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_init.ts).
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp tests/cli-parser_test.ts`
+- `deno task test --frozen --quiet`: `474` passed, `8.97s` real
+- `deno task test:coverage --frozen --quiet`: `474` passed, `78.0%` line / `83.4%` branch, `9.07s` real
+
+Current worktree still includes the earlier in-progress files in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json), [codex-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/codex-parser_test.ts), [runtime-config_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-config_test.ts), [daemon-main_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-main_test.ts), [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts), [status-error-cursor_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-error-cursor_test.ts), [runtime-env_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/runtime-env_test.ts), plus the unrelated transcript file [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md).
+
+# djradon_2026-03-06_1754_23
+
+commit message
+
+# gpt-5.4_2026-03-06_1754_32
+
+```text
+test: add direct cli parser coverage and refresh metrics
+
+Add parser-only tests for help routing, usage errors, arity checks, and
+format validation so CLI argument coverage no longer depends on the broad
+daemon CLI runtime suite. Refresh testing notes with the verified 474-test
+baseline and updated coverage hotspots after the parser and legacy Codex
+request_user_input coverage gains.
+```

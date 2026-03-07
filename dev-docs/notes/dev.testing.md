@@ -38,8 +38,9 @@ The root `test` and `test:coverage` tasks now use Deno module parallelism by
 default. Local verification on 2026-03-06 stayed deterministic with both
 `deno task test --frozen --quiet` and `deno task test:coverage --frozen --quiet`,
 including after adding direct JSONL writer, session-twin mapper,
-runtime-config, path-policy, launcher, status-command, and Codex parser tests
-plus a shared env lock in `tests/test_env.ts` for env-mutating cases.
+runtime-config, shared-behavior config, path-policy, launcher, status-command,
+control-plane, env-helper, status-error-cursor, CLI parser, and Codex parser
+tests plus a shared env lock in `tests/test_env.ts` for env-mutating cases.
 
 GitHub CI uses a split gate:
 
@@ -76,9 +77,9 @@ instead of rerunning the whole suite.
 
 Current local timings from 2026-03-06:
 
-- `deno task test --frozen --quiet`: `427` passing tests, about `8.5s` real
-- `deno task test:coverage --frozen --quiet`: `427` passing tests,
-  `76.1%` line coverage, `82.0%` branch coverage, about `10.1s` real
+- `deno task test --frozen --quiet`: `474` passing tests, about `9.0s` real
+- `deno task test:coverage --frozen --quiet`: `474` passing tests,
+  `78.0%` line coverage, `83.4%` branch coverage, about `9.1s` real
 
 Current coverage-report caveat:
 
