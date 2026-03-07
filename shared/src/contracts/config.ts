@@ -70,6 +70,12 @@ export interface CliConfig {
   logging: RuntimeLoggingConfig;
 }
 
+export interface WebConfig {
+  schemaVersion: 1;
+  hostname: string;
+  port: number;
+}
+
 export interface RuntimeConfig {
   schemaVersion: 1;
   runtimeDir: string;

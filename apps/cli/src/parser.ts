@@ -231,6 +231,116 @@ function parseStatus(rest: string[]): DaemonCliIntent {
   };
 }
 
+function parseWebInit(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    string: ["host", "port"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "web" };
+  }
+
+  requireNoPositionals("web-init", toPositionals(parsed));
+  const hostname =
+    typeof parsed.host === "string" && parsed.host.trim().length > 0
+      ? parsed.host.trim()
+      : undefined;
+  let port: number | undefined;
+  if (parsed.port !== undefined) {
+    port = Number(parsed.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      throw new CliUsageError(
+        "Command 'web init' requires --port to be an integer between 1 and 65535",
+      );
+    }
+  }
+  return {
+    kind: "command",
+    command: {
+      name: "web-init",
+      ...(hostname ? { hostname } : {}),
+      ...(port !== undefined ? { port } : {}),
+    },
+  };
+}
+
+function parseWebStart(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "web" };
+  }
+
+  requireNoPositionals("web-start", toPositionals(parsed));
+  return { kind: "command", command: { name: "web-start" } };
+}
+
+function parseWebStop(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "web" };
+  }
+
+  requireNoPositionals("web-stop", toPositionals(parsed));
+  return { kind: "command", command: { name: "web-stop" } };
+}
+
+function parseWebStatus(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help", "json"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "web" };
+  }
+
+  requireNoPositionals("web-status", toPositionals(parsed));
+  return {
+    kind: "command",
+    command: { name: "web-status", asJson: parsed.json === true },
+  };
+}
+
+function parseWeb(rest: string[]): DaemonCliIntent {
+  const [subcommand, ...subRest] = rest;
+  const usage = "Usage: kato web <init|start|stop|status> [options]";
+  if (!subcommand) {
+    throw new CliUsageError(usage);
+  }
+
+  if (subcommand === "--help" || subcommand === "-h") {
+    if (subRest.length > 0) {
+      throw new CliUsageError(usage);
+    }
+    return { kind: "help", topic: "web" };
+  }
+
+  if (subcommand === "init") {
+    return parseWebInit(subRest);
+  }
+  if (subcommand === "start") {
+    return parseWebStart(subRest);
+  }
+  if (subcommand === "stop") {
+    return parseWebStop(subRest);
+  }
+  if (subcommand === "status") {
+    return parseWebStatus(subRest);
+  }
+
+  throw new CliUsageError(`Unknown web subcommand: ${subcommand}`);
+}
+
 function parseExport(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
@@ -537,6 +647,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
         topic === "restart" ||
         topic === "stop" ||
         topic === "status" ||
+        topic === "web" ||
         topic === "workspace-init" ||
         topic === "workspace-register" ||
         topic === "workspace-list" ||
@@ -550,7 +661,7 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
     }
 
     throw new CliUsageError(
-      "Usage: kato help [init|start|restart|stop|status|workspace-init|workspace-register|workspace-list|workspace-unregister|export|clean|user]",
+      "Usage: kato help [init|start|restart|stop|status|web|workspace-init|workspace-register|workspace-list|workspace-unregister|export|clean|user]",
     );
   }
 
@@ -568,6 +679,9 @@ export function parseDaemonCliArgs(args: string[]): DaemonCliIntent {
   }
   if (commandName === "status") {
     return parseStatus(rest);
+  }
+  if (commandName === "web") {
+    return parseWeb(rest);
   }
   if (commandName === "workspace") {
     const [subcommand, ...subRest] = rest;

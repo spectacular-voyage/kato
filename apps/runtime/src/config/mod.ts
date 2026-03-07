@@ -43,3 +43,12 @@ export {
   UserConfigFileStore,
   validateAndNormalizeParticipantUsername,
 } from "./user_config.ts";
+export type {
+  EnsureWebConfigResult,
+  WebConfigStoreLike,
+} from "./web_config.ts";
+export {
+  createDefaultWebConfig,
+  resolveDefaultWebConfigPath,
+  WebConfigFileStore,
+} from "./web_config.ts";

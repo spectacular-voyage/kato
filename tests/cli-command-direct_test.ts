@@ -12,6 +12,8 @@ import {
   createDefaultRuntimeConfig,
   createDefaultSharedBehaviorConfig,
   createDefaultStatusSnapshot,
+  createDefaultWebConfig,
+  createDefaultWebServerStatus,
   type LogRecord,
   type LogSink,
   StructuredLogger,
@@ -203,6 +205,32 @@ function makeCommandContext(root: string, options: {
     defaultRuntimeConfig: runtimeConfig,
     defaultSharedConfig: sharedConfig,
     defaultCliConfig: cliConfig,
+    webConfigStore: {
+      load() {
+        return Promise.resolve(createDefaultWebConfig());
+      },
+      ensureInitialized() {
+        return Promise.resolve({
+          created: false,
+          config: createDefaultWebConfig(),
+          path: join(katoDir, "web", "kato-web-config.yaml"),
+        });
+      },
+    },
+    webConfig: createDefaultWebConfig(),
+    webStatusStore: {
+      load() {
+        return Promise.resolve(createDefaultWebServerStatus(NOW));
+      },
+      save() {
+        return Promise.resolve();
+      },
+    },
+    webLauncher: {
+      launchDetached() {
+        return Promise.resolve(9002);
+      },
+    },
     statusStore: statusStore.store,
     controlStore: {
       list() {

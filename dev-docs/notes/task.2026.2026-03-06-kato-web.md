@@ -471,9 +471,9 @@ Validation workflow before merge:
       `[[dev.codebase-overview]]`:
       `apps/web` is no longer only a read-only status surface; it now owns a
       small set of local operator workflows.
-- [ ] Scaffold `apps/web` as a Fresh app while preserving existing
+- [x] Scaffold `apps/web` as a Fresh app while preserving existing
       framework-agnostic exports under `apps/web/src`.
-- [ ] Add and document a separate web lifecycle model:
+- [x] Add and document a separate web lifecycle model:
       web can run without daemon, `kato start` stays daemon-only, and
       `kato web ...` owns web-server lifecycle commands.
 - [ ] Move reusable non-CLI-specific status view models into `shared/src` so
@@ -481,12 +481,14 @@ Validation workflow before merge:
 - [ ] Extract reusable mutation services from the current CLI command handlers
       so CLI and web share the same business rules for:
       workspace register/update, user settings/mappings, and maintenance clean.
-- [ ] Introduce a dedicated web config/store for bind settings and optional
+- [x] Introduce a dedicated web config/store for bind settings and optional
       auth, instead of overloading participant/user settings config.
-- [ ] Make web startup fail closed until explicit web setup has completed:
+- [x] Make web startup fail closed until explicit web setup has completed:
       non-interactive `kato init` must not silently configure the web app, and
       `kato web start` must refuse startup while web config/bootstrap is absent.
-- [ ] Add `apps/web` loader modules for:
+- [x] Add `apps/web` loader modules for:
+      initial status snapshot loader for the Summary page.
+- [ ] Expand `apps/web` loader modules for:
       status snapshot, workspace registry/config validation, user config,
       persistent session metadata, recording history, and log reads.
 - [ ] Implement the Summary route first so it mirrors `kato status --live` as

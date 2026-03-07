@@ -8,15 +8,18 @@ export {
   createDefaultRuntimeMarkdownFrontmatterConfig,
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
+  createDefaultWebConfig,
   type EnsureCliConfigResult,
   type EnsureRuntimeConfigResult,
   type EnsureSharedBehaviorConfigResult,
   type EnsureUserConfigResult,
+  type EnsureWebConfigResult,
   resolveDefaultCliConfigPath,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
+  resolveDefaultWebConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
@@ -25,6 +28,8 @@ export {
   UserConfigFileStore,
   type UserConfigStoreLike,
   validateAndNormalizeParticipantUsername,
+  WebConfigFileStore,
+  type WebConfigStoreLike,
 } from "./config/mod.ts";
 
 export type {
@@ -146,3 +151,15 @@ export {
 } from "./utils/exports_log.ts";
 export { hashStringFNV1a, stableStringify } from "./utils/hash.ts";
 export { normalizeText, utf8ByteLength } from "./utils/text.ts";
+export type {
+  WebProcessLauncherLike,
+  WebServerStatus,
+  WebServerStatusStoreLike,
+} from "./web/mod.ts";
+export {
+  createDefaultWebServerStatus,
+  DenoDetachedWebLauncher,
+  isProcessAlive,
+  resolveDefaultWebStatusPath,
+  WebServerStatusFileStore,
+} from "./web/mod.ts";

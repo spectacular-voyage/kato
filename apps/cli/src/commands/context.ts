@@ -4,6 +4,7 @@ import type {
   CliConfig,
   RuntimeConfig,
   SharedBehaviorConfig,
+  WebConfig,
 } from "@kato/shared";
 import type {
   CliConfigStoreLike,
@@ -11,6 +12,9 @@ import type {
   DaemonProcessLauncherLike,
   DaemonStatusSnapshotStoreLike,
   SharedBehaviorConfigStoreLike,
+  WebConfigStoreLike,
+  WebProcessLauncherLike,
+  WebServerStatusStoreLike,
 } from "@kato/runtime";
 import type { WritePathPolicyGateLike } from "@kato/runtime";
 import type {
@@ -29,6 +33,10 @@ export interface DaemonCliCommandContext {
   defaultRuntimeConfig: RuntimeConfig;
   defaultSharedConfig: SharedBehaviorConfig;
   defaultCliConfig: CliConfig;
+  webConfigStore: WebConfigStoreLike;
+  webConfig?: WebConfig;
+  webStatusStore: WebServerStatusStoreLike;
+  webLauncher: WebProcessLauncherLike;
   statusStore: DaemonStatusSnapshotStoreLike;
   controlStore: DaemonControlRequestStoreLike;
   daemonLauncher: DaemonProcessLauncherLike;
