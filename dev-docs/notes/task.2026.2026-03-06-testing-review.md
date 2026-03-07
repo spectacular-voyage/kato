@@ -2,7 +2,7 @@
 id: a7kdxc803xvjsgm8lx4u04l
 title: 2026 03 06 Testing Review
 desc: ""
-updated: 1772813819197
+updated: 1772870234942
 created: 1772809486844
 ---
 
@@ -440,3 +440,6 @@ Review work should capture before/after evidence for:
       commands, how to inspect hotspots, when to use targeted versus full runs,
       any `--parallel` / CI guidance adopted from this review, and the agreed
       security-testing workflow/tooling.
+
+
+
