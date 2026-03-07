@@ -51,7 +51,7 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
-import { makeTestTempDir, withTestTempDir } from "./test_temp.ts";
+import { withTestTempDir } from "./test_temp.ts";
 
 type DaemonCliRuntimeConfigFixture = DaemonRuntimeConfig & {
   statusPath: string;
@@ -1211,12 +1211,6 @@ Deno.test(
         output,
         `○ Invalid.Proj -> ${invalidWorkspaceId} (invalid:`,
       );
-      assertStringIncludes(
-        output,
-        "invalid: Unsupported workspace config k",
-      );
-      assertStringIncludes(output, "root: ");
-      assertStringIncludes(output, "config: ");
     });
   },
 );

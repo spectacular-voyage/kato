@@ -2954,3 +2954,466 @@ Found 19 problems
 # gpt-5.4_2026-03-06_2159_05
 
 I’m fixing the lint regressions directly in the test files: remove unnecessary `async` from promise-returning stubs, drop the unused `makeTestTempDir` import, and then rerun a focused lint pass on the touched tests.
+
+# gpt-5.4_2026-03-06_2159_16
+
+I’ve isolated the regressions to pure lint mechanics, not behavior: mostly promise-returning test doubles written with unnecessary `async`, plus one unused import and one `async` callback with no `await`. I’m patching only those signatures and then I’ll run `deno lint` on the touched test files.
+
+# gpt-5.4_2026-03-06_2159_31
+
+I’ve got the exact signatures. I’m patching the test doubles to return `Promise.resolve(...)` / `Promise.reject(...)` explicitly, which keeps the interfaces honest and satisfies `require-await` without changing behavior.
+
+# gpt-5.4_2026-03-06_2159_58
+
+The signature cleanup is patched. I’m formatting the touched files, then running `deno lint` specifically on the files that were called out, followed by a focused test run to make sure the promise-shape edits didn’t change behavior.
+
+# gpt-5.4_2026-03-06_2200_06
+
+`deno lint` is clean on the touched files. The focused test run is still in flight; once that finishes I’ll confirm the exact result so you can close out the lint regression confidently.
+
+# gpt-5.4_2026-03-06_2200_11
+
+The lint regressions are fixed in [cli-command-direct_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-command-direct_test.ts), [daemon-control-plane_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-control-plane_test.ts), and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+I removed unnecessary `async` from promise-returning test doubles/callbacks, replaced them with explicit `Promise.resolve(...)` / `Promise.reject(...)`, and dropped the unused `makeTestTempDir` import.
+
+Verification:
+- `deno lint tests/cli-command-direct_test.ts tests/daemon-control-plane_test.ts tests/daemon-cli_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_DAEMON_STATUS_PATH,KATO_DAEMON_CONTROL_PATH tests/cli-command-direct_test.ts tests/daemon-control-plane_test.ts`
+
+Both passed.
+
+# djradon_2026-03-06_2204_43
+
+ERRORS 
+
+runDaemonCli status reports workspace validity with mappings => ./tests/daemon-cli_test.ts:1101:6
+error: AssertionError: Expected actual: "kato CLI (v0.2.2)  ·  kato daemon (vunknown): running (pid: 4242)  ·  refreshed 02:00:00
+─────────────────────────────────────────────────────────────────────────────────────────────────
+recordings: 0 active                                  memory: unavailable
+sessions: 0 active, 0 stale
+workspaces: 1 active, 1 invalid
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Workspaces (1 active, 1 invalid)
+
+  ○ Invalid.Proj -> c59899a1-9a33-4274-bf1a-8b9822e318a0 (invalid: Unsupported workspace confi...
+     root: /home/djradon/hub/spectacular-voyage/kato/.test-tmp/daemon-cli-status-workspaces-57...
+     config: /home/djradon/hub/spectacular-voyage/kato/.test-tmp/daemon-cli-status-workspaces-...
+
+  ● Valid.Proj -> 87d82281-0ef2-4e8f-bcd9-1d93e9f61a8a (valid)
+     root: /home/djradon/hub/spectacular-voyage/kato/.test-tmp/daemon-cli-status-workspaces-57...
+     config: /home/djradon/hub/spectacular-voyage/kato/.test-tmp/daemon-cli-status-workspaces-...
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Recent Errors (1)
+
+  [2026-02-22 02:00] ERROR operational workspace.config.invalid · Invalid.Proj (c59899a1-9a33-...
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Sessions
+
+  (none active — run with --all to show 0 stale)
+" to contain: "invalid: Unsupported workspace config k".
+  throw new AssertionError(msg);
+        ^
+    at assertStringIncludes (https://jsr.io/@std/assert/1.0.13/string_includes.ts:29:9)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1214:7
+    at async withTestTempDir (file:///home/djradon/hub/spectacular-voyage/kato/tests/test_temp.ts:55:12)
+    at async file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1104:5
+
+ FAILURES 
+
+runDaemonCli status reports workspace validity with mappings => ./tests/daemon-cli_test.ts:1101:6
+
+# gpt-5.4_2026-03-06_2204_50
+
+I’m checking the failing status assertion in `daemon-cli_test.ts` against the current rendered output. This looks like a brittle substring match on a wrapped/truncated error message, so I’ll tighten it to something stable and re-run the focused CLI test file.
+
+# gpt-5.4_2026-03-06_2205_07
+
+The failure is the kind I expected: the broad CLI integration test is asserting on the tail of a line that gets truncated by status rendering. I’m narrowing that assertion to the stable integration signal, `workspace.config.invalid`, and keeping the exact invalid-reason coverage in the smaller status rendering tests.
+
+# gpt-5.4_2026-03-06_2205_11
+
+I’ve made the assertion integration-safe. I’m formatting that file and rerunning the focused `daemon-cli_test.ts` suite so we confirm the failure is gone without broadening the change any further.
+
+# gpt-5.4_2026-03-06_2205_15
+
+The file formatted cleanly. The focused CLI suite is running now; I’m waiting for that one result, since this was a single brittle assertion fix.
+
+# gpt-5.4_2026-03-06_2205_19
+
+That failure is fixed in [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+The issue was a brittle assertion against the truncated tail of the invalid-workspace line. I changed it to assert on stable integration signals instead:
+- `Recent Errors (1)`
+- `workspace.config.invalid`
+
+Verification:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_DAEMON_STATUS_PATH,KATO_DAEMON_CONTROL_PATH,KATO_CLAUDE_SESSION_ROOTS,KATO_CODEX_SESSION_ROOTS,KATO_GEMINI_SESSION_ROOTS,KATO_DAEMON_MAX_MEMORY_MB,KATO_CONFIG_PATH,KATO_ALLOWED_WRITE_ROOT,KATO_ALLOWED_WRITE_ROOTS_JSON tests/daemon-cli_test.ts`
+
+That focused suite passed: `55` tests, `0` failed.
+
+# djradon_2026-03-06_2205_22
+
+Did you update the task note to-do items?
+
+# gpt-5.4_2026-03-06_2205_29
+
+I’m checking the task note’s checkbox section directly. If the refactor-progress checkboxes weren’t updated to match the latest verified slices, I’ll fix that now instead of just answering from memory.
+
+# gpt-5.4_2026-03-06_2205_39
+
+Not the checkbox itself.
+
+In [task.2026.2026-03-06-testing-review.md:323](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md#L323), `Run a targeted refactor-for-testability pass...` is still unchecked. That was intentional: I updated the progress bullets earlier in the note to record the verified `daemon-runtime_test.ts`, `daemon-cli_test.ts`, and `provider-ingestion_test.ts` refactor slices, but I didn’t mark the overall plan item done because that broader pass is still in progress.
+
+So:
+- `Discussion`/progress notes: updated
+- `Implementation Plan` checkbox: still open
+
+If you want, I can make that more explicit by adding `in progress` wording under the checkbox.
+
+# gpt-5.4_2026-03-06_2205_42
+
+Not the checkbox itself.
+
+In [task.2026.2026-03-06-testing-review.md:323](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md#L323), `Run a targeted refactor-for-testability pass...` is still unchecked. That was intentional: I updated the progress bullets earlier in the note to record the verified `daemon-runtime_test.ts`, `daemon-cli_test.ts`, and `provider-ingestion_test.ts` refactor slices, but I didn’t mark the overall plan item done because that broader pass is still in progress.
+
+So:
+- `Discussion`/progress notes: updated
+- `Implementation Plan` checkbox: still open
+
+If you want, I can make that more explicit by adding `in progress` wording under the checkbox.
+
+# djradon_2026-03-06_2206_19
+
+That's okay, proceed with the next slice
+
+# gpt-5.4_2026-03-06_2206_27
+
+I’m continuing in `provider-ingestion_test.ts`. The next slice is to push the new runner/state-store helpers through the remaining local `makeRunner` closures, starting with the cursor-reset and Gemini-resume clusters where the duplication is highest.
+
+# gpt-5.4_2026-03-06_2206_38
+
+I’ve got a clean second provider-ingestion slice: there are four remaining local `makeRunner` factories and a few repeated `PersistentSessionStateStore` constructions in the source-change, missing-twin bootstrap, and Gemini anchor tests. I’m converting those to the shared helpers next, which should finish the obvious persisted-state duplication without touching the one-off parse-error or duplicate-discovery cases.
+
+# gpt-5.4_2026-03-06_2206_44
+
+I’ve pinned the exact duplication points. I’m patching the source-change, missing-twin bootstrap, fail-closed schema, and Gemini anchor tests onto the shared helpers now; then I’ll re-run `provider-ingestion_test.ts` and the repo test task before updating the note.
+
+# gpt-5.4_2026-03-06_2207_21
+
+The provider-ingestion helper expansion is patched. I’m formatting and rerunning the focused provider-ingestion suite now; if that’s green, I’ll update the task note to reflect the wider scope and then rerun the repo test task.
+
+# gpt-5.4_2026-03-06_2207_28
+
+Formatting is clean. The focused provider-ingestion suite is running on the broader helper use now; I’m waiting on that before I touch the task note or run the repo-wide test task again.
+
+# gpt-5.4_2026-03-06_2207_34
+
+The wider provider-ingestion helper pass is green. I’m updating the task note so it reflects the expanded scope, then I’ll rerun the repo-wide `test` task to leave this as another verified checkpoint.
+
+# gpt-5.4_2026-03-06_2207_40
+
+The note is updated and the repo-wide `test` task is running on the expanded provider-ingestion refactor state. If this stays green, the next slice is probably no longer another test-file cleanup; it’s either a commit point or the first real extraction inside `provider_ingestion.ts` / `status.ts`.
+
+# gpt-5.4_2026-03-06_2207_49
+
+I completed the next refactor slice in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts). The shared `makeSessionStateStore()` and typed `makeFileProviderTestRunner()` helpers now cover the remaining persisted-state clusters too: source-file change, missing-twin bootstrap, fail-closed schema, and both Gemini anchor cases, in addition to the earlier persisted-cursor/workspace-output/snippet cases. I also updated the progress notes in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to reflect that wider provider-ingestion cleanup. The high-level checkbox is still intentionally open, since the broader refactor-for-testability pass is not finished yet.
+
+Verification stayed green:
+- `deno test --allow-read --allow-write=.test-tmp tests/provider-ingestion_test.ts`
+- `deno task test --frozen --quiet`
+
+Both passed; repo total remains `486` passing tests. I did not rerun coverage for this slice.
+
+# gpt-5.4_2026-03-06_2207_51
+
+I completed the next refactor slice in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts). The shared `makeSessionStateStore()` and typed `makeFileProviderTestRunner()` helpers now cover the remaining persisted-state clusters too: source-file change, missing-twin bootstrap, fail-closed schema, and both Gemini anchor cases, in addition to the earlier persisted-cursor/workspace-output/snippet cases. I also updated the progress notes in [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to reflect that wider provider-ingestion cleanup. The high-level checkbox is still intentionally open, since the broader refactor-for-testability pass is not finished yet.
+
+Verification stayed green:
+- `deno test --allow-read --allow-write=.test-tmp tests/provider-ingestion_test.ts`
+- `deno task test --frozen --quiet`
+
+Both passed; repo total remains `486` passing tests. I did not rerun coverage for this slice.
+
+# djradon_2026-03-06_2213_54
+
+proceed
+
+# gpt-5.4_2026-03-06_2214_09
+
+I’ve finished the obvious large test-file cleanup slices. The next useful move is a real extraction, not more helper churn, so I’m checking `status.ts` and the task note to choose the smallest production seam that already has test coverage behind it.
+
+# gpt-5.4_2026-03-06_2214_27
+
+I found a conservative seam in `status.ts`: the workspace-status loading path is self-contained and already has good indirect coverage. I’m checking the existing status-related files to avoid inventing a parallel abstraction if the repo already has one.
+
+# gpt-5.4_2026-03-06_2214_31
+
+There isn’t already a dedicated workspace-status helper. I’m reading the bottom of `status.ts` now to make sure the extraction boundary lines up with how `runStatusCommand` and live mode actually consume it.
+
+# gpt-5.4_2026-03-06_2214_37
+
+The boundary is clean: `loadWorkspaceStatusSummary()` and its validation helpers are only used by `status.ts`, and `renderStatusText()` already treats `WorkspaceStatusSummary` as input data. I’m extracting that workspace-loading path into its own module and adding direct tests for it, then I’ll trim the broad CLI status integration assertion to the minimum routing-level contract.
+
+# gpt-5.4_2026-03-06_2215_22
+
+I’m making the extraction now. The scope is narrow: move workspace-summary loading/validation into a dedicated helper module, add direct tests for that module, and slim the broad CLI status test to routing/integration assertions that still belong there.
+
+# gpt-5.4_2026-03-06_2216_34
+
+I’m continuing with the `status.ts` extraction slice now. First I’m re-reading the current helper block and the related tests so I can move only the workspace-summary logic, add direct coverage, and keep the integration suite narrower.
+
+# gpt-5.4_2026-03-06_2216_40
+
+I found that `status.ts` already points at `status_workspace.ts`, so I’m checking whether that extraction is partial or just missing the direct test coverage. If the helper module is already in place, I’ll avoid redundant churn and target the remaining gap directly.
+
+# gpt-5.4_2026-03-06_2216_45
+
+The helper module exists and the remaining gap is what I expected: there’s no direct test file for it yet, so workspace validation behavior is still mostly exercised through the broad CLI suite. I’m reading the call sites now so I can add the direct tests and then shrink the integration assertions without breaking the live/status path.
+
+# gpt-5.4_2026-03-06_2216_48
+
+The status call sites are already clean. I’m just pulling the workspace registry type and then I’ll patch in a direct `status-workspace` test file plus narrow the broad `daemon-cli` assertion set to what still belongs there.
+
+# gpt-5.4_2026-03-06_2217_02
+
+I’ve got enough context. I’m patching two things: a direct `status_workspace` test file that exercises validation behavior without going through the whole CLI, and a smaller `daemon-cli` workspace-status integration assertion so that file stops owning the details the new unit tests cover.
+
+# gpt-5.4_2026-03-06_2217_05
+
+I found an existing source of truth for the invalid-config wording in `workspace-registry_test.ts`, so I’m aligning the new direct workspace-status tests with that behavior instead of inventing new expectations.
+
+# gpt-5.4_2026-03-06_2217_21
+
+The direct tests are going to own validation semantics. I’m checking the existing `improved-status` coverage one more time so I only remove assertions from `daemon-cli_test.ts` that are already covered elsewhere, not user-visible rendering we’d accidentally drop.
+
+# gpt-5.4_2026-03-06_2217_26
+
+`improved-status_test.ts` already owns the workspace detail rendering and recent-error promotion, so I can safely slim the `daemon-cli` integration test to routing and loaded-data assertions only. After the code changes I’ll run the focused status suites and then the full repo test task.
+
+# gpt-5.4_2026-03-06_2217_27
+
+I found the right note section. If the focused status helper extraction passes, I’ll add one short progress bullet there and leave the top-level checkbox open, since this is another verified slice, not the end of the refactor pass.
+
+# gpt-5.4_2026-03-06_2217_53
+
+The new unit file is in place and the integration test is trimmed. I’m formatting those files and then I’ll run the focused status suites first to catch any gaps before touching the broader task note.
+
+# gpt-5.4_2026-03-06_2218_04
+
+The focused status suites are running now. If those stay green, I’ll update the task note with this slice and then run the full frozen test task to make sure the narrower integration coverage didn’t hide any coupling.
+
+The focused status suites are clean, including the new direct workspace-summary file. I’m updating the task note with this verified slice and then I’ll run the full frozen test task to confirm nothing else regressed outside the status area.
+
+# gpt-5.4_2026-03-06_2218_20
+
+The full frozen suite is running now. If it stays green, this slice is done: the status helper has direct coverage, the broad CLI test is slimmer, and the task note will already reflect it.
+
+# gpt-5.4_2026-03-06_2218_32
+
+The full suite is green at `490` tests, so I’m doing one coverage pass too. This slice added real direct tests, not just helper churn, so it’s worth recording the new baseline and updating the notes with actual numbers instead of leaving them stale.
+
+# gpt-5.4_2026-03-06_2218_37
+
+Coverage is running now. After that I’ll grab the updated project totals and the `status_workspace` / `status.ts` numbers, then I’ll patch the notes so the task state matches what’s actually verified in the repo.
+
+# gpt-5.4_2026-03-06_2218_49
+
+The project totals are now `490` tests with `78.8%` line and `83.8%` branch coverage. I’m querying the two status files directly from the fresh coverage data now so the note can say exactly what moved in this slice instead of hand-waving about it.
+
+# gpt-5.4_2026-03-06_2219_04
+
+I already have the new project totals. Deno’s follow-up `deno coverage` query is still flaky for these files, so I’m running one small focused coverage slice for the status-related suites to get exact `status.ts` / `status_workspace.ts` numbers from the same reporter that produced the project table.
+
+# gpt-5.4_2026-03-06_2219_21
+
+Deno’s summary still refuses to break out `status.ts` and `status_workspace.ts` as separate rows, even in the focused slice, so I’m not going to fake a per-file number. I do have the verified repo-wide baseline, and I’m updating the notes to `490` tests and `78.8%` line / `83.8%` branch coverage now.
+
+# gpt-5.4_2026-03-06_2219_32
+
+I’m patching the notes now with the fresh verified baseline and the new status-workspace test slice. I’m keeping the refactor checkbox open; this is another completed step, not the end state.
+
+# gpt-5.4_2026-03-06_2219_39
+
+The functional verification is done. I’m running a quick targeted lint on the touched TypeScript files so this slice doesn’t leave behind a style or `require-await` regression like the last one did.
+
+# gpt-5.4_2026-03-06_2219_41
+
+The code and notes are clean under lint. I’m doing one quick worktree check now so I can close with exactly what changed in this slice and call out any unrelated files that are still sitting around.
+
+# gpt-5.4_2026-03-06_2219_56
+
+There’s one more check worth doing: the extracted status helper files themselves are still in the worktree, not just the tests around them. I’m linting `status.ts` and `status_workspace.ts` too so this slice closes cleanly against the actual command code, not only the tests.
+
+# gpt-5.4_2026-03-06_2220_03
+
+The extracted status helper code had one leftover lint issue: `status.ts` was importing `WorkspaceStatusRow` only to re-export it. I’m removing that unused import and rechecking lint immediately after.
+
+# gpt-5.4_2026-03-06_2220_12
+
+The status files are lint-clean now. I’m rerunning the focused status suites once more because `status.ts` changed after the earlier green run, even though it was only an import cleanup.
+
+# gpt-5.4_2026-03-06_2220_24
+
+I changed the production file after the full-suite run, even though it was only an unused type import. I’m rerunning the frozen test task once more so the final state is verified against the current tree, not the pre-lint-fix tree.
+
+# gpt-5.4_2026-03-06_2221_02
+
+I continued the `cli status` refactor slice by building on the existing helper extraction in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) and [status_workspace.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status_workspace.ts). I added direct workspace-summary coverage in [status-workspace_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-workspace_test.ts) for valid/invalid config handling, `workspaceId` mismatch, missing config files, and registry-load unavailable behavior. I also narrowed [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts) so it keeps the integration assertions that still belong there, while render/detail behavior remains covered in [improved-status_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/improved-status_test.ts). A leftover unused type import in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) is fixed too.
+
+I updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the verified baseline: `490` passing tests, `78.8%` line coverage, `83.8%` branch coverage. I left the main refactor checkbox open. Deno’s coverage summary still isn’t giving a separate row for `status.ts` / `status_workspace.ts`, so the notes record the verified slice and repo totals rather than a per-file percentage.
+
+Verification:
+- `deno lint apps/cli/src/commands/status.ts apps/cli/src/commands/status_workspace.ts tests/status-workspace_test.ts tests/daemon-cli_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=... tests/status-workspace_test.ts tests/daemon-cli_test.ts tests/improved-status_test.ts`
+- `deno task test --frozen --quiet` passed: `490` tests
+- `deno task test:coverage --frozen --quiet` passed: `490` tests, `78.8%` line / `83.8%` branch
+
+Relevant current worktree note: [status_workspace.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status_workspace.ts) and [status-workspace_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/status-workspace_test.ts) are new files in the worktree.
+
+# djradon_2026-03-06_2221_51
+
+proceed
+
+# gpt-5.4_2026-03-06_2222_03
+
+I’m moving to the next refactor-for-testability slice in `provider_ingestion`. First I’m reading the current source and existing tests to find the narrowest extraction seam that removes real coupling rather than just shuffling helpers around.
+
+# gpt-5.4_2026-03-06_2222_11
+
+I found the likely seam: duplicate-session discovery and winner selection inside `provider_ingestion.ts`. The tests already cover the behavior, but the selection logic is still buried inside the runner. I’m reading that section now to see if I can extract it into a directly testable helper without disturbing watch/poll orchestration.
+
+# gpt-5.4_2026-03-06_2222_34
+
+The candidate-selection logic is self-contained enough to pull out. I’m checking the existing Gemini duplicate tests now so I can decide whether to replace them with smaller direct helper tests or keep one thin integration test for runner wiring and move the ranking assertions out.
+
+# gpt-5.4_2026-03-06_2222_43
+
+The existing duplicate Gemini tests are a good candidate to move out. They’re full runner/filesystem tests just to validate candidate ranking. I’m checking exports now so I can extract that ranking/deduping logic into a small helper module, add direct tests there, and then delete the two heavy end-to-end winner-selection tests.
+
+# gpt-5.4_2026-03-06_2222_55
+
+I’ve got the seam and the likely replacement: extract duplicate discovery ranking/deduping into a small helper, add direct tests for ranking, and remove the two heavy Gemini duplicate-winner integration tests that only exist to exercise that policy. Then I’ll rerun provider-ingestion, full test, and coverage, and sync the task note with the verified result.
+
+# gpt-5.4_2026-03-06_2223_17
+
+I’m editing the provider-ingestion source now. The change is narrow: pull duplicate-discovery ranking/deduping into a pure helper module, switch the runner to that helper, and add a direct test file so we can drop the two large Gemini duplicate-selection integration cases.
+
+# gpt-5.4_2026-03-06_2224_16
+
+The source extraction and test replacement are in. I’m checking for fallout now: unused helpers/imports in `provider-ingestion_test.ts`, then I’ll format and run the focused provider-ingestion suites before touching the notes.
+
+# gpt-5.4_2026-03-06_2224_24
+
+I removed the now-dead Gemini fixture helper from the broad integration file. Next is mechanical verification: format, lint, then run the focused provider-ingestion/direct-helper tests so I can see whether the extraction actually let us trim those heavy cases cleanly.
+
+# gpt-5.4_2026-03-06_2224_35
+
+The focused provider-ingestion verification is running. If it stays green, I’ll run the full frozen suite and coverage, then update the testing-review note to record that duplicate discovery ranking moved out of the giant integration file.
+
+# gpt-5.4_2026-03-06_2224_44
+
+The focused slice passed: the provider-ingestion integration file is down to `22` tests, and the duplicate ranking behavior now lives in the new direct helper test file. I’m running the full frozen suite and coverage next so the note updates are backed by the real repo baseline, not just a focused pass.
+
+# gpt-5.4_2026-03-06_2224_53
+
+The full suite is green at `492` tests. I’m running coverage now so I can update the notes with the real post-extraction baseline and, if possible, the new `provider_ingestion`/helper numbers instead of guessing.
+
+# gpt-5.4_2026-03-06_2225_11
+
+The new repo baseline is `492` tests with `79.4%` line and `84.2%` branch coverage. I didn’t get the provider-ingestion rows in the truncated table, so I’m querying the detailed coverage output directly for `provider_ingestion` and the new helper before I update the notes.
+
+# gpt-5.4_2026-03-06_2225_47
+
+I have the new counts and coverage, but the notes also track wall-clock timings, not just `deno test`’s internal suite time. I’m running one timed pass for `test` and one for `test:coverage` so the docs stay anchored to actual numbers instead of stale estimates.
+
+# gpt-5.4_2026-03-06_2226_22
+
+I’m updating the notes now: new repo totals, timed commands, and one short progress bullet for the provider-ingestion duplicate-discovery extraction. I’m also tightening the coverage caveat in `dev.testing.md` because the follow-up `deno coverage --detailed` query is now warning on the freshly extracted status/provider-ingestion modules too.
+
+# gpt-5.4_2026-03-06_2226_33
+
+The code/test side is done and the notes are synced. I’m doing a last worktree check so I can close with the exact files from this slice and avoid mixing them up with the older unrelated note changes still in the tree.
+
+# gpt-5.4_2026-03-06_2226_56
+
+I completed the next `provider_ingestion` refactor slice. Duplicate session discovery ranking/deduping now lives in [provider_session_discovery.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_session_discovery.ts), [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts) uses that helper, and the ranking policy has direct coverage in [provider-session-discovery_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-session-discovery_test.ts). I removed the two Gemini duplicate-winner end-to-end cases from [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts), so that broader suite stays focused on runner orchestration instead of ranking policy details.
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) and [task.2026.2026-03-06-testing-review.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-testing-review.md) to the verified baseline: `492` passing tests, `79.4%` line coverage, `84.2%` branch coverage.
+
+Verification:
+- `deno lint apps/daemon/src/orchestrator/provider_ingestion.ts apps/daemon/src/orchestrator/provider_session_discovery.ts tests/provider-ingestion_test.ts tests/provider-session-discovery_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/provider-ingestion_test.ts tests/provider-session-discovery_test.ts` passed: `26` tests
+- `deno task test --frozen --quiet` passed: `492` tests, `9.58s` real
+- `deno task test:coverage --frozen --quiet` passed: `492` tests, `79.4%` line / `84.2%` branch, `10.49s` real
+
+Current caveat: `deno coverage --detailed` is still warning about missing transpiled source for some recently extracted modules, including the status/provider-ingestion helper files, so the task-runner summary is the reliable repo-wide baseline right now.
+
+Unrelated modified files still present and untouched by me include [dev.feature-ideas.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.feature-ideas.md) and [conv.2026.2026-03-06_0822-testing-review-implementation-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-06_0822-testing-review-implementation-codex.md).
+
+# djradon_2026-03-06_2227_46
+
+If transpilation errors is just lint, it's fine. I can't bring myself to wade in here. 
+
+Keep in mind, I only want good, potentially valuable tests. No BS tests just for coverage stats.
+
+# gpt-5.4_2026-03-06_2228_02
+
+Understood.
+
+Those “missing transpiled source” warnings are coverage-reporting noise from `deno coverage --detailed`, not lint, not runtime behavior, and not a security issue. I won’t spend time chasing them unless they start hiding real failures.
+
+I’ll keep the bar here:
+- no tests added just to tick branches
+- only direct tests for logic with real failure modes, policy decisions, or bug-prone state transitions
+- use smaller direct tests to replace heavy integration assertions when that actually reduces maintenance cost
+- avoid locking in incidental implementation details
+
+The recent `status_workspace` and `provider_session_discovery` slices fit that standard: they moved real selection/validation logic out of broader suites and let us delete or narrow noisier end-to-end cases.
+
+If I keep going, I’ll target the same kind of thing in `daemon_runtime` or another `provider_ingestion` seam, not cosmetic coverage work.
+
+# gpt-5.4_2026-03-06_2228_05
+
+Understood.
+
+Those “missing transpiled source” warnings are coverage-reporting noise from `deno coverage --detailed`, not lint, not runtime behavior, and not a security issue. I won’t spend time chasing them unless they start hiding real failures.
+
+I’ll keep the bar here:
+- no tests added just to tick branches
+- only direct tests for logic with real failure modes, policy decisions, or bug-prone state transitions
+- use smaller direct tests to replace heavy integration assertions when that actually reduces maintenance cost
+- avoid locking in incidental implementation details
+
+The recent `status_workspace` and `provider_session_discovery` slices fit that standard: they moved real selection/validation logic out of broader suites and let us delete or narrow noisier end-to-end cases.
+
+If I keep going, I’ll target the same kind of thing in `daemon_runtime` or another `provider_ingestion` seam, not cosmetic coverage work.
+
+# djradon_2026-03-06_2229_01
+
+commit message?
+
+# gpt-5.4_2026-03-06_2229_06
+
+```text
+test: extract provider session discovery ranking from ingestion runner
+
+Move duplicate session discovery ranking and deduping into a small
+provider_session_discovery helper with direct tests, and trim the broad
+provider-ingestion suite by removing Gemini duplicate-winner end-to-end cases
+that now belong to the focused helper coverage. Refresh testing notes with the
+verified 492-test baseline and updated coverage/timing numbers.
+```
+
+# gpt-5.4_2026-03-06_2229_07
+
+```text
+test: extract provider session discovery ranking from ingestion runner
+
+Move duplicate session discovery ranking and deduping into a small
+provider_session_discovery helper with direct tests, and trim the broad
+provider-ingestion suite by removing Gemini duplicate-winner end-to-end cases
+that now belong to the focused helper coverage. Refresh testing notes with the
+verified 492-test baseline and updated coverage/timing numbers.
+```

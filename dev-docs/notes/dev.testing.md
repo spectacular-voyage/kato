@@ -86,17 +86,22 @@ it under `.test-tmp/coverage/<label>` instead of creating a new top-level
 
 Current local timings from 2026-03-06:
 
-- `deno task test --frozen --quiet`: `486` passing tests, about `9.4s` real
-- `deno task test:coverage --frozen --quiet`: `486` passing tests,
-  `78.4%` line coverage, `83.8%` branch coverage, about `10.6s` real
+- `deno task test --frozen --quiet`: `492` passing tests, about `9.6s` real
+- `deno task test:coverage --frozen --quiet`: `492` passing tests,
+  `79.4%` line coverage, `84.2%` branch coverage, about `10.5s` real
 
 Current coverage-report caveat:
 
-- `deno coverage --detailed .test-tmp/coverage/root` currently warns that
-  `apps/runtime/src/orchestrator/launcher.ts` is missing transpiled source and
-  attributes the covered launcher code under
-  `apps/daemon/src/orchestrator/launcher.ts` instead. Treat that daemon-path
-  entry as the launcher result until the reporting quirk is resolved.
+- `deno coverage --detailed .test-tmp/coverage/root` currently warns that some
+  extracted modules may be missing transpiled source, including
+  `apps/runtime/src/orchestrator/launcher.ts`,
+  `apps/cli/src/commands/status.ts`,
+  `apps/cli/src/commands/status_workspace.ts`,
+  `apps/daemon/src/orchestrator/provider_ingestion.ts`, and
+  `apps/daemon/src/orchestrator/provider_session_discovery.ts`. Treat the
+  summary emitted by `deno task test:coverage --frozen --quiet` as the
+  authoritative repo-wide baseline when that reporting quirk appears, and use
+  focused coverage runs for per-file work.
 
 ## Security Automation
 

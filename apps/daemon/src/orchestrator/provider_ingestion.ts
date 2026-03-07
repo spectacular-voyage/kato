@@ -40,6 +40,7 @@ import {
   resolveHomeDir,
 } from "../utils/env.ts";
 import { hashStringFNV1a, stableStringify } from "../utils/hash.ts";
+import { dedupeDiscoveredSessions } from "./provider_session_discovery.ts";
 
 export interface ProviderSessionFile {
   sessionId: string;
@@ -847,42 +848,6 @@ function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
   );
 }
 
-function geminiLayoutRank(
-  layoutType: ProviderSessionFile["layoutType"],
-): number {
-  switch (layoutType) {
-    case "slug":
-      return 2;
-    case "hash":
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-function compareDiscoveredSessionCandidates(
-  a: ProviderSessionFile,
-  b: ProviderSessionFile,
-): number {
-  const aContentUpdated = a.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
-  const bContentUpdated = b.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
-  if (aContentUpdated !== bContentUpdated) {
-    return bContentUpdated - aContentUpdated;
-  }
-
-  const aLayoutRank = geminiLayoutRank(a.layoutType);
-  const bLayoutRank = geminiLayoutRank(b.layoutType);
-  if (aLayoutRank !== bLayoutRank) {
-    return bLayoutRank - aLayoutRank;
-  }
-
-  if (a.modifiedAtMs !== b.modifiedAtMs) {
-    return b.modifiedAtMs - a.modifiedAtMs;
-  }
-
-  return a.filePath.localeCompare(b.filePath);
-}
-
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   readonly provider: string;
   private readonly now: () => Date;
@@ -1192,34 +1157,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private async dedupeDiscoveredSessions(
     sessions: ProviderSessionFile[],
   ): Promise<ProviderSessionFile[]> {
-    const bySessionId = new Map<string, ProviderSessionFile>();
-    const duplicateSessionIds = new Set<string>();
-    let droppedEvents = 0;
+    const deduped = dedupeDiscoveredSessions(sessions);
 
-    const sorted = [...sessions].sort((a, b) => {
-      if (a.sessionId === b.sessionId) {
-        return compareDiscoveredSessionCandidates(a, b);
-      }
-      return a.sessionId.localeCompare(b.sessionId);
-    });
-
-    for (const session of sorted) {
-      if (!bySessionId.has(session.sessionId)) {
-        bySessionId.set(session.sessionId, session);
-      } else {
-        droppedEvents += 1;
-        duplicateSessionIds.add(session.sessionId);
-      }
-    }
-
-    if (droppedEvents > 0) {
-      const warningKey = `${droppedEvents}:${
-        Array.from(duplicateSessionIds)
-          .sort()
-          .join(",")
+    if (deduped.droppedEvents > 0) {
+      const warningKey = `${deduped.droppedEvents}:${
+        deduped.duplicateSessionIds.join(",")
       }`;
       if (this.lastDuplicateDiscoveryWarningKey === warningKey) {
-        return Array.from(bySessionId.values());
+        return deduped.sessions;
       }
       this.lastDuplicateDiscoveryWarningKey = warningKey;
       await this.operationalLogger.debug(
@@ -1227,16 +1172,16 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         "Dropped duplicate session discovery events",
         {
           provider: this.provider,
-          droppedEvents,
+          droppedEvents: deduped.droppedEvents,
           reason: "duplicate-session-id",
-          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
+          duplicateSessionIds: deduped.duplicateSessionIds,
         },
       );
     } else {
       this.lastDuplicateDiscoveryWarningKey = undefined;
     }
 
-    return Array.from(bySessionId.values());
+    return deduped.sessions;
   }
 
   private setCursor(

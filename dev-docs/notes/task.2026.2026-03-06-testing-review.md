@@ -41,9 +41,9 @@ Current signals already visible in the repo today:
   - direct `deno test --parallel --clean --coverage=.test-tmp/coverage/par ... --frozen`:
     about `10s` elapsed
 - Post-initial implementation verification on `2026-03-06`:
-  - `deno task test --frozen --quiet`: `486` passing tests, about `9.4s` real
-  - `deno task test:coverage --frozen --quiet`: `486` passing tests,
-    `78.4%` line coverage, `83.8%` branch coverage, about `10.6s` real
+  - `deno task test --frozen --quiet`: `492` passing tests, about `9.6s` real
+  - `deno task test:coverage --frozen --quiet`: `492` passing tests,
+    `79.4%` line coverage, `84.2%` branch coverage, about `10.5s` real
   - `apps/daemon/src/writer/jsonl_writer.ts` is now at `95.9%` line coverage /
     `96.9%` branch coverage after adding a direct test file
   - `apps/daemon/src/orchestrator/session_twin_mapper.ts` is now at `90.8%`
@@ -118,6 +118,9 @@ Current signals already visible in the repo today:
   - direct start / workspace-init command tests now cover daemon
     acknowledgement/retry behavior plus workspace-config create/idempotent
     behavior without routing through `runDaemonCli`
+  - direct status-workspace tests now cover workspace validation, registry-load
+    unavailable behavior, and invalid-config/mismatch/missing-config cases
+    without routing through the full `runDaemonCli status` integration path
   - direct CLI parser tests now cover help topics, usage errors, arity checks,
     and format validation without a runtime harness
   - direct control-plane tests now cover default/override path resolution,
@@ -150,9 +153,20 @@ Current signals already visible in the repo today:
     boilerplate inline
   - the current `provider-ingestion_test.ts` refactor slice now extracts a
     shared persistent-session-state helper plus a typed file-runner factory
-    across the persisted-cursor, workspace-output twin, and snippet-resume
-    scenarios so those cases stop redefining the same state-store and
+    across the persisted-cursor, workspace-output twin, snippet-resume,
+    source-change, missing-twin bootstrap, fail-closed schema, and Gemini
+    anchor scenarios so those cases stop redefining the same state-store and
     `FileProviderIngestionRunner` scaffolding inline
+  - the current `provider_ingestion` source/test refactor slice now extracts
+    duplicate session discovery ranking and deduping into
+    `apps/daemon/src/orchestrator/provider_session_discovery.ts` with direct
+    coverage in `tests/provider-session-discovery_test.ts`, so the broad
+    `tests/provider-ingestion_test.ts` suite no longer needs the two Gemini
+    duplicate-winner end-to-end cases
+  - the current `cli status` refactor slice now relies on direct
+    `tests/status-workspace_test.ts` coverage for workspace-summary validation
+    and unavailable-state behavior, while `tests/daemon-cli_test.ts` keeps only
+    the narrower integration assertions for loaded workspace mappings
 - GitHub CI trigger behavior today:
   `.github/workflows/ci.yml` runs on `pull_request` and on `push` to `main`.
   That means it runs during PR review/update and again after merge when the

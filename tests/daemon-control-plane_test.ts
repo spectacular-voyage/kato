@@ -270,7 +270,7 @@ Deno.test("isStatusSnapshotStale handles stopped, fresh, stale, and invalid hear
 });
 
 Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath use katoDir defaults", async () => {
-  await withTempRuntimeDir(async (runtimeDir) => {
+  await withTempRuntimeDir((runtimeDir) => {
     const katoDir = join(runtimeDir, ".kato");
 
     assertEquals(
@@ -281,6 +281,7 @@ Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath use katoDir de
       resolveDefaultControlPath(katoDir),
       join(katoDir, "shared", "ipc", "daemon-control.json"),
     );
+    return Promise.resolve();
   });
 });
 

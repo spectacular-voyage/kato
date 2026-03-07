@@ -68,16 +68,17 @@ function makeSequencedStatusStore(steps: StatusLoadStep[]) {
   return {
     loadCalls: () => index,
     store: {
-      async load(): Promise<DaemonStatusSnapshot> {
+      load(): Promise<DaemonStatusSnapshot> {
         const step = steps[Math.min(index, steps.length - 1)]!;
         index += 1;
         if (step instanceof Error) {
           throw step;
         }
-        return step;
+        return Promise.resolve(step);
       },
-      async save(_snapshot: DaemonStatusSnapshot): Promise<void> {
+      save(_snapshot: DaemonStatusSnapshot): Promise<void> {
         // Not used by these command-level tests.
+        return Promise.resolve();
       },
     },
   };
@@ -157,42 +158,43 @@ function makeCommandContext(root: string, options: {
       },
     },
     configStore: {
-      async load() {
-        return runtimeConfig;
+      load() {
+        return Promise.resolve(runtimeConfig);
       },
-      async ensureInitialized() {
-        return {
+      ensureInitialized() {
+        return Promise.resolve({
           created: false,
           config: runtimeConfig,
           path: join(runtimeDir, "kato-daemon-config.yaml"),
-        };
+        });
       },
     },
     sharedConfigStore: {
-      async load() {
-        return sharedConfig;
+      load() {
+        return Promise.resolve(sharedConfig);
       },
-      async ensureInitialized() {
-        return {
+      ensureInitialized() {
+        return Promise.resolve({
           created: false,
           config: sharedConfig,
           path: join(katoDir, "shared", "kato-shared-config.yaml"),
-        };
+        });
       },
-      async save(_config) {
+      save(_config) {
         // Not used by these command-level tests.
+        return Promise.resolve();
       },
     },
     cliConfigStore: {
-      async load() {
-        return cliConfig;
+      load() {
+        return Promise.resolve(cliConfig);
       },
-      async ensureInitialized() {
-        return {
+      ensureInitialized() {
+        return Promise.resolve({
           created: false,
           config: cliConfig,
           path: join(katoDir, "cli", "kato-cli-config.yaml"),
-        };
+        });
       },
     },
     runtimeConfig,
@@ -203,8 +205,8 @@ function makeCommandContext(root: string, options: {
     defaultCliConfig: cliConfig,
     statusStore: statusStore.store,
     controlStore: {
-      async list() {
-        return [];
+      list() {
+        return Promise.resolve([]);
       },
       async enqueue(request) {
         if (options.enqueueImpl) {
@@ -212,43 +214,50 @@ function makeCommandContext(root: string, options: {
         }
         throw new Error("enqueue not implemented in direct command tests");
       },
-      async markProcessed(_requestId) {
+      markProcessed(_requestId) {
         // Not used by these command-level tests.
+        return Promise.resolve();
       },
     },
     daemonLauncher: {
-      async launchDetached() {
+      launchDetached() {
         launchCalls += 1;
-        return launchedPid;
+        return Promise.resolve(launchedPid);
       },
     },
     pathPolicyGate: {
-      async evaluateWritePath(targetPath: string) {
-        return {
+      evaluateWritePath(targetPath: string) {
+        return Promise.resolve({
           decision: options.pathPolicyDecision?.decision ?? "allow",
           targetPath,
           reason: options.pathPolicyDecision?.reason ?? "test",
           canonicalTargetPath: options.pathPolicyDecision?.canonicalTargetPath,
           matchedRoot: options.pathPolicyDecision?.matchedRoot,
-        };
+        });
       },
     },
     operationalLogger,
     auditLogger,
     resolveUserConfigStore: () => ({
-      async load() {
-        throw new Error(
-          "user config store not implemented in direct command tests",
+      load() {
+        return Promise.reject(
+          new Error(
+            "user config store not implemented in direct command tests",
+          ),
         );
       },
-      async ensureInitialized() {
-        throw new Error(
-          "user config store not implemented in direct command tests",
+      ensureInitialized() {
+        return Promise.reject(
+          new Error(
+            "user config store not implemented in direct command tests",
+          ),
         );
       },
-      async save() {
-        throw new Error(
-          "user config store not implemented in direct command tests",
+      save() {
+        return Promise.reject(
+          new Error(
+            "user config store not implemented in direct command tests",
+          ),
         );
       },
     }),
@@ -448,13 +457,13 @@ Deno.test("runExportCommand rejects stale daemon status before queueing", async 
           daemonPid: 4242,
         }),
       ],
-      enqueueImpl: async (request) => {
+      enqueueImpl: (request) => {
         enqueued.push(request);
-        return {
+        return Promise.resolve({
           ...request,
           requestId: "req-unexpected",
           requestedAt: NOW.toISOString(),
-        };
+        });
       },
     });
 
@@ -499,13 +508,13 @@ Deno.test("runExportCommand rejects denied output paths before enqueueing", asyn
         reason: "Target path is outside allowed write roots",
         canonicalTargetPath: deniedPath,
       },
-      enqueueImpl: async (request) => {
+      enqueueImpl: (request) => {
         enqueued.push(request);
-        return {
+        return Promise.resolve({
           ...request,
           requestId: "req-unexpected",
           requestedAt: NOW.toISOString(),
-        };
+        });
       },
     });
 
@@ -550,13 +559,13 @@ Deno.test("runExportCommand enqueues exports and records queue history", async (
         canonicalTargetPath: resolvedOutputPath,
         matchedRoot: root,
       },
-      enqueueImpl: async (request) => {
+      enqueueImpl: (request) => {
         enqueued.push(request);
-        return {
+        return Promise.resolve({
           ...request,
           requestId: "req-export-1",
           requestedAt: NOW.toISOString(),
-        };
+        });
       },
     });
 
@@ -624,13 +633,13 @@ Deno.test("runExportCommand continues when export history append fails", async (
           }),
         ],
         runtimeDir: join(occupiedRoot, "runtime"),
-        enqueueImpl: async (request) => {
+        enqueueImpl: (request) => {
           enqueued.push(request);
-          return {
+          return Promise.resolve({
             ...request,
             requestId: "req-export-2",
             requestedAt: NOW.toISOString(),
-          };
+          });
         },
       });
 
