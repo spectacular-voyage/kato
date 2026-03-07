@@ -42,15 +42,18 @@ subdirectory such as `.test-tmp/coverage/status` or
 
 The root `test` and `test:coverage` tasks now use Deno module parallelism by
 default. Local verification on 2026-03-06 stayed deterministic with both
-`deno task test --frozen --quiet` and `deno task test:coverage --frozen --quiet`,
-including after adding direct JSONL writer, session-twin mapper,
-runtime-config, shared-behavior config, path-policy, launcher, status-command,
-control-plane, env-helper, status-error-cursor, CLI parser, direct start /
-workspace-init / export command tests, direct hash tests, and Codex parser
-tests, status-workspace tests, provider-session-discovery tests,
-daemon-status-projection tests, daemon-export-request tests, and
-daemon-first-seen tests plus a shared env lock in `tests/test_env.ts` for
-env-mutating cases.
+`deno task test --frozen --quiet` and
+`deno task test:coverage --frozen --quiet`, including after adding direct JSONL
+writer, session-twin mapper, runtime-config, shared-behavior config,
+path-policy, launcher, status-command, control-plane, env-helper,
+status-error-cursor, CLI parser, direct start / workspace-init / export command
+tests, direct hash tests, and Codex parser tests, status-workspace tests,
+provider-session-discovery tests, daemon-status-projection tests,
+daemon-export-request tests, and daemon-first-seen tests, daemon-command-state
+tests, daemon-memory-telemetry tests, daemon-workspace-paths tests,
+daemon-workspace-output-state tests, provider-ingestion-resume tests,
+provider-ingestion-merge tests, plus a shared env lock in `tests/test_env.ts`
+for env-mutating cases.
 
 GitHub CI uses a split gate:
 
@@ -82,16 +85,16 @@ or they will be loaded as zero-test modules.
 3. Generate the LCOV artifact used by GitHub CI / Codecov:
    - `deno task coverage:lcov`
 
-For focused local work, prefer specific `_test.ts` files and `--filter`
-instead of rerunning the whole suite. If you need a manual raw profile, write
-it under `.test-tmp/coverage/<label>` instead of creating a new top-level
-`.coverage-*` directory.
+For focused local work, prefer specific `_test.ts` files and `--filter` instead
+of rerunning the whole suite. If you need a manual raw profile, write it under
+`.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
+directory.
 
 Current local timings from 2026-03-06:
 
 - `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
-- `deno task test:coverage --frozen --quiet`: `492` passing tests,
-  `80.9%` line coverage, `85.2%` branch coverage, `8.94s` real
+- `deno task test:coverage --frozen --quiet`: `492` passing tests, `80.9%` line
+  coverage, `85.2%` branch coverage, `8.94s` real
 
 Current coverage-report caveat:
 
@@ -104,10 +107,10 @@ Current coverage-report caveat:
   `apps/daemon/src/orchestrator/provider_session_discovery.ts`, and
   `apps/daemon/src/orchestrator/runtime_export_request.ts`, and
   `apps/daemon/src/orchestrator/runtime_first_seen.ts`, and
-  `apps/daemon/src/orchestrator/runtime_status_projection.ts`. Treat the
-  summary emitted by `deno task test:coverage --frozen --quiet` as the
-  authoritative repo-wide baseline when that reporting quirk appears, and use
-  focused coverage runs for per-file work.
+  `apps/daemon/src/orchestrator/runtime_status_projection.ts`. Treat the summary
+  emitted by `deno task test:coverage --frozen --quiet` as the authoritative
+  repo-wide baseline when that reporting quirk appears, and use focused coverage
+  runs for per-file work.
 
 ## Security Automation
 
@@ -130,9 +133,11 @@ Use these patterns to keep tests portable across Windows/macOS/Linux:
 
 1. Build expected paths with `join(...)` instead of hardcoded `/` strings.
 2. Do not assert on raw JSON text when it includes file paths.
-   - Parse JSON and assert object fields (`assertEquals(parsed.path, expected)`).
-3. For command outputs or logs that may normalize separators differently, compare
-   normalized values (for example, convert `\\` to `/` before asserting).
+   - Parse JSON and assert object fields
+     (`assertEquals(parsed.path, expected)`).
+3. For command outputs or logs that may normalize separators differently,
+   compare normalized values (for example, convert `\\` to `/` before
+   asserting).
 4. Avoid test fixtures that require Windows-invalid filenames.
    - Example: `:` is not valid in Windows filenames.
 5. Gate platform-specific behavior explicitly when needed.

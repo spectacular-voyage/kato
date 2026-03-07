@@ -6,7 +6,7 @@ import type {
   UserConfig,
 } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
-import { extname, isAbsolute, join, relative, resolve } from "@std/path";
+import { extname, isAbsolute, join, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -14,7 +14,6 @@ import {
 } from "../observability/mod.ts";
 import {
   detectInChatControlCommands,
-  type InChatControlCommand,
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../policy/mod.ts";
@@ -56,11 +55,42 @@ import {
   type SessionExportSnapshot,
 } from "./runtime_export_request.ts";
 import {
+  emptySnapshotMemoryStats,
+  logMemoryTelemetry,
+} from "./runtime_memory_telemetry.ts";
+import {
+  renderWorkspaceFilename,
+  resolveWorkspaceDefaultOutputDir,
+} from "./runtime_workspace_paths.ts";
+import {
+  activeWorkspaceOutputs,
+  applyWorkspaceProfileSnapshot,
+  closeWorkspaceOutputCycle,
+  createWorkspaceOutputState,
+  findWorkspaceOutput,
+  openWorkspaceOutputCycle,
+  readWorkspaceOutputs,
+  resolveBindingForRetargetedWorkspacePath,
+  stopAllWorkspaceOutputs,
+  toWorkspaceDestinationBinding,
+} from "./runtime_workspace_output_state.ts";
+import {
   type FirstSeenSourceFileFreshnessBasis,
   isFirstSeenProviderSessionUserEventEligible,
   resolveFirstSeenProviderSessionCommandCursor,
   resolveFirstSeenSourceFileFreshness,
 } from "./runtime_first_seen.ts";
+import {
+  buildBoundarySnapshotEvents,
+  buildCommandCursorAnchor,
+  buildCommandSeedEvents,
+  commandCursorAnchorEquals,
+  readCommandCursor,
+  readCommandCursorAnchor,
+  resolveCommandBoundaries,
+  resolveCommandStartCursor,
+  writeCommandCursor,
+} from "./runtime_command_state.ts";
 import {
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
@@ -338,317 +368,6 @@ interface PersistentRecordingCommandContext {
   userConfig: UserConfig;
 }
 
-interface InChatCommandBoundary {
-  command: InChatControlCommand;
-  nextCommandLine: number;
-  lastLineInSegment: number;
-}
-
-function sanitizeFilenamePart(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(
-    /-+/g,
-    "-",
-  ).replace(/^-+|-+$/g, "");
-  return normalized.length > 0 ? normalized : "recording";
-}
-
-function slugifySnippetForFilename(value: string): string {
-  const normalized = value.toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return normalized.length > 0 ? normalized : "conversation";
-}
-
-function firstNonEmptyLine(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return value.split(/\r\n?|\n/)
-    .find((line) => line.trim().length > 0)
-    ?.trim();
-}
-
-function resolveFilenameSnippet(options: {
-  snapshotSnippet?: string;
-  boundarySnapshot?: ConversationEvent[];
-}): string {
-  const fromSnapshot = firstNonEmptyLine(options.snapshotSnippet);
-  if (fromSnapshot) {
-    return fromSnapshot;
-  }
-  const fromBoundary = firstNonEmptyLine(
-    extractSnippet(options.boundarySnapshot ?? []),
-  );
-  if (fromBoundary) {
-    return fromBoundary;
-  }
-  return "conversation";
-}
-
-function readDatePart(
-  parts: Intl.DateTimeFormatPart[],
-  type: Intl.DateTimeFormatPartTypes,
-): string {
-  return parts.find((part) => part.type === type)?.value ?? "";
-}
-
-function readTimestampTemplateParts(
-  now: Date,
-  timeZone: string,
-): {
-  YYYY: string;
-  YY: string;
-  MM: string;
-  DD: string;
-  HH: string;
-  mm: string;
-  timestampHumane: string;
-} {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    ...(timeZone === "local" ? {} : { timeZone }),
-  });
-  const parts = formatter.formatToParts(now);
-  const year = readDatePart(parts, "year");
-  const month = readDatePart(parts, "month");
-  const day = readDatePart(parts, "day");
-  const hour = readDatePart(parts, "hour");
-  const minute = readDatePart(parts, "minute");
-  return {
-    YYYY: year,
-    YY: year.slice(-2),
-    MM: month,
-    DD: day,
-    HH: hour,
-    mm: minute,
-    timestampHumane: `${year}-${month}-${day}_${hour}${minute}`,
-  };
-}
-
-function readWorkspaceOutputs(
-  metadata: SessionMetadataV1,
-): NonNullable<SessionMetadataV1["workspaceOutputs"]> {
-  if (!metadata.workspaceOutputs) {
-    metadata.workspaceOutputs = [];
-  }
-  return metadata.workspaceOutputs;
-}
-
-function findWorkspaceOutput(
-  metadata: SessionMetadataV1,
-  workspaceId: string,
-): NonNullable<SessionMetadataV1["workspaceOutputs"]>[number] | undefined {
-  return readWorkspaceOutputs(metadata).find((entry) =>
-    entry.workspaceId === workspaceId
-  );
-}
-
-function activeWorkspaceOutputs(
-  metadata: SessionMetadataV1,
-): NonNullable<SessionMetadataV1["workspaceOutputs"]> {
-  return readWorkspaceOutputs(metadata).filter((entry) =>
-    entry.desiredState === "on"
-  );
-}
-
-function closeWorkspaceOutputCycle(
-  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
-  stopCursor: number,
-  nowIso: string,
-): boolean {
-  const cycleId = output.activeRecordingCycleId;
-  if (!cycleId) {
-    const changed = output.desiredState !== "off";
-    delete output.activeRecordingCycleId;
-    output.desiredState = "off";
-    return changed;
-  }
-  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
-    const cycle = output.recordingCycles[i];
-    if (
-      !cycle || cycle.recordingCycleId !== cycleId ||
-      cycle.stoppedCursor !== undefined
-    ) {
-      continue;
-    }
-    cycle.stoppedCursor = stopCursor;
-    cycle.stoppedAt = nowIso;
-    cycle.stoppedBySeq = stopCursor;
-    break;
-  }
-  delete output.activeRecordingCycleId;
-  output.desiredState = "off";
-  return true;
-}
-
-function stopAllWorkspaceOutputs(
-  metadata: SessionMetadataV1,
-  stopCursor: number,
-  nowIso: string,
-): string[] {
-  const changed: string[] = [];
-  for (const output of readWorkspaceOutputs(metadata)) {
-    if (closeWorkspaceOutputCycle(output, stopCursor, nowIso)) {
-      changed.push(output.workspaceId);
-    }
-  }
-  return changed;
-}
-
-function openWorkspaceOutputCycle(
-  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
-  startCursor: number,
-  nowIso: string,
-  recordingCycleId: string = crypto.randomUUID(),
-): string {
-  output.recordingCycles.push({
-    recordingCycleId,
-    startedCursor: startCursor,
-    startedAt: nowIso,
-    startedBySeq: startCursor,
-  });
-  output.activeRecordingCycleId = recordingCycleId;
-  output.desiredState = "on";
-  return recordingCycleId;
-}
-
-function applyWorkspaceProfileSnapshot(
-  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
-  profile: ResolvedWorkspaceProfile,
-  resolvedDefaultOutputDir: string,
-): void {
-  output.workspaceAliasSnapshot = profile.alias;
-  output.sourceConfigPath = profile.configPath;
-  output.workspaceRootSnapshot = profile.workspaceRoot;
-  output.resolvedDefaultOutputDir = resolvedDefaultOutputDir;
-  output.filenameTemplate = profile.filenameTemplate;
-  output.writerFeatureFlags = { ...profile.writerFeatureFlags };
-}
-
-function createWorkspaceOutputState(options: {
-  profile: ResolvedWorkspaceProfile;
-  binding: NonNullable<
-    SessionMetadataV1["workspaceOutputs"]
-  >[number]["currentDestination"];
-  resolvedPath: string;
-  resolvedDefaultOutputDir: string;
-  desiredState: "on" | "off";
-  writeCursor: number;
-  nowIso: string;
-}): NonNullable<SessionMetadataV1["workspaceOutputs"]>[number] {
-  return {
-    workspaceId: options.profile.workspaceId,
-    workspaceAliasSnapshot: options.profile.alias,
-    desiredState: options.desiredState,
-    currentDestination: options.binding,
-    currentResolvedPath: options.resolvedPath,
-    sourceConfigPath: options.profile.configPath,
-    workspaceRootSnapshot: options.profile.workspaceRoot,
-    resolvedDefaultOutputDir: options.resolvedDefaultOutputDir,
-    filenameTemplate: options.profile.filenameTemplate,
-    writerFeatureFlags: { ...options.profile.writerFeatureFlags },
-    writeCursor: options.writeCursor,
-    createdAt: options.nowIso,
-    recordingCycles: [],
-  };
-}
-
-function buildWorkspaceTemplateTokens(options: {
-  profile: ResolvedWorkspaceProfile;
-  provider: string;
-  sessionId: string;
-  now: Date;
-  outputUsername: string;
-  snapshotSnippet?: string;
-  boundarySnapshot?: ConversationEvent[];
-}): Record<string, string> {
-  const timestampTokens = readTimestampTemplateParts(
-    options.now,
-    options.profile.workspaceTimezone,
-  );
-  return {
-    provider: sanitizeFilenamePart(options.provider),
-    sessionId: sanitizeFilenamePart(options.sessionId),
-    sessionShortId: sanitizeFilenamePart(options.sessionId.slice(0, 8)),
-    YYYY: timestampTokens.YYYY,
-    YY: timestampTokens.YY,
-    MM: timestampTokens.MM,
-    DD: timestampTokens.DD,
-    HH: timestampTokens.HH,
-    mm: timestampTokens.mm,
-    timestampHumane: timestampTokens.timestampHumane,
-    snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)),
-    username: sanitizeFilenamePart(options.outputUsername),
-  };
-}
-
-function renderWorkspaceTemplate(
-  template: string,
-  tokens: Record<string, string>,
-): string {
-  let rendered = template;
-  for (const [token, replacement] of Object.entries(tokens)) {
-    rendered = rendered.replaceAll(`{${token}}`, replacement);
-  }
-  return rendered;
-}
-
-function renderWorkspaceFilename(
-  profile: ResolvedWorkspaceProfile,
-  provider: string,
-  sessionId: string,
-  now: Date,
-  outputUsername: string,
-  options: {
-    snapshotSnippet?: string;
-    boundarySnapshot?: ConversationEvent[];
-  } = {},
-): string {
-  const tokens = buildWorkspaceTemplateTokens({
-    profile,
-    provider,
-    sessionId,
-    now,
-    outputUsername,
-    snapshotSnippet: options.snapshotSnippet,
-    boundarySnapshot: options.boundarySnapshot,
-  });
-  const rendered = renderWorkspaceTemplate(profile.filenameTemplate, tokens);
-  const normalized = rendered
-    .replace(/[\\/]+/g, "-")
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return normalized.length > 0
-    ? normalized
-    : `${tokens.timestampHumane}-${tokens.snippetSlug}-${tokens.provider}.md`;
-}
-
-function resolveWorkspaceDefaultOutputDir(options: {
-  profile: ResolvedWorkspaceProfile;
-  provider: string;
-  sessionId: string;
-  now: Date;
-  outputUsername: string;
-  snapshotSnippet?: string;
-  boundarySnapshot?: ConversationEvent[];
-}): string {
-  const tokens = buildWorkspaceTemplateTokens(options);
-  const rendered = renderWorkspaceTemplate(
-    options.profile.defaultOutputDirTemplate,
-    tokens,
-  );
-  return isAbsolute(rendered)
-    ? resolve(rendered)
-    : resolve(options.profile.workspaceRoot, rendered);
-}
-
 async function isDirectoryTargetPath(path: string): Promise<boolean> {
   if (path.endsWith("/") || path.endsWith("\\")) {
     return true;
@@ -691,31 +410,6 @@ async function resolveUniqueNonExistingPath(path: string): Promise<string> {
   throw new Error(`Unable to resolve unique destination path for: ${path}`);
 }
 
-function toWorkspaceDestinationBinding(
-  profile: ResolvedWorkspaceProfile,
-  resolvedPath: string,
-): NonNullable<
-  SessionMetadataV1["workspaceOutputs"]
->[number]["currentDestination"] {
-  const rel = relative(resolve(profile.workspaceRoot), resolve(resolvedPath));
-  if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) {
-    return {
-      kind: "workspace-relative",
-      relativePathFromWorkspaceRoot: rel,
-    };
-  }
-  if (rel === "") {
-    return {
-      kind: "workspace-relative",
-      relativePathFromWorkspaceRoot: ".",
-    };
-  }
-  return {
-    kind: "absolute-explicit",
-    absolutePath: resolve(resolvedPath),
-  };
-}
-
 async function resolveWorkspaceCommandDestination(options: {
   profile: ResolvedWorkspaceProfile;
   provider: string;
@@ -747,17 +441,15 @@ async function resolveWorkspaceCommandDestination(options: {
   if (!normalized) {
     const generatedPath = join(
       resolvedDefaultOutputDir,
-      renderWorkspaceFilename(
-        options.profile,
-        options.provider,
-        options.sessionId,
-        options.now,
-        options.outputUsername,
-        {
-          snapshotSnippet: options.snapshotSnippet,
-          boundarySnapshot: options.boundarySnapshot,
-        },
-      ),
+      renderWorkspaceFilename({
+        profile: options.profile,
+        provider: options.provider,
+        sessionId: options.sessionId,
+        now: options.now,
+        outputUsername: options.outputUsername,
+        snapshotSnippet: options.snapshotSnippet,
+        boundarySnapshot: options.boundarySnapshot,
+      }),
     );
     const generated = options.ensureGeneratedPathUnique
       ? await resolveUniqueNonExistingPath(generatedPath)
@@ -781,17 +473,15 @@ async function resolveWorkspaceCommandDestination(options: {
   const resolvedPathBase = generatedFromDirectory
     ? join(
       resolvedBase,
-      renderWorkspaceFilename(
-        options.profile,
-        options.provider,
-        options.sessionId,
-        options.now,
-        options.outputUsername,
-        {
-          snapshotSnippet: options.snapshotSnippet,
-          boundarySnapshot: options.boundarySnapshot,
-        },
-      ),
+      renderWorkspaceFilename({
+        profile: options.profile,
+        provider: options.provider,
+        sessionId: options.sessionId,
+        now: options.now,
+        outputUsername: options.outputUsername,
+        snapshotSnippet: options.snapshotSnippet,
+        boundarySnapshot: options.boundarySnapshot,
+      }),
     )
     : resolvedBase;
   const resolvedPath =
@@ -810,244 +500,6 @@ async function resolveWorkspaceCommandDestination(options: {
       : toWorkspaceDestinationBinding(options.profile, resolvedPath),
   };
 }
-function readCommandCursor(metadata: SessionMetadataV1): number {
-  const raw = metadata.commandCursor;
-  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) {
-    return 0;
-  }
-  return raw;
-}
-
-function normalizeCommandCursorAnchor(
-  value: SessionMetadataV1["commandCursorAnchor"] | undefined,
-): SessionMetadataV1["commandCursorAnchor"] | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const eventId = readString(value.eventId);
-  const providerEventType = readString(value.providerEventType);
-  const providerEventId = readString(value.providerEventId);
-  const timestamp = readString(value.timestamp);
-  if (!eventId && !(providerEventType && providerEventId) && !timestamp) {
-    return undefined;
-  }
-  return {
-    ...(eventId ? { eventId } : {}),
-    ...(providerEventType ? { providerEventType } : {}),
-    ...(providerEventId ? { providerEventId } : {}),
-    ...(timestamp ? { timestamp } : {}),
-  };
-}
-
-function readCommandCursorAnchor(
-  metadata: SessionMetadataV1,
-): SessionMetadataV1["commandCursorAnchor"] | undefined {
-  return normalizeCommandCursorAnchor(metadata.commandCursorAnchor);
-}
-
-function buildCommandCursorAnchor(
-  event: ConversationEvent | undefined,
-): SessionMetadataV1["commandCursorAnchor"] | undefined {
-  if (!event) {
-    return undefined;
-  }
-  return normalizeCommandCursorAnchor({
-    eventId: event.eventId,
-    providerEventType: event.source.providerEventType,
-    providerEventId: event.source.providerEventId,
-    timestamp: event.timestamp,
-  });
-}
-
-function commandCursorAnchorMatchesEvent(
-  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
-  event: ConversationEvent,
-): boolean {
-  if (anchor.eventId && event.eventId === anchor.eventId) {
-    return true;
-  }
-  if (
-    anchor.providerEventType &&
-    anchor.providerEventId &&
-    event.source.providerEventType === anchor.providerEventType &&
-    event.source.providerEventId === anchor.providerEventId
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function findCommandCursorAnchorIndex(
-  events: ConversationEvent[],
-  anchor: NonNullable<SessionMetadataV1["commandCursorAnchor"]>,
-): number {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i];
-    if (!event) {
-      continue;
-    }
-    if (commandCursorAnchorMatchesEvent(anchor, event)) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-function findFirstEventAfterTimestamp(
-  events: ConversationEvent[],
-  timestamp: string,
-): number {
-  const anchorTimeMs = readTimeMs(timestamp);
-  if (anchorTimeMs === undefined) {
-    return events.length;
-  }
-  for (let i = 0; i < events.length; i += 1) {
-    const event = events[i];
-    if (!event) {
-      continue;
-    }
-    const eventTimeMs = readTimeMs(event.timestamp);
-    if (eventTimeMs !== undefined && eventTimeMs > anchorTimeMs) {
-      return i;
-    }
-  }
-  return events.length;
-}
-
-function resolveCommandStartCursor(
-  metadata: SessionMetadataV1,
-  events: ConversationEvent[],
-): number {
-  const anchor = readCommandCursorAnchor(metadata);
-  if (anchor) {
-    const anchorIndex = findCommandCursorAnchorIndex(events, anchor);
-    if (anchorIndex >= 0) {
-      return anchorIndex + 1;
-    }
-    if (anchor.timestamp) {
-      return findFirstEventAfterTimestamp(events, anchor.timestamp);
-    }
-  }
-  const persisted = readCommandCursor(metadata);
-  if (persisted <= events.length) {
-    return persisted;
-  }
-  return events.length;
-}
-
-function commandCursorAnchorEquals(
-  left: SessionMetadataV1["commandCursorAnchor"] | undefined,
-  right: SessionMetadataV1["commandCursorAnchor"] | undefined,
-): boolean {
-  const leftNormalized = normalizeCommandCursorAnchor(left);
-  const rightNormalized = normalizeCommandCursorAnchor(right);
-  if (!leftNormalized && !rightNormalized) {
-    return true;
-  }
-  if (!leftNormalized || !rightNormalized) {
-    return false;
-  }
-  return leftNormalized.eventId === rightNormalized.eventId &&
-    leftNormalized.providerEventType === rightNormalized.providerEventType &&
-    leftNormalized.providerEventId === rightNormalized.providerEventId &&
-    leftNormalized.timestamp === rightNormalized.timestamp;
-}
-
-function writeCommandCursor(
-  metadata: SessionMetadataV1,
-  cursor: number,
-  events: ConversationEvent[],
-): void {
-  const normalizedCursor = Math.max(0, Math.floor(cursor));
-  metadata.commandCursor = normalizedCursor;
-  const anchor = normalizedCursor > 0
-    ? buildCommandCursorAnchor(events[normalizedCursor - 1])
-    : undefined;
-  if (anchor) {
-    metadata.commandCursorAnchor = anchor;
-  } else {
-    delete metadata.commandCursorAnchor;
-  }
-}
-
-function resolveCommandBoundaries(
-  content: string,
-  commands: InChatControlCommand[],
-): InChatCommandBoundary[] {
-  if (commands.length === 0) {
-    return [];
-  }
-  const totalLines = content.replace(/\r\n?/g, "\n").split("\n").length;
-  return commands.map((command, index) => {
-    const nextCommandLine = commands[index + 1]?.line ?? (totalLines + 1);
-    const lastLineInSegment = Math.max(command.line, nextCommandLine - 1);
-    return {
-      command,
-      nextCommandLine,
-      lastLineInSegment,
-    };
-  });
-}
-
-function sliceContentByLineRange(
-  content: string,
-  startLineInclusive: number,
-  endLineInclusive: number,
-): string {
-  const lines = content.replace(/\r\n?/g, "\n").split("\n");
-  const start = Math.max(1, startLineInclusive);
-  const end = Math.min(lines.length, endLineInclusive);
-  if (end < start) {
-    return "";
-  }
-  return lines.slice(start - 1, end).join("\n");
-}
-
-function withUserEventContent(
-  event: ConversationEvent & { kind: "message.user" },
-  content: string,
-): ConversationEvent & { kind: "message.user" } {
-  return {
-    ...event,
-    content,
-  };
-}
-
-function buildBoundarySnapshotEvents(
-  events: ConversationEvent[],
-  eventIndex: number,
-  event: ConversationEvent & { kind: "message.user" },
-  boundaryLine: number,
-): ConversationEvent[] {
-  const slice = events.slice(0, eventIndex + 1);
-  if (slice.length === 0) {
-    return [];
-  }
-  const boundaryContent = sliceContentByLineRange(
-    event.content,
-    1,
-    boundaryLine,
-  );
-  slice[slice.length - 1] = withUserEventContent(event, boundaryContent);
-  return slice;
-}
-
-function buildCommandSeedEvents(
-  event: ConversationEvent & { kind: "message.user" },
-  startLineInclusive: number,
-  endLineInclusive: number,
-): ConversationEvent[] {
-  const content = sliceContentByLineRange(
-    event.content,
-    startLineInclusive,
-    endLineInclusive,
-  );
-  if (content.trim().length === 0) {
-    return [];
-  }
-  return [withUserEventContent(event, content)];
-}
-
 async function validateDestinationPathForCommand(
   recordingPipeline: RecordingPipelineLike,
   provider: string,
@@ -1162,24 +614,6 @@ async function captureSnapshotWithRetries(options: {
       );
     }
   }
-}
-
-function resolveBindingForRetargetedWorkspacePath(options: {
-  profile: ResolvedWorkspaceProfile;
-  currentBinding: NonNullable<
-    SessionMetadataV1["workspaceOutputs"]
-  >[number]["currentDestination"];
-  resolvedPath: string;
-}): NonNullable<
-  SessionMetadataV1["workspaceOutputs"]
->[number]["currentDestination"] {
-  if (options.currentBinding.kind === "absolute-explicit") {
-    return {
-      kind: "absolute-explicit",
-      absolutePath: resolve(options.resolvedPath),
-    };
-  }
-  return toWorkspaceDestinationBinding(options.profile, options.resolvedPath);
 }
 
 function createOutputOverridesFromWorkspaceProfile(
@@ -1403,20 +837,16 @@ async function resolveBoundaryEventsFromTwinStart(
   }
 
   if (boundaryIndex >= 0) {
-    const slice = twinConversation.slice(0, boundaryIndex + 1);
-    const boundaryEvent = slice[slice.length - 1];
+    const boundaryEvent = twinConversation[boundaryIndex];
     if (boundaryEvent?.kind === "message.user") {
-      const boundaryContent = sliceContentByLineRange(
-        boundaryEvent.content,
-        1,
+      return buildBoundarySnapshotEvents(
+        twinConversation,
+        boundaryIndex,
+        boundaryEvent,
         boundaryLine,
       );
-      slice[slice.length - 1] = withUserEventContent(
-        boundaryEvent,
-        boundaryContent,
-      );
     }
-    return slice;
+    return twinConversation.slice(0, boundaryIndex + 1);
   }
   return fallbackBoundaryEvents;
 }
@@ -2784,158 +2214,6 @@ async function processPersistentRecordingUpdates(
     }
   }
   return anyMetadataChanged;
-}
-
-function emptySnapshotMemoryStats(): SnapshotMemoryStats {
-  return {
-    estimatedBytes: 0,
-    sessionCount: 0,
-    eventCount: 0,
-    evictionsTotal: 0,
-    bytesReclaimedTotal: 0,
-    evictionsByReason: {},
-    overBudget: false,
-  };
-}
-
-function cloneSnapshotMemoryStats(
-  stats: SnapshotMemoryStats,
-): SnapshotMemoryStats {
-  return {
-    estimatedBytes: stats.estimatedBytes,
-    sessionCount: stats.sessionCount,
-    eventCount: stats.eventCount,
-    evictionsTotal: stats.evictionsTotal,
-    bytesReclaimedTotal: stats.bytesReclaimedTotal,
-    evictionsByReason: { ...stats.evictionsByReason },
-    overBudget: stats.overBudget,
-  };
-}
-
-function hasSnapshotMemoryChanged(
-  previous: SnapshotMemoryStats | undefined,
-  current: SnapshotMemoryStats,
-): boolean {
-  if (!previous) {
-    return true;
-  }
-  if (
-    previous.estimatedBytes !== current.estimatedBytes ||
-    previous.sessionCount !== current.sessionCount ||
-    previous.eventCount !== current.eventCount ||
-    previous.evictionsTotal !== current.evictionsTotal ||
-    previous.bytesReclaimedTotal !== current.bytesReclaimedTotal ||
-    previous.overBudget !== current.overBudget
-  ) {
-    return true;
-  }
-
-  const previousEntries = Object.entries(previous.evictionsByReason);
-  const currentEntries = Object.entries(current.evictionsByReason);
-  if (previousEntries.length !== currentEntries.length) {
-    return true;
-  }
-  for (const [reason, value] of currentEntries) {
-    if ((previous.evictionsByReason[reason] ?? 0) !== value) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function computeSnapshotEvictionDelta(
-  previous: SnapshotMemoryStats | undefined,
-  current: SnapshotMemoryStats,
-): {
-  evictionsTotal: number;
-  bytesReclaimedTotal: number;
-  evictionsByReason: Record<string, number>;
-} {
-  const previousEvictionsTotal = previous?.evictionsTotal ?? 0;
-  const previousBytesReclaimedTotal = previous?.bytesReclaimedTotal ?? 0;
-  const evictionsByReason: Record<string, number> = {};
-
-  for (const [reason, count] of Object.entries(current.evictionsByReason)) {
-    const priorCount = previous?.evictionsByReason[reason] ?? 0;
-    if (count > priorCount) {
-      evictionsByReason[reason] = count - priorCount;
-    }
-  }
-
-  return {
-    evictionsTotal: Math.max(
-      0,
-      current.evictionsTotal - previousEvictionsTotal,
-    ),
-    bytesReclaimedTotal: Math.max(
-      0,
-      current.bytesReclaimedTotal - previousBytesReclaimedTotal,
-    ),
-    evictionsByReason,
-  };
-}
-
-async function logMemoryTelemetry(options: {
-  operationalLogger: StructuredLogger;
-  daemonMaxMemoryBytes: number;
-  processMemory: Deno.MemoryUsage;
-  snapshotMemory: SnapshotMemoryStats;
-  previousSnapshotMemory?: SnapshotMemoryStats;
-  phase: "heartbeat" | "shutdown";
-  forceSampleLog?: boolean;
-}): Promise<SnapshotMemoryStats> {
-  const {
-    operationalLogger,
-    daemonMaxMemoryBytes,
-    processMemory,
-    snapshotMemory,
-    previousSnapshotMemory,
-    phase,
-    forceSampleLog = false,
-  } = options;
-
-  if (
-    forceSampleLog ||
-    hasSnapshotMemoryChanged(previousSnapshotMemory, snapshotMemory)
-  ) {
-    await operationalLogger.debug(
-      "daemon.memory.sample",
-      "Daemon memory sample updated",
-      {
-        phase,
-        daemonMaxMemoryBytes,
-        process: {
-          rss: processMemory.rss,
-          heapTotal: processMemory.heapTotal,
-          heapUsed: processMemory.heapUsed,
-          external: processMemory.external,
-        },
-        snapshots: snapshotMemory,
-      },
-    );
-  }
-
-  const evictionDelta = computeSnapshotEvictionDelta(
-    previousSnapshotMemory,
-    snapshotMemory,
-  );
-  if (evictionDelta.evictionsTotal > 0) {
-    await operationalLogger.info(
-      "daemon.memory.evicted",
-      "Daemon snapshot store evicted sessions",
-      {
-        phase,
-        evictions: evictionDelta.evictionsTotal,
-        bytesReclaimed: evictionDelta.bytesReclaimedTotal,
-        evictionsByReason: evictionDelta.evictionsByReason,
-        snapshotSessionCount: snapshotMemory.sessionCount,
-        snapshotEstimatedBytes: snapshotMemory.estimatedBytes,
-      },
-    );
-  }
-
-  return cloneSnapshotMemoryStats(snapshotMemory);
 }
 
 function summarizeControlCommands(
