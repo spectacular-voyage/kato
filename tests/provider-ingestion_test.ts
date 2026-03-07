@@ -7,6 +7,7 @@ import {
   createCodexIngestionRunner,
   createGeminiIngestionRunner,
   FileProviderIngestionRunner,
+  type FileProviderIngestionRunnerOptions,
   InMemorySessionSnapshotStore,
   type LogRecord,
   mapConversationEventsToTwin,
@@ -26,129 +27,6 @@ function makeEvent(id: string, timestamp: string): ConversationEvent {
     content: `${id}-content`,
     source: { providerEventType: "assistant", providerEventId: id },
   } as unknown as ConversationEvent;
-}
-
-interface GeminiFixtureMessage {
-  id: string;
-  type: "user" | "gemini";
-  content: string;
-  timestamp: string;
-}
-
-function readOptionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-async function writeGeminiSessionFixture(
-  filePath: string,
-  sessionId: string,
-  messages: GeminiFixtureMessage[],
-): Promise<void> {
-  await Deno.writeTextFile(
-    filePath,
-    JSON.stringify(
-      {
-        sessionId,
-        messages: messages.map((message) => ({
-          id: message.id,
-          type: message.type,
-          timestamp: message.timestamp,
-          content: message.content,
-          displayContent: message.content,
-        })),
-      },
-      null,
-      2,
-    ),
-  );
-}
-
-async function writeGeminiSessionWithLastUpdated(
-  filePath: string,
-  sessionId: string,
-  lastUpdated: string,
-  messages: GeminiFixtureMessage[],
-): Promise<void> {
-  await Deno.writeTextFile(
-    filePath,
-    JSON.stringify(
-      {
-        sessionId,
-        startTime: messages[0]?.timestamp ?? lastUpdated,
-        lastUpdated,
-        messages: messages.map((message) => ({
-          id: message.id,
-          type: message.type,
-          timestamp: message.timestamp,
-          content: [{ text: message.content }],
-          displayContent: [{ text: message.content }],
-        })),
-      },
-      null,
-      2,
-    ),
-  );
-}
-
-function parseGeminiFixtureEvents(
-  filePath: string,
-  fromOffset: number,
-  ctx: { provider: string; sessionId: string },
-): AsyncIterable<
-  { event: ConversationEvent; cursor: { kind: "item-index"; value: number } }
-> {
-  return (async function* () {
-    const parsed = JSON.parse(await Deno.readTextFile(filePath)) as unknown;
-    const root =
-      (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
-        ? parsed as Record<string, unknown>
-        : {};
-    const rawMessages = Array.isArray(root["messages"]) ? root["messages"] : [];
-    const start = Math.max(0, Math.floor(fromOffset));
-
-    for (let index = start; index < rawMessages.length; index += 1) {
-      const raw = rawMessages[index];
-      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        continue;
-      }
-      const message = raw as Record<string, unknown>;
-      const type = readOptionalString(message["type"]);
-      if (type !== "user" && type !== "gemini") {
-        continue;
-      }
-      const messageId = readOptionalString(message["id"]) ??
-        `${ctx.sessionId}:${index}`;
-      const content = readOptionalString(message["content"]) ??
-        readOptionalString(message["displayContent"]) ?? "";
-      if (content.length === 0) {
-        continue;
-      }
-
-      const cursor = { kind: "item-index" as const, value: index + 1 };
-      yield {
-        event: {
-          eventId: `${ctx.sessionId}:${messageId}`,
-          provider: ctx.provider,
-          sessionId: ctx.sessionId,
-          timestamp: readOptionalString(message["timestamp"]) ??
-            "2026-02-26T10:00:00.000Z",
-          kind: type === "user" ? "message.user" : "message.assistant",
-          role: type === "user" ? "user" : "assistant",
-          content,
-          source: {
-            providerEventType: type,
-            providerEventId: messageId,
-            rawCursor: cursor,
-          },
-        } as ConversationEvent,
-        cursor,
-      };
-    }
-  })();
 }
 
 class CaptureSink {
@@ -207,6 +85,41 @@ async function withTempDir(
   run: (dir: string) => Promise<void>,
 ): Promise<void> {
   await withTestTempDir(prefix, run);
+}
+
+const INGESTION_TEST_NOW_ISO = "2026-02-26T10:00:00.000Z";
+
+function ingestionTestNow(): Date {
+  return new Date(INGESTION_TEST_NOW_ISO);
+}
+
+function makeSessionStateStore(
+  katoDir: string,
+  sessionId: string,
+): PersistentSessionStateStore {
+  return new PersistentSessionStateStore({
+    katoDir,
+    now: ingestionTestNow,
+    makeSessionId: () => sessionId,
+  });
+}
+
+type FileProviderTestRunnerOptions =
+  & Omit<FileProviderIngestionRunnerOptions, "watchRoots" | "now">
+  & {
+    dir: string;
+    now?: () => Date;
+  };
+
+function makeFileProviderTestRunner(
+  options: FileProviderTestRunnerOptions,
+): FileProviderIngestionRunner {
+  const { dir, now = ingestionTestNow, ...runnerOptions } = options;
+  return new FileProviderIngestionRunner({
+    ...runnerOptions,
+    watchRoots: [dir],
+    now,
+  });
 }
 
 Deno.test("FileProviderIngestionRunner resumes byte-offset cursors after watch updates", async () => {
@@ -358,15 +271,14 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
     const parseOffsets: number[] = [];
 
     function makeRunner(store: InMemorySessionSnapshotStore) {
-      return new FileProviderIngestionRunner({
+      return makeFileProviderTestRunner({
+        dir,
         provider: "test-provider",
-        watchRoots: [dir],
         sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-abcdef12",
-        }),
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-uuid-abcdef12",
+        ),
         autoGenerateSnapshots: true,
         discoverSessions() {
           return Promise.resolve([{
@@ -425,11 +337,10 @@ Deno.test(
         const sessionFile = join(dir, "session-workspace-output.jsonl");
         await Deno.writeTextFile(sessionFile, "placeholder\n");
         const stateRoot = join(dir, ".kato");
-        const stateStore = new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-workspace-output-1234",
-        });
+        const stateStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-workspace-output-1234",
+        );
         const metadata = await stateStore.getOrCreateSessionMetadata({
           provider: "test-provider",
           providerSessionId: "session-workspace-output",
@@ -466,15 +377,14 @@ Deno.test(
         await stateStore.saveSessionMetadata(metadata);
 
         const store = new InMemorySessionSnapshotStore();
-        const runner = new FileProviderIngestionRunner({
+        const runner = makeFileProviderTestRunner({
+          dir,
           provider: "test-provider",
-          watchRoots: [dir],
           sessionSnapshotStore: store,
-          sessionStateStore: new PersistentSessionStateStore({
-            katoDir: stateRoot,
-            now: () => new Date("2026-02-26T10:00:00.000Z"),
-            makeSessionId: () => "session-uuid-workspace-output-1234",
-          }),
+          sessionStateStore: makeSessionStateStore(
+            stateRoot,
+            "session-uuid-workspace-output-1234",
+          ),
           autoGenerateSnapshots: false,
           discoverSessions() {
             return Promise.resolve([{
@@ -506,11 +416,10 @@ Deno.test(
         await runner.poll();
         await runner.stop();
 
-        const reloadedStore = new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-uuid-workspace-output-1234",
-        });
+        const reloadedStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-workspace-output-1234",
+        );
         const reloaded = await reloadedStore.getOrCreateSessionMetadata({
           provider: "test-provider",
           providerSessionId: "session-workspace-output",
@@ -535,15 +444,14 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
     function makeRunner(
       store: InMemorySessionSnapshotStore,
     ): FileProviderIngestionRunner {
-      return new FileProviderIngestionRunner({
+      return makeFileProviderTestRunner({
+        dir,
         provider: "codex",
-        watchRoots: [dir],
         sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-snippet-persist-uuid",
-        }),
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-snippet-persist-uuid",
+        ),
         autoGenerateSnapshots: false,
         discoverSessions() {
           return Promise.resolve([{
@@ -609,11 +517,10 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
     assertExists(firstSnapshot);
     assertEquals(firstSnapshot.metadata.snippet, "first user message");
 
-    const reloadedStateStore = new PersistentSessionStateStore({
-      katoDir: stateRoot,
-      now: () => new Date("2026-02-26T10:00:00.000Z"),
-      makeSessionId: () => "session-snippet-persist-uuid",
-    });
+    const reloadedStateStore = makeSessionStateStore(
+      stateRoot,
+      "session-snippet-persist-uuid",
+    );
     const reloadedMetadata = await reloadedStateStore
       .getOrCreateSessionMetadata({
         provider: "codex",
@@ -673,11 +580,10 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
         ].join("\n") + "\n",
       );
       const stateRoot = join(dir, ".kato");
-      const stateStore = new PersistentSessionStateStore({
-        katoDir: stateRoot,
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-        makeSessionId: () => "session-codex-compaction-uuid",
-      });
+      const stateStore = makeSessionStateStore(
+        stateRoot,
+        "session-codex-compaction-uuid",
+      );
       const metadata = await stateStore.getOrCreateSessionMetadata({
         provider: "codex",
         providerSessionId: "session-codex-compaction",
@@ -720,15 +626,14 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
         events: [existingFirst],
       });
       const parseOffsets: number[] = [];
-      const runner = new FileProviderIngestionRunner({
+      const runner = makeFileProviderTestRunner({
+        dir,
         provider: "codex",
-        watchRoots: [dir],
         sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-codex-compaction-uuid",
-        }),
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-codex-compaction-uuid",
+        ),
         autoGenerateSnapshots: false,
         discoverSessions() {
           return Promise.resolve([{
@@ -824,11 +729,10 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
       assertEquals(snapshot.events[0]?.timestamp, "2026-02-26T10:00:00.000Z");
       assertEquals(snapshot.cursor, { kind: "byte-offset", value: 28_000 });
 
-      const reloadedStateStore = new PersistentSessionStateStore({
-        katoDir: stateRoot,
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-        makeSessionId: () => "session-codex-compaction-uuid",
-      });
+      const reloadedStateStore = makeSessionStateStore(
+        stateRoot,
+        "session-codex-compaction-uuid",
+      );
       const reloadedMetadata = await reloadedStateStore
         .getOrCreateSessionMetadata(
           {
@@ -860,73 +764,6 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
   );
 });
 
-Deno.test("FileProviderIngestionRunner resets persisted cursor when source file path changes", async () => {
-  await withTempDir("provider-ingestion-source-change-", async (dir) => {
-    const sessionFileA = join(dir, "session-source-a.jsonl");
-    const sessionFileB = join(dir, "session-source-b.jsonl");
-    await Deno.writeTextFile(sessionFileA, "placeholder-a\n");
-    await Deno.writeTextFile(sessionFileB, "placeholder-b\n");
-    const stateRoot = join(dir, ".kato");
-    const parseOffsets: number[] = [];
-
-    function makeRunner(
-      filePath: string,
-      store: InMemorySessionSnapshotStore,
-    ): FileProviderIngestionRunner {
-      return new FileProviderIngestionRunner({
-        provider: "test-provider",
-        watchRoots: [dir],
-        sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "session-source-change-uuid",
-        }),
-        autoGenerateSnapshots: true,
-        discoverSessions() {
-          return Promise.resolve([{
-            sessionId: "session-source-change",
-            filePath,
-            modifiedAtMs: Date.now(),
-          }]);
-        },
-        parseEvents(
-          currentFilePath: string,
-          fromOffset: number,
-          _ctx: { provider: string; sessionId: string },
-        ) {
-          parseOffsets.push(fromOffset);
-          return (async function* () {
-            if (fromOffset === 0) {
-              yield {
-                event: makeEvent(
-                  `source:${currentFilePath}:offset:0`,
-                  "2026-02-26T10:00:00.000Z",
-                ),
-                cursor: { kind: "byte-offset" as const, value: 10 },
-              };
-            }
-          })();
-        },
-      });
-    }
-
-    const firstStore = new InMemorySessionSnapshotStore();
-    const firstRunner = makeRunner(sessionFileA, firstStore);
-    await firstRunner.start();
-    await firstRunner.poll();
-    await firstRunner.stop();
-
-    const secondStore = new InMemorySessionSnapshotStore();
-    const secondRunner = makeRunner(sessionFileB, secondStore);
-    await secondRunner.start();
-    await secondRunner.poll();
-    await secondRunner.stop();
-
-    assertEquals(parseOffsets, [0, 0]);
-  });
-});
-
 Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file is missing", async () => {
   await withTempDir(
     "provider-ingestion-bootstrap-missing-twin-",
@@ -938,15 +775,14 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
       let phase: "initial" | "recovery" = "initial";
 
       function makeRunner(store: InMemorySessionSnapshotStore) {
-        return new FileProviderIngestionRunner({
+        return makeFileProviderTestRunner({
+          dir,
           provider: "test-provider",
-          watchRoots: [dir],
           sessionSnapshotStore: store,
-          sessionStateStore: new PersistentSessionStateStore({
-            katoDir: stateRoot,
-            now: () => new Date("2026-02-26T10:00:00.000Z"),
-            makeSessionId: () => "session-uuid-bootstrap-1",
-          }),
+          sessionStateStore: makeSessionStateStore(
+            stateRoot,
+            "session-uuid-bootstrap-1",
+          ),
           autoGenerateSnapshots: true,
           discoverSessions() {
             return Promise.resolve([{
@@ -986,11 +822,10 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
       await firstRunner.stop();
       phase = "recovery";
 
-      const stateStore = new PersistentSessionStateStore({
-        katoDir: stateRoot,
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-        makeSessionId: () => "session-uuid-bootstrap-1",
-      });
+      const stateStore = makeSessionStateStore(
+        stateRoot,
+        "session-uuid-bootstrap-1",
+      );
       const metadata = await stateStore.getOrCreateSessionMetadata({
         provider: "test-provider",
         providerSessionId: "session-bootstrap",
@@ -1016,11 +851,10 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
       );
       assertEquals(parseOffsets, [0, 0, 10]);
 
-      const reloadedStateStore = new PersistentSessionStateStore({
-        katoDir: stateRoot,
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-        makeSessionId: () => "session-uuid-bootstrap-1",
-      });
+      const reloadedStateStore = makeSessionStateStore(
+        stateRoot,
+        "session-uuid-bootstrap-1",
+      );
       const updatedMetadata = await reloadedStateStore
         .getOrCreateSessionMetadata({
           provider: "test-provider",
@@ -1053,11 +887,10 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
     await Deno.writeTextFile(sessionFile, "placeholder\n");
     const stateRoot = join(dir, ".kato");
 
-    const stateStore = new PersistentSessionStateStore({
-      katoDir: stateRoot,
-      now: () => new Date("2026-02-26T10:00:00.000Z"),
-      makeSessionId: () => "session-uuid-fail-closed-1",
-    });
+    const stateStore = makeSessionStateStore(
+      stateRoot,
+      "session-uuid-fail-closed-1",
+    );
     const location = stateStore.resolveLocation({
       provider: "test-provider",
       providerSessionId: "session-fail-closed",
@@ -1086,9 +919,9 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
     );
 
     let parseCalled = false;
-    const runner = new FileProviderIngestionRunner({
+    const runner = makeFileProviderTestRunner({
+      dir,
       provider: "test-provider",
-      watchRoots: [dir],
       sessionSnapshotStore: new InMemorySessionSnapshotStore(),
       sessionStateStore: stateStore,
       autoGenerateSnapshots: true,
@@ -1124,213 +957,6 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
       sink.records.some((record) =>
         record.event === "session.state.fail_closed" &&
         record.channel === "security-audit"
-      ),
-    );
-  });
-});
-
-Deno.test("FileProviderIngestionRunner realigns Gemini cursor via persisted anchor", async () => {
-  await withTempDir(
-    "provider-ingestion-gemini-anchor-realign-",
-    async (dir) => {
-      const sessionId = "gemini-session-anchor";
-      const sessionFile = join(dir, "session-gemini-anchor.json");
-      const stateRoot = join(dir, ".kato");
-      const parseOffsets: number[] = [];
-      const sink = new CaptureSink();
-      const operationalLogger = new StructuredLogger([sink], {
-        channel: "operational",
-        minLevel: "debug",
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-      });
-      const auditLogger = new AuditLogger(
-        new StructuredLogger([sink], {
-          channel: "security-audit",
-          minLevel: "debug",
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-        }),
-      );
-
-      await writeGeminiSessionFixture(sessionFile, sessionId, [
-        {
-          id: "m-a",
-          type: "user",
-          content: "first",
-          timestamp: "2026-02-26T10:00:00.000Z",
-        },
-        {
-          id: "m-b",
-          type: "gemini",
-          content: "second",
-          timestamp: "2026-02-26T10:00:01.000Z",
-        },
-      ]);
-
-      function makeRunner(store: InMemorySessionSnapshotStore) {
-        return new FileProviderIngestionRunner({
-          provider: "gemini",
-          watchRoots: [dir],
-          sessionSnapshotStore: store,
-          sessionStateStore: new PersistentSessionStateStore({
-            katoDir: stateRoot,
-            now: () => new Date("2026-02-26T10:00:00.000Z"),
-            makeSessionId: () => "kato-gemini-anchor-1234",
-          }),
-          autoGenerateSnapshots: true,
-          operationalLogger,
-          auditLogger,
-          discoverSessions() {
-            return Promise.resolve([{
-              sessionId,
-              filePath: sessionFile,
-              modifiedAtMs: Date.now(),
-            }]);
-          },
-          parseEvents(filePath, fromOffset, ctx) {
-            parseOffsets.push(fromOffset);
-            return parseGeminiFixtureEvents(filePath, fromOffset, ctx);
-          },
-        });
-      }
-
-      const firstStore = new InMemorySessionSnapshotStore();
-      const firstRunner = makeRunner(firstStore);
-      await firstRunner.start();
-      await firstRunner.poll();
-      await firstRunner.stop();
-
-      await writeGeminiSessionFixture(sessionFile, sessionId, [
-        {
-          id: "m-b",
-          type: "gemini",
-          content: "second",
-          timestamp: "2026-02-26T10:00:01.000Z",
-        },
-        {
-          id: "m-x",
-          type: "user",
-          content: "third",
-          timestamp: "2026-02-26T10:00:02.000Z",
-        },
-        {
-          id: "m-c",
-          type: "gemini",
-          content: "fourth",
-          timestamp: "2026-02-26T10:00:03.000Z",
-        },
-      ]);
-
-      const secondStore = new InMemorySessionSnapshotStore();
-      const secondRunner = makeRunner(secondStore);
-      await secondRunner.start();
-      await secondRunner.poll();
-      await secondRunner.stop();
-
-      assertEquals(parseOffsets, [0, 1]);
-      assert(
-        sink.records.some((record) =>
-          record.event === "provider.ingestion.anchor.realigned" &&
-          record.channel === "operational"
-        ),
-      );
-    },
-  );
-});
-
-Deno.test("FileProviderIngestionRunner replays Gemini from start when anchor is missing", async () => {
-  await withTempDir("provider-ingestion-gemini-anchor-replay-", async (dir) => {
-    const sessionId = "gemini-session-replay";
-    const sessionFile = join(dir, "session-gemini-replay.json");
-    const stateRoot = join(dir, ".kato");
-    const parseOffsets: number[] = [];
-    const sink = new CaptureSink();
-    const operationalLogger = new StructuredLogger([sink], {
-      channel: "operational",
-      minLevel: "debug",
-      now: () => new Date("2026-02-26T10:00:00.000Z"),
-    });
-    const auditLogger = new AuditLogger(
-      new StructuredLogger([sink], {
-        channel: "security-audit",
-        minLevel: "debug",
-        now: () => new Date("2026-02-26T10:00:00.000Z"),
-      }),
-    );
-
-    await writeGeminiSessionFixture(sessionFile, sessionId, [
-      {
-        id: "m-a",
-        type: "user",
-        content: "first",
-        timestamp: "2026-02-26T10:00:00.000Z",
-      },
-      {
-        id: "m-b",
-        type: "gemini",
-        content: "second",
-        timestamp: "2026-02-26T10:00:01.000Z",
-      },
-    ]);
-
-    function makeRunner(store: InMemorySessionSnapshotStore) {
-      return new FileProviderIngestionRunner({
-        provider: "gemini",
-        watchRoots: [dir],
-        sessionSnapshotStore: store,
-        sessionStateStore: new PersistentSessionStateStore({
-          katoDir: stateRoot,
-          now: () => new Date("2026-02-26T10:00:00.000Z"),
-          makeSessionId: () => "kato-gemini-replay-5678",
-        }),
-        autoGenerateSnapshots: true,
-        operationalLogger,
-        auditLogger,
-        discoverSessions() {
-          return Promise.resolve([{
-            sessionId,
-            filePath: sessionFile,
-            modifiedAtMs: Date.now(),
-          }]);
-        },
-        parseEvents(filePath, fromOffset, ctx) {
-          parseOffsets.push(fromOffset);
-          return parseGeminiFixtureEvents(filePath, fromOffset, ctx);
-        },
-      });
-    }
-
-    const firstStore = new InMemorySessionSnapshotStore();
-    const firstRunner = makeRunner(firstStore);
-    await firstRunner.start();
-    await firstRunner.poll();
-    await firstRunner.stop();
-
-    await writeGeminiSessionFixture(sessionFile, sessionId, [
-      {
-        id: "m-x",
-        type: "user",
-        content: "replacement-1",
-        timestamp: "2026-02-26T10:00:02.000Z",
-      },
-      {
-        id: "m-y",
-        type: "gemini",
-        content: "replacement-2",
-        timestamp: "2026-02-26T10:00:03.000Z",
-      },
-    ]);
-
-    const secondStore = new InMemorySessionSnapshotStore();
-    const secondRunner = makeRunner(secondStore);
-    await secondRunner.start();
-    await secondRunner.poll();
-    await secondRunner.stop();
-
-    assertEquals(parseOffsets, [0, 0]);
-    assert(
-      sink.records.some((record) =>
-        record.event === "provider.ingestion.anchor.not_found" &&
-        record.channel === "operational"
       ),
     );
   });
@@ -1584,240 +1210,6 @@ Deno.test("FileProviderIngestionRunner skips watch setup when roots are missing"
     assertEquals(result.eventsObserved, 0);
   });
 });
-
-Deno.test("FileProviderIngestionRunner suppresses duplicate replayed messages", async () => {
-  await withTempDir("provider-ingestion-dedupe-", async (dir) => {
-    const sessionFile = join(dir, "session-dedupe.jsonl");
-    await Deno.writeTextFile(sessionFile, "placeholder\n");
-
-    const sink = new CaptureSink();
-    const operationalLogger = new StructuredLogger([sink], {
-      channel: "operational",
-      minLevel: "debug",
-      now: () => new Date("2026-02-22T20:15:00.000Z"),
-    });
-    const auditLogger = new AuditLogger(
-      new StructuredLogger([sink], {
-        channel: "security-audit",
-        minLevel: "debug",
-        now: () => new Date("2026-02-22T20:15:00.000Z"),
-      }),
-    );
-
-    const harness = makeWatchHarness();
-    const store = new InMemorySessionSnapshotStore();
-    const runner = new FileProviderIngestionRunner({
-      provider: "test-provider",
-      watchRoots: [dir],
-      sessionSnapshotStore: store,
-      watchFs: harness.watchFn,
-      operationalLogger,
-      auditLogger,
-      discoverSessions() {
-        return Promise.resolve([{
-          sessionId: "session-dedupe",
-          filePath: sessionFile,
-          modifiedAtMs: Date.now(),
-        }]);
-      },
-      parseEvents(
-        _filePath: string,
-        fromOffset: number,
-        _ctx: { provider: string; sessionId: string },
-      ) {
-        return (async function* () {
-          if (fromOffset === 0) {
-            yield {
-              event: makeEvent("m1", "2026-02-22T20:15:00.000Z"),
-              cursor: { kind: "byte-offset" as const, value: 10 },
-            };
-          } else if (fromOffset === 10) {
-            // Simulate replayed event after provider offset drift.
-            yield {
-              event: makeEvent("m1", "2026-02-22T20:15:00.000Z"),
-              cursor: { kind: "byte-offset" as const, value: 20 },
-            };
-          }
-        })();
-      },
-    });
-
-    await runner.start();
-    await runner.poll();
-    await harness.emitModify(sessionFile);
-    await runner.poll();
-    await runner.stop();
-
-    const snapshot = store.get("session-dedupe");
-    assertExists(snapshot);
-    assertEquals(snapshot.events.length, 1);
-    assert(
-      sink.records.some((record) =>
-        record.event === "provider.ingestion.events_dropped" &&
-        record.channel === "operational"
-      ),
-    );
-  });
-});
-
-Deno.test(
-  "FileProviderIngestionRunner keeps cross-kind events when dedupe fields collide",
-  async () => {
-    await withTempDir("provider-ingestion-cross-kind-", async (dir) => {
-      const sessionFile = join(dir, "session-cross-kind.jsonl");
-      await Deno.writeTextFile(sessionFile, "placeholder\n");
-
-      const harness = makeWatchHarness();
-      const store = new InMemorySessionSnapshotStore();
-      const runner = new FileProviderIngestionRunner({
-        provider: "test-provider",
-        watchRoots: [dir],
-        sessionSnapshotStore: store,
-        watchFs: harness.watchFn,
-        discoverSessions() {
-          return Promise.resolve([{
-            sessionId: "session-cross-kind",
-            filePath: sessionFile,
-            modifiedAtMs: Date.now(),
-          }]);
-        },
-        parseEvents(
-          _filePath: string,
-          fromOffset: number,
-          _ctx: { provider: string; sessionId: string },
-        ) {
-          return (async function* () {
-            if (fromOffset !== 0) {
-              return;
-            }
-
-            const sharedTimestamp = "2026-02-22T20:15:00.000Z";
-            const sharedCursor = { kind: "byte-offset" as const, value: 10 };
-            const sharedSource = {
-              providerEventType: "assistant",
-              rawCursor: sharedCursor,
-            };
-
-            yield {
-              event: {
-                eventId: "collision",
-                provider: "test-provider",
-                sessionId: "sess-test",
-                timestamp: sharedTimestamp,
-                kind: "message.assistant",
-                role: "assistant",
-                content: "same-content",
-                source: sharedSource,
-              } as ConversationEvent,
-              cursor: sharedCursor,
-            };
-            yield {
-              event: {
-                eventId: "collision",
-                provider: "test-provider",
-                sessionId: "sess-test",
-                timestamp: sharedTimestamp,
-                kind: "thinking",
-                content: "same-content",
-                source: sharedSource,
-              } as ConversationEvent,
-              cursor: sharedCursor,
-            };
-          })();
-        },
-      });
-
-      await runner.start();
-      await runner.poll();
-      await runner.stop();
-
-      const snapshot = store.get("session-cross-kind");
-      assertExists(snapshot);
-      assertEquals(snapshot.events.length, 2);
-      assertEquals(
-        snapshot.events.map((event) => event.kind),
-        ["message.assistant", "thinking"],
-      );
-    });
-  },
-);
-
-Deno.test(
-  "FileProviderIngestionRunner keeps distinct events when provider ids and timestamps are missing",
-  async () => {
-    await withTempDir("provider-ingestion-missing-id-", async (dir) => {
-      const sessionFile = join(dir, "session-missing-id.jsonl");
-      await Deno.writeTextFile(sessionFile, "placeholder\n");
-
-      const harness = makeWatchHarness();
-      const store = new InMemorySessionSnapshotStore();
-      const runner = new FileProviderIngestionRunner({
-        provider: "test-provider",
-        watchRoots: [dir],
-        sessionSnapshotStore: store,
-        watchFs: harness.watchFn,
-        discoverSessions() {
-          return Promise.resolve([{
-            sessionId: "session-missing-id",
-            filePath: sessionFile,
-            modifiedAtMs: Date.now(),
-          }]);
-        },
-        parseEvents(
-          _filePath: string,
-          fromOffset: number,
-          _ctx: { provider: string; sessionId: string },
-        ) {
-          return (async function* () {
-            if (fromOffset !== 0) {
-              return;
-            }
-            yield {
-              event: {
-                eventId: "e1",
-                provider: "test-provider",
-                sessionId: "sess-test",
-                kind: "message.assistant",
-                role: "assistant",
-                content: "same-content",
-                turnId: "turn-1",
-                source: {
-                  providerEventType: "assistant",
-                  rawCursor: { kind: "byte-offset", value: 10 },
-                },
-              } as ConversationEvent,
-              cursor: { kind: "byte-offset" as const, value: 10 },
-            };
-            yield {
-              event: {
-                eventId: "e2",
-                provider: "test-provider",
-                sessionId: "sess-test",
-                kind: "message.assistant",
-                role: "assistant",
-                content: "same-content",
-                turnId: "turn-2",
-                source: {
-                  providerEventType: "assistant",
-                  rawCursor: { kind: "byte-offset", value: 20 },
-                },
-              } as ConversationEvent,
-              cursor: { kind: "byte-offset" as const, value: 20 },
-            };
-          })();
-        },
-      });
-
-      await runner.start();
-      await runner.poll();
-      await runner.stop();
-
-      const snapshot = store.get("session-missing-id");
-      assertExists(snapshot);
-      assertEquals(snapshot.events.length, 2);
-    });
-  },
-);
 
 Deno.test("FileProviderIngestionRunner logs duplicate session discovery warnings once per duplicate set", async () => {
   await withTempDir("provider-ingestion-duplicate-sessions-", async (dir) => {
@@ -2087,199 +1479,3 @@ Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", asyn
     );
   });
 });
-
-Deno.test(
-  "createGeminiIngestionRunner prefers newer Gemini lastUpdated over newer mtime for duplicate session files",
-  async () => {
-    await withTempDir("provider-ingestion-gemini-dedupe-updated-", async (
-      dir,
-    ) => {
-      const sessionId = "gemini-dedupe-updated";
-      const hashProject =
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-      const hashChats = join(dir, hashProject, "chats");
-      const slugChats = join(dir, "kato", "chats");
-      await Deno.mkdir(hashChats, { recursive: true });
-      await Deno.mkdir(slugChats, { recursive: true });
-
-      const hashPath = join(hashChats, "session-2026-02-24-dup.json");
-      const slugPath = join(slugChats, "session-2026-02-24-dup.json");
-
-      await writeGeminiSessionWithLastUpdated(
-        hashPath,
-        sessionId,
-        "2026-02-24T20:00:01.000Z",
-        [
-          {
-            id: "h-u1",
-            type: "user",
-            content: "hash user",
-            timestamp: "2026-02-24T20:00:01.000Z",
-          },
-          {
-            id: "h-a1",
-            type: "gemini",
-            content: "assistant from hash",
-            timestamp: "2026-02-24T20:00:02.000Z",
-          },
-        ],
-      );
-
-      await writeGeminiSessionWithLastUpdated(
-        slugPath,
-        sessionId,
-        "2026-02-24T20:00:10.000Z",
-        [
-          {
-            id: "s-u1",
-            type: "user",
-            content: "slug user",
-            timestamp: "2026-02-24T20:00:09.000Z",
-          },
-          {
-            id: "s-a1",
-            type: "gemini",
-            content: "assistant from slug",
-            timestamp: "2026-02-24T20:00:10.000Z",
-          },
-        ],
-      );
-
-      // Make the hash copy look newer on filesystem mtime to ensure
-      // dedupe winner is chosen by parsed lastUpdated first.
-      await Deno.utime(
-        hashPath,
-        new Date("2026-02-24T20:00:30.000Z"),
-        new Date("2026-02-24T20:00:30.000Z"),
-      );
-      await Deno.utime(
-        slugPath,
-        new Date("2026-02-24T20:00:20.000Z"),
-        new Date("2026-02-24T20:00:20.000Z"),
-      );
-
-      const store = new InMemorySessionSnapshotStore();
-      const harness = makeWatchHarness();
-      const runner = createGeminiIngestionRunner({
-        sessionSnapshotStore: store,
-        sessionRoots: [dir],
-        now: () => new Date("2026-02-24T20:00:00.000Z"),
-        watchFs: harness.watchFn,
-      });
-
-      await runner.start();
-      const result = await runner.poll();
-      await runner.stop();
-
-      assertEquals(result.provider, "gemini");
-      assertEquals(result.sessionsUpdated, 1);
-      const snapshot = store.get(sessionId);
-      assertExists(snapshot);
-
-      const contents = snapshot.events
-        .filter((event) =>
-          event.kind === "message.user" || event.kind === "message.assistant"
-        )
-        .map((event) => event.content);
-      assert(contents.includes("assistant from slug"));
-      assertEquals(contents.includes("assistant from hash"), false);
-    });
-  },
-);
-
-Deno.test(
-  "createGeminiIngestionRunner prefers slug layout over hash layout when duplicate Gemini lastUpdated ties",
-  async () => {
-    await withTempDir("provider-ingestion-gemini-dedupe-layout-", async (
-      dir,
-    ) => {
-      const sessionId = "gemini-dedupe-layout";
-      const hashProject =
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-      const hashChats = join(dir, hashProject, "chats");
-      const slugChats = join(dir, "kato", "chats");
-      await Deno.mkdir(hashChats, { recursive: true });
-      await Deno.mkdir(slugChats, { recursive: true });
-
-      const hashPath = join(hashChats, "session-2026-02-24-layout.json");
-      const slugPath = join(slugChats, "session-2026-02-24-layout.json");
-      const tiedLastUpdated = "2026-02-24T20:00:05.000Z";
-
-      await writeGeminiSessionWithLastUpdated(
-        hashPath,
-        sessionId,
-        tiedLastUpdated,
-        [
-          {
-            id: "h-u1",
-            type: "user",
-            content: "hash user",
-            timestamp: "2026-02-24T20:00:04.000Z",
-          },
-          {
-            id: "h-a1",
-            type: "gemini",
-            content: "assistant from hash layout tie",
-            timestamp: "2026-02-24T20:00:05.000Z",
-          },
-        ],
-      );
-
-      await writeGeminiSessionWithLastUpdated(
-        slugPath,
-        sessionId,
-        tiedLastUpdated,
-        [
-          {
-            id: "s-u1",
-            type: "user",
-            content: "slug user",
-            timestamp: "2026-02-24T20:00:04.000Z",
-          },
-          {
-            id: "s-a1",
-            type: "gemini",
-            content: "assistant from slug layout tie",
-            timestamp: "2026-02-24T20:00:05.000Z",
-          },
-        ],
-      );
-
-      // Keep hash mtime newer so layout tie-break runs before mtime.
-      await Deno.utime(
-        hashPath,
-        new Date("2026-02-24T20:00:30.000Z"),
-        new Date("2026-02-24T20:00:30.000Z"),
-      );
-      await Deno.utime(
-        slugPath,
-        new Date("2026-02-24T20:00:10.000Z"),
-        new Date("2026-02-24T20:00:10.000Z"),
-      );
-
-      const store = new InMemorySessionSnapshotStore();
-      const harness = makeWatchHarness();
-      const runner = createGeminiIngestionRunner({
-        sessionSnapshotStore: store,
-        sessionRoots: [dir],
-        now: () => new Date("2026-02-24T20:00:00.000Z"),
-        watchFs: harness.watchFn,
-      });
-
-      await runner.start();
-      const result = await runner.poll();
-      await runner.stop();
-
-      assertEquals(result.provider, "gemini");
-      assertEquals(result.sessionsUpdated, 1);
-      const snapshot = store.get(sessionId);
-      assertExists(snapshot);
-
-      const contents = snapshot.events
-        .filter((event) => event.kind === "message.assistant")
-        .map((event) => event.content);
-      assert(contents.includes("assistant from slug layout tie"));
-      assertEquals(contents.includes("assistant from hash layout tie"), false);
-    });
-  },
-);

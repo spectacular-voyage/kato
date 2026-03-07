@@ -74,6 +74,41 @@ Deno.test("loadSuppressedRecentErrorKeys ignores invalid document schema", async
   }
 });
 
+Deno.test("loadSuppressedRecentErrorKeys ignores non-object and invalid field shapes", async () => {
+  const dir = await makeTestTempDir("status-error-cursor-invalid-shape-");
+  try {
+    const cursorPath = resolveStatusErrorCursorPath(dir);
+
+    await Deno.writeTextFile(cursorPath, JSON.stringify(["not-a-document"]));
+    let loaded = await loadSuppressedRecentErrorKeys(cursorPath);
+    assertEquals([...loaded], []);
+
+    await Deno.writeTextFile(
+      cursorPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: 123,
+        suppressedRecentErrorKeys: ["log|A"],
+      }),
+    );
+    loaded = await loadSuppressedRecentErrorKeys(cursorPath);
+    assertEquals([...loaded], []);
+
+    await Deno.writeTextFile(
+      cursorPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-03-02T00:00:00.000Z",
+        suppressedRecentErrorKeys: ["log|A", 123],
+      }),
+    );
+    loaded = await loadSuppressedRecentErrorKeys(cursorPath);
+    assertEquals([...loaded], []);
+  } finally {
+    await removePathIfPresent(dir);
+  }
+});
+
 Deno.test("loadSuppressedRecentErrorKeys ignores malformed JSON", async () => {
   const dir = await makeTestTempDir("status-error-cursor-malformed-");
   try {
@@ -86,6 +121,34 @@ Deno.test("loadSuppressedRecentErrorKeys ignores malformed JSON", async () => {
     await removePathIfPresent(dir);
   }
 });
+
+Deno.test(
+  "saveSuppressedRecentErrorKeys creates parent directories and caps normalized keys",
+  async () => {
+    const dir = await makeTestTempDir("status-error-cursor-cap-");
+    try {
+      const runtimeDir = join(dir, "nested", "runtime");
+      const cursorPath = resolveStatusErrorCursorPath(runtimeDir);
+      const rawKeys = new Set(
+        Array.from({ length: 300 }, (_, index) => `  log|${index}  `),
+      );
+
+      await saveSuppressedRecentErrorKeys(
+        cursorPath,
+        rawKeys,
+        new Date("2026-03-04T00:00:00.000Z"),
+      );
+
+      const loaded = await loadSuppressedRecentErrorKeys(cursorPath);
+      const normalizedKeys = [...loaded];
+      assertEquals(normalizedKeys.length, 256);
+      assertEquals(normalizedKeys[0], "log|0");
+      assertEquals(normalizedKeys[255], "log|255");
+    } finally {
+      await removePathIfPresent(dir);
+    }
+  },
+);
 
 Deno.test(
   "saveSuppressedRecentErrorKeys overwrites existing cursor file without leaving temp files",

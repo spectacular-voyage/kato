@@ -39,7 +39,24 @@ import {
   readOptionalEnv,
   resolveHomeDir,
 } from "../utils/env.ts";
-import { hashStringFNV1a, stableStringify } from "../utils/hash.ts";
+import { hashStringFNV1a } from "../utils/hash.ts";
+import { dedupeDiscoveredSessions } from "./provider_session_discovery.ts";
+import {
+  cursorsEqual,
+  makeByteOffsetCursor,
+  makeItemIndexCursor,
+  type ProviderIngestionCodexCompactionAnchor,
+  resolveByteOffsetResume,
+  resolveCodexCompactionResume,
+  resolveCursorPosition,
+  resolveGeminiAnchorResume,
+  resolveInitialIngestionCursor,
+  resolveNextIngestAnchor,
+} from "./provider_ingestion_resume.ts";
+import {
+  mergeEvents,
+  type MergeEventsOptions,
+} from "./provider_ingestion_merge.ts";
 
 export interface ProviderSessionFile {
   sessionId: string;
@@ -127,20 +144,10 @@ interface CodexSessionMeta {
   source: string;
 }
 
-interface CodexCompactionAnchor {
-  lineEnd: number;
-  anchor: SessionIngestAnchorV1;
-}
-
 interface GeminiSessionDiscovery {
   sessionId: string;
   contentUpdatedAtMs?: number;
   layoutType: "hash" | "slug" | "unknown";
-}
-
-interface MergeEventsOptions {
-  ignoreTimestamp?: boolean;
-  ignoreCursor?: boolean;
 }
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
@@ -188,52 +195,6 @@ function makeNoopAuditLogger(now: () => Date): AuditLogger {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function resolveByteOffset(cursor: ProviderCursor | undefined): number {
-  if (cursor?.kind === "byte-offset" && Number.isFinite(cursor.value)) {
-    return Math.max(0, Math.floor(cursor.value));
-  }
-  return 0;
-}
-
-function resolveItemIndex(cursor: ProviderCursor | undefined): number {
-  if (cursor?.kind === "item-index" && Number.isFinite(cursor.value)) {
-    return Math.max(0, Math.floor(cursor.value));
-  }
-  return 0;
-}
-
-function resolveCursorPosition(cursor: ProviderCursor | undefined): number {
-  if (cursor?.kind === "byte-offset") {
-    return resolveByteOffset(cursor);
-  }
-  if (cursor?.kind === "item-index") {
-    return resolveItemIndex(cursor);
-  }
-  return 0;
-}
-
-function cursorsEqual(
-  a: ProviderCursor | undefined,
-  b: ProviderCursor | undefined,
-): boolean {
-  if (!a || !b) return a === b;
-  return a.kind === b.kind && a.value === b.value;
-}
-
-function makeByteOffsetCursor(offset: number): ProviderCursor {
-  return {
-    kind: "byte-offset",
-    value: Math.max(0, Math.floor(offset)),
-  };
-}
-
-function makeItemIndexCursor(index: number): ProviderCursor {
-  return {
-    kind: "item-index",
-    value: Math.max(0, Math.floor(index)),
-  };
 }
 
 function normalizeRoots(paths: string[]): string[] {
@@ -449,10 +410,10 @@ async function readCodexSessionMeta(
 
 async function readLatestCodexCompactionAnchor(
   filePath: string,
-): Promise<CodexCompactionAnchor | undefined> {
+): Promise<ProviderIngestionCodexCompactionAnchor | undefined> {
   let file: Deno.FsFile | undefined;
   let lineEnd = 0;
-  let latest: CodexCompactionAnchor | undefined;
+  let latest: ProviderIngestionCodexCompactionAnchor | undefined;
   const decoder = new TextDecoder();
 
   const processLine = (
@@ -660,81 +621,6 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readAnchorStringField(value: unknown): string | undefined {
-  if (!isNonEmptyString(value)) {
-    return undefined;
-  }
-  return value.trim();
-}
-
-function normalizeGeminiMessageForAnchor(
-  message: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    type: readAnchorStringField(message["type"]) ?? "",
-    content: message["content"],
-    displayContent: message["displayContent"],
-    thoughts: message["thoughts"],
-    toolCalls: message["toolCalls"],
-    model: readAnchorStringField(message["model"]) ?? "",
-  };
-}
-
-function buildGeminiMessageAnchor(
-  message: Record<string, unknown>,
-): SessionIngestAnchorV1 {
-  const messageId = readAnchorStringField(message["id"]);
-  const payloadHash = hashStringFNV1a(
-    stableStringify(normalizeGeminiMessageForAnchor(message)),
-  );
-  return {
-    ...(messageId ? { messageId } : {}),
-    payloadHash,
-  };
-}
-
-function findGeminiAnchorIndex(
-  messages: Record<string, unknown>[],
-  anchor: SessionIngestAnchorV1,
-): number | undefined {
-  if (isNonEmptyString(anchor.messageId)) {
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index];
-      if (!message) continue;
-      const messageId = readAnchorStringField(message["id"]);
-      if (messageId === anchor.messageId) {
-        return index;
-      }
-    }
-  }
-
-  if (!isNonEmptyString(anchor.payloadHash)) {
-    return undefined;
-  }
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (!message) continue;
-    const candidate = buildGeminiMessageAnchor(message);
-    if (candidate.payloadHash === anchor.payloadHash) {
-      return index;
-    }
-  }
-  return undefined;
-}
-
-function anchorsEqual(
-  a: SessionIngestAnchorV1 | undefined,
-  b: SessionIngestAnchorV1 | undefined,
-): boolean {
-  if (!a || !b) {
-    return a === b;
-  }
-  if (isNonEmptyString(a.messageId) || isNonEmptyString(b.messageId)) {
-    return (a.messageId ?? "") === (b.messageId ?? "");
-  }
-  return (a.payloadHash ?? "") === (b.payloadHash ?? "");
-}
-
 async function readGeminiMessages(
   filePath: string,
 ): Promise<Record<string, unknown>[] | undefined> {
@@ -763,124 +649,10 @@ async function readGeminiMessages(
   );
 }
 
-function serializeCursor(cursor: ProviderCursor | undefined): string {
-  if (!cursor) {
-    return "";
-  }
-  return `${cursor.kind}:${String(cursor.value)}`;
-}
-
-function resolveStableCursorComponent(
-  event: ConversationEvent,
-  options: MergeEventsOptions = {},
-): string {
-  if (isNonEmptyString(event.turnId)) {
-    return `turn:${event.turnId}`;
-  }
-  if (isNonEmptyString(event.source.providerEventId)) {
-    return "";
-  }
-  if (options.ignoreCursor) {
-    return "";
-  }
-  return serializeCursor(event.source.rawCursor);
-}
-
-function eventSignature(
-  event: ConversationEvent,
-  options: MergeEventsOptions = {},
-): string {
-  const stableCursorComponent = resolveStableCursorComponent(event, options);
-  const timestamp = options.ignoreTimestamp ? "" : event.timestamp ?? "";
-  const base = `${event.kind}\0${event.source.providerEventType}\0${
-    event.source.providerEventId ?? ""
-  }\0${timestamp}\0${stableCursorComponent}`;
-  switch (event.kind) {
-    case "message.user":
-    case "message.assistant":
-    case "message.system":
-      return `${base}\0${event.content}`;
-    case "tool.call":
-      return `${base}\0${event.toolCallId}\0${event.name}\0${
-        event.description ?? ""
-      }\0${event.input !== undefined ? JSON.stringify(event.input) : ""}`;
-    case "tool.result":
-      return `${base}\0${event.toolCallId}\0${event.result}`;
-    case "thinking":
-      return `${base}\0${event.content}`;
-    case "decision":
-      return `${base}\0${event.decisionId}`;
-    case "provider.info":
-      return `${base}\0${event.content}`;
-    default:
-      return base;
-  }
-}
-
-function mergeEvents(
-  existingEvents: ConversationEvent[],
-  incomingEvents: ConversationEvent[],
-  options: MergeEventsOptions = {},
-): { mergedEvents: ConversationEvent[]; droppedEvents: number } {
-  const signatures = new Set(
-    existingEvents.map((event) => eventSignature(event, options)),
-  );
-  const mergedEvents = [...existingEvents];
-  let droppedEvents = 0;
-
-  for (const event of incomingEvents) {
-    const signature = eventSignature(event, options);
-    if (signatures.has(signature)) {
-      droppedEvents += 1;
-      continue;
-    }
-    signatures.add(signature);
-    mergedEvents.push(event);
-  }
-
-  return { mergedEvents, droppedEvents };
-}
-
 function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
   return (stateMetadata.workspaceOutputs ?? []).some((output) =>
     output.desiredState === "on"
   );
-}
-
-function geminiLayoutRank(
-  layoutType: ProviderSessionFile["layoutType"],
-): number {
-  switch (layoutType) {
-    case "slug":
-      return 2;
-    case "hash":
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-function compareDiscoveredSessionCandidates(
-  a: ProviderSessionFile,
-  b: ProviderSessionFile,
-): number {
-  const aContentUpdated = a.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
-  const bContentUpdated = b.contentUpdatedAtMs ?? Number.NEGATIVE_INFINITY;
-  if (aContentUpdated !== bContentUpdated) {
-    return bContentUpdated - aContentUpdated;
-  }
-
-  const aLayoutRank = geminiLayoutRank(a.layoutType);
-  const bLayoutRank = geminiLayoutRank(b.layoutType);
-  if (aLayoutRank !== bLayoutRank) {
-    return bLayoutRank - aLayoutRank;
-  }
-
-  if (a.modifiedAtMs !== b.modifiedAtMs) {
-    return b.modifiedAtMs - a.modifiedAtMs;
-  }
-
-  return a.filePath.localeCompare(b.filePath);
 }
 
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
@@ -1192,34 +964,14 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private async dedupeDiscoveredSessions(
     sessions: ProviderSessionFile[],
   ): Promise<ProviderSessionFile[]> {
-    const bySessionId = new Map<string, ProviderSessionFile>();
-    const duplicateSessionIds = new Set<string>();
-    let droppedEvents = 0;
+    const deduped = dedupeDiscoveredSessions(sessions);
 
-    const sorted = [...sessions].sort((a, b) => {
-      if (a.sessionId === b.sessionId) {
-        return compareDiscoveredSessionCandidates(a, b);
-      }
-      return a.sessionId.localeCompare(b.sessionId);
-    });
-
-    for (const session of sorted) {
-      if (!bySessionId.has(session.sessionId)) {
-        bySessionId.set(session.sessionId, session);
-      } else {
-        droppedEvents += 1;
-        duplicateSessionIds.add(session.sessionId);
-      }
-    }
-
-    if (droppedEvents > 0) {
-      const warningKey = `${droppedEvents}:${
-        Array.from(duplicateSessionIds)
-          .sort()
-          .join(",")
+    if (deduped.droppedEvents > 0) {
+      const warningKey = `${deduped.droppedEvents}:${
+        deduped.duplicateSessionIds.join(",")
       }`;
       if (this.lastDuplicateDiscoveryWarningKey === warningKey) {
-        return Array.from(bySessionId.values());
+        return deduped.sessions;
       }
       this.lastDuplicateDiscoveryWarningKey = warningKey;
       await this.operationalLogger.debug(
@@ -1227,16 +979,16 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         "Dropped duplicate session discovery events",
         {
           provider: this.provider,
-          droppedEvents,
+          droppedEvents: deduped.droppedEvents,
           reason: "duplicate-session-id",
-          duplicateSessionIds: Array.from(duplicateSessionIds).sort(),
+          duplicateSessionIds: deduped.duplicateSessionIds,
         },
       );
     } else {
       this.lastDuplicateDiscoveryWarningKey = undefined;
     }
 
-    return Array.from(bySessionId.values());
+    return deduped.sessions;
   }
 
   private setCursor(
@@ -1299,33 +1051,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     const memoryCursor = this.cursors.get(sessionId);
-    let existingCursor = stateMetadata?.ingestCursor ??
-      memoryCursor;
-    let resumeSource: "persisted" | "memory" | "default" = stateMetadata
-      ? "persisted"
-      : memoryCursor
-      ? "memory"
-      : "default";
-    if (
-      stateMetadata?.sourceFilePath &&
-      stateMetadata.sourceFilePath !== session.filePath
-    ) {
-      existingCursor = undefined;
-      resumeSource = "persisted";
-      this.cursors.delete(sessionId);
-      this.cursorSourcePaths.delete(sessionId);
-    } else if (
-      !stateMetadata &&
-      memoryCursor &&
-      this.cursorSourcePaths.has(sessionId) &&
-      this.cursorSourcePaths.get(sessionId) !== session.filePath
-    ) {
-      existingCursor = undefined;
-      resumeSource = "default";
+    let { existingCursor, fromOffset, resumeSource, clearStoredCursor } =
+      resolveInitialIngestionCursor({
+        persistedCursor: stateMetadata?.ingestCursor,
+        persistedSourceFilePath: stateMetadata?.sourceFilePath,
+        memoryCursor,
+        memoryCursorSourcePath: this.cursorSourcePaths.get(sessionId),
+        sessionFilePath: session.filePath,
+      });
+    if (clearStoredCursor) {
       this.cursors.delete(sessionId);
       this.cursorSourcePaths.delete(sessionId);
     }
-    let fromOffset = resolveCursorPosition(existingCursor);
     let fileStat: Deno.FileInfo;
     try {
       fileStat = await Deno.stat(session.filePath);
@@ -1339,21 +1076,24 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       throw error;
     }
 
-    if (existingCursor?.kind === "byte-offset") {
-      const fileSize = fileStat.size ?? 0;
-      if (fromOffset > fileSize) {
-        fromOffset = 0;
-        existingCursor = makeByteOffsetCursor(0);
-        this.setCursor(sessionId, existingCursor, session.filePath);
-        if (stateMetadata) {
-          stateMetadata.ingestCursor = existingCursor;
-        }
-        await this.operationalLogger.warn(
-          "provider.ingestion.cursor.reset",
-          "Provider ingestion cursor reset after file truncation",
-          { provider: this.provider, sessionId, filePath: session.filePath },
-        );
+    const truncatedResume = resolveByteOffsetResume({
+      existingCursor,
+      fromOffset,
+      fileSize: fileStat.size ?? 0,
+    });
+    existingCursor = truncatedResume.existingCursor;
+    fromOffset = truncatedResume.fromOffset;
+    if (truncatedResume.truncated) {
+      const resetCursor = existingCursor!;
+      this.setCursor(sessionId, resetCursor, session.filePath);
+      if (stateMetadata) {
+        stateMetadata.ingestCursor = resetCursor;
       }
+      await this.operationalLogger.warn(
+        "provider.ingestion.cursor.reset",
+        "Provider ingestion cursor reset after file truncation",
+        { provider: this.provider, sessionId, filePath: session.filePath },
+      );
     }
 
     await this.operationalLogger.debug(
@@ -1393,7 +1133,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       existingCursor?.kind === "byte-offset" &&
       fromOffset > 0
     ) {
-      let latestCompactionAnchor: CodexCompactionAnchor | undefined;
+      let latestCompactionAnchor:
+        | ProviderIngestionCodexCompactionAnchor
+        | undefined;
       try {
         latestCompactionAnchor = await readLatestCodexCompactionAnchor(
           session.filePath,
@@ -1404,21 +1146,20 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         }
         throw error;
       }
-      codexCompactionAnchor = latestCompactionAnchor?.anchor;
-      if (
-        latestCompactionAnchor &&
-        latestCompactionAnchor.lineEnd <= fromOffset &&
-        !anchorsEqual(stateMetadata.ingestAnchor, latestCompactionAnchor.anchor)
-      ) {
-        const previousOffset = fromOffset;
-        const backtrackedOffset = Math.max(
-          0,
-          latestCompactionAnchor.lineEnd - CODEX_COMPACTION_BACKTRACK_BYTES,
-        );
-        fromOffset = backtrackedOffset;
-        existingCursor = makeByteOffsetCursor(backtrackedOffset);
-        stateMetadata.ingestCursor = existingCursor;
-        this.setCursor(sessionId, existingCursor, session.filePath);
+      const compactionResume = resolveCodexCompactionResume({
+        existingCursor,
+        fromOffset,
+        persistedAnchor: stateMetadata.ingestAnchor,
+        latestCompactionAnchor,
+        backtrackBytes: CODEX_COMPACTION_BACKTRACK_BYTES,
+      });
+      codexCompactionAnchor = compactionResume.compactionAnchor;
+      existingCursor = compactionResume.existingCursor;
+      fromOffset = compactionResume.fromOffset;
+      if (compactionResume.backtracked) {
+        const backtrackedCursor = existingCursor!;
+        stateMetadata.ingestCursor = backtrackedCursor;
+        this.setCursor(sessionId, backtrackedCursor, session.filePath);
         codexCompactionBacktrack = true;
         codexCompactionMergeOptions = {
           ignoreTimestamp: true,
@@ -1431,9 +1172,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             provider: this.provider,
             sessionId,
             filePath: session.filePath,
-            previousCursor: previousOffset,
-            compactionCursor: latestCompactionAnchor.lineEnd,
-            backtrackedCursor: backtrackedOffset,
+            previousCursor: compactionResume.previousOffset,
+            compactionCursor: latestCompactionAnchor?.lineEnd,
+            backtrackedCursor: compactionResume.backtrackedOffset,
           },
         );
       }
@@ -1457,55 +1198,46 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
 
       if (messages) {
-        const expectedAnchor = stateMetadata.ingestAnchor;
-        const currentAnchor = messages[fromOffset - 1]
-          ? buildGeminiMessageAnchor(messages[fromOffset - 1]!)
-          : undefined;
-
-        if (!anchorsEqual(expectedAnchor, currentAnchor)) {
-          const previousOffset = fromOffset;
-          const realignedIndex = findGeminiAnchorIndex(
-            messages,
-            expectedAnchor,
+        const anchorResume = resolveGeminiAnchorResume({
+          existingCursor,
+          fromOffset,
+          persistedAnchor: stateMetadata.ingestAnchor,
+          messages,
+        });
+        existingCursor = anchorResume.existingCursor;
+        fromOffset = anchorResume.fromOffset;
+        if (anchorResume.replayedFromStart) {
+          const replayCursor = existingCursor!;
+          stateMetadata.ingestCursor = replayCursor;
+          this.setCursor(sessionId, replayCursor, session.filePath);
+          replayedFromStart = true;
+          await this.operationalLogger.warn(
+            "provider.ingestion.anchor.not_found",
+            "Gemini anchor missing; replaying session from start with dedupe",
+            {
+              provider: this.provider,
+              sessionId,
+              filePath: session.filePath,
+              previousCursor: anchorResume.previousOffset,
+              anchor: stateMetadata.ingestAnchor,
+            },
           );
-          if (realignedIndex === undefined) {
-            fromOffset = 0;
-            existingCursor = makeItemIndexCursor(0);
-            stateMetadata.ingestCursor = existingCursor;
-            this.setCursor(sessionId, existingCursor, session.filePath);
-            replayedFromStart = true;
-            await this.operationalLogger.warn(
-              "provider.ingestion.anchor.not_found",
-              "Gemini anchor missing; replaying session from start with dedupe",
-              {
-                provider: this.provider,
-                sessionId,
-                filePath: session.filePath,
-                previousCursor: previousOffset,
-                anchor: expectedAnchor,
-              },
-            );
-          } else {
-            const realignedOffset = realignedIndex + 1;
-            if (realignedOffset !== fromOffset) {
-              fromOffset = realignedOffset;
-              existingCursor = makeItemIndexCursor(realignedOffset);
-              stateMetadata.ingestCursor = existingCursor;
-              this.setCursor(sessionId, existingCursor, session.filePath);
-              await this.operationalLogger.warn(
-                "provider.ingestion.anchor.realigned",
-                "Gemini anchor mismatch resolved by re-aligning cursor",
-                {
-                  provider: this.provider,
-                  sessionId,
-                  filePath: session.filePath,
-                  previousCursor: previousOffset,
-                  realignedCursor: realignedOffset,
-                  anchor: expectedAnchor,
-                },
-              );
-            }
-          }
+        } else if (anchorResume.realigned) {
+          const realignedCursor = existingCursor!;
+          stateMetadata.ingestCursor = realignedCursor;
+          this.setCursor(sessionId, realignedCursor, session.filePath);
+          await this.operationalLogger.warn(
+            "provider.ingestion.anchor.realigned",
+            "Gemini anchor mismatch resolved by re-aligning cursor",
+            {
+              provider: this.provider,
+              sessionId,
+              filePath: session.filePath,
+              previousCursor: anchorResume.previousOffset,
+              realignedCursor: anchorResume.realignedOffset,
+              anchor: stateMetadata.ingestAnchor,
+            },
+          );
         }
       }
     }
@@ -1775,30 +1507,28 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       let anchorChanged = false;
       let nextAnchor: SessionIngestAnchorV1 | undefined = stateMetadata
         .ingestAnchor;
-      if (this.provider === "gemini" && latestCursor.kind === "item-index") {
-        nextAnchor = undefined;
-        const latestIndex = resolveItemIndex(latestCursor);
-        if (latestIndex > 0) {
-          try {
-            const messages = await loadGeminiMessagesForAnchor(true);
-            const message = messages?.[latestIndex - 1];
-            if (message) {
-              nextAnchor = buildGeminiMessageAnchor(message);
-            }
-          } catch (error) {
-            if (
-              !(await this.handleReadDenied(error, "open", session.filePath))
-            ) {
-              throw error;
-            }
-          }
+      try {
+        const geminiMessagesArg = this.provider === "gemini"
+          ? (geminiMessagesCache ?? await loadGeminiMessagesForAnchor())
+          : undefined;
+        const anchorResolution = resolveNextIngestAnchor({
+          provider: this.provider,
+          previousAnchor: stateMetadata.ingestAnchor,
+          latestCursor,
+          geminiMessages: geminiMessagesArg,
+          codexCompactionAnchor,
+        });
+        nextAnchor = anchorResolution.nextAnchor;
+        anchorChanged = anchorResolution.anchorChanged;
+      } catch (error) {
+        if (
+          !(await this.handleReadDenied(error, "open", session.filePath))
+        ) {
+          throw error;
         }
-      } else if (this.provider === "codex") {
-        nextAnchor = codexCompactionAnchor;
       }
-      if (!anchorsEqual(stateMetadata.ingestAnchor, nextAnchor)) {
+      if (anchorChanged) {
         stateMetadata.ingestAnchor = nextAnchor;
-        anchorChanged = true;
       }
 
       const cursorChanged = !cursorsEqual(

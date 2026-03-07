@@ -10,6 +10,7 @@ markdownFrontmatter:
   includeWorkspaceIds: true
   includeRecordingIds: true
   includeConversationEventKinds: true
+  addParticipantUsernameToHeadings: true
 workspaceFeatureFlags:
   writerIncludeCommentary: true
   writerIncludeThinking: true

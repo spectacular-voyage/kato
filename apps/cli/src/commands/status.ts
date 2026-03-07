@@ -4,7 +4,6 @@ import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
-import type { RegisteredWorkspace } from "@kato/runtime";
 import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
@@ -15,6 +14,14 @@ import {
   resolveStatusErrorCursorPath,
   saveSuppressedRecentErrorKeys,
 } from "./status_error_cursor.ts";
+import {
+  loadWorkspaceStatusSummary,
+  type WorkspaceStatusSummary,
+} from "./status_workspace.ts";
+export type {
+  WorkspaceStatusRow,
+  WorkspaceStatusSummary,
+} from "./status_workspace.ts";
 
 const LIVE_REFRESH_MS = 2_000;
 const LIVE_SESSION_CAP = 5;
@@ -42,22 +49,6 @@ const ANSI_CSI_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
   "g",
 );
-
-export interface WorkspaceStatusRow {
-  workspaceId: string;
-  alias: string;
-  workspaceRoot: string;
-  configPath: string;
-  valid: boolean;
-  invalidReason?: string;
-}
-
-export interface WorkspaceStatusSummary {
-  activeCount: number;
-  invalidCount: number;
-  rows: WorkspaceStatusRow[];
-  unavailableReason?: string;
-}
 
 export interface StatusRecentError {
   timestamp: string;
@@ -169,92 +160,6 @@ function resolveTerminalWidth(): number {
   } catch {
     return DEFAULT_TERMINAL_WIDTH;
   }
-}
-
-function formatWorkspaceValidationError(error: unknown): string {
-  if (error instanceof Deno.errors.NotFound) {
-    return "config file not found";
-  }
-  if (error instanceof Deno.errors.PermissionDenied) {
-    return "permission denied while reading config";
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return sanitizeInlineText(error.message);
-  }
-  return sanitizeInlineText(String(error));
-}
-
-function toWorkspaceStatusRow(
-  entry: RegisteredWorkspace,
-  opts: { valid: boolean; invalidReason?: string },
-): WorkspaceStatusRow {
-  return {
-    workspaceId: entry.workspaceId,
-    alias: entry.alias,
-    workspaceRoot: entry.workspaceRoot,
-    configPath: entry.configPath,
-    valid: opts.valid,
-    ...(opts.invalidReason ? { invalidReason: opts.invalidReason } : {}),
-  };
-}
-
-async function validateWorkspaceEntry(
-  entry: RegisteredWorkspace,
-): Promise<WorkspaceStatusRow> {
-  try {
-    await loadWorkspaceConfigOverrides(entry.configPath);
-    const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
-      entry.configPath,
-      { allowMissing: true },
-    );
-    if (
-      configuredWorkspaceId &&
-      configuredWorkspaceId !== entry.workspaceId
-    ) {
-      return toWorkspaceStatusRow(entry, {
-        valid: false,
-        invalidReason:
-          `workspaceId mismatch (registry=${entry.workspaceId}, config=${configuredWorkspaceId})`,
-      });
-    }
-    return toWorkspaceStatusRow(entry, { valid: true });
-  } catch (error) {
-    return toWorkspaceStatusRow(entry, {
-      valid: false,
-      invalidReason: formatWorkspaceValidationError(error),
-    });
-  }
-}
-
-async function loadWorkspaceStatusSummary(
-  ctx: DaemonCliCommandContext,
-): Promise<WorkspaceStatusSummary> {
-  let entries: RegisteredWorkspace[];
-  try {
-    entries = await resolveWorkspaceRegistryStore(ctx).load();
-  } catch (error) {
-    return {
-      activeCount: 0,
-      invalidCount: 0,
-      rows: [],
-      unavailableReason: formatWorkspaceValidationError(error),
-    };
-  }
-
-  const rows = await Promise.all(
-    entries.map((entry) => validateWorkspaceEntry(entry)),
-  );
-  rows.sort((a, b) =>
-    a.alias.localeCompare(b.alias) ||
-    a.workspaceId.localeCompare(b.workspaceId)
-  );
-
-  const activeCount = rows.filter((row) => row.valid).length;
-  return {
-    activeCount,
-    invalidCount: rows.length - activeCount,
-    rows,
-  };
 }
 
 async function readTailText(
@@ -1003,7 +908,13 @@ async function runLiveMode(
         now,
       );
       const [workspaceStatus, recentErrors] = await Promise.all([
-        loadWorkspaceStatusSummary(ctx),
+        loadWorkspaceStatusSummary(
+          () => resolveWorkspaceRegistryStore(ctx).load(),
+          {
+            loadWorkspaceConfigOverrides,
+            readWorkspaceConfigWorkspaceId,
+          },
+        ),
         loadRecentStatusErrors(ctx),
       ]);
       const stale = isStatusSnapshotStale(snapshot, now);
@@ -1090,9 +1001,13 @@ export async function runStatusCommand(
   const statusErrorCursorPath = resolveStatusErrorCursorPath(
     ctx.runtime.runtimeDir,
   );
-  const workspaceStatus = asJson
-    ? undefined
-    : await loadWorkspaceStatusSummary(ctx);
+  const workspaceStatus = asJson ? undefined : await loadWorkspaceStatusSummary(
+    () => resolveWorkspaceRegistryStore(ctx).load(),
+    {
+      loadWorkspaceConfigOverrides,
+      readWorkspaceConfigWorkspaceId,
+    },
+  );
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
   const suppressedRecentErrorKeys = asJson

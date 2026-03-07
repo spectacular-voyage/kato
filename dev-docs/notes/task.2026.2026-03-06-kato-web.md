@@ -2,7 +2,7 @@
 id: 7y4mlp9tplfnv8okm498osi
 title: 2026 03 06 Kato Web
 desc: ''
-updated: 1772812393168
+updated: 1772874117389
 created: 1772810034340
 ---
 
@@ -312,34 +312,34 @@ view, not a generic admin template:
 
 - Should the initial Summary page include the full Workspaces section by
   default, or keep only the workspaces summary line and link through to the
-  detailed page?
+  detailed page? (summary line)
 - Do we want page navigation rendered as top-level tabs, left-nav sections, or
-  route links styled as tabs? Route-backed tabs are the current recommendation.
+  route links styled as tabs? Route-backed tabs are the current recommendation. (route-backed tabs)
 - Should cleanup live under a dedicated `/maintenance` page or inside the
-  Operational Details section?
+  Operational Details section? (maintenance)
 - Should the first lifecycle slice ship only `kato web start|stop|status`, or
-  also include `kato web open`?
+  also include `kato web open`? (defer open)
 - Should recent errors on the Summary page show only the current `8`-item view
-  from CLI parity, or a slightly larger browser-friendly window?
+  from CLI parity, or a slightly larger browser-friendly window?(slightly larger browser-friendly)
 - For the Recordings page, do we want only active + known historical recording
-  cycles, or also direct links to output files when they still exist?
+  cycles, or also direct links to output files when they still exist? (what do you think?)
 - Should workspace registration in the web UI automatically extend
   `allowedWriteRoots` exactly the way the CLI does today, or should that be a
-  separate explicit confirmation step?
+  separate explicit confirmation step? (automatic)
 - What local-only protection is enough for mutating routes:
-  localhost binding only, origin checks, CSRF token, or some combination?
+  localhost binding only, origin checks, CSRF token, or some combination? (localhost only, auth required)
 - Where should optional web auth config live:
-  user config, CLI config, or a dedicated web config file under `~/.kato`?
+  user config, CLI config, or a dedicated web config file under `~/.kato`? (dedicated)
 - Should the optional auth bootstrap live in `kato init --interactive`, or in a
-  separate dedicated command such as a later `kato web auth init` flow?
+  separate dedicated command such as a later `kato web auth init` flow? (both, interactive will eventually be more in-depth and cover things other than auth)
 - After explicit setup, is auth mandatory for all web access, or may setup
-  allow an explicitly unauthenticated localhost mode?
+  allow an explicitly unauthenticated localhost mode? (auth is mandatory for writes)
 - Should we ever add a convenience coupling between daemon and web startup
-  later, or explicitly standardize on separate lifecycle commands only?
+  later, or explicitly standardize on separate lifecycle commands only? ( separate)
 - Should the first web mutation slice also include workspace unregister, or is
-  register/update enough for now?
+  register/update enough for now? (include unregister)
 - How should the Performance page obtain memory history?
-  - new persisted ring buffer file
+  - new persisted ring buffer file (yes)
   - append-only status history JSONL
   - derived from operational debug logs
 - This task intentionally broadens `apps/web` beyond the earlier "read-only

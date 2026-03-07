@@ -6,14 +6,19 @@ import {
 } from "@std/assert";
 import { join } from "@std/path";
 import {
+  createDefaultStatusSnapshot,
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
+  isStatusSnapshotStale,
+  resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
+  resolveDefaultStatusPath,
 } from "../apps/daemon/src/mod.ts";
 import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
+  withLockedEnvironment,
 } from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
@@ -23,20 +28,70 @@ async function withTempRuntimeDir(
   await withTestTempDir("daemon-control-plane-", run);
 }
 
+function snapshotControlPlaneOverrideEnv(): {
+  statusPath: string | undefined;
+  controlPath: string | undefined;
+} {
+  return {
+    statusPath: Deno.env.get("KATO_DAEMON_STATUS_PATH"),
+    controlPath: Deno.env.get("KATO_DAEMON_CONTROL_PATH"),
+  };
+}
+
+function restoreControlPlaneOverrideEnv(snapshot: {
+  statusPath: string | undefined;
+  controlPath: string | undefined;
+}): void {
+  if (snapshot.statusPath === undefined) {
+    Deno.env.delete("KATO_DAEMON_STATUS_PATH");
+  } else {
+    Deno.env.set("KATO_DAEMON_STATUS_PATH", snapshot.statusPath);
+  }
+  if (snapshot.controlPath === undefined) {
+    Deno.env.delete("KATO_DAEMON_CONTROL_PATH");
+  } else {
+    Deno.env.set("KATO_DAEMON_CONTROL_PATH", snapshot.controlPath);
+  }
+}
+
 Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", async () => {
-  const snapshot = snapshotRuntimeEnv();
-  await withTestTempDir("daemon-control-home-", async (rootDir) => {
-    const homeDir = join(rootDir, "home");
-    await Deno.mkdir(homeDir, { recursive: true });
+  await withLockedEnvironment(async () => {
+    const snapshot = snapshotRuntimeEnv();
+    await withTestTempDir("daemon-control-home-", async (rootDir) => {
+      const homeDir = join(rootDir, "home");
+      await Deno.mkdir(homeDir, { recursive: true });
+      try {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+        assertEquals(
+          resolveDefaultRuntimeDir(),
+          join(homeDir, ".kato", "daemon"),
+        );
+      } finally {
+        restoreRuntimeEnv(snapshot);
+      }
+    });
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir uses USERPROFILE when HOME is unset", async () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
-        HOME: homeDir,
-        USERPROFILE: undefined,
+        HOME: undefined,
+        USERPROFILE: "C:\\Users\\WindowsUser",
         KATO_RUNTIME_DIR: undefined,
       });
       assertEquals(
         resolveDefaultRuntimeDir(),
-        join(homeDir, ".kato", "daemon"),
+        "C:\\Users\\WindowsUser\\.kato\\daemon",
       );
     } finally {
       restoreRuntimeEnv(snapshot);
@@ -44,74 +99,82 @@ Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", a
   });
 });
 
-Deno.test("resolveDefaultRuntimeDir uses USERPROFILE when HOME is unset", () => {
-  if (Deno.build.os !== "windows") {
-    return;
-  }
-  const snapshot = snapshotRuntimeEnv();
-  try {
-    setRuntimeEnv({
-      HOME: undefined,
-      USERPROFILE: "C:\\Users\\WindowsUser",
-      KATO_RUNTIME_DIR: undefined,
-    });
-    assertEquals(
-      resolveDefaultRuntimeDir(),
-      "C:\\Users\\WindowsUser\\.kato\\daemon",
-    );
-  } finally {
-    restoreRuntimeEnv(snapshot);
-  }
-});
-
-Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", () => {
-  const snapshot = snapshotRuntimeEnv();
-  try {
-    setRuntimeEnv({
-      HOME: undefined,
-      USERPROFILE: undefined,
-      KATO_RUNTIME_DIR: ".kato/daemon",
-    });
-    assertThrows(
-      () => resolveDefaultRuntimeDir(),
-      Error,
-      "must resolve to an absolute path",
-    );
-  } finally {
-    restoreRuntimeEnv(snapshot);
-  }
-});
-
-Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async () => {
-  const snapshot = snapshotRuntimeEnv();
-  await withTestTempDir("daemon-control-runtime-", async (rootDir) => {
-    const runtimeDir = join(rootDir, "runtime");
-    await Deno.mkdir(runtimeDir, { recursive: true });
+Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
-        KATO_RUNTIME_DIR: runtimeDir,
+        HOME: undefined,
+        USERPROFILE: undefined,
+        KATO_RUNTIME_DIR: ".kato/daemon",
       });
-      assertEquals(resolveDefaultRuntimeDir(), runtimeDir);
+      assertThrows(
+        () => resolveDefaultRuntimeDir(),
+        Error,
+        "must resolve to an absolute path",
+      );
     } finally {
       restoreRuntimeEnv(snapshot);
     }
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async () => {
+  await withLockedEnvironment(async () => {
+    const snapshot = snapshotRuntimeEnv();
+    await withTestTempDir("daemon-control-runtime-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "runtime");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      try {
+        setRuntimeEnv({
+          KATO_RUNTIME_DIR: runtimeDir,
+        });
+        assertEquals(resolveDefaultRuntimeDir(), runtimeDir);
+      } finally {
+        restoreRuntimeEnv(snapshot);
+      }
+    });
   });
 });
 
 Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async () => {
-  const snapshot = snapshotRuntimeEnv();
-  await withTestTempDir("daemon-control-home-", async (rootDir) => {
-    const homeDir = join(rootDir, "home");
-    await Deno.mkdir(homeDir, { recursive: true });
+  await withLockedEnvironment(async () => {
+    const snapshot = snapshotRuntimeEnv();
+    await withTestTempDir("daemon-control-home-", async (rootDir) => {
+      const homeDir = join(rootDir, "home");
+      await Deno.mkdir(homeDir, { recursive: true });
+      try {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: "~/.kato/custom-daemon",
+        });
+        assertEquals(
+          resolveDefaultRuntimeDir(),
+          join(homeDir, ".kato", "custom-daemon"),
+        );
+      } finally {
+        restoreRuntimeEnv(snapshot);
+      }
+    });
+  });
+});
+
+Deno.test("resolveDefaultRuntimeDir expands ~\\-prefixed KATO_RUNTIME_DIR", async () => {
+  if (Deno.build.os !== "windows") {
+    return;
+  }
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
-        HOME: homeDir,
-        USERPROFILE: undefined,
-        KATO_RUNTIME_DIR: "~/.kato/custom-daemon",
+        HOME: undefined,
+        USERPROFILE: "C:\\Users\\WindowsUser",
+        KATO_RUNTIME_DIR: "~\\.kato\\custom-daemon",
       });
       assertEquals(
         resolveDefaultRuntimeDir(),
-        join(homeDir, ".kato", "custom-daemon"),
+        "C:\\Users\\WindowsUser\\.kato\\custom-daemon",
       );
     } finally {
       restoreRuntimeEnv(snapshot);
@@ -119,42 +182,142 @@ Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async 
   });
 });
 
-Deno.test("resolveDefaultRuntimeDir expands ~\\-prefixed KATO_RUNTIME_DIR", () => {
-  if (Deno.build.os !== "windows") {
-    return;
-  }
-  const snapshot = snapshotRuntimeEnv();
-  try {
-    setRuntimeEnv({
-      HOME: undefined,
-      USERPROFILE: "C:\\Users\\WindowsUser",
-      KATO_RUNTIME_DIR: "~\\.kato\\custom-daemon",
-    });
-    assertEquals(
-      resolveDefaultRuntimeDir(),
-      "C:\\Users\\WindowsUser\\.kato\\custom-daemon",
-    );
-  } finally {
-    restoreRuntimeEnv(snapshot);
-  }
+Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", async () => {
+  await withLockedEnvironment(() => {
+    const snapshot = snapshotRuntimeEnv();
+    try {
+      setRuntimeEnv({
+        HOME: undefined,
+        USERPROFILE: undefined,
+        KATO_RUNTIME_DIR: undefined,
+      });
+      assertThrows(
+        () => resolveDefaultRuntimeDir(),
+        Error,
+        "HOME/USERPROFILE is not set",
+      );
+    } finally {
+      restoreRuntimeEnv(snapshot);
+    }
+  });
 });
 
-Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", () => {
-  const snapshot = snapshotRuntimeEnv();
-  try {
-    setRuntimeEnv({
-      HOME: undefined,
-      USERPROFILE: undefined,
-      KATO_RUNTIME_DIR: undefined,
-    });
-    assertThrows(
-      () => resolveDefaultRuntimeDir(),
-      Error,
-      "HOME/USERPROFILE is not set",
+Deno.test("createDefaultStatusSnapshot initializes stopped daemon defaults", () => {
+  const snapshot = createDefaultStatusSnapshot(
+    new Date("2026-02-22T12:00:00.000Z"),
+  );
+
+  assertEquals(snapshot, {
+    schemaVersion: 2,
+    generatedAt: "2026-02-22T12:00:00.000Z",
+    heartbeatAt: "2026-02-22T12:00:00.000Z",
+    daemonRunning: false,
+    daemonVersion: undefined,
+    providers: [],
+    recordings: {
+      activeRecordings: 0,
+      destinations: 0,
+    },
+  });
+});
+
+Deno.test("isStatusSnapshotStale handles stopped, fresh, stale, and invalid heartbeats", () => {
+  const now = new Date("2026-02-22T12:00:11.000Z");
+
+  assertEquals(
+    isStatusSnapshotStale({
+      ...createDefaultStatusSnapshot(
+        new Date("2026-02-22T12:00:00.000Z"),
+      ),
+      daemonRunning: false,
+      heartbeatAt: "invalid",
+    }, now),
+    false,
+  );
+
+  assertEquals(
+    isStatusSnapshotStale({
+      ...createDefaultStatusSnapshot(
+        new Date("2026-02-22T12:00:00.000Z"),
+      ),
+      daemonRunning: true,
+      heartbeatAt: "2026-02-22T12:00:01.000Z",
+    }, now),
+    false,
+  );
+
+  assertEquals(
+    isStatusSnapshotStale({
+      ...createDefaultStatusSnapshot(
+        new Date("2026-02-22T12:00:00.000Z"),
+      ),
+      daemonRunning: true,
+      heartbeatAt: "2026-02-22T12:00:00.000Z",
+    }, new Date("2026-02-22T12:00:12.000Z")),
+    true,
+  );
+
+  assertEquals(
+    isStatusSnapshotStale({
+      ...createDefaultStatusSnapshot(
+        new Date("2026-02-22T12:00:00.000Z"),
+      ),
+      daemonRunning: true,
+      heartbeatAt: "invalid",
+    }, now),
+    true,
+  );
+});
+
+Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath use katoDir defaults", async () => {
+  await withTempRuntimeDir((runtimeDir) => {
+    const katoDir = join(runtimeDir, ".kato");
+
+    assertEquals(
+      resolveDefaultStatusPath(katoDir),
+      join(katoDir, "shared", "status.json"),
     );
-  } finally {
-    restoreRuntimeEnv(snapshot);
-  }
+    assertEquals(
+      resolveDefaultControlPath(katoDir),
+      join(katoDir, "shared", "ipc", "daemon-control.json"),
+    );
+    return Promise.resolve();
+  });
+});
+
+Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath honor env overrides", async () => {
+  await withLockedEnvironment(async () => {
+    const runtimeSnapshot = snapshotRuntimeEnv();
+    const overrideSnapshot = snapshotControlPlaneOverrideEnv();
+    await withTestTempDir("daemon-control-path-overrides-", async (rootDir) => {
+      const homeDir = join(rootDir, "home");
+      await Deno.mkdir(homeDir, { recursive: true });
+      try {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+        Deno.env.set("KATO_DAEMON_STATUS_PATH", "~/.kato/custom-status.json");
+        Deno.env.set(
+          "KATO_DAEMON_CONTROL_PATH",
+          "~/.kato/custom-ipc/daemon-control.json",
+        );
+
+        assertEquals(
+          resolveDefaultStatusPath(join(rootDir, ".ignored")),
+          join(homeDir, ".kato", "custom-status.json"),
+        );
+        assertEquals(
+          resolveDefaultControlPath(join(rootDir, ".ignored")),
+          join(homeDir, ".kato", "custom-ipc", "daemon-control.json"),
+        );
+      } finally {
+        restoreControlPlaneOverrideEnv(overrideSnapshot);
+        restoreRuntimeEnv(runtimeSnapshot);
+      }
+    });
+  });
 });
 
 Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async () => {
@@ -177,7 +340,12 @@ Deno.test("DaemonStatusSnapshotFileStore persists and loads snapshots", async ()
       heartbeatAt: "2026-02-22T12:05:00.000Z",
       daemonRunning: true,
       daemonPid: 9876,
-      providers: [{ provider: "claude", activeSessions: 2 }],
+      daemonVersion: "1.2.3",
+      providers: [{
+        provider: "claude",
+        activeSessions: 2,
+        lastEventAt: "2026-02-22T12:04:00.000Z",
+      }],
       recordings: { activeRecordings: 4, destinations: 1 },
     };
     await store.save(snapshot);
@@ -201,6 +369,36 @@ Deno.test("DaemonStatusSnapshotFileStore falls back on invalid JSON", async () =
     assertEquals(fallback.schemaVersion, 2);
     assertEquals(fallback.generatedAt, "2026-02-22T12:10:00.000Z");
     assertEquals(fallback.heartbeatAt, "2026-02-22T12:10:00.000Z");
+    assertEquals(fallback.daemonRunning, false);
+  });
+});
+
+Deno.test("DaemonStatusSnapshotFileStore falls back on unsupported snapshot shapes", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const statusPath = join(runtimeDir, "status.json");
+    await Deno.writeTextFile(
+      statusPath,
+      JSON.stringify({
+        schemaVersion: 2,
+        generatedAt: "2026-02-22T12:10:00.000Z",
+        heartbeatAt: "2026-02-22T12:10:00.000Z",
+        daemonRunning: true,
+        daemonPid: 1234,
+        daemonVersion: 42,
+        providers: [{ provider: "claude", activeSessions: -1 }],
+        recordings: { activeRecordings: 1, destinations: 1 },
+      }),
+    );
+
+    const store = new DaemonStatusSnapshotFileStore(
+      statusPath,
+      () => new Date("2026-02-22T12:11:00.000Z"),
+    );
+
+    const fallback = await store.load();
+    assertEquals(fallback.schemaVersion, 2);
+    assertEquals(fallback.generatedAt, "2026-02-22T12:11:00.000Z");
+    assertEquals(fallback.heartbeatAt, "2026-02-22T12:11:00.000Z");
     assertEquals(fallback.daemonRunning, false);
   });
 });
@@ -261,6 +459,62 @@ Deno.test("DaemonControlRequestFileStore appends and lists requests", async () =
   });
 });
 
+Deno.test("DaemonControlRequestFileStore clones payloads and persists lastProcessedRequestId", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    const store = new DaemonControlRequestFileStore(
+      controlPath,
+      () => new Date("2026-02-22T12:16:00.000Z"),
+      () => "req-1",
+    );
+
+    const draftPayload = { requestedByPid: 1111 };
+    const enqueued = await store.enqueue({
+      command: "start",
+      payload: draftPayload,
+    });
+    draftPayload.requestedByPid = 2222;
+    if (!enqueued.payload) {
+      throw new Error("expected payload on enqueued request");
+    }
+    enqueued.payload["requestedByPid"] = 3333;
+
+    const listed = await store.list();
+    assertEquals(listed.length, 1);
+    assertEquals(listed[0]?.payload?.["requestedByPid"], 1111);
+
+    if (!listed[0]?.payload) {
+      throw new Error("expected payload on listed request");
+    }
+    listed[0].payload["requestedByPid"] = 4444;
+
+    const listedAgain = await store.list();
+    assertEquals(listedAgain[0]?.payload?.["requestedByPid"], 1111);
+
+    await store.markProcessed("req-1");
+    const raw = JSON.parse(await Deno.readTextFile(controlPath)) as {
+      requests?: unknown[];
+      lastProcessedRequestId?: string;
+    };
+    assertEquals(raw.requests, []);
+    assertEquals(raw.lastProcessedRequestId, "req-1");
+  });
+});
+
+Deno.test("DaemonControlRequestFileStore rejects malformed JSON queue files", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    await Deno.writeTextFile(controlPath, "{not-json");
+
+    const store = new DaemonControlRequestFileStore(controlPath);
+    await assertRejects(
+      () => store.list(),
+      Error,
+      "invalid JSON",
+    );
+  });
+});
+
 Deno.test("DaemonControlRequestFileStore fails closed on invalid queue files", async () => {
   await withTempRuntimeDir(async (runtimeDir) => {
     const controlPath = join(runtimeDir, "control.json");
@@ -269,6 +523,27 @@ Deno.test("DaemonControlRequestFileStore fails closed on invalid queue files", a
       JSON.stringify({
         schemaVersion: 999,
         requests: [{ requestId: 1 }],
+      }),
+    );
+
+    const store = new DaemonControlRequestFileStore(controlPath);
+    await assertRejects(
+      () => store.list(),
+      Error,
+      "unsupported schema",
+    );
+  });
+});
+
+Deno.test("DaemonControlRequestFileStore fails closed on invalid lastProcessedRequestId shape", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    await Deno.writeTextFile(
+      controlPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        requests: [],
+        lastProcessedRequestId: 123,
       }),
     );
 
@@ -308,6 +583,30 @@ Deno.test("DaemonControlRequestFileStore fails closed on unknown commands", asyn
       () => store.list(),
       Error,
       "unsupported schema",
+    );
+  });
+});
+
+Deno.test("DaemonControlRequestFileStore enforces the maximum queue length", async () => {
+  await withTempRuntimeDir(async (runtimeDir) => {
+    const controlPath = join(runtimeDir, "control.json");
+    await Deno.writeTextFile(
+      controlPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        requests: Array.from({ length: 10_000 }, (_, index) => ({
+          requestId: `req-${index + 1}`,
+          requestedAt: "2026-02-22T12:15:00.000Z",
+          command: "start",
+        })),
+      }),
+    );
+
+    const store = new DaemonControlRequestFileStore(controlPath);
+    await assertRejects(
+      () => store.enqueue({ command: "stop" }),
+      Error,
+      "exceeds limit",
     );
   });
 });

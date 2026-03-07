@@ -26,6 +26,12 @@ get a unique subdirectory under `.test-tmp/` that can be removed in a `finally`
 block. If you hard-code a path (e.g. for tests that do not need isolation), use
 `.test-tmp/` as the parent so it stays out of `.kato/`.
 
+Raw Deno coverage profiles should also stay under `.test-tmp/coverage/` rather
+than top-level `.coverage*` directories. The root `test:coverage` task now uses
+`.test-tmp/coverage/root`, and focused local coverage runs should use a labeled
+subdirectory such as `.test-tmp/coverage/status` or
+`.test-tmp/coverage/provider-ingestion`.
+
 ## Test Levels
 
 1. Fast local verification:
@@ -34,6 +40,21 @@ block. If you hard-code a path (e.g. for tests that do not need isolation), use
 2. Full gate:
    - `deno task ci`
 
+The root `test` and `test:coverage` tasks now use Deno module parallelism by
+default. Local verification on 2026-03-06 stayed deterministic with both
+`deno task test --frozen --quiet` and
+`deno task test:coverage --frozen --quiet`, including after adding direct JSONL
+writer, session-twin mapper, runtime-config, shared-behavior config,
+path-policy, launcher, status-command, control-plane, env-helper,
+status-error-cursor, CLI parser, direct start / workspace-init / export command
+tests, direct hash tests, and Codex parser tests, status-workspace tests,
+provider-session-discovery tests, daemon-status-projection tests,
+daemon-export-request tests, and daemon-first-seen tests, daemon-command-state
+tests, daemon-memory-telemetry tests, daemon-workspace-paths tests,
+daemon-workspace-output-state tests, provider-ingestion-resume tests,
+provider-ingestion-merge tests, daemon-command-destination tests, plus a shared
+env lock in `tests/test_env.ts` for env-mutating cases.
+
 GitHub CI uses a split gate:
 
 - `deno task ci:quality` for `fmt` + `lint` + `check`
@@ -41,6 +62,55 @@ GitHub CI uses a split gate:
 
 This keeps local `deno task ci` as the full pre-PR gate while avoiding running
 the full test suite twice in GitHub Actions.
+
+## Test File Selection
+
+The root `deno task test` and `deno task test:coverage` commands intentionally
+run:
+
+- `main_test.ts`
+- `tests/**/*_test.ts`
+
+Helper modules under `tests/` such as `tests/test_env.ts` and
+`tests/test_temp.ts` are shared test utilities, not standalone test modules.
+Import them from test files, but do not point scripted runs at `tests/**/*.ts`
+or they will be loaded as zero-test modules.
+
+## Coverage Workflow
+
+1. Generate a fresh raw coverage profile:
+   - `deno task test:coverage --frozen`
+2. Inspect local hotspots:
+   - `deno coverage --detailed .test-tmp/coverage/root`
+3. Generate the LCOV artifact used by GitHub CI / Codecov:
+   - `deno task coverage:lcov`
+
+For focused local work, prefer specific `_test.ts` files and `--filter` instead
+of rerunning the whole suite. If you need a manual raw profile, write it under
+`.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
+directory.
+
+Current local timings from 2026-03-06:
+
+- `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
+- `deno task test:coverage --frozen --quiet`: `492` passing tests, `80.9%` line
+  coverage, `85.2%` branch coverage, `8.94s` real
+
+Current coverage-report caveat:
+
+- `deno coverage --detailed .test-tmp/coverage/root` currently warns that some
+  extracted modules may be missing transpiled source, including
+  `apps/runtime/src/orchestrator/launcher.ts`,
+  `apps/cli/src/commands/status.ts`,
+  `apps/cli/src/commands/status_workspace.ts`,
+  `apps/daemon/src/orchestrator/provider_ingestion.ts`, and
+  `apps/daemon/src/orchestrator/provider_session_discovery.ts`, and
+  `apps/daemon/src/orchestrator/runtime_export_request.ts`, and
+  `apps/daemon/src/orchestrator/runtime_first_seen.ts`, and
+  `apps/daemon/src/orchestrator/runtime_status_projection.ts`. Treat the summary
+  emitted by `deno task test:coverage --frozen --quiet` as the authoritative
+  repo-wide baseline when that reporting quirk appears, and use focused coverage
+  runs for per-file work.
 
 ## Security Automation
 
@@ -63,9 +133,11 @@ Use these patterns to keep tests portable across Windows/macOS/Linux:
 
 1. Build expected paths with `join(...)` instead of hardcoded `/` strings.
 2. Do not assert on raw JSON text when it includes file paths.
-   - Parse JSON and assert object fields (`assertEquals(parsed.path, expected)`).
-3. For command outputs or logs that may normalize separators differently, compare
-   normalized values (for example, convert `\\` to `/` before asserting).
+   - Parse JSON and assert object fields
+     (`assertEquals(parsed.path, expected)`).
+3. For command outputs or logs that may normalize separators differently,
+   compare normalized values (for example, convert `\\` to `/` before
+   asserting).
 4. Avoid test fixtures that require Windows-invalid filenames.
    - Example: `:` is not valid in Windows filenames.
 5. Gate platform-specific behavior explicitly when needed.

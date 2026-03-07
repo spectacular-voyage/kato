@@ -2,14 +2,14 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ""
-updated: 1772778324448
+updated: 1772864549538
 created: 1771724652182
 ---
 
 - thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overrids, maybe by adding flags to the '::' commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
-- support for kimi, copilot, roo, cline, etc
+- support for kimi, copilot, roo, cline, opencode, etc.
 - multiple recordings to one file
 - create a summary file (and/or decision log, maybe update a to-do file) on
   command
@@ -30,3 +30,7 @@ created: 1771724652182
   toggle (CLI flag or config key) to enable silent failure behavior for
   unexpected aliases
 - real (OS-aware) liveness check
+
+## Interoperability
+
+- https://github.com/strongdm/cxdb format export

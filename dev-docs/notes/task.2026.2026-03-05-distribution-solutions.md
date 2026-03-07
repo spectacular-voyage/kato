@@ -2,7 +2,7 @@
 id: wvgli7yr4zmuwcalv6wyevu
 title: 2026 03 05 Distribution Solutions
 desc: ''
-updated: 1772779005238
+updated: 1772866630000
 created: 1772761416593
 ---
 
@@ -38,8 +38,9 @@ user-level service-manager integration.
 - Stable per-user config/state locations across all install channels.
 - A path to later `systemd --user`, `launchd`, or Windows integration.
 - Straightforward uninstall that does not accidentally destroy user data.
-- One release pipeline that can publish GitHub artifacts, npm packages, and JSR
-  from the same versioned release event.
+- One release pipeline that can publish GitHub artifacts and npm packages from
+  the same versioned release event while leaving clone-from-source available
+  for contributors and power users.
 
 ## Recommendation
 
@@ -283,11 +284,10 @@ logic has one durable source of truth before extra channels land.
 Field notes:
 
 - `schemaVersion`: metadata schema version, starting at `1`
-- `channel`: one of `direct-binary`, `windows-installer`, `npm`, `deno-jsr`,
-  `source`
+- `channel`: one of `direct-binary`, `windows-installer`, `npm`, `source`
 - `installRoot`: program install root for the active channel
 - `managedBy`: owner of lifecycle operations, for example `script-installer`,
-  `msi`, `npm`, `deno`, `manual`
+  `msi`, `npm`, `git`, `manual`
 - `installScope`: `user` for current plans
 - `installedVersion`: installed Kato release version
 - `updatedAt`: RFC3339 timestamp when metadata was last written
@@ -298,6 +298,8 @@ Field notes:
 - channel-native updaters rewrite metadata after successful replacement
 - binaries should not invent a new channel on first run; they may only preserve
   or migrate known values
+- source checkouts should not write install metadata automatically unless a
+  future developer-oriented installer is added
 
 ### Legacy Migration Rule
 
@@ -383,28 +385,28 @@ Uninstall behavior stays clean:
 
 - `npm uninstall -g kato` removes npm-managed shims and packages
 - npm does not need to understand or run shell installer scripts
-## JSR Distribution Options
 
-JSR is still worth doing, but as a Deno-first channel, not the primary
-non-programmer install path.
+## JSR Status
 
-Recommended role for JSR:
+JSR is de-scoped indefinitely.
 
-- publish the CLI entrypoint as a JSR package
-- support Deno users and CI/power-user installs
-- keep it as the source/distribution channel for Deno-native consumers
+Reasoning:
 
-Good fit:
+- Kato is currently a product/executable distribution problem, not a library
+  distribution problem.
+- Non-programmers need prebuilt binaries and installers, not a Deno package.
+- Contributors and most power users can continue to use clone-from-source plus
+  Deno.
+- The upcoming split into `kato` and `kato-daemon` reinforces that the main
+  public surface is executable packaging, not a JSR import API.
+- Publishing to JSR now would add package metadata, docs, public API, and
+  versioning commitments without a concrete user group that needs them.
 
-- Deno users
-- CI
-- contributors
-- power users who prefer `deno install`
+Revisit only if:
 
-Poor fit for the primary goal:
-
-- it still assumes a Deno runtime
-- it does not remove the "install Deno first" friction for non-programmers
+- a real external audience wants to import stable Kato modules as a library
+- a reusable library surface is intentionally carved out and supported
+  separately from the product executables
 
 
 ## Permission Model After Compile
@@ -503,12 +505,14 @@ Recommended behavior:
 - npm install:
   - prefer `npm install -g kato@latest` / `npm update -g kato`
   - `kato self-update` should either defer to npm or clearly refuse
-- JSR / Deno install:
-  - prefer the Deno-native reinstall/upgrade path
-  - `kato self-update` should not overwrite a Deno-managed install silently
+- source checkout / developer run:
+  - prefer the repo-native update path (`git pull`, pinned checkout updates,
+    or whatever the contributor workflow requires)
+  - `kato self-update` should refuse rather than overwrite a source-managed
+    install
 
-Without channel awareness, the updater will eventually fight npm, MSI, or Deno
-and leave users in a confusing state.
+Without channel awareness, the updater will eventually fight npm, MSI, or a
+source-managed checkout and leave users in a confusing state.
 
 ### Update Consent UX
 
@@ -563,8 +567,8 @@ Why preserve `~/.kato` by default:
   - `npm uninstall -g kato`
   - should remove npm-managed shims and package files
   - should not purge `~/.kato`
-- JSR / Deno:
-  - use the Deno uninstall/remove path for the installed executable
+- source checkout:
+  - remove user-created aliases/shims and the local clone manually
   - should not purge `~/.kato`
 
 ### Kato-Owned Cleanup Commands
@@ -599,12 +603,11 @@ Recommended trigger:
 5. Generate checksums and update manifest.
 6. Create a draft GitHub release and upload all release assets.
 7. Publish npm packages.
-8. Publish JSR package.
-9. Publish or undraft the GitHub release only after registry publishing passes.
+8. Publish or undraft the GitHub release only after npm publishing passes.
 
 Why draft first:
 
-- npm and JSR package versions are immutable once published.
+- npm package versions are immutable once published.
 - A draft GitHub release gives room to retry packaging/publishing failures
   without showing a broken public release page immediately.
 
@@ -617,7 +620,6 @@ Recommended approach:
 
 - GitHub release creation should tolerate rerun/update behavior while still in
   draft.
-- JSR publishing is already naturally skip-safe when the version exists.
 - npm publishing should check whether each target package version already exists
   before attempting publish, and skip if present.
 
@@ -639,8 +641,8 @@ Reasoning:
 Recommendation:
 
 - use the Git tag release version as the single user-facing release version
-- stamp npm package versions, JSR package version, binary metadata, and release
-  artifact names from that one version source
+- stamp npm package versions, binary metadata, and release artifact names from
+  that one version source
 
 Current CLI/daemon version split is acceptable internally, but release
 orchestration should avoid making users reason about three unrelated version
@@ -809,8 +811,7 @@ Add required checks: codecov/project and codecov/patch
 
 - Add Linux arm64 release target.
 - Publish npm wrapper plus platform binary packages.
-- Publish JSR package for Deno-native users.
-- Extend install-channel metadata writers for npm/JSR/installer channels.
+- Extend install-channel metadata writers for npm and installer channels.
 - Expand update manifest usage and updater channel-routing behavior.
 - Add `kato self-update --check` and `kato self-update --apply` with
   channel-aware behavior.
@@ -848,7 +849,7 @@ Add required checks: codecov/project and codecov/patch
   - direct binary release
   - Windows installer
   - npm
-  - JSR / Deno
+  - clone-from-source for developers and power users
 - Add `~/.kato/shared/install-channel.json` v1 schema and writers.
 - Add missing-metadata fallback handling (`channel=direct-binary`).
 - Add explicit service/autostart cleanup commands.
@@ -866,8 +867,6 @@ Add required checks: codecov/project and codecov/patch
   are useful for platform-specific wrapper packages.
 - npm trusted publishing currently supports GitHub-hosted GitHub Actions
   runners.
-- JSR supports tokenless publishing from GitHub Actions when the package is
-  linked to the repository and the workflow has `id-token: write`.
 - WinGet supports MSI, EXE, ZIP, and other installer types.
 - Windows Installer surfaces per-user installs in Add/Remove Programs for the
   current user.
