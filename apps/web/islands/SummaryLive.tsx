@@ -150,11 +150,11 @@ export default function SummaryLive(
                 </span>
                 <span class="metric-primary-label">active</span>
               </span>
-              <span class="metric-note mono">
-                {data.staleGeneratingSessionCount} stale
+              <span class="metric-note mono activity-stale">
+                {data.staleGeneratingSessionCount} idle
               </span>
               <span class="metric-note mono">
-                {data.inactiveSessionCount} inactive
+                {data.inactiveSessionCount} off
               </span>
             </div>
             <div class="metric">
@@ -165,11 +165,11 @@ export default function SummaryLive(
                 </span>
                 <span class="metric-primary-label">active</span>
               </span>
-              <span class="metric-note mono">
-                {data.staleRecordingCount} stale
+              <span class="metric-note mono activity-stale">
+                {data.staleRecordingCount} idle
               </span>
               <span class="metric-note mono">
-                {data.stoppedRecordingCount} inactive
+                {data.stoppedRecordingCount} off
               </span>
             </div>
             <div class="metric">
@@ -182,20 +182,20 @@ export default function SummaryLive(
                     : "active"}
                 </span>
               </span>
-              <span class="metric-note mono">
+              <span class="metric-note mono activity-stale">
                 {data.workspaceSummary.unavailableReason
                   ? "unavailable"
-                  : `${data.workspaceSummary.staleCount} stale`}
+                  : `${data.workspaceSummary.staleCount} idle`}
               </span>
               <span class="metric-note mono">
                 {data.workspaceSummary.unavailableReason
                   ? data.workspaceSummary.unavailableReason
-                  : `${data.workspaceSummary.inactiveCount} inactive`}
+                  : `${data.workspaceSummary.inactiveCount} off`}
               </span>
               {data.workspaceSummary.unavailableReason
                 ? null
                 : (
-                  <span class="metric-note mono">
+                  <span class="metric-note mono danger">
                     {data.workspaceSummary.invalidCount} invalid
                   </span>
                 )}
@@ -274,7 +274,7 @@ export default function SummaryLive(
                   : data.workspaceSummary.rows.map((row) => (
                     <li key={row.workspaceId}>
                       <div class="mono">{row.alias}</div>
-                      <div class={row.valid ? "ok" : "stale"}>
+                      <div class={row.valid ? "ok" : "danger"}>
                         {row.valid ? "valid" : row.invalidReason ?? "invalid"}
                       </div>
                     </li>

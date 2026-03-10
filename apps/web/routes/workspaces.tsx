@@ -129,7 +129,7 @@ export default define.page(async function WorkspacesPage(ctx) {
         />
 
         {notice ? <p class="notice-banner ok">{notice}</p> : null}
-        {error ? <p class="notice-banner stale">{error}</p> : null}
+        {error ? <p class="notice-banner danger">{error}</p> : null}
 
         <section class="grid">
           <article class="card span-5">
@@ -172,7 +172,7 @@ export default define.page(async function WorkspacesPage(ctx) {
           <article class="card span-7">
             <h2>Write Root Coverage</h2>
             {pageData.sharedConfigError
-              ? <p class="stale">{pageData.sharedConfigError}</p>
+              ? <p class="danger">{pageData.sharedConfigError}</p>
               : (
                 <>
                   <p class="muted">
@@ -194,7 +194,7 @@ export default define.page(async function WorkspacesPage(ctx) {
             <h2>Registered Workspaces</h2>
             {pageData.workspaceSummary.unavailableReason
               ? (
-                <p class="stale">
+                <p class="danger">
                   {pageData.workspaceSummary.unavailableReason}
                 </p>
               )
@@ -215,8 +215,8 @@ export default define.page(async function WorkspacesPage(ctx) {
                           <div class="muted">{row.configPath}</div>
                           <div class="workspace-recording-summary mono">
                             {row.activeRecordingCount} active ·{" "}
-                            {row.staleRecordingCount} stale ·{" "}
-                            {row.stoppedRecordingCount} inactive
+                            {row.staleRecordingCount} idle ·{" "}
+                            {row.stoppedRecordingCount} off
                           </div>
                           <div class="muted">
                             {row.latestRecordingAt
@@ -273,14 +273,14 @@ export default define.page(async function WorkspacesPage(ctx) {
                             : null}
                         </div>
                         <div class="workspace-row-meta">
-                          <div class={row.valid ? "ok mono" : "stale mono"}>
+                          <div class={row.valid ? "ok mono" : "danger mono"}>
                             {row.valid
                               ? "config valid"
                               : row.invalidReason ?? "invalid"}
                           </div>
                           <div
                             class={row.writePathCovered === false
-                              ? "stale mono"
+                              ? "danger mono"
                               : "muted mono"}
                           >
                             {row.writePathCovered === undefined

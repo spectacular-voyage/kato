@@ -2653,8 +2653,8 @@ Deno.test(
 
     assertEquals(code, 0);
     const output = harness.stdout.join("");
-    assertStringIncludes(output, "sessions: 0 active, 1 stale");
-    assertStringIncludes(output, "run with --all to show 1 stale");
+    assertStringIncludes(output, "sessions: 0 active, 1 idle");
+    assertStringIncludes(output, "run with --all to show 1 idle");
   },
 );
 

@@ -3788,3 +3788,307 @@ I updated the Summary tiles and unified the state conventions. In [SummaryLive.t
 I also standardized the session-page and workspace-page dots to the same model: green `●` for active, red `●` for stale, black hollow `○` for inactive. That’s wired through [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx), [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
 
 Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# User_2026-03-10_1519_06
+
+Instead of red for stale, let's use yellow-orange for stale and red for invalid. Black/hollow can still be used for inactive.
+
+Can we use those colors in the CLI too? 
+
+Beware, Claude was working on updates to the providers summary tile, so you may have some context slides or whatever you call them.
+
+# gpt-5.4_2026-03-10_1519_18
+
+I’m checking the current working tree first so I don’t trample Claude’s changes, then I’ll update the web stale/invalid colors and trace the CLI color pipeline so the same state palette is used there too.
+
+# gpt-5.4_2026-03-10_1519_27
+
+I found only one unrelated modified file in the worktree, so the provider-tile changes didn’t create a direct merge conflict. Next I’m remapping the actual shared state colors: stale to amber, invalid/error to red, and then I’ll mirror that palette in the CLI status renderer.
+
+# gpt-5.4_2026-03-10_1519_37
+
+I found the CLI gap: `kato status` is still plain monochrome text, so to use the same palette there I need to add opt-in ANSI styling rather than just swapping strings in place, otherwise the status tests will all break. I’m tracing the render path now so I can keep tests plain and only colorize live TTY output.
+
+# gpt-5.4_2026-03-10_1520_04
+
+I’ve confirmed the CLI status path is still plain text only. I’m adding ANSI coloring as a TTY-only layer on top of the existing renderer so tests and redirected output stay unchanged, but live terminal output gets the same green / amber / red state palette.
+
+# gpt-5.4_2026-03-10_1520_32
+
+The web side needs one more separation pass: right now `.stale` is still doing double duty for both “paused/stale” and actual errors. I’m splitting that into amber `stale` and red `danger`, then I’ll swap the invalid/error call sites over.
+
+# gpt-5.4_2026-03-10_1521_32
+
+I’m keeping the CLI color layer narrow: TTY-only ANSI, no effect on JSON or piped/test output. The first pass will cover the state words/markers you actually see in `kato status`, not every possible line in the renderer.
+
+# gpt-5.4_2026-03-10_1522_35
+
+I’ve split the palette in CSS and CLI rendering. One more small UI pass: I’m coloring the Summary note lines themselves so `stale` reads amber and `invalid` reads red there too, not just in the dots and page-body statuses.
+
+# gpt-5.4_2026-03-10_1522_47
+
+The CLI color layer is in as TTY-only output, so I’m running both the web checks and the CLI status tests now. The likely regressions here are formatter drift in `status.ts` and any render-signature mismatch in `improved-status_test.ts`.
+
+# gpt-5.4_2026-03-10_1522_52
+
+The only failure is the Deno terminal API surface: this codebase has `Deno.stdout.isTerminal()`, not `isatty(rid)`. I’m swapping that and rerunning the same check stack.
+
+# gpt-5.4_2026-03-10_1523_19
+
+The targeted tests are clean. I’m waiting on the repo-wide web/type check to confirm there isn’t a late formatting drift or an untyped call-site issue in the live CLI path.
+
+# gpt-5.4_2026-03-10_1523_32
+
+Updated the palette split.
+
+On the web side, stale is now amber/orange and invalid/error is red in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css). I also switched the invalid/error call sites over to `danger` instead of reusing `stale`, so Summary, login/settings/maintenance banners, and workspace validity now read correctly in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx), [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx), [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx), and [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx). Sessions/recordings/workspaces now share the same visible convention: green `active`, amber `stale`, black hollow `inactive`.
+
+CLI status now uses the same palette too, but only for live TTY output. In [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts), active tokens are green, stale is amber, invalid is red, and inactive stays plain. JSON output, tests, and redirected output remain uncolored.
+
+I didn’t find overlapping uncommitted code changes from Claude in the app files; the only dirty file was the conversation note markdown. I preserved the provider-tile changes already present in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx).
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-activity-loader_test.ts tests/improved-status_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# gpt-5.4_2026-03-10_1523_33
+
+Updated the palette split.
+
+On the web side, stale is now amber/orange and invalid/error is red in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css). I also switched the invalid/error call sites over to `danger` instead of reusing `stale`, so Summary, login/settings/maintenance banners, and workspace validity now read correctly in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx), [settings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/settings.tsx), [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx), and [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx). Sessions/recordings/workspaces now share the same visible convention: green `active`, amber `stale`, black hollow `inactive`.
+
+CLI status now uses the same palette too, but only for live TTY output. In [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts), active tokens are green, stale is amber, invalid is red, and inactive stays plain. JSON output, tests, and redirected output remain uncolored.
+
+I didn’t find overlapping uncommitted code changes from Claude in the app files; the only dirty file was the conversation note markdown. I preserved the provider-tile changes already present in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx).
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-activity-loader_test.ts tests/improved-status_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# User_2026-03-10_1524_01
+
+let's make paused/stale color more yellow (but still readable on a light background)
+
+# gpt-5.4_2026-03-10_1524_10
+
+Adjusting the stale/paused color in both the web CSS and the CLI ANSI palette so they stay aligned. I’m starting from the current amber values and shifting them toward yellow while keeping enough contrast on the light background.
+
+# gpt-5.4_2026-03-10_1524_11
+
+The color tokens are where I expected. I’m just nudging the amber toward a more yellow-leaning mustard and keeping the red/error token unchanged.
+
+# gpt-5.4_2026-03-10_1524_30
+
+The palette shift is in. I’m running a quick web check and the CLI status tests to make sure nothing else drifted while touching the shared status renderer.
+
+# gpt-5.4_2026-03-10_1524_35
+
+Updated the stale/paused color to a more yellow-leaning mustard while keeping invalid/error red.
+
+On the web side, [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) now uses `#8f7300` for the stale/warn token, so stale reads more yellow on the light background without washing out. On the CLI side, [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) now uses a more yellow ANSI amber (`38;5;178`) for stale state in TTY output. Invalid/error stays red in both.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts` and `deno task --cwd apps/web check`.
+
+# gpt-5.4_2026-03-10_1524_38
+
+Updated the stale/paused color to a more yellow-leaning mustard while keeping invalid/error red.
+
+On the web side, [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) now uses `#8f7300` for the stale/warn token, so stale reads more yellow on the light background without washing out. On the CLI side, [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts) now uses a more yellow ANSI amber (`38;5;178`) for stale state in TTY output. Invalid/error stays red in both.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts` and `deno task --cwd apps/web check`.
+
+# User_2026-03-10_1528_56
+
+Using "inactive" for sessions might not be appropriate: it's very close in meaning to "stale", and I think it actually only applies to sessions that have never been active? Inactive has some sense of "formerly active". What's a better term that captures "this session is known and monitored, but has never had twin generation".
+
+# gpt-5.4_2026-03-10_1529_36
+
+`idle` is the best replacement for the current `inactive`.
+
+Reason:
+- `active` = generating now
+- `stale` = generation would resume on new data
+- `idle` = known session, not currently generating
+
+`inactive` is muddy because it sounds too close to `stale`, and it also suggests prior activity. `idle` reads more cleanly as “present, but not engaged right now.”
+
+One important correction: the current third bucket is not really “never had twin generation.” In the current daemon path, twins are generally appended for known sessions. The bucket is closer to “not generating snapshots right now.”
+
+So I’d recommend:
+- `active`
+- `stale`
+- `idle`
+
+If you want the stricter meaning “known, but never generated,” that would need a different signal and probably a separate label such as `observed` or `not yet engaged`. But for the current implementation, `idle` is the honest term.
+
+# User_2026-03-10_1534_43
+
+But your definition of idle, "known session, not currently generating" applies equally to stale. You're implying idle means "would not resume on new data", but that doesn't sound like "idle", that sounds like "off". Let's replace "stale" with "idle" for sessions and recordings. I don't think we need a different signal for the "off" state for a session. Is off the best word?
+
+# gpt-5.4_2026-03-10_1535_05
+
+I’m treating this as a terminology cleanup, not a state-model rewrite: keep the underlying `stale/inactive` mechanics, but change the operator-facing labels to `idle/off` where that better matches the mental model. I’m tracing the visible strings in web and CLI now so the vocabulary changes stay consistent.
+
+# gpt-5.4_2026-03-10_1535_21
+
+I agree with the distinction you’re drawing: `idle` is a better user-facing term than `stale` for sessions/recordings, and `off` is the cleanest contrast for the non-engaged bucket. I’m changing the visible labels now while leaving the internal state names alone so we don’t churn the underlying logic.
+
+# gpt-5.4_2026-03-10_1535_34
+
+I’ve isolated the visible strings. I’m changing only the operator-facing vocabulary: `stale -> idle` and `inactive -> off` for session/recording activity, while leaving snapshot/web-status “stale” alone. That keeps the daemon-health language intact and only changes the activity model terms.
+
+# gpt-5.4_2026-03-10_1535_50
+
+I’ve narrowed it to a label-only change. Internal `stale/inactive` state names and query flags stay as-is; the visible operator text becomes `idle/off` for session and recording activity.
+
+# gpt-5.4_2026-03-10_1536_22
+
+I’ve applied the label change in both web and CLI renderers. I’m doing a quick grep for exact-output tests next, then I’ll run the focused checks so we don’t miss any snapshot/session wording expectations.
+
+# gpt-5.4_2026-03-10_1536_26
+
+The focused web/status tests are fine, but there are still CLI integration assertions pinned to the old wording (`stale`). I’m patching those exact expectations now before the full check.
+
+# gpt-5.4_2026-03-10_1536_33
+
+I found the only pinned CLI integration test and updated it to `idle`. I’m running the CLI integration plus the full repo check now so this closes cleanly.
+
+# gpt-5.4_2026-03-10_1536_40
+
+Formatting is done and the combined test run has started. I’m waiting on the repo check before closing this out, since `daemon-cli_test.ts` was the only new surface affected beyond the web UI.
+
+# gpt-5.4_2026-03-10_1536_51
+
+Yes. `off` is the right contrast term here, and I updated the operator-facing labels accordingly.
+
+Visible activity labels now read:
+- `active`
+- `idle`
+- `off`
+
+I changed that in:
+- [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts)
+- [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx)
+- [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx)
+- [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx)
+- [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts)
+
+Important scope: this only changes the activity vocabulary for sessions/recordings/workspace recording rollups. I did not rename daemon/web-status `stale`, `stale heartbeat`, or snapshot staleness, since those are different concepts.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# gpt-5.4_2026-03-10_1536_52
+
+Yes. `off` is the right contrast term here, and I updated the operator-facing labels accordingly.
+
+Visible activity labels now read:
+- `active`
+- `idle`
+- `off`
+
+I changed that in:
+- [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts)
+- [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx)
+- [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx)
+- [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx)
+- [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/status.ts)
+
+Important scope: this only changes the activity vocabulary for sessions/recordings/workspace recording rollups. I did not rename daemon/web-status `stale`, `stale heartbeat`, or snapshot staleness, since those are different concepts.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/improved-status_test.ts tests/daemon-cli_test.ts tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# User_2026-03-10_1539_10
+
+OK, we kinda went on a (good) tangent there. Regarding the original [task.2026.2026-03-06-kato-web.md](dev-docs/notes/task.2026.2026-03-06-kato-web.md) -- should we pick that up in a fresh chat? Are there any checkboxes that need checking?
+
+# gpt-5.4_2026-03-10_1539_15
+
+I’m checking the task note against the implementation state so I can answer concretely instead of guessing. First step is to read the current checkbox sections and see what’s still unchecked.
+
+# gpt-5.4_2026-03-10_1539_25
+
+I’ve got the current unchecked list. I’m checking the two likely “should be checked now” candidates: the docs/decision-log items and the broader tests/Summary parity items, so I can tell you what’s still genuinely open versus just stale bookkeeping.
+
+# gpt-5.4_2026-03-10_1539_41
+
+The docs state is clear now: `dev.codebase-overview` still says `apps/web/src` is a placeholder, and I don’t see the Fresh/web-boundary decisions recorded in `dev.decision-log`. I’m doing one last pass on the checklist candidates that look implementation-complete but maybe just weren’t ticked.
+
+# gpt-5.4_2026-03-10_1539_58
+
+Yes. A fresh chat is probably the right move now.
+
+This thread has drifted into UI/detail work, and the remaining work is mostly “reconcile task note and docs, then finish the true leftovers.” Starting a new chat with [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md) plus a short “what’s actually still open” prompt would be cleaner than carrying all this context forward.
+
+On checkboxes, I think one unchecked item should now be checked:
+- `Implement the Summary route first so it mirrors kato status --live...`
+  The current Summary does have the header, activity/session/recording summaries, memory, workspace summary/details, recent errors, and live session rows.
+
+I would leave these unchecked:
+- framework choice recorded in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md)
+- boundary change recorded in [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md) and [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md)
+- shared status view models moved into `shared/src`
+- logo/wordmark wired in
+- Performance decision/page
+- the broad tests checkbox
+  Focused tests exist, but that checkbox promises more than we’ve explicitly covered, especially auth-route/render-parity coverage.
+
+One concrete docs mismatch to fix later: [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md) still says `apps/web/src` is a placeholder, which is now wrong.
+
+If you want, I can do one last housekeeping pass now:
+- tick the Summary checkbox
+- leave the real open ones alone
+- update `dev.codebase-overview` and `dev.decision-log`
+
+That would make the next chat much cleaner.
+
+# User_2026-03-10_1542_09
+
+yes please.
+
+# gpt-5.4_2026-03-10_1542_16
+
+I’m doing the docs cleanup pass now: update the task note to reflect what’s actually complete, and fix the stale architecture notes in `dev.codebase-overview` and `dev.decision-log` so the next chat starts from an accurate baseline.
+
+# gpt-5.4_2026-03-10_1542_50
+
+Picking up the docs reconciliation pass now. I’m going to update the task note checkbox that is clearly complete and bring the codebase overview and decision log back in sync with the actual `apps/web` implementation.
+
+# gpt-5.4_2026-03-10_1543_01
+
+I have the mismatches pinned down. I’m updating the task checkbox, then I’m tightening the architecture docs so they reflect the real web boundary, lifecycle files, and the Fresh/auth decisions instead of the old placeholder language.
+
+# gpt-5.4_2026-03-10_1543_08
+
+I’ve confirmed the web runtime files now include config, status, and both operational and security-audit logs. I’m patching the docs to reflect that concrete filesystem and lifecycle surface instead of the old placeholder state.
+
+# gpt-5.4_2026-03-10_1543_34
+
+I’ve got the exact doc deltas now. I’m applying them in one pass so the task note, codebase overview, and decision log all agree about what `Kato Web` actually is today.
+
+# gpt-5.4_2026-03-10_1543_58
+
+The doc edits are in. I’m doing a quick readback now to make sure the checkbox state and the architecture wording are consistent and that I didn’t leave the old placeholder language behind.
+
+# gpt-5.4_2026-03-10_1544_03
+
+One small cleanup remains: the overview still says “control/data flow between CLI and daemon.” I’m fixing that phrasing so the note doesn’t understate the browser process it now describes.
+
+# gpt-5.4_2026-03-10_1544_09
+
+The docs are consistent now. I’m doing one last quick diff summary, then I’ll hand you the exact outcome and which checkboxes remain intentionally open.
+
+# gpt-5.4_2026-03-10_1544_14
+
+Updated the housekeeping docs.
+
+I checked the two items that are now clearly complete in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md):
+- boundary change recorded
+- Summary route implemented
+
+I also synced the architecture docs:
+- [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md) now treats Kato as a CLI/daemon/web system, describes `apps/web` as a real Fresh operator console, and lists the web config/status/log files under `~/.kato/web`
+- [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md) now has an explicit `Kato Web as a Local Fresh Operator Console` decision covering framework choice, separate lifecycle, shared business logic, and auth posture
+
+I intentionally left these unchecked in the task note:
+- shared non-CLI status view models moved into `shared/src`
+- logo/wordmark wiring
+- Performance slice
+- the broad tests checkbox
+
+No tests run; this was a docs-only pass.

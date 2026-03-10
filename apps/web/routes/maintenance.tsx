@@ -190,7 +190,7 @@ export default define.page(async function MaintenancePage(ctx) {
         />
 
         {notice ? <p class="notice-banner ok">{notice}</p> : null}
-        {error ? <p class="notice-banner stale">{error}</p> : null}
+        {error ? <p class="notice-banner danger">{error}</p> : null}
 
         <section class="grid">
           <article class="card span-6">

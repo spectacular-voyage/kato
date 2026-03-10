@@ -8,7 +8,9 @@
   --accent: #c45d2c;
   --accent-dark: #8c3510;
   --ok: #1d6b42;
-  --warn: #a24d1e;
+  --stale: #8f7300;
+  --warn: #8f7300;
+  --danger: #b1261e;
 }
 
 * {
@@ -224,7 +226,7 @@ a {
 }
 
 .activity-stale {
-  color: #b1261e;
+  color: var(--stale);
 }
 
 .activity-inactive {
@@ -287,7 +289,7 @@ a {
 }
 
 .danger-button {
-  color: var(--warn);
+  color: var(--danger);
 }
 
 .session-list,
@@ -470,7 +472,7 @@ a {
 }
 
 .activity-state-dot.stale {
-  color: #b1261e;
+  color: var(--stale);
 }
 
 .activity-state-dot.inactive {
@@ -482,7 +484,7 @@ a {
 }
 
 .activity-state-text.stale {
-  color: #b1261e;
+  color: var(--stale);
 }
 
 .activity-state-text.inactive {
@@ -556,9 +558,12 @@ a {
   color: var(--ok);
 }
 
-.log-badge.error,
 .log-badge.warn {
   color: var(--warn);
+}
+
+.log-badge.error {
+  color: var(--danger);
 }
 
 .log-badge.info,
@@ -611,7 +616,11 @@ a {
 }
 
 .stale {
-  color: var(--warn);
+  color: var(--stale);
+}
+
+.danger {
+  color: var(--danger);
 }
 
 .ok {

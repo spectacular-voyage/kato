@@ -78,8 +78,8 @@ export default define.page(async function SessionsPage(ctx) {
               <div>
                 <h2>Session Activity</h2>
                 <p class="page-toolbar-summary muted mono">
-                  Active: {pageData.activeSessionCount}, Stale:{" "}
-                  {pageData.staleSessionCount}, Inactive:{" "}
+                  Active: {pageData.activeSessionCount}, Idle:{" "}
+                  {pageData.staleSessionCount}, Off:{" "}
                   {pageData.inactiveSessionCount}
                   {pageData.workspaceFilter
                     ? ` · Workspace: ${pageData.workspaceFilter}`

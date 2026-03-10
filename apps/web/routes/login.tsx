@@ -50,7 +50,7 @@ export default define.page(async function LoginPage(ctx) {
       <section class="grid">
         <article class="card span-5">
           <h2>Sign In</h2>
-          {error ? <p class="stale">Invalid username or password.</p> : null}
+          {error ? <p class="danger">Invalid username or password.</p> : null}
           <form method="post" class="login-form">
             <label class="form-label" for="username">Username</label>
             <input

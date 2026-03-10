@@ -21,9 +21,9 @@ export function activityStateLabel(state: ActivityState): string {
     case "active":
       return "active";
     case "stale":
-      return "stale";
+      return "idle";
     case "inactive":
-      return "inactive";
+      return "off";
   }
 }
 

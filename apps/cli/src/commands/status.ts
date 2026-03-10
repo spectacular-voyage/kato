@@ -49,6 +49,10 @@ const KEY_UPPER_Q = 81;
 const KEY_LOWER_F = 102;
 const KEY_UPPER_F = 70;
 const ANSI_ESCAPE = String.fromCharCode(0x1b);
+const ANSI_RESET = `${ANSI_ESCAPE}[0m`;
+const ANSI_GREEN = `${ANSI_ESCAPE}[32m`;
+const ANSI_AMBER = `${ANSI_ESCAPE}[38;5;178m`;
+const ANSI_RED = `${ANSI_ESCAPE}[31m`;
 const ANSI_OSC_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
   "g",
@@ -123,6 +127,50 @@ function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function colorizeText(
+  text: string,
+  tone: "green" | "amber" | "red",
+  enabled: boolean,
+): string {
+  if (!enabled) {
+    return text;
+  }
+  const color = tone === "green"
+    ? ANSI_GREEN
+    : tone === "amber"
+    ? ANSI_AMBER
+    : ANSI_RED;
+  return `${color}${text}${ANSI_RESET}`;
+}
+
+function formatStateCount(
+  count: number,
+  label: "active" | "stale" | "inactive" | "invalid",
+  colorize: boolean,
+): string {
+  switch (label) {
+    case "active":
+      return colorizeText(`${count} active`, "green", colorize);
+    case "stale":
+      return colorizeText(`${count} idle`, "amber", colorize);
+    case "invalid":
+      return colorizeText(`${count} invalid`, "red", colorize);
+    case "inactive":
+      return `${count} off`;
+  }
+}
+
+function formatStatusToken(
+  text: string,
+  tone: "green" | "amber" | "red" | "plain",
+  colorize: boolean,
+): string {
+  if (tone === "plain") {
+    return text;
+  }
+  return colorizeText(text, tone, colorize);
+}
+
 function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
   if (!alias) return undefined;
   const withoutAnsi = alias
@@ -182,6 +230,14 @@ function resolveTerminalWidth(): number {
     return resolveRenderWidth(columns);
   } catch {
     return DEFAULT_TERMINAL_WIDTH;
+  }
+}
+
+function shouldColorizeStatusOutput(): boolean {
+  try {
+    return Deno.stdout.isTerminal();
+  } catch {
+    return false;
   }
 }
 
@@ -380,6 +436,7 @@ async function loadStatusWebState(
 
 function renderWebStatusText(
   webStatus: StatusWebState | undefined,
+  colorize: boolean = false,
 ): string | undefined {
   if (!webStatus) {
     return undefined;
@@ -388,22 +445,25 @@ function renderWebStatusText(
     return "unconfigured";
   }
   if (webStatus.state === "running") {
-    return `running (${webStatus.url ?? "url unavailable"}, pid ${
-      webStatus.pid ?? "unknown"
-    })`;
+    return `${formatStatusToken("running", "green", colorize)} (${
+      webStatus.url ?? "url unavailable"
+    }, pid ${webStatus.pid ?? "unknown"})`;
   }
   if (webStatus.state === "stale") {
-    return `stale status (${webStatus.url ?? "url unavailable"}, pid ${
-      webStatus.pid ?? "unknown"
-    }, heartbeat ${formatLocalTimestamp(webStatus.heartbeatAt)})`;
+    return `${formatStatusToken("stale status", "amber", colorize)} (${
+      webStatus.url ?? "url unavailable"
+    }, pid ${webStatus.pid ?? "unknown"}, heartbeat ${
+      formatLocalTimestamp(webStatus.heartbeatAt)
+    })`;
   }
   return `stopped (${webStatus.url ?? "url unavailable"})`;
 }
 
 function renderWebHeaderLine(
   webStatus: StatusWebState | undefined,
+  colorize: boolean = false,
 ): string | undefined {
-  const webText = renderWebStatusText(webStatus);
+  const webText = renderWebStatusText(webStatus, colorize);
   if (!webText) {
     return undefined;
   }
@@ -641,12 +701,21 @@ function renderTopSummarySection(
     staleCount: number;
     width: number;
     recordingActivity: RecordingActivitySummary;
+    colorize?: boolean;
   },
 ): string[] {
   const { activeCount, staleCount, width, recordingActivity } = opts;
+  const colorize = opts.colorize ?? false;
   const memoryLines = buildMemoryLines(snapshot);
-  const recordingLine =
-    `recordings: ${recordingActivity.activeRecordings} active, ${recordingActivity.inactiveRecordings} inactive`;
+  const recordingLine = `recordings: ${
+    formatStateCount(recordingActivity.activeRecordings, "active", colorize)
+  }, ${
+    formatStateCount(
+      recordingActivity.inactiveRecordings,
+      "inactive",
+      colorize,
+    )
+  }`;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
     return [
@@ -658,7 +727,9 @@ function renderTopSummarySection(
 
   const leftLines = [
     recordingLine,
-    `sessions: ${activeCount} active, ${staleCount} stale`,
+    `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
+      formatStateCount(staleCount, "stale", colorize)
+    }`,
   ];
   const rightLines = memoryLines;
 
@@ -693,8 +764,11 @@ function renderSessionRow(
   s: DaemonSessionStatus,
   now: Date,
   width: number,
+  colorize: boolean = false,
 ): string[] {
-  const marker = s.stale ? "○" : "●";
+  const marker = s.stale
+    ? colorizeText("○", "amber", colorize)
+    : colorizeText("●", "green", colorize);
   const label = s.snippet
     ? `"${sanitizeInlineText(s.snippet)}"`
     : "(no user message)";
@@ -716,7 +790,9 @@ function renderSessionRow(
     return lines;
   }
 
-  const recMarker = s.stale ? "○" : "●";
+  const recMarker = s.stale
+    ? colorizeText("○", "amber", colorize)
+    : colorizeText("●", "green", colorize);
   for (const recording of s.recordings) {
     const recordingIdentity = recording.recordingShortId ??
       recording.recordingId ??
@@ -751,6 +827,7 @@ function renderSessionRow(
 
 function renderWorkspaceSummaryLine(
   workspaceStatus: WorkspaceStatusSummary | undefined,
+  colorize: boolean = false,
 ): string | undefined {
   if (!workspaceStatus) {
     return undefined;
@@ -758,12 +835,15 @@ function renderWorkspaceSummaryLine(
   if (workspaceStatus.unavailableReason) {
     return `workspaces: unavailable (${workspaceStatus.unavailableReason})`;
   }
-  return `workspaces: ${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid`;
+  return `workspaces: ${
+    formatStateCount(workspaceStatus.activeCount, "active", colorize)
+  }, ${formatStateCount(workspaceStatus.invalidCount, "invalid", colorize)}`;
 }
 
 function renderWorkspaceSection(
   workspaceStatus: WorkspaceStatusSummary,
   width: number,
+  colorize: boolean = false,
 ): string[] {
   if (workspaceStatus.unavailableReason) {
     return [
@@ -778,7 +858,9 @@ function renderWorkspaceSection(
   }
 
   const lines: string[] = [
-    `Workspaces (${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid)`,
+    `Workspaces (${
+      formatStateCount(workspaceStatus.activeCount, "active", colorize)
+    }, ${formatStateCount(workspaceStatus.invalidCount, "invalid", colorize)})`,
     "",
   ];
 
@@ -788,11 +870,15 @@ function renderWorkspaceSection(
   }
 
   for (const row of workspaceStatus.rows) {
-    const marker = row.valid ? "●" : "○";
+    const marker = row.valid
+      ? colorizeText("●", "green", colorize)
+      : colorizeText("○", "red", colorize);
     const alias = resolveDisplayWorkspaceAlias(row.alias);
     const statusLabel = row.valid
-      ? "valid"
-      : `invalid: ${row.invalidReason ?? "unknown error"}`;
+      ? formatStatusToken("valid", "green", colorize)
+      : `${formatStatusToken("invalid", "red", colorize)}: ${
+        row.invalidReason ?? "unknown error"
+      }`;
     lines.push(
       formatPrefixedLine(
         `  ${marker} `,
@@ -839,14 +925,19 @@ export function renderStatusText(
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
     suppressedRecentErrorKeys?: ReadonlySet<string>;
+    colorize?: boolean;
   },
 ): string {
   const { showAll, now, stale } = opts;
   const sessionCap = opts.sessionCap ?? Infinity;
   const width = resolveRenderWidth(opts.terminalWidth);
+  const colorize = opts.colorize ?? false;
   const divider = "─".repeat(width);
-  const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
-  const webHeaderLine = renderWebHeaderLine(opts.webStatus);
+  const workspaceSummary = renderWorkspaceSummaryLine(
+    opts.workspaceStatus,
+    colorize,
+  );
+  const webHeaderLine = renderWebHeaderLine(opts.webStatus, colorize);
   const recentErrors = collectRecentErrors(
     now,
     opts.workspaceStatus,
@@ -882,7 +973,7 @@ export function renderStatusText(
 
   const sessionSummary = allSessions.length === 0
     ? ""
-    : ` (${activeCount} active, ${staleCount} stale)`;
+    : ` (${activeCount} active, ${staleCount} idle)`;
 
   const refreshedAt = now.toTimeString().slice(0, 8);
   const daemonVersion = snapshot.daemonVersion ?? "unknown";
@@ -905,6 +996,7 @@ export function renderStatusText(
       staleCount,
       width,
       recordingActivity,
+      colorize,
     }),
   );
   if (workspaceSummary) {
@@ -912,7 +1004,9 @@ export function renderStatusText(
   }
   lines.push(divider);
   if (opts.showWorkspaceDetails && opts.workspaceStatus) {
-    lines.push(...renderWorkspaceSection(opts.workspaceStatus, width));
+    lines.push(
+      ...renderWorkspaceSection(opts.workspaceStatus, width, colorize),
+    );
     lines.push(divider);
   }
 
@@ -924,9 +1018,13 @@ export function renderStatusText(
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
+      const level = recentError.level.toUpperCase();
+      const renderedLevel = recentError.level === "error"
+        ? colorizeText(level, "red", colorize)
+        : colorizeText(level, "amber", colorize);
       const detail = `[${
         formatLocalTimestamp(recentError.timestamp)
-      }] ${recentError.level.toUpperCase()} ${scopePrefix}${channel} ${
+      }] ${renderedLevel} ${scopePrefix}${channel} ${
         sanitizeInlineText(recentError.event)
       } · ${sanitizeInlineText(recentError.message)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
@@ -944,11 +1042,11 @@ export function renderStatusText(
         ? "  (daemon not running)"
         : showAll
         ? "  (none)"
-        : `  (none active — run with --all to show ${staleCount} stale)`,
+        : `  (none active — run with --all to show ${staleCount} idle)`,
     );
   } else {
     for (const s of displaySessions) {
-      lines.push(...renderSessionRow(s, now, width));
+      lines.push(...renderSessionRow(s, now, width, colorize));
       lines.push("");
     }
   }
@@ -1073,6 +1171,7 @@ async function runLiveMode(
         webStatus,
         recentErrors,
         suppressedRecentErrorKeys,
+        colorize: shouldColorizeStatusOutput(),
       });
 
       // Clear screen and draw
@@ -1212,6 +1311,7 @@ export async function runStatusCommand(
       showWorkspaceDetails: true,
       recentErrors,
       suppressedRecentErrorKeys,
+      colorize: shouldColorizeStatusOutput(),
     }) + "\n",
   );
 }

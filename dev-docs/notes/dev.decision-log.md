@@ -554,3 +554,41 @@ created: 1771779490894
   - Add CLI UX for editing/listing provider session roots.
   - Add a dedicated permission-boundary integration test for read-denied
     provider roots.
+
+### Kato Web as a Local Fresh Operator Console
+
+- Decision:
+  - Build `apps/web` as a local Fresh-based operator console, not as a
+    read-only placeholder or a generic JSON API shell.
+  - Keep web lifecycle separate from daemon lifecycle: `kato start` remains
+    daemon-only, while `kato web ...` owns explicit web bootstrap/status/start
+    behavior.
+  - Let `apps/web` own a small set of guided local operator workflows
+    (workspaces, settings, maintenance), while keeping reusable business rules
+    in shared runtime/shared modules instead of route handlers.
+  - Require configured auth for all web access after setup, with same-origin
+    and CSRF protections on mutating routes.
+- Owner: Kato engineering
+- Date: 2026-03-10
+- Why:
+  - The product need is a browser operator surface that mirrors
+    `kato status --live` and exposes the same local operational data without
+    requiring CLI fluency.
+  - Fresh fits the current Deno-first architecture better than introducing a
+    separate server/router plus a second UI stack for SSR pages, static assets,
+    and small islands.
+  - Guided write workflows are useful, but the validation and mutation rules
+    must stay shared with CLI so web does not become a parallel policy surface.
+- Tradeoffs:
+  - Fresh 2 brings Vite/npm tooling into `apps/web`, so the web app now has a
+    `node_modules` footprint even though Kato remains Deno-first overall.
+  - Separate web config/status/log files add another local lifecycle surface to
+    document and support.
+  - Local browser auth/session handling adds complexity compared with a
+    localhost-only unauthenticated dashboard, but protects conversation and
+    operational data appropriately.
+- Follow-up tasks:
+  - Continue moving reusable status view-model logic into `shared/src` where it
+    materially reduces CLI/web duplication.
+  - Add the remaining shell/docs polish work, including logo/wordmark wiring
+    and a codebase-overview refresh when the next major web slice lands.

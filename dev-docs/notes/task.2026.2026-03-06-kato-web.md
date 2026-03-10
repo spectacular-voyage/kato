@@ -457,7 +457,7 @@ Validation workflow before merge:
 - [ ] Decide and record the framework choice in `[[dev.decision-log]]`: use
       `Fresh` as the primary `apps/web` framework unless a concrete blocker
       appears during scaffolding.
-- [ ] Record the boundary change in `[[dev.decision-log]]` and
+- [x] Record the boundary change in `[[dev.decision-log]]` and
       `[[dev.codebase-overview]]`: `apps/web` is no longer only a read-only
       status surface; it now owns a small set of local operator workflows.
 - [x] Scaffold `apps/web` as a Fresh app while preserving existing
@@ -480,7 +480,7 @@ Validation workflow before merge:
 - [x] Expand `apps/web` loader modules for: status snapshot, workspace
       registry/config validation, user config, persistent session metadata,
       recording history, and log reads.
-- [ ] Implement the Summary route first so it mirrors `kato status --live` as
+- [x] Implement the Summary route first so it mirrors `kato status --live` as
       closely as practical in a browser: header, recordings/sessions, memory,
       workspaces summary/details, recent errors, and live session rows.
 - [x] Add a lightweight live-refresh mechanism: route handler JSON payload plus
