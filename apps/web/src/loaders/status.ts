@@ -4,24 +4,22 @@ import type {
   ProviderStatus,
 } from "@kato/shared";
 import { summarizeRecordingActivity } from "@kato/shared";
-import { join } from "@std/path";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   isStatusSnapshotStale,
   resolveDefaultStatusPath,
 } from "../../../runtime/src/orchestrator/control_plane.ts";
-import { resolveDefaultKatoDir } from "../../../runtime/src/orchestrator/session_state_store.ts";
 import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   WorkspaceRegistryFileStore,
 } from "../../../runtime/src/workspace/registry.ts";
+import { loadLogEntries } from "./logs.ts";
 import { toStatusViewModel } from "../main.ts";
 
 const RECENT_ERRORS_LIMIT = 12;
-const RECENT_ERRORS_TAIL_BYTES = 2 * 1024 * 1024;
 
 export interface WorkspaceSummaryRow {
   workspaceId: string;
@@ -242,134 +240,20 @@ function formatWorkspaceConfigError(error: unknown): string {
 async function loadRecentErrors(
   statusPath: string,
 ): Promise<SummaryRecentError[]> {
-  const runtimeDir = resolveRuntimeDirFromStatusPath(statusPath);
-  const katoDir = resolveDefaultKatoDir();
-  const [operational, securityAudit, webOperational, webSecurityAudit] =
-    await Promise.all([
-      loadRecentErrorsFromLog(
-        join(runtimeDir, "logs", "operational.jsonl"),
-        "daemon",
-      ),
-      loadRecentErrorsFromLog(
-        join(runtimeDir, "logs", "security-audit.jsonl"),
-        "daemon",
-      ),
-      loadRecentErrorsFromLog(
-        join(katoDir, "web", "logs", "operational.jsonl"),
-        "web",
-      ),
-      loadRecentErrorsFromLog(
-        join(katoDir, "web", "logs", "security-audit.jsonl"),
-        "web",
-      ),
-    ]);
+  const rows = await loadLogEntries({
+    channel: "all",
+    levels: ["warn", "error"],
+    limit: RECENT_ERRORS_LIMIT,
+    tailBytes: 2 * 1024 * 1024,
+    statusPath,
+  });
 
-  return [
-    ...operational,
-    ...securityAudit,
-    ...webOperational,
-    ...webSecurityAudit,
-  ]
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, RECENT_ERRORS_LIMIT);
-}
-
-function resolveRuntimeDirFromStatusPath(statusPath: string): string {
-  const normalized = statusPath.replaceAll("\\", "/");
-  if (normalized.endsWith("/shared/status.json")) {
-    return `${normalized.slice(0, -"/shared/status.json".length)}/daemon`;
-  }
-  return normalized;
-}
-
-async function loadRecentErrorsFromLog(
-  filePath: string,
-  scope: SummaryRecentError["scope"],
-): Promise<SummaryRecentError[]> {
-  const tail = await readTailText(filePath, RECENT_ERRORS_TAIL_BYTES);
-  if (!tail) {
-    return [];
-  }
-
-  const rows: SummaryRecentError[] = [];
-  const lines = tail.split(/\r\n?|\n/);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i]?.trim();
-    if (!line) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      const level = parsed["level"];
-      const channel = parsed["channel"];
-      const timestamp = parsed["timestamp"];
-      if (
-        (level !== "warn" && level !== "error") ||
-        (channel !== "operational" && channel !== "security-audit") ||
-        typeof timestamp !== "string"
-      ) {
-        continue;
-      }
-      rows.push({
-        timestamp,
-        level,
-        channel,
-        scope,
-        event: typeof parsed["event"] === "string"
-          ? parsed["event"]
-          : "unknown",
-        message: typeof parsed["message"] === "string"
-          ? parsed["message"].replace(/\s+/g, " ").trim()
-          : "no message",
-      });
-    } catch {
-      continue;
-    }
-  }
-  return rows;
-}
-
-async function readTailText(
-  filePath: string,
-  maxBytes: number,
-): Promise<string | undefined> {
-  let file: Deno.FsFile;
-  try {
-    file = await Deno.open(filePath, { read: true });
-  } catch (error) {
-    if (
-      error instanceof Deno.errors.NotFound ||
-      error instanceof Deno.errors.PermissionDenied
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
-
-  try {
-    const stat = await file.stat();
-    if (stat.size <= 0) {
-      return "";
-    }
-    const start = Math.max(0, stat.size - maxBytes);
-    await file.seek(start, Deno.SeekMode.Start);
-
-    const bytes = new Uint8Array(Number(stat.size - start));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const read = await file.read(bytes.subarray(offset));
-      if (read === null) {
-        break;
-      }
-      offset += read;
-    }
-    let text = new TextDecoder().decode(bytes.subarray(0, offset));
-    if (start > 0) {
-      const firstBreak = text.indexOf("\n");
-      text = firstBreak === -1 ? "" : text.slice(firstBreak + 1);
-    }
-    return text;
-  } finally {
-    file.close();
-  }
+  return rows.map((row) => ({
+    timestamp: row.timestamp,
+    level: row.level === "warn" || row.level === "error" ? row.level : "warn",
+    channel: row.channel,
+    scope: row.scope,
+    event: row.event,
+    message: row.message,
+  }));
 }

@@ -70,7 +70,7 @@ Why:
 - The Summary page will need server-rendered first paint plus lightweight client
   refresh behavior; Fresh islands fit that shape cleanly.
 - The app will likely need a mix of:
-  - full page routes (`/`, `/sessions`, `/recordings`, `/workspaces`, etc.)
+  - full page routes (`/`, `/sessions`, `/workspaces`, `/operational`, etc.)
   - JSON route handlers for polling/live refresh
   - small interactive widgets for log filters and charts
 - `Hono` remains a decent fallback if we later decide `apps/web` should be API
@@ -101,8 +101,9 @@ Proposed route-backed information architecture:
 - `/` Summary dashboard, live-refreshing, visually close to `status --live`
 - `/sessions` complete session list from persistent session metadata, not just
   the in-memory status snapshot
-- `/recordings` active and historical recording rows derived from session
-  metadata
+- `/sessions` should also carry the browser recording view, because recordings
+  belong to sessions; show active and historical recording rows inline rather
+  than forcing a separate recordings-first page
 - `/workspaces` registered workspace list, config validity details, and
   workspace register/update forms
 - `/operational` operational log viewer with level/event/text filters
@@ -133,8 +134,8 @@ should follow the same split instead of overloading `status.json`:
 - Sessions page:
   - persistent session metadata from
     `apps/runtime/src/orchestrator/session_state_store.ts`
-- Recordings page:
-  - session metadata `workspaceOutputs` / recording cycle history
+  - session metadata `workspaceOutputs` / recording cycle history rendered
+    inline with the owning session
 - Workspaces page:
   - workspace registry + workspace config validation
   - shared behavior config for `allowedWriteRoots`
@@ -313,8 +314,8 @@ view, not a generic admin template:
   `kato web start|stop|status` first.
 - Let recent-error panels on the Summary page use a slightly larger
   browser-friendly window than the current CLI `8`-item view.
-- On the Recordings page, include direct links to output files when they still
-  exist, alongside active and historical recording-cycle data.
+- On the Sessions page, include direct links to output files when they still
+  exist, alongside active and historical recording-cycle data for each session.
 - Keep web workspace registration behavior aligned with CLI behavior by
   automatically extending `allowedWriteRoots` when the existing CLI flow would
   do so.
@@ -493,8 +494,9 @@ Validation workflow before merge:
 - [x] Add a Maintenance route with guided clean flows for logs and sessions:
       dry-run first, explicit confirmation for execution, and shared cleanup
       behavior with CLI.
-- [ ] Add route-backed detail pages for Sessions, Recordings, Workspaces,
-      Operational Details, Security, and Settings using shared loaders.
+- [x] Add route-backed detail pages for Sessions, Workspaces, Operational
+      Details, Security, and Settings using shared loaders, with recordings
+      integrated into Sessions instead of a separate recordings page.
 - [ ] Add local-only mutation protections appropriate for a localhost operator
       console: POST-only handlers, origin/CSRF protection, and clear
       confirmation UX for destructive actions.

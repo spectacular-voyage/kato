@@ -3416,3 +3416,123 @@ Add focused loader coverage for the new session-activity and workspace
 recording rollup aggregations, and keep the web app passing `deno task
 --cwd apps/web check` and full repo `deno task check`.
 ```
+
+# User_2026-03-10_0829_12
+
+ok, what's next?
+
+# gpt-5.4_2026-03-10_0829_33
+
+Next highest-value slice is logs.
+
+You now have:
+- Summary
+- Sessions
+- Workspaces
+- Settings
+- Maintenance
+
+The biggest remaining operator gap is drill-down diagnostics, so I’d do:
+
+- `/operational` and `/security` next
+- same pattern as Sessions: shared loader underneath, operator-friendly integrated display on top
+- filters for level, event, text, time, and maybe `scope=daemon|web`
+- link out from Summary `Recent Errors` into the filtered log view
+
+After that:
+- docs sweep in [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md) and the task note
+- shell polish/logo wiring
+- any remaining Summary parity cleanup
+
+If you want the best next implementation step, I’d proceed with the log pages now.
+
+# User_2026-03-10_0830_38
+
+OK, proceed
+
+# gpt-5.4_2026-03-10_0830_54
+
+I’m implementing the log drill-down slice next: shared loader first, then `/operational` and `/security`, then Summary links into those filtered views. I’m reading the current log parsing and web logging code so I can reuse the existing file formats instead of adding another path.
+
+# gpt-5.4_2026-03-10_0831_13
+
+I’m switching from the summary-tail parser to a proper log loader now. The plan is a small shared web log loader that reads daemon and web JSONL files, then two thin routes on top: `/operational` and `/security`.
+
+# gpt-5.4_2026-03-10_0831_28
+
+I’ve confirmed the log record shape. I’m reading the full status loader now so I can pull the existing tail-reading and error parsing out into a dedicated logs loader instead of duplicating it in two places.
+
+# gpt-5.4_2026-03-10_0833_08
+
+I’m patching the dedicated logs loader first so Summary and the new pages share the same parsing path. After that I’ll wire the routes and nav, then add the Summary deep links and focused loader tests.
+
+# gpt-5.4_2026-03-10_0839_46
+
+I’m patching the new dedicated logs loader now and then I’ll rewire Summary to use it. After that, the page routes are mostly presentation and query plumbing.
+
+# gpt-5.4_2026-03-10_0841_44
+
+The shared logs loader is in and Summary is now wired to it. I’m adding the two page routes and nav entries next so the drill-down is actually reachable from the app shell.
+
+# gpt-5.4_2026-03-10_0842_22
+
+The routes and nav are in. I’m finishing the presentation layer now: styles for the new log pages and Summary deep links, then I’ll add the focused loader tests so the filter behavior is pinned down.
+
+# gpt-5.4_2026-03-10_0842_26
+
+The CSS patch drifted on me, so I’m reading the current stylesheet around the affected blocks and patching it in smaller chunks. The data and routes are already in place.
+
+# gpt-5.4_2026-03-10_0842_48
+
+The page layer is wired. I’m adding focused log-loader tests now so the scope/level/event/text filtering is pinned down before I run the full checks.
+
+# gpt-5.4_2026-03-10_0843_21
+
+The feature is complete enough to test, but I’m removing one obvious inefficiency first: the log page loader currently rereads the same files to compute the matched count. I’m collapsing that into one parse pass before I run the tests.
+
+# gpt-5.4_2026-03-10_0843_48
+
+The log pages and loader are fully patched. I’m formatting the touched files and then running the new log-loader tests plus the existing Summary loader tests before the web and repo-wide checks.
+
+# gpt-5.4_2026-03-10_0844_18
+
+The checks are green. I’m doing one live route sanity check against the running dev server for `/operational` and `/security` so we know the new surfaces are reachable in the real app shell, not just the typechecker.
+
+# gpt-5.4_2026-03-10_0844_30
+
+I’m doing one small docs sync before I close this out. The task note still talks about a separate `/recordings` page, but you decided to integrate recordings into `Sessions`, so I’m updating that decision and the related checkbox line so the note matches the implementation.
+
+# gpt-5.4_2026-03-10_0845_07
+
+I’ve synced the task note with the integrated Sessions/recordings decision and the new log pages. I’m formatting that note now; no code behavior changed in this step.
+
+# gpt-5.4_2026-03-10_0845_23
+
+The log drill-down slice is in.
+
+I added a shared log loader in [logs.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/logs.ts) and wired Summary to use it for recent errors via [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts). The new authenticated pages are [operational.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/operational.tsx) and [security.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/security.tsx), rendered through [log_page.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_page.tsx). They support scope, level, event, and text filtering across both daemon and web logs, and Summary recent-error rows now deep-link into the filtered log views from [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx). I also added the new tabs in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx) and the page styling in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Coverage is in [web-log-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-log-loader_test.ts), and the existing Summary loader tests still pass. I ran:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-log-loader_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+Live route sanity checks also passed:
+- `GET /operational` -> `302 /login`
+- `GET /security` -> `302 /login`
+
+I also synced the task note so it reflects the integrated Sessions+recordings decision and marks the Sessions/Workspaces/Operational/Security/Settings detail-page slice complete in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md).
+
+Next sensible step is either UI polish on the new log pages or the docs/codebase-overview sweep.
+
+# User_2026-03-10_0847_13
+
+Please update the checkboxes in [task.2026.2026-03-06-kato-web.md](dev-docs/notes/task.2026.2026-03-06-kato-web.md) 
+
+There's a discrepancy in accounting for active recordings. On Summary it says "Recording 1, Inactive 2" but in sessions, there are three recordings listed as active. I think we need to differentiate between are "on" (not stopped) and active (same staleness threshold as sessions). Maybe we use the red dot and "on, stale" for stale recordings and a green dot with "on, active" for ones that are engaged and not stale. 
+
+Is there a better word than "on"? Maybe "engaged"?
+
+Let's add the dots + text to the workspaces page's recording lists too. 
+
+Also, I think the "registered workspaces" list doesn't need separate items for

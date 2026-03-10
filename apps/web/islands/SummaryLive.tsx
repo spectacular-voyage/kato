@@ -57,6 +57,19 @@ function relativeTimestamp(value: string | undefined): string {
   return `${Math.floor(diffSeconds / 86400)}d ago`;
 }
 
+function buildLogHref(
+  error: SummaryPageData["recentErrors"][number],
+): string {
+  const path = error.channel === "security-audit"
+    ? "/security"
+    : "/operational";
+  const params = new URLSearchParams();
+  params.set("scope", error.scope);
+  params.set("level", error.level);
+  params.set("event", error.event);
+  return `${path}?${params.toString()}`;
+}
+
 export default function SummaryLive(
   { initialData }: { initialData: SummaryPageData },
 ) {
@@ -225,10 +238,10 @@ export default function SummaryLive(
               ? <li class="muted">No recent operational or security errors.</li>
               : data.recentErrors.map((error) => (
                 <li key={`${error.timestamp}:${error.event}:${error.message}`}>
-                  <div class="mono">
+                  <a class="mono summary-log-link" href={buildLogHref(error)}>
                     {error.level} · {error.scope} · {error.channel} ·{" "}
                     {error.event}
-                  </div>
+                  </a>
                   <div>{error.message}</div>
                   <div class="muted">
                     {formatTimestamp(error.timestamp)} ·{" "}

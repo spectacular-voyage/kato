@@ -322,6 +322,13 @@ a {
   gap: 10px;
 }
 
+.log-filter-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
 .current-filter {
   background: var(--accent);
   border-color: var(--accent);
@@ -444,6 +451,94 @@ a {
   text-underline-offset: 0.18em;
 }
 
+.summary-log-link {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.log-entry-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.log-entry-row {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.log-entry-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.log-entry-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.log-entry-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.log-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.log-badge.daemon {
+  color: var(--accent-dark);
+}
+
+.log-badge.web {
+  color: var(--ok);
+}
+
+.log-badge.error,
+.log-badge.warn {
+  color: var(--warn);
+}
+
+.log-badge.info,
+.log-badge.debug {
+  color: var(--muted);
+}
+
+.log-entry-event {
+  margin-top: 8px;
+}
+
+.log-entry-details {
+  margin-top: 10px;
+}
+
+.log-attributes {
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(21, 21, 21, 0.08);
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
+.log-entry-links {
+  margin-top: 10px;
+}
+
 .notice-banner {
   margin: 0 0 16px;
   padding: 12px 16px;
@@ -524,15 +619,21 @@ a {
 
   .page-toolbar,
   .session-activity-top,
-  .recording-row-top {
+  .recording-row-top,
+  .log-entry-top {
     flex-direction: column;
   }
 
   .page-actions,
-  .session-activity-meta {
+  .session-activity-meta,
+  .log-entry-badges {
     width: 100%;
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .log-filter-form {
+    grid-template-columns: 1fr;
   }
 
   .span-4,
