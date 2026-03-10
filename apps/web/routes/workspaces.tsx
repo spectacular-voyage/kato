@@ -104,7 +104,7 @@ export default define.page(async function WorkspacesPage(ctx) {
       <div class="shell">
         <AppHeader
           title="Workspaces"
-          description="Register, review, and remove workspace aliases using the same registry and config rules as the CLI."
+          description="Register, review, and remove workspace aliases, then inspect the recordings currently or historically writing into each workspace."
           currentPath="/workspaces"
           showLogout
           appStatus={appStatus}
@@ -186,12 +186,59 @@ export default define.page(async function WorkspacesPage(ctx) {
                     ? <li class="muted">No workspaces registered.</li>
                     : pageData.rows.map((row) => (
                       <li key={row.workspaceId} class="workspace-row">
-                        <div class="workspace-row-main">
+                        <div
+                          class="workspace-row-main"
+                          id={`workspace-${row.workspaceId}`}
+                        >
                           <div class="mono workspace-row-title">
                             {row.alias} ({row.workspaceId})
                           </div>
                           <div class="muted">{row.workspaceRoot}</div>
                           <div class="muted">{row.configPath}</div>
+                          <div class="workspace-recording-summary mono">
+                            {row.activeRecordingCount} active recording(s) ·
+                            {" "}
+                            {row.stoppedRecordingCount} stopped recording(s)
+                          </div>
+                          <div class="muted">
+                            {row.latestRecordingAt
+                              ? `Latest recording activity ${
+                                new Date(
+                                  row.latestRecordingAt,
+                                ).toLocaleString()
+                              }`
+                              : "No recordings associated with this workspace yet."}
+                          </div>
+                          {row.recordings.length > 0
+                            ? (
+                              <ul class="recording-list workspace-recordings">
+                                {row.recordings.map((recording) => (
+                                  <li key={recording.key} class="recording-row">
+                                    <div class="recording-row-top">
+                                      <div class="mono">
+                                        {recording.status === "active"
+                                          ? "recording active"
+                                          : "recording stopped"}
+                                      </div>
+                                      <a
+                                        class="mono workspace-session-link"
+                                        href={recording.sessionLink}
+                                      >
+                                        {recording.provider}:{" "}
+                                        {recording.sessionShortId}
+                                      </a>
+                                    </div>
+                                    <div>
+                                      {recording.snippet ?? "(no snippet)"}
+                                    </div>
+                                    <div class="mono recording-path">
+                                      {recording.outputPath}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )
+                            : null}
                         </div>
                         <div class="workspace-row-meta">
                           <div class={row.valid ? "ok mono" : "stale mono"}>
@@ -210,6 +257,14 @@ export default define.page(async function WorkspacesPage(ctx) {
                               ? "write root covered"
                               : "write root not covered"}
                           </div>
+                          <a
+                            class="secondary-button"
+                            href={`/sessions?workspace=${
+                              encodeURIComponent(row.workspaceId)
+                            }`}
+                          >
+                            View Sessions
+                          </a>
                           <form method="post">
                             <input
                               type="hidden"

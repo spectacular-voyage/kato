@@ -3026,3 +3026,393 @@ the task note with the new cleanup policy.
 Add and update coverage for the expanded log scope and for successful
 session cleanup while daemon status is running.
 ```
+
+# User_2026-03-07_1552_48
+
+what's next
+
+# gpt-5.4_2026-03-07_1552_54
+
+I’m checking the task note against what’s already landed so I can give you the highest-value next slice, not just the next unchecked box.
+
+# gpt-5.4_2026-03-07_1553_05
+
+Next highest-value slice is the drill-down pages.
+
+The biggest gap between the current app and the task goal is that we have Summary plus write workflows, but we still do not have the deeper read surfaces. I’d do this in order:
+
+- `/sessions`: persistent session list, active/stale filters, session detail view
+- `/recordings`: active plus inactive/stopped recording rows, output paths, history
+- `/operational` and `/security`: filtered log views, since we’re already reading those logs
+- shared loaders/view-models in `shared/src` where CLI and web are clearly duplicating projection logic
+
+After that:
+- finish Summary parity cleanup so the browser surface matches `kato status --live` more closely
+- wire the logo/wordmark into the shell
+- do the docs sweep in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md), [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md), and `dev.decision-log`
+
+If you want the best next implementation slice, I’d start with `/sessions` and `/recordings` together.
+
+# User_2026-03-07_1555_21
+
+I think for API endpoints your plan is good. For the display it's almost like sessions and recordings are best displayed on an integrated page. Kinda like on the cli summary. Every recording belongs to a session, so best to show them together.
+
+# gpt-5.4_2026-03-07_1555_34
+
+Agreed.
+
+The clean split is:
+
+- API/loaders: keep sessions and recordings separable underneath, because they’re useful for filtering, tests, and possible future detail views.
+- UI: present them together on one integrated operator page, because recordings are subordinate to sessions and that’s how the CLI already teaches the mental model.
+
+So I’d change the next slice to:
+- build a combined `/sessions` page as the main activity drill-down
+- show each session with its recording state/history inline
+- treat a standalone `/recordings` page as optional later, only if we find a real operator need for a recordings-first view
+
+That gives us the right internal boundaries without forcing a worse display model. If you want, I’ll proceed on that basis and update the task note to reflect the integrated page decision.
+
+# gpt-5.4_2026-03-07_1555_35
+
+Agreed.
+
+The clean split is:
+
+- API/loaders: keep sessions and recordings separable underneath, because they’re useful for filtering, tests, and possible future detail views.
+- UI: present them together on one integrated operator page, because recordings are subordinate to sessions and that’s how the CLI already teaches the mental model.
+
+So I’d change the next slice to:
+- build a combined `/sessions` page as the main activity drill-down
+- show each session with its recording state/history inline
+- treat a standalone `/recordings` page as optional later, only if we find a real operator need for a recordings-first view
+
+That gives us the right internal boundaries without forcing a worse display model. If you want, I’ll proceed on that basis and update the task note to reflect the integrated page decision.
+
+# User_2026-03-07_1556_29
+
+maybe the workspaces page shows recordings per workspace.
+
+# gpt-5.4_2026-03-07_1556_36
+
+Yes. That’s a good fit for `Workspaces`, but as a rollup, not the primary recording surface.
+
+I’d split it like this:
+
+- `Sessions` page: primary integrated session + recording view
+- `Workspaces` page: per-workspace activity summary
+
+On `Workspaces`, I’d show for each workspace:
+- active sessions
+- stale sessions
+- active recordings
+- inactive/stopped recordings
+- latest activity/heartbeat
+- link into the filtered `Sessions` view for that workspace
+
+That keeps the mental model clean:
+- recordings belong to sessions
+- sessions belong to workspaces
+- workspaces get aggregated operational summaries
+
+So I would not make `Workspaces` the main place to inspect recordings, but I would absolutely surface recording counts and health there.
+
+# gpt-5.4_2026-03-07_1556_37
+
+Yes. That’s a good fit for `Workspaces`, but as a rollup, not the primary recording surface.
+
+I’d split it like this:
+
+- `Sessions` page: primary integrated session + recording view
+- `Workspaces` page: per-workspace activity summary
+
+On `Workspaces`, I’d show for each workspace:
+- active sessions
+- stale sessions
+- active recordings
+- inactive/stopped recordings
+- latest activity/heartbeat
+- link into the filtered `Sessions` view for that workspace
+
+That keeps the mental model clean:
+- recordings belong to sessions
+- sessions belong to workspaces
+- workspaces get aggregated operational summaries
+
+So I would not make `Workspaces` the main place to inspect recordings, but I would absolutely surface recording counts and health there.
+
+# User_2026-03-07_1603_58
+
+Sessions aren't necessarily associated with a workspace directly... only via recordings. So for each workspace, show recordings, and recording listing can reference/link to the session. Workspaces don't really have activity/heartbeat outside recordings.
+
+# gpt-5.4_2026-03-07_1604_07
+
+That’s the better model.
+
+`Workspaces` should not pretend to have first-class activity independent of recordings. If the real association is:
+
+- session
+- recording references workspace output
+- workspace is therefore only indirectly related to the session
+
+then the page should reflect that exactly.
+
+I’d structure it this way:
+
+- `Sessions` page:
+  primary operator view, with sessions and their recordings shown together
+
+- `Workspaces` page:
+  recording-centric rollup per workspace:
+  - active recordings
+  - stopped/inactive recordings
+  - output paths/files
+  - latest recording activity
+  - links back to the owning session
+
+That means:
+- no synthetic workspace “heartbeat”
+- no workspace session counts unless clearly labeled as “sessions with recordings in this workspace”
+- workspace activity is derived from recordings only
+
+That’s a cleaner data model and a better UI. If you want, I’ll proceed with the next slice using that rule.
+
+# gpt-5.4_2026-03-07_1604_08
+
+That’s the better model.
+
+`Workspaces` should not pretend to have first-class activity independent of recordings. If the real association is:
+
+- session
+- recording references workspace output
+- workspace is therefore only indirectly related to the session
+
+then the page should reflect that exactly.
+
+I’d structure it this way:
+
+- `Sessions` page:
+  primary operator view, with sessions and their recordings shown together
+
+- `Workspaces` page:
+  recording-centric rollup per workspace:
+  - active recordings
+  - stopped/inactive recordings
+  - output paths/files
+  - latest recording activity
+  - links back to the owning session
+
+That means:
+- no synthetic workspace “heartbeat”
+- no workspace session counts unless clearly labeled as “sessions with recordings in this workspace”
+- workspace activity is derived from recordings only
+
+That’s a cleaner data model and a better UI. If you want, I’ll proceed with the next slice using that rule.
+
+# User_2026-03-07_1607_37
+
+proceed
+
+# gpt-5.4_2026-03-07_1607_44
+
+I’m taking the next slice as an integrated Sessions view plus workspace recording rollups, with the data model driven by recordings rather than synthetic workspace activity. First I’m reading the current loaders/routes and the session/recording shapes already exposed by runtime and status so I can build this without inventing a parallel model.
+
+# gpt-5.4_2026-03-07_1607_49
+
+I have the current web data surface. Next I’m reading the session/recording contracts and the persistent session metadata model so I can build the integrated page off real sources instead of only the live status snapshot.
+
+# gpt-5.4_2026-03-07_1607_55
+
+I’ve confirmed the deeper data is already in persistent session metadata via `workspaceOutputs.recordingCycles`. I’m reading just that contract next so I can map a sessions page and a workspace recording rollup page from the same underlying source.
+
+# gpt-5.4_2026-03-07_1608_02
+
+The persistent model is enough to build this cleanly. I’m checking what the runtime already exports so I can either reuse the store directly or add a small loader helper, then I’ll wire in the new `Sessions` tab and the workspace recording rollups.
+
+# gpt-5.4_2026-03-07_1608_08
+
+I’ve got the runtime exports and the current Summary/Workspaces shell. I’m checking the existing CSS before editing so I can add the sessions and workspace recording layouts without fighting the current styles.
+
+# gpt-5.4_2026-03-07_1608_14
+
+I’m at the design point now. I’m going to implement this as one new sessions loader/route plus an expanded workspaces loader: sessions become the primary integrated session+recording drill-down, and workspaces get recording-based rollups with links back into filtered sessions.
+
+# gpt-5.4_2026-03-07_1608_24
+
+I need a minimal valid session metadata fixture shape before I start patching the loader tests. I’m pulling one from the existing daemon tests so the new sessions/workspace loader tests use the real metadata contract and don’t drift.
+
+# gpt-5.4_2026-03-07_1609_37
+
+I’m in the implementation phase now. I’m checking the workspace registry file shape so I can add a focused workspaces-rollup test alongside the sessions-loader test instead of relying on manual verification for that aggregation.
+
+# gpt-5.4_2026-03-07_1609_42
+
+I’ve got enough to implement it. I’m patching in a new shared web loader for session activity, a `/sessions` route, the extra navigation tab, and the workspaces recording rollup that links back into filtered sessions.
+
+# gpt-5.4_2026-03-07_1610_19
+
+I’m writing the new loader layer first because both pages depend on it. Once that’s in place, the route and workspaces UI changes are straightforward and the tests can hit the same aggregation logic the pages use.
+
+# gpt-5.4_2026-03-07_1611_07
+
+The data layer is in. I’m wiring the actual Sessions page now with simple query filters so the new workspace links have somewhere concrete to land.
+
+# gpt-5.4_2026-03-07_1611_32
+
+The Sessions route exists now. I’m updating the Workspaces page so it stops implying workspace-native activity and instead shows recording rows per workspace with links back to the integrated sessions view.
+
+# gpt-5.4_2026-03-07_1612_16
+
+I’m adding focused loader tests now. They’ll cover the two risky parts of this slice: joining live snapshot sessions to persistent recording history, and grouping recordings under registered workspaces without inventing fake workspace activity.
+
+# gpt-5.4_2026-03-07_1613_05
+
+The test fixtures are in. I’m doing a quick correctness pass now for resolver paths and likely lint issues before I run them, because the loaders depend on the repo’s actual default paths rather than the literals I’d use in a quick draft.
+
+# gpt-5.4_2026-03-07_1613_20
+
+The code is in. I’m formatting and running the new focused loader tests first, then I’ll run the web check and full repo check so any failure is easier to localize.
+
+# gpt-5.4_2026-03-07_1613_32
+
+I hit three type issues: one shared type isn’t exported the way I used it, one callback needs an explicit type, and the shared-config factory requires options. I’m patching those directly and rerunning the focused tests.
+
+# gpt-5.4_2026-03-07_1613_52
+
+The new loader tests pass. I’m running the web app check next, then the full repo check; if anything remains, it should be route/rendering or lint-level drift rather than the data model.
+
+# gpt-5.4_2026-03-07_1614_05
+
+The checks are green. I’m doing one live HTTP sanity check against the running dev server for the new route surface so we know the app is serving the new page path, not just type-checking it.
+
+# gpt-5.4_2026-03-07_1614_20
+
+Added the next drill-down slice as an integrated Sessions page plus recording-based workspace rollups.
+
+The new integrated loader is [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), and the page is [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx). It joins live snapshot sessions with persistent session metadata so each session shows its recordings inline, including active and stopped cycles. I also added the `Sessions` tab in [app_header.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/app_header.tsx).
+
+`Workspaces` now treats recordings as the real activity model. [workspaces.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/workspaces.ts) groups recordings by registered workspace, and [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx) shows those recording rows with links back into filtered `/sessions` views. Styling for the new layouts lives in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Coverage is in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts). I ran:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task check`
+
+Live sanity check against the running dev server also passed for route presence:
+- `GET /sessions` -> `302 /login`
+- `GET /workspaces` -> `302 /login`
+
+The next sensible slice is the operational/security log drill-down pages, or a quick polish pass on the new Sessions/Workspaces UI if you want to tune the presentation first.
+
+# User_2026-03-07_1637_43
+
+For the Sessions page, let's have the top line for each session be like, in a 15% largeer font size:
+
+* codex: **kato web** (14107e4a)
+
+I don't think we need to show provider session id 019cc77f-aefa-7db3-bdc5-11b06f70a383 as that is internal only, right?
+
+The Filters div and Activity div can be dispensed with. The "All Session"/"Active Only" buttons can be moved into Session Activity, right-aligned across from the heading.  Right under the heading you can have (in a small font): "Active: 6, Stale: 1"
+
+The recordings should be indented with maybe left-tree lines to show they are associated with a session. Maybe sessions (with their recordings) alternate background colors so its easier to distinguish.
+
+# gpt-5.4_2026-03-07_1637_55
+
+I’m adjusting the Sessions page layout and copy only: remove the provider session id, fold the filters into the Session Activity header, add the active/stale summary line, and restyle the session/recording block so the hierarchy reads more clearly.
+
+# gpt-5.4_2026-03-07_1638_30
+
+I’m only changing the Sessions page presentation now, not the underlying loader. The goal is to make the session/recording hierarchy read cleanly without changing the data model or filters.
+
+# gpt-5.4_2026-03-07_1638_54
+
+I’ve made the Sessions-page-only UI pass. I’m formatting and running the web check now so we catch any JSX/CSS drift, then I’ll give you exactly what changed.
+
+# gpt-5.4_2026-03-07_1639_09
+
+The Sessions page now uses the layout you described in [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx). Each session’s top line is larger and reads as `provider: snippet (shortid)`, with the snippet bolded, and the internal provider session id line is gone.
+
+I also removed the separate `Filters` and `Activity` cards. The `All Sessions` / `Active Only` controls now sit on the right side of the `Session Activity` heading, with a small summary line directly underneath showing `Active: n, Stale: n`. The recording rows are now visually nested under each session using an indented tree-line treatment, and the session blocks alternate background tones to make adjacent sessions easier to distinguish. Those styling changes are in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Verified with `deno task --cwd apps/web check`. Refresh `/sessions` and the new layout should be there.
+
+# gpt-5.4_2026-03-07_1639_10
+
+The Sessions page now uses the layout you described in [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx). Each session’s top line is larger and reads as `provider: snippet (shortid)`, with the snippet bolded, and the internal provider session id line is gone.
+
+I also removed the separate `Filters` and `Activity` cards. The `All Sessions` / `Active Only` controls now sit on the right side of the `Session Activity` heading, with a small summary line directly underneath showing `Active: n, Stale: n`. The recording rows are now visually nested under each session using an indented tree-line treatment, and the session blocks alternate background tones to make adjacent sessions easier to distinguish. Those styling changes are in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Verified with `deno task --cwd apps/web check`. Refresh `/sessions` and the new layout should be there.
+
+# User_2026-03-07_1647_44
+
+Close up the padding between "Session Activity" and "Active:..."
+
+For the workspace mention in the recording, better to have "workspace: k" instead of just k. Make the path font tiny.
+
+For the recording lines, can you do a red solid circle when recording is active, hollow circle when not.
+
+From the session line, remove the twin path, e.g. "/home/djradon/.codex/sessions/2026/03/07/rollout-2026-03-07T00-52-42-019cc77f-aefa-7db3-bdc5-11b06f70a383.jsonl" and close up the space between the title line and the updated line.
+
+I think "1 active · 0 stopped" for recordings is unnecessary here.
+
+# gpt-5.4_2026-03-07_1647_49
+
+I’m tightening the Sessions page presentation only: compress the heading spacing, remove the extra session meta lines, restyle recording state markers, and make the recording workspace/path labels read more clearly.
+
+# gpt-5.4_2026-03-07_1647_57
+
+I have the current markup already, so I’m patching the route and CSS directly rather than changing any loader data. The behavior stays the same; this is just hierarchy and readability cleanup.
+
+# gpt-5.4_2026-03-07_1648_11
+
+The Sessions page markup is updated. I’m running format and the web check now to catch any JSX/CSS drift, then I’ll hand back exactly what changed.
+
+# gpt-5.4_2026-03-07_1648_19
+
+Adjusted the Sessions page in [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx) and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Changes:
+- tightened the space between `Session Activity` and the `Active: ..., Stale: ...` line
+- removed the extra `1 active · 0 stopped` session meta line
+- removed the extra internal path line under each session
+- tightened the space between the session title line and the updated line
+- changed recording workspace labels to `workspace: ...`
+- made recording paths much smaller
+- added red filled `●` for active recordings and hollow `○` for stopped recordings
+
+Verified with `deno task --cwd apps/web check`.
+
+Refresh `/sessions` and the updated presentation should be live.
+
+# User_2026-03-10_0827_17
+
+commit message please
+
+# gpt-5.4_2026-03-10_0827_32
+
+```text
+feat(web): add integrated sessions view and workspace recording rollups
+
+Add a new authenticated `/sessions` page as the primary drill-down surface
+for session activity. The page joins live daemon snapshot data with
+persistent session metadata so each session can show current and historical
+recording state inline instead of splitting sessions and recordings into
+separate operator views.
+
+Expand the Workspaces page to treat recordings as the real activity model
+for a workspace. Each registered workspace now shows active and stopped
+recordings, latest recording activity, and links back into the filtered
+Sessions view for the owning session.
+
+Polish the Sessions presentation to better match the operator mental
+model: larger session title lines, simplified header stats, removal of
+internal-only provider session ids and path noise, indented recording
+rows with tree-line styling, alternating session backgrounds, explicit
+`workspace: ...` labels, tiny output-path text, and red/hollow recording
+state markers for active vs stopped recording rows.
+
+Add focused loader coverage for the new session-activity and workspace
+recording rollup aggregations, and keep the web app passing `deno task
+--cwd apps/web check` and full repo `deno task check`.
+```
