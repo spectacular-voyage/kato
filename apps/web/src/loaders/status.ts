@@ -3,7 +3,6 @@ import type {
   MemoryStatus,
   ProviderStatus,
 } from "@kato/shared";
-import { summarizeRecordingActivity } from "@kato/shared";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
@@ -11,12 +10,18 @@ import {
   resolveDefaultStatusPath,
 } from "../../../runtime/src/orchestrator/control_plane.ts";
 import {
+  deriveSessionGenerationState,
+  loadRuntimeConfigOrDefault,
+  providerAutoGeneratesSnapshots,
+} from "./activity_state.ts";
+import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   WorkspaceRegistryFileStore,
 } from "../../../runtime/src/workspace/registry.ts";
 import { loadLogEntries } from "./logs.ts";
+import { loadSessionActivityRows } from "./sessions.ts";
 import { toStatusViewModel } from "../main.ts";
 
 const RECENT_ERRORS_LIMIT = 12;
@@ -32,6 +37,8 @@ export interface WorkspaceSummaryRow {
 
 export interface WorkspaceSummary {
   activeCount: number;
+  staleCount: number;
+  inactiveCount: number;
   invalidCount: number;
   rows: WorkspaceSummaryRow[];
   unavailableReason?: string;
@@ -51,6 +58,11 @@ export interface AppChromeStatus {
   snapshot: "current" | "stale";
 }
 
+export interface ConfiguredProvider {
+  provider: string;
+  autoGenerateSnapshots: boolean;
+}
+
 export interface SummaryPageData {
   generatedAt: string;
   heartbeatAt: string;
@@ -60,10 +72,15 @@ export interface SummaryPageData {
   sessionCount: number;
   activeSessionCount: number;
   staleSessionCount: number;
+  generatingSessionCount: number;
+  staleGeneratingSessionCount: number;
+  inactiveSessionCount: number;
   recordingCount: number;
-  inactiveRecordingCount: number;
+  staleRecordingCount: number;
+  stoppedRecordingCount: number;
   sessions: DaemonSessionStatus[];
   providers: ProviderStatus[];
+  configuredProviders: ConfiguredProvider[];
   memory?: MemoryStatus;
   stale: boolean;
   statusPath: string;
@@ -113,11 +130,63 @@ export async function loadSummaryPageData(
   const allSessions = snapshot.sessions ?? [];
   const activeSessionCount = allSessions.filter((session) => !session.stale)
     .length;
-  const recordingActivity = summarizeRecordingActivity(
-    allSessions,
-    snapshot.recordings,
+  const sessionActivityRows = await loadSessionActivityRows({
+    includeStale: true,
+    now,
+    statusPath,
+    statusStore,
+  });
+  const runtimeConfig = await loadRuntimeConfigOrDefault();
+  const fallbackActiveRecordingCount = allSessions.reduce(
+    (sum, session) =>
+      sum + (session.stale ? 0 : (session.recordings ?? []).length),
+    0,
   );
-  const workspaceSummary = await loadWorkspaceSummary();
+  const fallbackStaleRecordingCount = allSessions.reduce(
+    (sum, session) =>
+      sum + (session.stale ? (session.recordings ?? []).length : 0),
+    0,
+  );
+  const recordingCount = sessionActivityRows.length > 0
+    ? sessionActivityRows.reduce(
+      (sum, row) => sum + row.activeRecordingCount,
+      0,
+    )
+    : fallbackActiveRecordingCount;
+  const staleRecordingCount = sessionActivityRows.length > 0
+    ? sessionActivityRows.reduce((sum, row) => sum + row.staleRecordingCount, 0)
+    : fallbackStaleRecordingCount;
+  const stoppedRecordingCount = sessionActivityRows.reduce(
+    (sum, row) => sum + row.stoppedRecordingCount,
+    0,
+  );
+  const sessionActivityKeys = new Set(
+    sessionActivityRows.map((row) =>
+      makeProviderSessionKey(row.provider, row.sessionId)
+    ),
+  );
+  const liveOnlySessions = allSessions.filter((session) =>
+    !sessionActivityKeys.has(
+      makeProviderSessionKey(session.provider, session.sessionId),
+    )
+  );
+  const configuredProviders: ConfiguredProvider[] = (
+    ["claude", "codex", "gemini"] as const
+  )
+    .filter((p) => (runtimeConfig.providerSessionRoots[p] ?? []).length > 0)
+    .map((p) => ({
+      provider: p,
+      autoGenerateSnapshots: providerAutoGeneratesSnapshots(p, runtimeConfig),
+    }));
+  const sessionGenerationCounts = summarizeSessionGenerationState(
+    sessionActivityRows,
+    liveOnlySessions,
+    runtimeConfig,
+  );
+  const workspaceSummary = summarizeWorkspaceActivity(
+    await loadWorkspaceSummary(),
+    sessionActivityRows,
+  );
   const recentErrors = await loadRecentErrors(statusPath);
 
   return {
@@ -129,15 +198,133 @@ export async function loadSummaryPageData(
     sessionCount: allSessions.length,
     activeSessionCount,
     staleSessionCount: allSessions.length - activeSessionCount,
-    recordingCount: recordingActivity.activeRecordings,
-    inactiveRecordingCount: recordingActivity.inactiveRecordings,
+    generatingSessionCount: sessionGenerationCounts.active,
+    staleGeneratingSessionCount: sessionGenerationCounts.stale,
+    inactiveSessionCount: sessionGenerationCounts.inactive,
+    recordingCount,
+    staleRecordingCount,
+    stoppedRecordingCount,
     sessions: viewModel.sessions,
     providers: snapshot.providers,
+    configuredProviders,
     memory: viewModel.memory,
     stale: isStatusSnapshotStale(snapshot, now()),
     statusPath,
     workspaceSummary,
     recentErrors,
+  };
+}
+
+function makeProviderSessionKey(provider: string, sessionId: string): string {
+  return `${provider}:${sessionId}`;
+}
+
+function summarizeSessionGenerationState(
+  sessionActivityRows: Awaited<ReturnType<typeof loadSessionActivityRows>>,
+  liveOnlySessions: Array<
+    Pick<DaemonSessionStatus, "provider" | "sessionId" | "stale" | "recordings">
+  >,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
+): { active: number; stale: number; inactive: number } {
+  let active = 0;
+  let stale = 0;
+  let inactive = 0;
+
+  for (const row of sessionActivityRows) {
+    switch (deriveSessionGenerationState(row, runtimeConfig)) {
+      case "active":
+        active += 1;
+        break;
+      case "stale":
+        stale += 1;
+        break;
+      case "inactive":
+        inactive += 1;
+        break;
+    }
+  }
+
+  for (const session of liveOnlySessions) {
+    switch (
+      deriveSessionGenerationState(
+        {
+          provider: session.provider,
+          stale: session.stale,
+          recordingCount: session.recordings?.length ?? 0,
+        },
+        runtimeConfig,
+      )
+    ) {
+      case "active":
+        active += 1;
+        break;
+      case "stale":
+        stale += 1;
+        break;
+      case "inactive":
+        inactive += 1;
+        break;
+    }
+  }
+
+  return { active, stale, inactive };
+}
+
+function summarizeWorkspaceActivity(
+  workspaceSummary: WorkspaceSummary,
+  sessionActivityRows: Awaited<ReturnType<typeof loadSessionActivityRows>>,
+): WorkspaceSummary {
+  if (workspaceSummary.unavailableReason) {
+    return workspaceSummary;
+  }
+
+  const activityByWorkspace = new Map<
+    string,
+    { active: boolean; stale: boolean }
+  >();
+  for (const session of sessionActivityRows) {
+    for (const recording of session.recordings) {
+      if (!recording.workspaceId) {
+        continue;
+      }
+      const state = activityByWorkspace.get(recording.workspaceId) ?? {
+        active: false,
+        stale: false,
+      };
+      if (recording.state === "engaged-active") {
+        state.active = true;
+      } else if (recording.state === "engaged-stale") {
+        state.stale = true;
+      }
+      activityByWorkspace.set(recording.workspaceId, state);
+    }
+  }
+
+  let activeCount = 0;
+  let staleCount = 0;
+  let inactiveCount = 0;
+  let invalidCount = 0;
+  for (const row of workspaceSummary.rows) {
+    if (!row.valid) {
+      invalidCount += 1;
+      continue;
+    }
+    const state = activityByWorkspace.get(row.workspaceId);
+    if (state?.active) {
+      activeCount += 1;
+    } else if (state?.stale) {
+      staleCount += 1;
+    } else {
+      inactiveCount += 1;
+    }
+  }
+
+  return {
+    ...workspaceSummary,
+    activeCount,
+    staleCount,
+    inactiveCount,
+    invalidCount,
   };
 }
 
@@ -152,6 +339,8 @@ export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
   } catch (error) {
     return {
       activeCount: 0,
+      staleCount: 0,
+      inactiveCount: 0,
       invalidCount: 0,
       rows: [],
       unavailableReason: formatWorkspaceRegistryError(error),
@@ -206,6 +395,8 @@ export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
   const activeCount = rows.filter((row) => row.valid).length;
   return {
     activeCount,
+    staleCount: 0,
+    inactiveCount: 0,
     invalidCount: rows.length - activeCount,
     rows,
   };

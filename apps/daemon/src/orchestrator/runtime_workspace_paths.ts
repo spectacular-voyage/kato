@@ -1,6 +1,6 @@
 import type { ConversationEvent } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
-import { isAbsolute, resolve } from "@std/path";
+import { isAbsolute, relative, resolve } from "@std/path";
 
 export interface WorkspacePathTemplateProfile {
   workspaceRoot: string;
@@ -158,6 +158,14 @@ export function renderWorkspaceFilename(
     : `${tokens.timestampHumane}-${tokens.snippetSlug}-${tokens.provider}.md`;
 }
 
+function isWithinWorkspaceRoot(
+  workspaceRoot: string,
+  candidatePath: string,
+): boolean {
+  const rel = relative(resolve(workspaceRoot), resolve(candidatePath));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 export function resolveWorkspaceDefaultOutputDir(
   options: WorkspacePathTemplateOptions,
 ): string {
@@ -166,7 +174,13 @@ export function resolveWorkspaceDefaultOutputDir(
     options.profile.defaultOutputDirTemplate,
     tokens,
   );
-  return isAbsolute(rendered)
+  const resolvedPath = isAbsolute(rendered)
     ? resolve(rendered)
     : resolve(options.profile.workspaceRoot, rendered);
+  if (!isWithinWorkspaceRoot(options.profile.workspaceRoot, resolvedPath)) {
+    throw new Error(
+      "defaultOutputDir must resolve within the workspace root",
+    );
+  }
+  return resolvedPath;
 }

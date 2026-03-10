@@ -82,6 +82,9 @@ Related notes:
 Workspace-local config remains `<workspace>/.kato-workspace-config.yaml`.
 Captured/exported conversation files are workspace-root data and do not belong
 under `~/.kato` by default.
+Generated defaults derived from workspace `defaultOutputDir` remain
+workspace-root-contained after template expansion; only explicit command paths
+may target outside the workspace root.
 
 ## Topology
 

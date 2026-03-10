@@ -70,25 +70,37 @@ function buildLogHref(
   return `${path}?${params.toString()}`;
 }
 
+function metricPrimaryStateClass(
+  state: "active" | "stale" | "inactive" | "neutral",
+): string {
+  return `metric-primary activity-${state}`;
+}
+
 export default function SummaryLive(
   { initialData }: { initialData: SummaryPageData },
 ) {
   const [data, setData] = useState(initialData);
-  const twinGenerationProviders = data.providers
-    .filter((provider) => provider.activeSessions > 0)
-    .map((provider) => provider.provider);
+  const activeSessionsByProvider = new Map(
+    data.providers.map((p) => [p.provider, p.activeSessions]),
+  );
   const workspaceCount = data.workspaceSummary.unavailableReason
     ? "n/a"
     : String(data.workspaceSummary.activeCount);
-  const workspaceInactive = data.workspaceSummary.unavailableReason
-    ? "Inactive: unavailable"
-    : `Inactive: ${data.workspaceSummary.invalidCount}`;
+  const workspacePrimaryState = data.workspaceSummary.unavailableReason
+    ? "neutral"
+    : "active";
 
   useEffect(() => {
     let cancelled = false;
+    let polling = false;
+
     const load = async () => {
+      if (polling) {
+        return;
+      }
+      polling = true;
       try {
-        const response = await fetch("/api/summary");
+        const response = await fetch("/api/summary", { cache: "no-store" });
         if (!response.ok) {
           return;
         }
@@ -98,10 +110,15 @@ export default function SummaryLive(
         }
       } catch {
         // Keep the previous snapshot rendered.
+      } finally {
+        polling = false;
       }
     };
 
-    const interval = setInterval(load, POLL_INTERVAL_MS);
+    void load();
+    const interval = setInterval(() => {
+      void load();
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -112,7 +129,7 @@ export default function SummaryLive(
     <div class="shell">
       <AppHeader
         title="Summary"
-        description="Browser access to the daemon snapshot with live polling, workspace health, and recent operator-visible errors."
+        description="Browser access to the daemon status with live polling, workspace health, and recent operator-visible errors."
         currentPath="/"
         showLogout
         appStatus={{
@@ -127,22 +144,61 @@ export default function SummaryLive(
           <div class="metrics">
             <div class="metric">
               <span class="label">Sessions</span>
-              <span class="value mono">{data.activeSessionCount}</span>
+              <span class={metricPrimaryStateClass("active")}>
+                <span class="metric-primary-count mono">
+                  {data.generatingSessionCount}
+                </span>
+                <span class="metric-primary-label">active</span>
+              </span>
               <span class="metric-note mono">
-                Inactive: {data.staleSessionCount}
+                {data.staleGeneratingSessionCount} stale
+              </span>
+              <span class="metric-note mono">
+                {data.inactiveSessionCount} inactive
               </span>
             </div>
             <div class="metric">
               <span class="label">Recordings</span>
-              <span class="value mono">{data.recordingCount}</span>
+              <span class={metricPrimaryStateClass("active")}>
+                <span class="metric-primary-count mono">
+                  {data.recordingCount}
+                </span>
+                <span class="metric-primary-label">active</span>
+              </span>
               <span class="metric-note mono">
-                Inactive: {data.inactiveRecordingCount}
+                {data.staleRecordingCount} stale
+              </span>
+              <span class="metric-note mono">
+                {data.stoppedRecordingCount} inactive
               </span>
             </div>
             <div class="metric">
               <span class="label">Workspaces</span>
-              <span class="value mono">{workspaceCount}</span>
-              <span class="metric-note mono">{workspaceInactive}</span>
+              <span class={metricPrimaryStateClass(workspacePrimaryState)}>
+                <span class="metric-primary-count mono">{workspaceCount}</span>
+                <span class="metric-primary-label">
+                  {data.workspaceSummary.unavailableReason
+                    ? "unavailable"
+                    : "active"}
+                </span>
+              </span>
+              <span class="metric-note mono">
+                {data.workspaceSummary.unavailableReason
+                  ? "unavailable"
+                  : `${data.workspaceSummary.staleCount} stale`}
+              </span>
+              <span class="metric-note mono">
+                {data.workspaceSummary.unavailableReason
+                  ? data.workspaceSummary.unavailableReason
+                  : `${data.workspaceSummary.inactiveCount} inactive`}
+              </span>
+              {data.workspaceSummary.unavailableReason
+                ? null
+                : (
+                  <span class="metric-note mono">
+                    {data.workspaceSummary.invalidCount} invalid
+                  </span>
+                )}
             </div>
           </div>
         </article>
@@ -164,24 +220,20 @@ export default function SummaryLive(
 
         <article class="card span-4">
           <h3>Providers</h3>
-          <p class="muted">
-            Twin generation:{" "}
-            <span class="mono">
-              {twinGenerationProviders.length > 0
-                ? twinGenerationProviders.join(", ")
-                : "none"}
-            </span>
-          </p>
           <ul class="provider-list">
-            {data.providers.length === 0
-              ? <li class="muted">No provider activity recorded.</li>
-              : data.providers.map((provider) => (
+            {data.configuredProviders.length === 0
+              ? <li class="muted">No providers configured.</li>
+              : data.configuredProviders.map((provider) => (
                 <li key={provider.provider}>
                   <div class="mono">{provider.provider}</div>
                   <div class="muted">
-                    {provider.activeSessions} active session(s)
+                    {activeSessionsByProvider.get(provider.provider) ?? 0}{" "}
+                    active session(s)
                   </div>
-                  <div class="muted">twin generation active</div>
+                  <div class="muted">
+                    Automatic Twin Generation:{" "}
+                    {provider.autoGenerateSnapshots ? "on" : "off"}
+                  </div>
                 </li>
               ))}
           </ul>

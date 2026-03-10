@@ -10,10 +10,15 @@ import {
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
 } from "@kato/runtime";
+import {
+  type ActivityState,
+  deriveSessionGenerationState,
+  loadRuntimeConfigOrDefault,
+} from "./activity_state.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
-  status: "active" | "stopped";
+  state: "engaged-active" | "engaged-stale" | "stopped";
   workspaceId?: string;
   workspaceAlias?: string;
   outputPath: string;
@@ -33,9 +38,11 @@ export interface SessionActivityRow {
   updatedAt: string;
   lastEventAt?: string;
   stale: boolean;
+  state: ActivityState;
   sourceFilePath: string;
   twinPath: string;
   activeRecordingCount: number;
+  staleRecordingCount: number;
   stoppedRecordingCount: number;
   recordings: SessionRecordingActivityRow[];
 }
@@ -46,7 +53,9 @@ export interface SessionsPageData {
   sessionCount: number;
   activeSessionCount: number;
   staleSessionCount: number;
+  inactiveSessionCount: number;
   activeRecordingCount: number;
+  staleRecordingCount: number;
   stoppedRecordingCount: number;
   rows: SessionActivityRow[];
 }
@@ -82,8 +91,12 @@ function sortRecordings(
   rows: SessionRecordingActivityRow[],
 ): SessionRecordingActivityRow[] {
   return [...rows].sort((a, b) => {
-    const statusDiff = Number(b.status === "active") -
-      Number(a.status === "active");
+    const order = {
+      "engaged-active": 0,
+      "engaged-stale": 1,
+      "stopped": 2,
+    } as const;
+    const statusDiff = order[a.state] - order[b.state];
     if (statusDiff !== 0) {
       return statusDiff;
     }
@@ -116,6 +129,7 @@ function findActiveCycle(
 function buildRecordingRowsForOutput(
   output: SessionWorkspaceOutputState,
   liveRecordings: DaemonRecordingStatus[],
+  sessionStale: boolean,
 ): SessionRecordingActivityRow[] {
   const rows: SessionRecordingActivityRow[] = [];
   const activeCycle = findActiveCycle(output);
@@ -130,7 +144,7 @@ function buildRecordingRowsForOutput(
         output.currentResolvedPath,
         activeCycle?.recordingCycleId ?? liveRecording?.recordingId ?? "active",
       ].join(":"),
-      status: "active",
+      state: sessionStale ? "engaged-stale" : "engaged-active",
       workspaceId: output.workspaceId,
       workspaceAlias: output.workspaceAliasSnapshot ??
         liveRecording?.workspaceAlias,
@@ -154,7 +168,7 @@ function buildRecordingRowsForOutput(
         output.currentResolvedPath,
         cycle.recordingCycleId,
       ].join(":"),
-      status: "stopped",
+      state: "stopped",
       workspaceId: output.workspaceId,
       workspaceAlias: output.workspaceAliasSnapshot,
       outputPath: output.currentResolvedPath,
@@ -174,12 +188,17 @@ function buildRecordingRows(
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
   const seenActiveOutputs = new Set<string>();
+  const sessionStale = live?.stale ?? true;
 
   for (const output of session.workspaceOutputs ?? []) {
-    const outputRows = buildRecordingRowsForOutput(output, liveRecordings);
+    const outputRows = buildRecordingRowsForOutput(
+      output,
+      liveRecordings,
+      sessionStale,
+    );
     for (const row of outputRows) {
       rows.push(row);
-      if (row.status === "active") {
+      if (row.state !== "stopped") {
         seenActiveOutputs.add(row.outputPath);
       }
     }
@@ -195,7 +214,7 @@ function buildRecordingRows(
         liveRecording.outputPath,
         liveRecording.recordingId ?? "active",
       ].join(":"),
-      status: "active",
+      state: sessionStale ? "engaged-stale" : "engaged-active",
       workspaceAlias: liveRecording.workspaceAlias,
       outputPath: liveRecording.outputPath,
       startedAt: liveRecording.startedAt,
@@ -219,9 +238,10 @@ export async function loadSessionActivityRows(
     katoDir,
     now,
   });
-  const [snapshot, metadataList] = await Promise.all([
+  const [snapshot, metadataList, runtimeConfig] = await Promise.all([
     statusStore.load(),
     sessionStore.listSessionMetadata(),
+    loadRuntimeConfigOrDefault(),
   ]);
 
   const liveBySessionId = new Map(
@@ -234,9 +254,19 @@ export async function loadSessionActivityRows(
     const live = liveBySessionId.get(metadata.sessionId);
     const recordings = buildRecordingRows(metadata, live);
     const activeRecordingCount = recordings.filter((row) =>
-      row.status === "active"
-    )
-      .length;
+      row.state === "engaged-active"
+    ).length;
+    const staleRecordingCount =
+      recordings.filter((row) => row.state === "engaged-stale").length;
+    const state = deriveSessionGenerationState(
+      {
+        provider: metadata.provider,
+        stale: live?.stale ?? true,
+        activeRecordingCount,
+        staleRecordingCount,
+      },
+      runtimeConfig,
+    );
     return {
       sessionKey: metadata.sessionKey,
       provider: metadata.provider,
@@ -247,10 +277,13 @@ export async function loadSessionActivityRows(
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
       stale: live?.stale ?? true,
+      state,
       sourceFilePath: metadata.sourceFilePath,
       twinPath: metadata.twinPath,
       activeRecordingCount,
-      stoppedRecordingCount: recordings.length - activeRecordingCount,
+      staleRecordingCount,
+      stoppedRecordingCount:
+        recordings.filter((row) => row.state === "stopped").length,
       recordings,
     };
   }).filter((row) => includeStale || !row.stale).filter((row) =>
@@ -294,10 +327,15 @@ export async function loadSessionsPageData(
     includeStale,
     workspaceFilter: options.workspaceFilter?.trim() || undefined,
     sessionCount: rows.length,
-    activeSessionCount: rows.filter((row) => !row.stale).length,
-    staleSessionCount: rows.filter((row) => row.stale).length,
+    activeSessionCount: rows.filter((row) => row.state === "active").length,
+    staleSessionCount: rows.filter((row) => row.state === "stale").length,
+    inactiveSessionCount: rows.filter((row) => row.state === "inactive").length,
     activeRecordingCount: rows.reduce(
       (sum, row) => sum + row.activeRecordingCount,
+      0,
+    ),
+    staleRecordingCount: rows.reduce(
+      (sum, row) => sum + row.staleRecordingCount,
       0,
     ),
     stoppedRecordingCount: rows.reduce(

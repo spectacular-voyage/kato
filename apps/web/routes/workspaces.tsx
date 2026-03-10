@@ -1,6 +1,11 @@
 import { registerWorkspace, unregisterWorkspace } from "@kato/runtime";
 import { Head } from "fresh/runtime";
 import AppHeader from "../src/app_header.tsx";
+import {
+  type ActivityState,
+  activityStateDot,
+  activityStateLabel,
+} from "../src/loaders/activity_state.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadWorkspacesPageData } from "../src/loaders/workspaces.ts";
 import { createWebLoggers } from "../src/logging.ts";
@@ -14,6 +19,19 @@ function decodeMessage(value: string | null): string | undefined {
     return decodeURIComponent(value);
   } catch {
     return value;
+  }
+}
+
+function recordingState(
+  state: "engaged-active" | "engaged-stale" | "stopped",
+): ActivityState {
+  switch (state) {
+    case "engaged-active":
+      return "active";
+    case "engaged-stale":
+      return "stale";
+    case "stopped":
+      return "inactive";
   }
 }
 
@@ -196,9 +214,9 @@ export default define.page(async function WorkspacesPage(ctx) {
                           <div class="muted">{row.workspaceRoot}</div>
                           <div class="muted">{row.configPath}</div>
                           <div class="workspace-recording-summary mono">
-                            {row.activeRecordingCount} active recording(s) ·
-                            {" "}
-                            {row.stoppedRecordingCount} stopped recording(s)
+                            {row.activeRecordingCount} active ·{" "}
+                            {row.staleRecordingCount} stale ·{" "}
+                            {row.stoppedRecordingCount} inactive
                           </div>
                           <div class="muted">
                             {row.latestRecordingAt
@@ -212,30 +230,44 @@ export default define.page(async function WorkspacesPage(ctx) {
                           {row.recordings.length > 0
                             ? (
                               <ul class="recording-list workspace-recordings">
-                                {row.recordings.map((recording) => (
-                                  <li key={recording.key} class="recording-row">
-                                    <div class="recording-row-top">
-                                      <div class="mono">
-                                        {recording.status === "active"
-                                          ? "recording active"
-                                          : "recording stopped"}
+                                {row.recordings.map((recording) => {
+                                  const uiState = recordingState(
+                                    recording.state,
+                                  );
+                                  return (
+                                    <li
+                                      key={recording.key}
+                                      class="recording-row"
+                                    >
+                                      <div class="recording-row-top">
+                                        <div class="mono recording-state-line">
+                                          <span
+                                            class={`activity-state-dot ${uiState}`}
+                                            aria-hidden="true"
+                                          >
+                                            {activityStateDot(uiState)}
+                                          </span>
+                                          <span>
+                                            {activityStateLabel(uiState)}
+                                          </span>
+                                        </div>
+                                        <a
+                                          class="mono workspace-session-link"
+                                          href={recording.sessionLink}
+                                        >
+                                          {recording.provider}:{" "}
+                                          {recording.sessionShortId}
+                                        </a>
                                       </div>
-                                      <a
-                                        class="mono workspace-session-link"
-                                        href={recording.sessionLink}
-                                      >
-                                        {recording.provider}:{" "}
-                                        {recording.sessionShortId}
-                                      </a>
-                                    </div>
-                                    <div>
-                                      {recording.snippet ?? "(no snippet)"}
-                                    </div>
-                                    <div class="mono recording-path">
-                                      {recording.outputPath}
-                                    </div>
-                                  </li>
-                                ))}
+                                      <div>
+                                        {recording.snippet ?? "(no snippet)"}
+                                      </div>
+                                      <div class="mono recording-path">
+                                        {recording.outputPath}
+                                      </div>
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             )
                             : null}

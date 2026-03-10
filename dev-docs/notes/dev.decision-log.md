@@ -17,6 +17,30 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Workspace Default Output Containment
+
+- Decision:
+  - Keep workspace-generated output as the current split model:
+    `defaultOutputDir` + `filenameTemplate`.
+  - Template tokens remain supported in `defaultOutputDir`.
+  - Generated defaults derived from `defaultOutputDir` must resolve within the
+    workspace root after template expansion.
+  - Explicit path arguments may still target locations outside the workspace
+    root, subject to write-path policy.
+- Owner: Kato engineering
+- Date: 2026-03-10
+- Why:
+  - Keeps the existing command model and bare-filename behavior intact.
+  - Preserves templated subfolder support where it already exists.
+  - Makes workspace-generated defaults fail closed instead of relying on broader
+    allowed-write-root policy to catch escaped default paths later.
+- Tradeoffs:
+  - A workspace config with an escaping `defaultOutputDir` becomes unusable for
+    generated defaults until corrected.
+- Follow-up tasks:
+  - Keep README and workspace-path tests aligned with the containment rule.
+  - Revisit only if Kato later grows a true multi-profile output model.
+
 ### Alias-Scoped Workspace Outputs
 
 - Decision:

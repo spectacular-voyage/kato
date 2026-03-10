@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { resolve } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import {
@@ -128,7 +128,7 @@ Deno.test(
 );
 
 Deno.test(
-  "resolveWorkspaceDefaultOutputDir applies template tokens for relative and absolute paths",
+  "resolveWorkspaceDefaultOutputDir applies template tokens for relative and absolute paths within the workspace root",
   () => {
     const relativeProfile = makeProfile({
       defaultOutputDirTemplate: "notes/{provider}/{YYYY}/{snippetSlug}",
@@ -154,7 +154,6 @@ Deno.test(
     const absoluteProfile = makeProfile({
       defaultOutputDirTemplate: resolve(
         relativeProfile.workspaceRoot,
-        "..",
         "exports",
         "{provider}",
         "{username}",
@@ -171,11 +170,52 @@ Deno.test(
       }),
       resolve(
         relativeProfile.workspaceRoot,
-        "..",
         "exports",
         "codex",
         "jane-user",
       ),
+    );
+  },
+);
+
+Deno.test(
+  "resolveWorkspaceDefaultOutputDir rejects relative and absolute defaults outside the workspace root",
+  () => {
+    assertThrows(
+      () =>
+        resolveWorkspaceDefaultOutputDir({
+          profile: makeProfile({
+            defaultOutputDirTemplate: "../exports/{provider}",
+          }),
+          provider: "codex",
+          sessionId: "session-dir-relative-escape",
+          now: new Date("2026-07-15T20:00:00.000Z"),
+          outputUsername: "Jane User",
+          boundarySnapshot: makeBoundarySnapshot("\n\n  Leading Snippet"),
+        }),
+      Error,
+      "defaultOutputDir must resolve within the workspace root",
+    );
+
+    assertThrows(
+      () =>
+        resolveWorkspaceDefaultOutputDir({
+          profile: makeProfile({
+            defaultOutputDirTemplate: resolve(
+              makeProfile().workspaceRoot,
+              "..",
+              "exports",
+              "{provider}",
+            ),
+          }),
+          provider: "codex",
+          sessionId: "session-dir-absolute-escape",
+          now: new Date("2026-07-15T20:00:00.000Z"),
+          outputUsername: "Jane User",
+          boundarySnapshot: makeBoundarySnapshot("\n\n  Leading Snippet"),
+        }),
+      Error,
+      "defaultOutputDir must resolve within the workspace root",
     );
   },
 );

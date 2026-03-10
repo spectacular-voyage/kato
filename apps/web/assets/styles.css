@@ -195,10 +195,43 @@ a {
   letter-spacing: -0.05em;
 }
 
+.metric-primary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.metric-primary-count {
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  letter-spacing: -0.05em;
+}
+
+.metric-primary-label {
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+
 .metric-note {
   display: block;
   margin-top: 10px;
   font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.activity-active {
+  color: var(--ok);
+}
+
+.activity-stale {
+  color: #b1261e;
+}
+
+.activity-inactive {
+  color: var(--ink);
+}
+
+.activity-neutral {
   color: var(--muted);
 }
 
@@ -427,17 +460,33 @@ a {
   gap: 8px;
 }
 
-.recording-state-dot {
+.activity-state-dot {
   font-size: 0.9rem;
   line-height: 1;
 }
 
-.recording-state-dot.active {
+.activity-state-dot.active {
+  color: var(--ok);
+}
+
+.activity-state-dot.stale {
   color: #b1261e;
 }
 
-.recording-state-dot.stopped {
-  color: var(--muted);
+.activity-state-dot.inactive {
+  color: var(--ink);
+}
+
+.activity-state-text.active {
+  color: var(--ok);
+}
+
+.activity-state-text.stale {
+  color: #b1261e;
+}
+
+.activity-state-text.inactive {
+  color: var(--ink);
 }
 
 .recording-path {

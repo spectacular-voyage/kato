@@ -3536,3 +3536,255 @@ Is there a better word than "on"? Maybe "engaged"?
 Let's add the dots + text to the workspaces page's recording lists too. 
 
 Also, I think the "registered workspaces" list doesn't need separate items for
+
+# gpt-5.4_2026-03-10_0847_31
+
+I’m updating the task note checkboxes and then I’m fixing the recording-state model so Summary, Sessions, and Workspaces all use the same distinction between current-session freshness and recording engagement. I’ll inspect the current loaders/UI first so I can change the counts and labels in one pass instead of patching each page independently.
+
+# gpt-5.4_2026-03-10_0847_57
+
+I’ve isolated the mismatch: Summary is using session staleness to define “active recordings”, while Sessions/Workspaces are currently treating any open recording cycle as active even if the session is stale. I’m going to give recordings an explicit state model and then apply it consistently across Summary, Sessions, and Workspaces, along with the UI tweaks you asked for.
+
+# gpt-5.4_2026-03-10_0848_49
+
+I’ve got the exact mismatch now. I’m changing the recording row state from binary `active/stopped` to a three-way model: `engaged, active`, `engaged, stale`, and `stopped`. Then I’ll use the same labels/dots on the Workspaces page and update the task-note checkboxes that are actually complete.
+
+# gpt-5.4_2026-03-10_0849_28
+
+I’m making the loader change now, not just relabeling the UI. That way the same recording-state model drives Sessions, Workspaces, and any future counts instead of relying on page-specific heuristics.
+
+# gpt-5.4_2026-03-10_0850_30
+
+I’m applying the same recording-state vocabulary to Workspaces now so the labels and dots mean the same thing everywhere. I’m also updating the workspace rollup counts so stale-but-still-engaged recordings aren’t hidden behind the old active/stopped binary.
+
+# gpt-5.4_2026-03-10_0851_00
+
+I’ve changed the loader model; now I’m updating the focused tests so we lock in the exact semantics: one recording can be “engaged, stale” rather than being misclassified as active or stopped. Then I’ll update the task note checkboxes that are actually complete.
+
+# gpt-5.4_2026-03-10_0851_38
+
+The state-model change and checkbox updates are patched. I’m formatting and running the focused activity tests plus the web check now so we can confirm the Summary/Sessions/Workspaces semantics are consistent after the rename.
+
+# gpt-5.4_2026-03-10_0851_46
+
+One workspace-loader assertion is off after the state split. I’m checking the exact expectation and the produced row shape, then I’ll patch the test or loader so the count semantics stay coherent.
+
+# gpt-5.4_2026-03-10_0852_30
+
+The failing test is just my fixture semantics, not the loader itself. I’m updating that expectation to reflect the current “engaged + active session” case and then rerunning the focused suite.
+
+# gpt-5.4_2026-03-10_0852_45
+
+The focused activity tests and the web app check are green. I’m doing one quick grep for any leftover `recording active/stopped` wording in Sessions/Workspaces so the new terminology is consistent before I close this out.
+
+# gpt-5.4_2026-03-10_0853_06
+
+Updated the task note checkboxes in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md): the shared mutation-service item, expanded loader-modules item, and local-only mutation-protection item are now checked.
+
+I also changed the recording-state model in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts) so recordings are no longer just `active/stopped`. They now distinguish:
+- `engaged, active`
+- `engaged, stale`
+- `stopped`
+
+That state now drives both [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx) and [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), with matching dot treatment in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css):
+- green solid dot for `engaged, active`
+- red solid dot for `engaged, stale`
+- hollow dot for `stopped`
+
+I also added the same dot + text treatment to the Workspaces recording lists and updated the workspace rollup counts so stale-but-engaged recordings are not hidden behind the old binary. Focused coverage was updated in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+
+One note: I left the Summary metric wording itself alone, so it still reflects fresh recording activity while Sessions/Workspaces now make the stale-engaged distinction explicit. If you want, the next small cleanup is to rename that Summary card copy so it’s less ambiguous. Also, your last sentence about the Registered Workspaces list cut off after “doesn't need separate items for”, so I left that overall structure unchanged aside from the recording-state updates.
+
+# gpt-5.4_2026-03-10_0853_07
+
+Updated the task note checkboxes in [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md): the shared mutation-service item, expanded loader-modules item, and local-only mutation-protection item are now checked.
+
+I also changed the recording-state model in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts) so recordings are no longer just `active/stopped`. They now distinguish:
+- `engaged, active`
+- `engaged, stale`
+- `stopped`
+
+That state now drives both [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx) and [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), with matching dot treatment in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css):
+- green solid dot for `engaged, active`
+- red solid dot for `engaged, stale`
+- hollow dot for `stopped`
+
+I also added the same dot + text treatment to the Workspaces recording lists and updated the workspace rollup counts so stale-but-engaged recordings are not hidden behind the old binary. Focused coverage was updated in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`
+- `deno task --cwd apps/web check`
+
+One note: I left the Summary metric wording itself alone, so it still reflects fresh recording activity while Sessions/Workspaces now make the stale-engaged distinction explicit. If you want, the next small cleanup is to rename that Summary card copy so it’s less ambiguous. Also, your last sentence about the Registered Workspaces list cut off after “doesn't need separate items for”, so I left that overall structure unchanged aside from the recording-state updates.
+
+# User_2026-03-10_1146_17
+
+Yes, let's update Summary card text. I think it should have "n  stale" and on a new line "n stopped"
+
+# gpt-5.4_2026-03-10_1146_54
+
+I’m changing the Summary recording metric to use the same three-way recording state model as Sessions and Workspaces, so the card text reflects real `active / stale / stopped` counts instead of the old mixed “inactive” bucket. After that I’ll update the Summary card copy and verify the loader tests.
+
+# gpt-5.4_2026-03-10_1153_17
+
+Updating the Summary recordings metric to match the new recording-state model. I’m checking the current loader and component wiring, then I’ll patch the card text and the underlying counts together so the UI isn’t just cosmetic.
+
+# gpt-5.4_2026-03-10_1153_24
+
+I’ve confirmed the Summary loader is still using the old binary recording summary, while Sessions/Workspaces are on the new `engaged-active / engaged-stale / stopped` model. I’m patching the Summary loader to derive the same counts from session activity rows, then I’ll switch the card text and update the regression test.
+
+# gpt-5.4_2026-03-10_1153_27
+
+I found one more place to watch: `apps/web/src/main.ts` still carries its own simple status view-model with active recording count only, but Summary doesn’t need to reuse that for the new card counts. I’m keeping the change local to the Summary loader and tests so we don’t churn unrelated rendering code.
+
+# gpt-5.4_2026-03-10_1154_16
+
+I’m making the Summary loader tolerant of both cases: when persistent session metadata exists it’ll use the richer engaged/stale/stopped counts, and when it doesn’t it’ll still fall back to the live snapshot instead of dropping counts to zero. That keeps the card stable in lightweight setups while matching Sessions/Workspaces in normal runtime.
+
+# gpt-5.4_2026-03-10_1154_28
+
+The loader patch is in. I’m switching the card text now so the Recordings tile shows the active count up top and then the two separate lines you asked for: stale and stopped.
+
+# gpt-5.4_2026-03-10_1154_59
+
+The code changes are in. I’m formatting and running the focused Summary tests first, then the web/type check, so we catch any mismatch in the new fields before touching broader repo checks.
+
+# gpt-5.4_2026-03-10_1155_08
+
+The type error is just from the snapshot schema making `session.recordings` optional. I’m tightening the fallback path so it treats missing recording arrays as empty and then I’ll rerun the checks serially to avoid the formatter race I just hit.
+
+# gpt-5.4_2026-03-10_1155_23
+
+The Summary loader is behaving as intended, but one test fixture still had two stale live recordings in the snapshot while the new persisted metadata model only defined one engaged-stale plus one stopped cycle. I’m aligning that fixture now so the expected stale/stopped counts match the actual state model.
+
+# gpt-5.4_2026-03-10_1155_45
+
+The Summary/tests are clean. The web app check has moved past formatting and is into lint/typecheck; I’m waiting on the full repo check so I can close this out with one verified result instead of a partial.
+
+# gpt-5.4_2026-03-10_1155_53
+
+Updated the Summary recordings tile in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) so it now shows the active count as the large number, then `n stale` and `n stopped` on separate lines. The underlying loader in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts) now derives recording counts from the same session-activity model used by Sessions/Workspaces, with a snapshot fallback when persistent session metadata is missing.
+
+I also updated [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts) to cover the new stale/stopped split. Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-activity-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# User_2026-03-10_1155_54
+
+Similarly, Session should differentiate between sessions that are generating snapshots (active, i.e. globalAutoGenerateSnapshots true or providerAutoGenerateSnapshots true, or snapshots are being generated because of recording activity), sessions that would be generating snapshots/twins if there were any activity (stale), and sessions that are inactive. 
+
+One question: if snapshots are being generated (in memory), don't we always also generate twins?
+
+# gpt-5.4_2026-03-10_1156_06
+
+I’m checking the daemon/runtime rules for snapshot generation versus twin generation first, because the Session metric wording should match the actual behavior rather than a guessed model. Then I’ll map that back to how Summary should present session states.
+
+# gpt-5.4_2026-03-10_1156_16
+
+I found the policy inputs. Now I’m reading the actual ingestion/runtime code paths where snapshot capture and twin writing happen, because that’s what determines whether “snapshot-active” really implies “twin-active”.
+
+# gpt-5.4_2026-03-10_1156_26
+
+I have the answer to the twin question now from the ingestion path. I’m pulling the remaining snapshot-hydration branch to be precise about the one caveat: twins are always appended when session state is enabled, but in-memory snapshot hydration is conditional.
+
+# gpt-5.4_2026-03-10_1156_45
+
+I’m checking whether the web loader can read the daemon runtime config cleanly. If it can, I can make the Session metric reflect the real “would generate snapshots” policy instead of guessing from the live snapshot alone.
+
+# gpt-5.4_2026-03-10_1157_36
+
+I’ve got the twin answer: in current ingestion, twin history is appended unconditionally when session state is enabled, and snapshot hydration sits on top of that. I’m updating the Summary Sessions metric now to use the same three-way state model: engaged active, engaged stale, and inactive.
+
+# gpt-5.4_2026-03-10_1159_31
+
+I’m keeping the existing raw session counts for Sessions page filters, and adding separate Summary-only counts for “snapshot-generating active / stale / inactive”. That way the Summary tile gets the richer semantics without breaking the Sessions page’s simpler live/stale totals.
+
+# gpt-5.4_2026-03-10_1159_58
+
+I’ve wired the new Session state counts into Summary. I’m updating the loader tests to lock in those semantics, and I may add one inactive-session regression if the existing fixtures don’t cover it cleanly.
+
+# gpt-5.4_2026-03-10_1200_30
+
+The Session metric change is patched. I added an inactive-session regression too, because the existing fixtures only exercised generating and stale-generating cases. I’m running the focused tests/checks again now.
+
+# gpt-5.4_2026-03-10_1200_34
+
+Web check is clean. The test run is still in flight; I’m waiting for the full Summary/activity test set so I can also confirm the new inactive-session case.
+
+# gpt-5.4_2026-03-10_1200_36
+
+The focused tests passed. I’m running the full repo check once, since this touched a shared test fixture pattern and a loader interface used by the live app.
+
+# gpt-5.4_2026-03-10_1200_53
+
+The Summary Sessions tile now uses the three-way state you described in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts) and [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx): the big number is sessions currently generating snapshots, with `n stale` and `n inactive` on separate lines underneath. I kept the existing raw live/stale session counts for the dedicated Sessions page, and added separate Summary-only counts so the two views don’t step on each other.
+
+On your question: yes, in the current implementation twin history is appended unconditionally when session state is enabled, so if snapshots are being generated then twins are also being generated. The broader caveat is that twin appends are actually less restrictive than snapshot-generation state, because ingestion sets `shouldAppendTwin = true` in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts). So the new Summary Sessions metric is really a snapshot-generation view, not a twin-generation view.
+
+I added regression coverage in [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts), including an inactive-session case. Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-activity-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# gpt-5.4_2026-03-10_1200_55
+
+The Summary Sessions tile now uses the three-way state you described in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts) and [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx): the big number is sessions currently generating snapshots, with `n stale` and `n inactive` on separate lines underneath. I kept the existing raw live/stale session counts for the dedicated Sessions page, and added separate Summary-only counts so the two views don’t step on each other.
+
+On your question: yes, in the current implementation twin history is appended unconditionally when session state is enabled, so if snapshots are being generated then twins are also being generated. The broader caveat is that twin appends are actually less restrictive than snapshot-generation state, because ingestion sets `shouldAppendTwin = true` in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts). So the new Summary Sessions metric is really a snapshot-generation view, not a twin-generation view.
+
+I added regression coverage in [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts), including an inactive-session case. Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-summary-loader_test.ts tests/web-activity-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# User_2026-03-10_1401_31
+
+The tiles should probably say "1 active" (in green and with the word "active" with the smaller font, but the count can stay in the big font). Or should just the count have a color and the count descriptor stay black?
+
+What defines "Workspace" activity? Maybe whether there is a current recording going on there? So workspaces could also be considered stale? And then we could also display "invalid" in the workspace summary tile?
+
+We should update the dots on the session page to follow the same conventions. black outline/hollow means inactive, red dot means stale (effectively paused, will resume on new data), and green dot means active.
+
+# gpt-5.4_2026-03-10_1402_01
+
+I’m updating the Summary and Sessions visuals together so the state language is consistent instead of drifting tile-by-tile. First I’m checking the current workspace activity data path and the session-page dot styling, then I’ll patch the shared conventions in one pass.
+
+# gpt-5.4_2026-03-10_1402_54
+
+I’m factoring the session-state rules out of the Summary loader so the Summary tile, Sessions page, and Workspaces recording lists can all use the same active/stale/inactive conventions instead of three slightly different copies.
+
+# gpt-5.4_2026-03-10_1403_34
+
+I’m standardizing the visible state names too. `engaged-active / engaged-stale / stopped` was useful internally, but the operator UI should just say `active / stale / inactive` if the dots mean those three states everywhere.
+
+# gpt-5.4_2026-03-10_1404_25
+
+The refactor patch drifted because `status.ts` has already been reformatted once. I’m patching that file in smaller hunks now so I don’t clobber the working loader.
+
+# gpt-5.4_2026-03-10_1405_14
+
+I’m on the visual pass now: the counts are there, and I’m changing the tiles to render as “`N active`” with the small state label, plus the new workspace stale/inactive/invalid breakdown underneath.
+
+# gpt-5.4_2026-03-10_1406_30
+
+The state model and UI text are patched across Summary, Sessions, and Workspaces. I’m formatting and running the focused web checks now; the most likely failures are just type drift from the new helper module and the Sessions route state fields.
+
+# gpt-5.4_2026-03-10_1406_38
+
+The only failure was a formatter race, not a code problem. I’m adding one small loader assertion for the new session state field and then rerunning the checks serially so the formatter and typecheck stop stepping on each other.
+
+# gpt-5.4_2026-03-10_1406_53
+
+Formatting is clean and the focused tests have started. I’m letting the serial run finish all the way through the web check and full repo check so we don’t close this out on only a partial validation.
+
+# gpt-5.4_2026-03-10_1407_02
+
+I updated the Summary tiles and unified the state conventions. In [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) the primary metric now renders as `N active` with the count large and the state label smaller; I colored both count and label together because it scans more cleanly than a colored count with a neutral descriptor. Sessions and Recordings now show `stale` and `inactive` underneath, and Workspaces now treats activity as “has active recording”, `stale` as “only stale recordings”, `inactive` as “no current recordings”, with `invalid` shown separately. The workspace-state rollup is computed in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts).
+
+I also standardized the session-page and workspace-page dots to the same model: green `●` for active, red `●` for stale, black hollow `○` for inactive. That’s wired through [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx), [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+# gpt-5.4_2026-03-10_1407_05
+
+I updated the Summary tiles and unified the state conventions. In [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) the primary metric now renders as `N active` with the count large and the state label smaller; I colored both count and label together because it scans more cleanly than a colored count with a neutral descriptor. Sessions and Recordings now show `stale` and `inactive` underneath, and Workspaces now treats activity as “has active recording”, `stale` as “only stale recordings”, `inactive` as “no current recordings”, with `invalid` shown separately. The workspace-state rollup is computed in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts).
+
+I also standardized the session-page and workspace-page dots to the same model: green `●` for active, red `●` for stale, black hollow `○` for inactive. That’s wired through [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx), [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx), and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.

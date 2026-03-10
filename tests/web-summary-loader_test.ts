@@ -1,5 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
+import {
+  createDefaultRuntimeConfig,
+  createDefaultWorkspaceWriterFeatureFlags,
+  PersistentSessionStateStore,
+  RuntimeConfigFileStore,
+} from "../apps/runtime/src/mod.ts";
 import { loadSummaryPageData } from "../apps/web/src/loaders/status.ts";
 import { withTestTempDir } from "./test_temp.ts";
 import {
@@ -8,6 +14,74 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
+
+async function createSessionFixture(options: {
+  katoDir: string;
+  sessionId: string;
+  providerSessionId: string;
+  snippet: string;
+  updatedAt: string;
+  sourceFilePath: string;
+  workspaceOutputs?: Array<{
+    workspaceId: string;
+    workspaceAliasSnapshot: string;
+    desiredState: "on" | "off";
+    currentResolvedPath: string;
+    activeRecordingCycleId?: string;
+    recordingCycles: Array<{
+      recordingCycleId: string;
+      startedCursor: number;
+      stoppedCursor?: number;
+      startedAt?: string;
+      stoppedAt?: string;
+      startedBySeq?: number;
+      stoppedBySeq?: number;
+    }>;
+  }>;
+}) {
+  const store = new PersistentSessionStateStore({
+    katoDir: options.katoDir,
+    now: () => new Date("2026-03-07T16:00:00.000Z"),
+    makeSessionId: () => options.sessionId,
+  });
+  const metadata = await store.getOrCreateSessionMetadata({
+    provider: "codex",
+    providerSessionId: options.providerSessionId,
+    sourceFilePath: options.sourceFilePath,
+    initialCursor: { kind: "byte-offset", value: 0 },
+  });
+  metadata.snippet = options.snippet;
+  metadata.updatedAt = options.updatedAt;
+  metadata.workspaceOutputs = options.workspaceOutputs?.map((output) => ({
+    workspaceId: output.workspaceId,
+    workspaceAliasSnapshot: output.workspaceAliasSnapshot,
+    desiredState: output.desiredState,
+    currentDestination: {
+      kind: "workspace-relative" as const,
+      relativePathFromWorkspaceRoot: "notes/output.md",
+    },
+    currentResolvedPath: output.currentResolvedPath,
+    sourceConfigPath: join(
+      options.katoDir,
+      `${output.workspaceId}-workspace-config.yaml`,
+    ),
+    workspaceRootSnapshot: join(options.katoDir, output.workspaceId),
+    resolvedDefaultOutputDir: join(
+      options.katoDir,
+      output.workspaceId,
+      "notes",
+    ),
+    filenameTemplate: "{provider}.md",
+    writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(),
+    ...(output.activeRecordingCycleId
+      ? { activeRecordingCycleId: output.activeRecordingCycleId }
+      : {}),
+    writeCursor: 1,
+    createdAt: "2026-03-07T15:00:00.000Z",
+    recordingCycles: output.recordingCycles.map((cycle) => ({ ...cycle })),
+  }));
+  await store.saveSessionMetadata(metadata);
+}
 
 Deno.test("loadSummaryPageData reads the default shared status snapshot", async () => {
   await withLockedEnvironment(async () => {
@@ -67,8 +141,12 @@ Deno.test("loadSummaryPageData reads the default shared status snapshot", async 
         assertEquals(data.daemon, "running");
         assertEquals(data.daemonPid, 4242);
         assertEquals(data.sessionCount, 1);
+        assertEquals(data.generatingSessionCount, 1);
+        assertEquals(data.staleGeneratingSessionCount, 0);
+        assertEquals(data.inactiveSessionCount, 0);
         assertEquals(data.recordingCount, 2);
-        assertEquals(data.inactiveRecordingCount, 0);
+        assertEquals(data.staleRecordingCount, 0);
+        assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.providers.length, 1);
         assertEquals(data.sessions[0]?.sessionId, "sess-001");
         assertEquals(data.stale, false);
@@ -92,8 +170,38 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
           KATO_RUNTIME_DIR: undefined,
         });
 
-        const statusPath = join(homeDir, ".kato", "shared", "status.json");
-        await Deno.mkdir(join(homeDir, ".kato", "shared"), { recursive: true });
+        const katoDir = join(homeDir, ".kato");
+        const statusPath = join(katoDir, "shared", "status.json");
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-stale",
+          providerSessionId: "provider-stale",
+          snippet: "stale session",
+          updatedAt: "2026-03-07T15:00:00.000Z",
+          sourceFilePath: "/tmp/provider-stale.jsonl",
+          workspaceOutputs: [{
+            workspaceId: "ws-stale",
+            workspaceAliasSnapshot: "stale",
+            desiredState: "on",
+            currentResolvedPath: "/tmp/stale-a.md",
+            activeRecordingCycleId: "cycle-stale",
+            recordingCycles: [{
+              recordingCycleId: "cycle-old",
+              startedCursor: 1,
+              stoppedCursor: 2,
+              startedAt: "2026-03-07T14:00:00.000Z",
+              stoppedAt: "2026-03-07T14:30:00.000Z",
+              startedBySeq: 1,
+              stoppedBySeq: 2,
+            }, {
+              recordingCycleId: "cycle-stale",
+              startedCursor: 3,
+              startedAt: "2026-03-07T14:45:00.000Z",
+              startedBySeq: 3,
+            }],
+          }],
+        });
         await Deno.writeTextFile(
           statusPath,
           JSON.stringify({
@@ -144,8 +252,12 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
         assertEquals(data.sessionCount, 2);
         assertEquals(data.activeSessionCount, 1);
         assertEquals(data.staleSessionCount, 1);
+        assertEquals(data.generatingSessionCount, 1);
+        assertEquals(data.staleGeneratingSessionCount, 1);
+        assertEquals(data.inactiveSessionCount, 0);
         assertEquals(data.recordingCount, 0);
-        assertEquals(data.inactiveRecordingCount, 3);
+        assertEquals(data.staleRecordingCount, 2);
+        assertEquals(data.stoppedRecordingCount, 1);
         assertEquals(data.sessions.length, 1);
         assertEquals(data.sessions[0]?.sessionId, "sess-active");
       });
@@ -224,6 +336,82 @@ Deno.test("loadSummaryPageData merges daemon and web recent errors", async () =>
         );
         assertEquals(data.recentErrors[1]?.scope, "daemon");
         assertEquals(data.recentErrors[1]?.event, "daemon.test.warn");
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("loadSummaryPageData counts non-generating sessions as inactive", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-summary-loader-inactive-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const runtimeDir = join(katoDir, "daemon");
+        const statusPath = join(katoDir, "shared", "status.json");
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        await Deno.mkdir(runtimeDir, { recursive: true });
+
+        const configStore = new RuntimeConfigFileStore(
+          join(runtimeDir, "kato-daemon-config.yaml"),
+        );
+        await configStore.ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir,
+            katoDir,
+            globalAutoGenerateSnapshots: false,
+            providerAutoGenerateSnapshots: {
+              claude: false,
+              codex: false,
+              gemini: false,
+            },
+          }),
+        );
+
+        await Deno.writeTextFile(
+          statusPath,
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-07T16:00:00.000Z",
+            heartbeatAt: "2026-03-07T16:00:00.000Z",
+            daemonRunning: true,
+            providers: [{
+              provider: "codex",
+              activeSessions: 1,
+              lastEventAt: "2026-03-07T15:59:00.000Z",
+            }],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [{
+              provider: "codex",
+              sessionId: "sess-inactive",
+              updatedAt: "2026-03-07T15:59:00.000Z",
+              lastEventAt: "2026-03-07T15:59:00.000Z",
+              stale: false,
+              snippet: "inactive session",
+              recordings: [],
+            }],
+          }),
+        );
+
+        const data = await loadSummaryPageData({
+          now: () => new Date("2026-03-07T16:00:02.000Z"),
+        });
+
+        assertEquals(data.generatingSessionCount, 0);
+        assertEquals(data.staleGeneratingSessionCount, 0);
+        assertEquals(data.inactiveSessionCount, 1);
       });
     } finally {
       restoreRuntimeEnv(env);

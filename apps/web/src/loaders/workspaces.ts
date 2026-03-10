@@ -14,7 +14,7 @@ import { loadSessionActivityRows } from "./sessions.ts";
 
 export interface WorkspaceRecordingEntry {
   key: string;
-  status: "active" | "stopped";
+  state: "engaged-active" | "engaged-stale" | "stopped";
   provider: string;
   sessionId: string;
   sessionShortId: string;
@@ -29,6 +29,7 @@ export interface WorkspaceRecordingEntry {
 export interface WorkspaceManagementRow extends WorkspaceSummaryRow {
   writePathCovered?: boolean;
   activeRecordingCount: number;
+  staleRecordingCount: number;
   stoppedRecordingCount: number;
   latestRecordingAt?: string;
   recordings: WorkspaceRecordingEntry[];
@@ -78,7 +79,7 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
       }
       const row: WorkspaceRecordingEntry = {
         key: `${recording.key}:${session.sessionId}`,
-        status: recording.status,
+        state: recording.state,
         provider: session.provider,
         sessionId: session.sessionId,
         sessionShortId: session.sessionShortId,
@@ -104,8 +105,12 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
     return rows.map((row) => {
       const recordings = [...(recordingsByWorkspace.get(row.workspaceId) ?? [])]
         .sort((a, b) => {
-          const statusDiff = Number(b.status === "active") -
-            Number(a.status === "active");
+          const order = {
+            "engaged-active": 0,
+            "engaged-stale": 1,
+            "stopped": 2,
+          } as const;
+          const statusDiff = order[a.state] - order[b.state];
           if (statusDiff !== 0) {
             return statusDiff;
           }
@@ -121,10 +126,13 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
           ? isPathWithinRoots(row.workspaceRoot, allowedWriteRoots)
           : undefined,
         activeRecordingCount: recordings.filter((recording) =>
-          recording.status === "active"
+          recording.state === "engaged-active"
+        ).length,
+        staleRecordingCount: recordings.filter((recording) =>
+          recording.state === "engaged-stale"
         ).length,
         stoppedRecordingCount: recordings.filter((recording) =>
-          recording.status === "stopped"
+          recording.state === "stopped"
         ).length,
         latestRecordingAt,
         recordings,

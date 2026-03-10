@@ -160,7 +160,8 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
               workspaceRoot: betaRoot,
               configPath: betaConfigPath,
               resolvedPath: betaOutputPath,
-              desiredState: "off",
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-stale",
               recordingCycles: [{
                 recordingCycleId: "cycle-old",
                 startedCursor: 1,
@@ -169,6 +170,11 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
                 stoppedAt: "2026-03-07T13:30:00.000Z",
                 startedBySeq: 1,
                 stoppedBySeq: 3,
+              }, {
+                recordingCycleId: "cycle-stale",
+                startedCursor: 4,
+                startedAt: "2026-03-07T13:45:00.000Z",
+                startedBySeq: 4,
               }],
             }),
           ],
@@ -213,16 +219,21 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(data.sessionCount, 2);
         assertEquals(data.activeSessionCount, 1);
         assertEquals(data.staleSessionCount, 1);
+        assertEquals(data.inactiveSessionCount, 0);
         assertEquals(data.activeRecordingCount, 1);
         assertEquals(data.stoppedRecordingCount, 1);
+        assertEquals(data.staleRecordingCount, 1);
         assertEquals(data.rows[0]?.sessionId, "sess-live");
-        assertEquals(data.rows[0]?.recordings[0]?.status, "active");
+        assertEquals(data.rows[0]?.state, "active");
+        assertEquals(data.rows[0]?.recordings[0]?.state, "engaged-active");
         assertEquals(
           data.rows[0]?.recordings[0]?.lastWriteAt,
           "2026-03-07T15:59:30.000Z",
         );
         assertEquals(data.rows[1]?.sessionId, "sess-stale");
-        assertEquals(data.rows[1]?.recordings[0]?.status, "stopped");
+        assertEquals(data.rows[1]?.state, "stale");
+        assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-stale");
+        assertEquals(data.rows[1]?.recordings[1]?.state, "stopped");
 
         const filtered = await loadSessionsPageData({
           workspaceFilter: "ws-beta",
@@ -326,7 +337,8 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
               workspaceRoot: betaRoot,
               configPath: betaConfigPath,
               resolvedPath: betaOutputPath,
-              desiredState: "off",
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-stale",
               recordingCycles: [{
                 recordingCycleId: "cycle-stopped",
                 startedCursor: 1,
@@ -335,6 +347,11 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
                 stoppedAt: "2026-03-07T14:30:00.000Z",
                 startedBySeq: 1,
                 stoppedBySeq: 2,
+              }, {
+                recordingCycleId: "cycle-stale",
+                startedCursor: 3,
+                startedAt: "2026-03-07T14:45:00.000Z",
+                startedBySeq: 3,
               }],
             }),
           ],
@@ -383,12 +400,16 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         assertExists(alphaRow);
         assertExists(betaRow);
         assertEquals(alphaRow.activeRecordingCount, 1);
+        assertEquals(alphaRow.staleRecordingCount, 0);
         assertEquals(alphaRow.stoppedRecordingCount, 0);
         assertEquals(alphaRow.writePathCovered, true);
-        assertEquals(betaRow.activeRecordingCount, 0);
+        assertEquals(betaRow.activeRecordingCount, 1);
+        assertEquals(betaRow.staleRecordingCount, 0);
         assertEquals(betaRow.stoppedRecordingCount, 1);
         assertEquals(betaRow.writePathCovered, true);
         assertEquals(alphaRow.recordings[0]?.sessionId, "sess-mixed");
+        assertEquals(betaRow.recordings[0]?.state, "engaged-active");
+        assertEquals(betaRow.recordings[1]?.state, "stopped");
         assertEquals(
           alphaRow.recordings[0]?.sessionLink,
           "/sessions?workspace=ws-alpha#session-sess-mixed",

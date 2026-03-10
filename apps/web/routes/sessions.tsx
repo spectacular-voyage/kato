@@ -1,5 +1,10 @@
 import { Head } from "fresh/runtime";
 import AppHeader from "../src/app_header.tsx";
+import {
+  type ActivityState,
+  activityStateDot,
+  activityStateLabel,
+} from "../src/loaders/activity_state.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSessionsPageData } from "../src/loaders/sessions.ts";
 import { define } from "../utils.ts";
@@ -26,6 +31,19 @@ function buildSessionsHref(
     url.searchParams.set("workspace", options.workspaceFilter);
   }
   return `${url.pathname}${url.search}`;
+}
+
+function recordingState(
+  state: "engaged-active" | "engaged-stale" | "stopped",
+): ActivityState {
+  switch (state) {
+    case "engaged-active":
+      return "active";
+    case "engaged-stale":
+      return "stale";
+    case "stopped":
+      return "inactive";
+  }
 }
 
 export default define.page(async function SessionsPage(ctx) {
@@ -61,7 +79,8 @@ export default define.page(async function SessionsPage(ctx) {
                 <h2>Session Activity</h2>
                 <p class="page-toolbar-summary muted mono">
                   Active: {pageData.activeSessionCount}, Stale:{" "}
-                  {pageData.staleSessionCount}
+                  {pageData.staleSessionCount}, Inactive:{" "}
+                  {pageData.inactiveSessionCount}
                   {pageData.workspaceFilter
                     ? ` · Workspace: ${pageData.workspaceFilter}`
                     : ""}
@@ -115,7 +134,13 @@ export default define.page(async function SessionsPage(ctx) {
                     <div class="session-activity-top">
                       <div class="session-activity-copy">
                         <div class="mono session-activity-title">
-                          {row.stale ? "○" : "●"} {row.provider}:{" "}
+                          <span
+                            class={`activity-state-dot ${row.state}`}
+                            aria-hidden="true"
+                          >
+                            {activityStateDot(row.state)}
+                          </span>{" "}
+                          {row.provider}:{" "}
                           <strong class="session-activity-snippet">
                             {row.snippet ?? "(no snippet)"}
                           </strong>{" "}
@@ -123,8 +148,8 @@ export default define.page(async function SessionsPage(ctx) {
                         </div>
                       </div>
                       <div class="session-activity-meta">
-                        <div class={row.stale ? "stale mono" : "ok mono"}>
-                          {row.stale ? "stale" : "active"}
+                        <div class={`mono activity-state-text ${row.state}`}>
+                          {activityStateLabel(row.state)}
                         </div>
                       </div>
                     </div>
@@ -141,43 +166,44 @@ export default define.page(async function SessionsPage(ctx) {
                             No recordings associated with this session.
                           </li>
                         )
-                        : row.recordings.map((recording) => (
-                          <li key={recording.key} class="recording-row">
-                            <div class="recording-row-top">
-                              <div class="mono recording-state-line">
-                                <span
-                                  class={`recording-state-dot ${recording.status}`}
-                                  aria-hidden="true"
-                                >
-                                  {recording.status === "active" ? "●" : "○"}
-                                </span>
-                                <span>
-                                  {recording.status === "active"
-                                    ? "recording active"
-                                    : "recording stopped"}
-                                </span>
+                        : row.recordings.map((recording) => {
+                          const uiState = recordingState(recording.state);
+                          return (
+                            <li key={recording.key} class="recording-row">
+                              <div class="recording-row-top">
+                                <div class="mono recording-state-line">
+                                  <span
+                                    class={`activity-state-dot ${uiState}`}
+                                    aria-hidden="true"
+                                  >
+                                    {activityStateDot(uiState)}
+                                  </span>
+                                  <span>
+                                    {activityStateLabel(uiState)}
+                                  </span>
+                                </div>
+                                <div class="muted mono">
+                                  workspace: {recording.workspaceAlias ??
+                                    recording.workspaceId ??
+                                    "unresolved"}
+                                </div>
                               </div>
-                              <div class="muted mono">
-                                workspace: {recording.workspaceAlias ??
-                                  recording.workspaceId ??
-                                  "unresolved"}
+                              <div class="mono recording-path">
+                                {recording.outputPath}
                               </div>
-                            </div>
-                            <div class="mono recording-path">
-                              {recording.outputPath}
-                            </div>
-                            <div class="muted">
-                              Started {formatTimestamp(recording.startedAt)}
-                              {recording.status === "active"
-                                ? ` · Last write ${
-                                  formatTimestamp(recording.lastWriteAt)
-                                }`
-                                : ` · Stopped ${
-                                  formatTimestamp(recording.stoppedAt)
-                                }`}
-                            </div>
-                          </li>
-                        ))}
+                              <div class="muted">
+                                Started {formatTimestamp(recording.startedAt)}
+                                {uiState === "inactive"
+                                  ? ` · Stopped ${
+                                    formatTimestamp(recording.stoppedAt)
+                                  }`
+                                  : ` · Last write ${
+                                    formatTimestamp(recording.lastWriteAt)
+                                  }`}
+                              </div>
+                            </li>
+                          );
+                        })}
                     </ul>
                   </li>
                 ))}

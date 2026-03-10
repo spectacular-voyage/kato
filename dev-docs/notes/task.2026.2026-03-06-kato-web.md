@@ -2,7 +2,7 @@
 id: 7y4mlp9tplfnv8okm498osi
 title: 2026 03 06 Kato Web
 desc: ""
-updated: 1772874117389
+updated: 1773175443251
 created: 1772810034340
 ---
 
@@ -467,7 +467,7 @@ Validation workflow before merge:
       lifecycle commands.
 - [ ] Move reusable non-CLI-specific status view models into `shared/src` so CLI
       and web consume the same projection/filtering logic.
-- [ ] Extract reusable mutation services from the current CLI command handlers
+- [x] Extract reusable mutation services from the current CLI command handlers
       so CLI and web share the same business rules for: workspace
       register/update, user settings/mappings, and maintenance clean.
 - [x] Introduce a dedicated web config/store for bind settings and optional
@@ -477,7 +477,7 @@ Validation workflow before merge:
       `kato web start` must refuse startup while web config/bootstrap is absent.
 - [x] Add `apps/web` loader modules for: initial status snapshot loader for the
       Summary page.
-- [ ] Expand `apps/web` loader modules for: status snapshot, workspace
+- [x] Expand `apps/web` loader modules for: status snapshot, workspace
       registry/config validation, user config, persistent session metadata,
       recording history, and log reads.
 - [ ] Implement the Summary route first so it mirrors `kato status --live` as
@@ -497,7 +497,7 @@ Validation workflow before merge:
 - [x] Add route-backed detail pages for Sessions, Workspaces, Operational
       Details, Security, and Settings using shared loaders, with recordings
       integrated into Sessions instead of a separate recordings page.
-- [ ] Add local-only mutation protections appropriate for a localhost operator
+- [x] Add local-only mutation protections appropriate for a localhost operator
       console: POST-only handlers, origin/CSRF protection, and clear
       confirmation UX for destructive actions.
 - [x] Decide and document the local auth posture for `Kato Web`: explicit web

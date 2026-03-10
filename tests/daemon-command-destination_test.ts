@@ -126,6 +126,28 @@ Deno.test("resolveWorkspaceCommandDestination rejects mention-style arguments", 
   });
 });
 
+Deno.test("resolveWorkspaceCommandDestination rejects generated default dirs that escape the workspace root", async () => {
+  await withTestTempDir("daemon-command-destination-escape-", async (dir) => {
+    const workspaceRoot = resolve(dir, "workspace");
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    const profile = makeProfile(workspaceRoot);
+    profile.defaultOutputDirTemplate = "../exports";
+
+    await assertRejects(
+      () =>
+        resolveWorkspaceCommandDestination({
+          profile,
+          provider: "codex",
+          sessionId: "session-escape",
+          outputUsername: "user-1",
+          now: new Date("2026-03-07T10:00:00.000Z"),
+        }),
+      Error,
+      "defaultOutputDir must resolve within the workspace root",
+    );
+  });
+});
+
 Deno.test("resolveWorkspaceCommandDestination applies unique suffixes for generated directory targets", async () => {
   await withTestTempDir("daemon-command-destination-unique-", async (dir) => {
     const workspaceRoot = resolve(dir, "workspace");

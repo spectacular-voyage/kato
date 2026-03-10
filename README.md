@@ -147,6 +147,8 @@ Rules:
   alias.
 - Pathless alias-scoped commands use that workspace's configured default output
   rules.
+- Generated defaults derived from `defaultOutputDir` must resolve within the
+  workspace root; only explicit path arguments may target outside it.
 
 ## CLI Command Reference
 
@@ -418,6 +420,8 @@ Supported `filenameTemplate` tokens:
   `defaultUsername` -> `unknown-user`)
 
 defaultOutputDir supports the same template tokens as `filenameTemplate`.
+Generated defaults derived from `defaultOutputDir` must resolve within the
+workspace root after template expansion.
 
 ## Timezone
 
