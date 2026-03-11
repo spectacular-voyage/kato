@@ -19,7 +19,7 @@ import {
   loadRuntimeConfigOrDefault,
   providerAutoGeneratesTwins,
 } from "./activity_state.ts";
-import { buildIngestionSessionHref } from "../session_routes.ts";
+import { buildSessionInventorySessionHref } from "../session_routes.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
@@ -541,7 +541,7 @@ export function flattenSessionRecordings(
       sessionShortId: row.sessionShortId,
       snippet: row.snippet,
       sessionState: row.state,
-      sessionHref: buildIngestionSessionHref(row.sessionId),
+      sessionHref: buildSessionInventorySessionHref(row.sessionId),
       updatedAt: row.updatedAt,
       lastEventAt: row.lastEventAt,
     }))

@@ -1,7 +1,7 @@
 ---
 id: kmpbihvnd51vhbyjpvchi8r
 title: 2026 03 10 Discriminate Ingestion from Twin Creation
-desc: ''
+desc: ""
 updated: 1773204824855
 created: 1773204824855
 ---
@@ -53,14 +53,14 @@ The privacy goal is that Kato should not automatically persist every conversatio
 
 ## Scenario Table
 
-| Scenario | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes |
-| --- | --- | --- | --- | --- |
-| Auto-twin provider discovers a recently active session | Yes | n/a | Yes | live ingestion, command detection, and persisted twin creation all continue |
-| Non-auto-twin provider discovers a recently active session with no explicit twin action | n/a | Yes | Mostly | live ingestion and command detection continue, but no twin is written |
-| User chooses `create twin` for a session with no twin | Yes | n/a | n/a | must replay provider source from start, not resume from stored ingest cursor |
-| User chooses `update twin` for a session with an existing twin behind source | Yes | n/a | n/a | should advance the twin incrementally; missing twin falls back to `create twin` |
-| User runs `capture` / `export` for a session with no twin after daemon restart | n/a | Yes | Yes | full-history replay comes from provider source instead of twin history |
-| Session has active workspace recording state but no twin | n/a | Yes | Yes | recording continuation uses metadata plus live ingestion; twin creation is not required |
+| Scenario                                                                                | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes                                                            |
+| --------------------------------------------------------------------------------------- | ------------------ | ---------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| Auto-twin provider discovers a recently active session                                  | Yes                | n/a                    | Yes            | live ingestion, command detection, and persisted twin creation all continue             |
+| Non-auto-twin provider discovers a recently active session with no explicit twin action | n/a                | Yes                    | Mostly         | live ingestion and command detection continue, but no twin is written                   |
+| User chooses `create twin` for a session with no twin                                   | Yes                | n/a                    | n/a            | must replay provider source from start, not resume from stored ingest cursor            |
+| User chooses `update twin` for a session with an existing twin behind source            | Yes                | n/a                    | n/a            | should advance the twin incrementally; missing twin falls back to `create twin`         |
+| User runs `capture` / `export` for a session with no twin after daemon restart          | n/a                | Yes                    | Yes            | full-history replay comes from provider source instead of twin history                  |
+| Session has active workspace recording state but no twin                                | n/a                | Yes                    | Yes            | recording continuation uses metadata plus live ingestion; twin creation is not required |
 
 # Decisions
 
@@ -177,60 +177,60 @@ The privacy goal is that Kato should not automatically persist every conversatio
 
 ## 1. Config and Naming
 
-- [ ] replace the runtime config contract, parser, defaults, tests, and any web/runtime references from `*AutoGenerateSnapshots` to `*AutoGenerateTwins`
-- [ ] reject startup if the old keys are present in config, with an explicit error telling the user to rename them
-- [ ] preserve the current default product intent by defaulting `providerAutoGenerateTwins.codex = true`
+- [x] replace the runtime config contract, parser, defaults, tests, and any web/runtime references from `*AutoGenerateSnapshots` to `*AutoGenerateTwins`
+- [x] reject startup if the old keys are present in config, with an explicit error telling the user to rename them
+- [x] preserve the current default product intent by defaulting `providerAutoGenerateTwins.codex = true`
 
 ## 2. Runtime Ingestion Split
 
-- [ ] change provider ingestion so background parsing into in-memory snapshots is independent from twin persistence
-- [ ] keep proactive discovery/ingestion for new-ish sessions after daemon start
-- [ ] gate `appendTwinEvents()` and twin bootstrap/hydration decisions behind the new twin-persistence policy instead of unconditional `shouldAppendTwin = true`
-- [ ] ensure metadata cursor updates still happen when twins are off, so command detection and restart cursor continuity continue to work
+- [x] change provider ingestion so background parsing into in-memory snapshots is independent from twin persistence
+- [x] keep proactive discovery/ingestion for new-ish sessions after daemon start
+- [x] gate `appendTwinEvents()` and twin bootstrap/hydration decisions behind the new twin-persistence policy instead of unconditional `shouldAppendTwin = true`
+- [x] ensure metadata cursor updates still happen when twins are off, so command detection and restart cursor continuity continue to work
 
 ## 3. Source Replay Fallback
 
-- [ ] add a provider-source replay helper that can parse a session from the beginning on demand
-- [ ] use that helper for `capture` / `export` when:
+- [x] add a provider-source replay helper that can parse a session from the beginning on demand
+- [x] use that helper for `capture` / `export` when:
   - there is no usable twin history, and
   - full-history boundary reconstruction is needed
-- [ ] use the same helper for CLI/control-plane export session resolution when no live snapshot or no twin-backed history is available
-- [ ] keep current twin-backed replay when twins exist
-- [ ] for Codex, document that replayed historical events may have less-accurate timestamps than auto-twin/live-captured events
+- [x] use the same helper for CLI/control-plane export session resolution when no live snapshot or no twin-backed history is available
+- [x] keep current twin-backed replay when twins exist
+- [x] for Codex, document that replayed historical events may have less-accurate timestamps than auto-twin/live-captured events
 
 ## 4. Metadata and Privacy Cleanup
 
-- [ ] remove `snippet` from the metadata contract and stop writing it during provider ingestion and manual twin actions
-- [ ] update session-state store cloning / validation / tests accordingly
-- [ ] add rewrite-time scrubbing so legacy `snippet` values are dropped whenever metadata is saved
-- [ ] clarify `cleanSessionStatesOnShutdown` semantics:
+- [x] remove `snippet` from the metadata contract and stop writing it during provider ingestion and manual twin actions
+- [x] update session-state store cloning / validation / tests accordingly
+- [x] add rewrite-time scrubbing so legacy `snippet` values are dropped whenever metadata is saved
+- [x] clarify `cleanSessionStatesOnShutdown` semantics:
   - still remove twin files
   - do not rely on shutdown cleanup for snippet privacy because snippets should no longer be persisted at all
 
 ## 5. Web / Status / Navigation Semantics
 
-- [ ] add a dedicated twin loader/API instead of reusing `loadSessionsPageData()` for persisted-history views
-- [ ] update web loaders so "ingested" / "idle" state is no longer inferred from raw twin existence alone
-- [ ] make `Sessions` the primary inventory of provider sessions
-- [ ] add explicit session-level UI signals for live activity, recording engagement, and twin persistence instead of collapsing them into one status label
-- [ ] replace the current top-level `Ingestion` page/tab with a `Twins` page
-- [ ] make the `Twins` page show, per session:
+- [x] add a dedicated twin loader/API instead of reusing `loadSessionsPageData()` for persisted-history views
+- [x] update web loaders so "ingested" / "idle" state is no longer inferred from raw twin existence alone
+- [x] make `Sessions` the primary inventory of provider sessions
+- [x] add explicit session-level UI signals for live activity, recording engagement, and twin persistence instead of collapsing them into one status label
+- [x] replace the current top-level `Ingestion` page/tab with a `Twins` page
+- [x] make the `Twins` page show, per session:
   - twin present / absent
   - twin file path
   - whether the persisted twin is current or behind the provider source
   - a twin-focused action (`create twin` or `update twin`) when applicable
-- [ ] rename manual web actions from `start ingestion` / `continue ingestion` to `create twin` / `update twin`
-- [ ] update Summary / Workspaces / route builders / live JSON endpoints so user-facing terminology and links match the new model
-- [ ] if raw ingestion diagnostics remain useful, move them to a secondary debug/detail view rather than top-level navigation
-- [ ] session pages should continue to use live snapshot state for active ingestion
-- [ ] inventory pages should not assume a persisted snippet exists
-- [ ] where snippet is absent and there is no live/twin/source-derived fallback, render a neutral placeholder rather than fabricating one
+- [x] rename manual web actions from `start ingestion` / `continue ingestion` to `create twin` / `update twin`
+- [x] update Summary / Workspaces / route builders / live JSON endpoints so user-facing terminology and links match the new model
+- [x] if raw ingestion diagnostics remain useful, move them to a secondary debug/detail view rather than top-level navigation
+- [x] session pages should continue to use live snapshot state for active ingestion
+- [x] inventory pages should not assume a persisted snippet exists
+- [x] where snippet is absent and there is no live/twin/source-derived fallback, render a neutral placeholder rather than fabricating one
 
 ## 6. Documentation
 
-- [ ] update `dev.general-guidance`
-- [ ] update `dev.codebase-overview`
-- [ ] update `dev.decision-log`
+- [x] update `dev.general-guidance`
+- [x] update `dev.codebase-overview`
+- [x] update `dev.decision-log`
 - [ ] update `dev.testing` if validation counts/timings materially changed
 
 # Acceptance Criteria

@@ -36,6 +36,9 @@ see [[dev.testing]]
   - `shared/src` for contracts and types used by 2+ apps
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
 - [[dev.security-baseline]] is the normative security contract.
+- Treat `/sessions` as the live provider-session inventory and `/twins` as the
+  persisted conversation-history inventory. When those concepts diverge, prefer
+  explicit route/model renames over compatibility aliases.
 - Startup/config behavior is fail-closed by default:
   - daemon subprocess startup must load runtime config successfully before
     entering runtime loop.

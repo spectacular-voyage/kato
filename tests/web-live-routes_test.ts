@@ -18,11 +18,11 @@ import {
 import { LIVE_JSON_CACHE_CONTROL } from "../apps/web/src/api_response.ts";
 import {
   getChromeStatusResponse,
-  getIngestionResponse,
   getLogsResponse,
   getRecordingsResponse,
   getSessionsResponse,
   getSummaryResponse,
+  getTwinsResponse,
   getWorkspacesResponse,
 } from "../apps/web/src/live_routes.ts";
 import {
@@ -364,7 +364,7 @@ Deno.test("live API routes disable caching and return expected page models", asy
   });
 });
 
-Deno.test("sessions, ingestion, and recordings APIs preserve current query semantics", async () => {
+Deno.test("sessions, twins, and recordings APIs preserve current query semantics", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
 
@@ -391,8 +391,8 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
             "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
           ),
         );
-        const ingestionActiveResponse = await getIngestionResponse(
-          new URL("http://kato.local/api/ingestion?view=active"),
+        const twinsActiveResponse = await getTwinsResponse(
+          new URL("http://kato.local/api/twins?view=active"),
         );
         const recordingsFilteredResponse = await getRecordingsResponse(
           new URL(
@@ -406,7 +406,7 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
             sessionsActiveResponse,
             sessionsWorkspaceResponse,
             sessionsCombinedResponse,
-            ingestionActiveResponse,
+            twinsActiveResponse,
             recordingsFilteredResponse,
           ]
         ) {
@@ -431,7 +431,7 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
           workspaceFilterId?: string;
           rows: Array<{ sessionId: string }>;
         };
-        const ingestionActiveData = await ingestionActiveResponse.json() as {
+        const twinsActiveData = await twinsActiveResponse.json() as {
           includeStale: boolean;
           rows: Array<{ sessionId: string }>;
         };
@@ -460,8 +460,8 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
         assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
           "sess-active",
         ]);
-        assertEquals(ingestionActiveData.includeStale, false);
-        assertEquals(ingestionActiveData.rows.map((row) => row.sessionId), [
+        assertEquals(twinsActiveData.includeStale, false);
+        assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
           "sess-active",
         ]);
         assertEquals(recordingsFilteredData.workspaceFilterId, "ws-beta");

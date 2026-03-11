@@ -491,7 +491,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         assertEquals(betaRow.recordings[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
           alphaRow.recordings[0]?.sessionLink,
-          "/ingestion?workspace=ws-alpha#session-sess-mixed",
+          "/sessions?workspace=ws-alpha#session-sess-mixed",
         );
       });
     } finally {

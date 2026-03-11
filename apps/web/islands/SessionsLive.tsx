@@ -8,8 +8,8 @@ import type {
   SessionsPageData,
 } from "../src/loaders/sessions.ts";
 import {
-  buildIngestionSessionHref,
   buildSessionInventoryHref,
+  buildTwinSessionHref,
 } from "../src/session_routes.ts";
 import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
@@ -142,6 +142,7 @@ export default function SessionsLive(
               <li
                 key={row.sessionKey}
                 class={`session-list-row ${row.state}`}
+                id={`session-${row.sessionId}`}
               >
                 <div class="session-list-action">
                   <span
@@ -168,7 +169,7 @@ export default function SessionsLive(
                   : (
                     <a
                       class="session-list-link"
-                      href={buildIngestionSessionHref(row.sessionId, {
+                      href={buildTwinSessionHref(row.sessionId, {
                         includeStale: pageData.includeStale,
                         workspaceFilter: pageData.workspaceFilter,
                       })}

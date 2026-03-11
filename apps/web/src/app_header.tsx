@@ -16,7 +16,7 @@ interface AppHeaderProps {
 
 const NAV_ITEMS = [
   { href: "/", label: "Summary" },
-  { href: "/ingestion", label: "Ingestion" },
+  { href: "/twins", label: "Twins" },
   { href: "/sessions", label: "Sessions" },
   { href: "/recordings", label: "Recordings" },
   { href: "/workspaces", label: "Workspaces" },

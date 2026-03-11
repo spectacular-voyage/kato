@@ -3,6 +3,7 @@ import { loadLogPageData } from "./loaders/logs.ts";
 import { loadRecordingsPageData } from "./loaders/recordings.ts";
 import { loadSessionsPageData } from "./loaders/sessions.ts";
 import { loadAppChromeStatus, loadSummaryPageData } from "./loaders/status.ts";
+import { loadTwinsPageData } from "./loaders/twins.ts";
 import { loadWorkspacesPageData } from "./loaders/workspaces.ts";
 import {
   parseLogsPageQuery,
@@ -18,9 +19,9 @@ export async function getSummaryResponse(): Promise<Response> {
   return liveJsonResponse(await loadSummaryPageData());
 }
 
-export async function getIngestionResponse(url: URL): Promise<Response> {
+export async function getTwinsResponse(url: URL): Promise<Response> {
   return liveJsonResponse(
-    await loadSessionsPageData(parseSessionPageQuery(url)),
+    await loadTwinsPageData(parseSessionPageQuery(url)),
   );
 }
 

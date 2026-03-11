@@ -592,3 +592,43 @@ created: 1771779490894
     materially reduces CLI/web duplication.
   - Add the remaining shell/docs polish work, including logo/wordmark wiring
     and a codebase-overview refresh when the next major web slice lands.
+
+### Distinguish Live Ingestion from Twin Persistence
+
+- Decision:
+  - Keep provider ingestion into the in-memory snapshot store independent from
+    persisted twin creation.
+  - Rename runtime config persistence controls from
+    `globalAutoGenerateSnapshots` / `providerAutoGenerateSnapshots` to
+    `globalAutoGenerateTwins` / `providerAutoGenerateTwins`, and fail fast if
+    the old keys are present.
+  - Persist durable session metadata across restarts even when twin persistence
+    is disabled.
+  - Persist twins only when the provider auto-twin policy allows it or the user
+    explicitly requests `create twin` / `update twin`.
+  - Remove durable `snippet` storage from session metadata; derive snippets from
+    live snapshots or twin/source replay when needed.
+  - Replace the top-level web `/ingestion` surface with `/twins`, and treat
+    `/sessions` as the primary live session inventory.
+- Owner: Kato engineering
+- Date: 2026-03-11
+- Why:
+  - The old model conflated live parsing, durable metadata, and durable
+    conversation history, which made transcript persistence happen as an
+    implicit side effect of discovery.
+  - Separating those concerns keeps command detection and restart continuity
+    working without forcing transcript retention for every provider session.
+  - The web app needed a cleaner distinction between live session state and
+    persisted twin state; `/ingestion` no longer reflected the actual product
+    concept.
+- Tradeoffs:
+  - Non-auto-twin sessions now rely on provider-source replay for some
+    full-history `capture` / `export` flows after restart, which can reduce
+    historical timestamp fidelity for Codex compared with live/auto-twin paths.
+  - Web loaders and routes now carry two distinct inventories (`/sessions` and
+    `/twins`) instead of overloading one page for both concerns.
+- Follow-up tasks:
+  - Document the Codex replay timestamp caveat anywhere operator-facing replay
+    behavior is described.
+  - Clarify shutdown cleanup docs so privacy does not rely on twin-file
+    deletion semantics.

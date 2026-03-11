@@ -1,8 +1,8 @@
-import { getIngestionResponse } from "../../src/live_routes.ts";
+import { getTwinsResponse } from "../../src/live_routes.ts";
 import { define } from "../../utils.ts";
 
 export const handler = define.handlers({
   GET(ctx: { url: URL }) {
-    return getIngestionResponse(ctx.url);
+    return getTwinsResponse(ctx.url);
   },
 });
