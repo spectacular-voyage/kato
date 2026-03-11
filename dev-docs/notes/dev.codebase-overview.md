@@ -66,6 +66,39 @@ Related notes:
 - `apps/cloud/src`: placeholder.
 - `tests`: behavior and contract coverage.
 
+## Web Route Map
+
+Current top-level web routes are:
+
+- `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
+  island, backed by `loadSummaryPageData()` and `/api/summary`.
+- `/ingestion`: operational ingest view for active/idle twin state and the
+  latest recording per destination, backed by `loadSessionsPageData()`.
+- `/sessions`: full discovered chat-session inventory, also backed by
+  `loadSessionsPageData()`, with manual `start ingestion` /
+  `continue ingestion` actions.
+- `/recordings`: flattened recording history across sessions and workspaces,
+  backed by `loadRecordingsPageData()`.
+- `/workspaces`: workspace register/unregister plus workspace-level recording
+  rollups, backed by `loadWorkspacesPageData()`.
+- `/logs`: combined daemon + web operational/security log view with shared
+  filter semantics, backed by `loadLogPageData()`.
+- `/settings`: guided user-default and workspace-username mapping workflows.
+- `/maintenance`: guided cleanup workflows for logs and old derived session
+  artifacts.
+- `/login` and `/logout`: local auth/session entry points.
+
+Supporting web files worth knowing:
+
+- `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
+  handlers.
+- `apps/web/src/session_routes.ts`: canonical href builders for
+  `/ingestion`, `/sessions`, and session anchor links.
+- `apps/web/routes/api/summary.ts`: currently the only shipped live JSON
+  endpoint.
+- `apps/web/src/summary_api.ts`: shared no-store response helper for the Summary
+  API.
+
 ## Default Filesystem Layout
 
 - `~/.kato/kato-user-config.yaml`
@@ -263,6 +296,22 @@ Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
 
 Missing/invalid/empty snapshots fail safe (no silent empty writes).
 
+## Current Web Live Refresh Model
+
+- Only the Summary body is live-polled today.
+- `apps/web/islands/SummaryLive.tsx` polls `/api/summary` every `2s` and keeps
+  the last good render if a request fails.
+- `/api/summary` returns `SummaryPageData` with no-store cache headers via
+  `apps/web/src/summary_api.ts`.
+- The shared `DAEMON` / `SNAPSHOT` header stack is still server-rendered on
+  non-Summary pages from `loadAppChromeStatus()`; it is not yet a reusable live
+  island.
+- `Ingestion`, `Sessions`, `Recordings`, `Workspaces`, `Logs`, `Settings`, and
+  `Maintenance` are currently server-rendered page loads with URL-driven
+  filters and PRG mutation flows where applicable.
+- Any future live-expansion work should preserve route/query semantics rather
+  than inventing separate client-only filter state.
+
 ## Source-of-Truth Boundaries
 
 - `~/.kato/daemon/kato-daemon-config.yaml`: daemon process settings.
@@ -278,6 +327,21 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 - `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session state.
 - in-memory snapshot store: runtime projection cache.
 - markdown/jsonl exports: derived artifacts.
+
+Page-level web source-of-truth guidance:
+
+- Summary and app-chrome status read primarily from `~/.kato/shared/status.json`
+  plus recent daemon/web log tails.
+- `Ingestion`, `Sessions`, `Recordings`, and most workspace recording details
+  come from persistent session metadata/twin state under
+  `~/.kato/shared/sessions/*`, with the current daemon snapshot merged in where
+  live runtime status exists.
+- `Workspaces` additionally depends on
+  `~/.kato/shared/workspace-registry.json`,
+  workspace-local `.kato-workspace-config.yaml`, shared behavior config, and
+  user settings for workspace-username mappings.
+- `Logs` reads both daemon and web log files and applies filtering at load time;
+  it is not a projection of `status.json`.
 
 ## Extension Guide
 

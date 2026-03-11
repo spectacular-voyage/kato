@@ -1629,3 +1629,89 @@ Changed the Summary `Active Ingestion` tile in [SummaryLive.tsx](/home/djradon/h
 Yes, that `active` state is still derived from the existing activity/staleness logic underneath, so this stays tied to the current staleness-calculated model rather than introducing a separate threshold here.
 
 Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2056_44
+
+can you review [task.2026.2026-03-10-dynamic-updates-everywhere.md](dev-docs/notes/task.2026.2026-03-10-dynamic-updates-everywhere.md) since it was created before this evenings' work, and probably has some outdated and missing content. We will tackle it in a fresh session.
+
+Then update [dev.codebase-overview.md](dev-docs/notes/dev.codebase-overview.md) as well.
+
+# gpt-5.4_2026-03-10_2056_54
+
+I’m reviewing the dynamic-updates task note against the current web implementation first, then I’ll update the codebase overview to reflect the final route split and summary/log/session behavior that landed tonight.
+
+# gpt-5.4_2026-03-10_2057_05
+
+Yes. The issue was not the tile content width, it was that `span-8` was missing from the shared grid CSS entirely.
+
+I added the missing `.span-8` rule in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css), along with the matching mobile collapse rule. That means the `Active Ingestion` card now actually spans 8 columns and should sit beside the 4-column `Providers` card on desktop as intended.
+
+Verified with `deno task --cwd apps/web check`.
+
+# gpt-5.4_2026-03-10_2057_06
+
+Yes. The issue was not the tile content width, it was that `span-8` was missing from the shared grid CSS entirely.
+
+I added the missing `.span-8` rule in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css), along with the matching mobile collapse rule. That means the `Active Ingestion` card now actually spans 8 columns and should sit beside the 4-column `Providers` card on desktop as intended.
+
+Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2103_28
+
+Sorry, did you get the codebase overview updated?
+
+# gpt-5.4_2026-03-10_2103_38
+
+Not yet. I updated the original web task note, but I hadn’t patched the codebase overview or the dynamic-updates task note yet. I’m fixing the overview now against the current web architecture so it reflects the final route split and current live/static behavior.
+
+# gpt-5.4_2026-03-10_2103_46
+
+I’ve confirmed the overview is still stale in a few concrete ways: it doesn’t describe the final web route split (`/ingestion`, `/sessions`, `/recordings`, `/logs`) or the current Summary/session/log behavior. I’m updating both the codebase overview and the dynamic-updates task note together so the next session starts from the actual current state.
+
+# gpt-5.4_2026-03-10_2104_02
+
+I’ve got the main drift points. The dynamic-updates note still assumes pre-split routes (`Operational`, `Security`, mixed `/sessions`) and work that hasn’t shipped (`/api/chrome-status`, `/api/sessions`, `/api/workspaces`). I’m rewriting it as a current-state follow-up task, and then I’ll patch the codebase overview with the actual web route map and current live-refresh model.
+
+# gpt-5.4_2026-03-10_2104_21
+
+I have the update shape. The dynamic-updates note needs a route-map correction more than anything else: `Ingestion`, `Sessions`, `Recordings`, and `Logs` now exist as separate surfaces, and only `/api/summary` has actually shipped. I’m patching both docs around that reality instead of layering more old assumptions on top.
+
+# gpt-5.4_2026-03-10_2104_38
+
+I’m replacing the dynamic-updates note wholesale now. The easiest way to make it useful for the next session is to rewrite it around the current shipped baseline rather than trying to diff-fix the old pre-split plan line by line.
+
+# gpt-5.4_2026-03-10_2105_35
+
+I’m patching the overview with two concrete additions: a current web route map and the current live-refresh model. That should make it accurate without turning it into a changelog.
+
+# gpt-5.4_2026-03-10_2105_50
+
+Both doc edits are in. I’m doing a quick readback on the changed sections so I don’t leave you with a misleading task note or an overview that still refers to the pre-split web IA.
+
+# gpt-5.4_2026-03-10_2105_54
+
+Yes. I’ve now updated both:
+
+- [task.2026.2026-03-10-dynamic-updates-everywhere.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-10-dynamic-updates-everywhere.md)
+- [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md)
+
+The dynamic-updates note now reflects the current web IA instead of the pre-evening version:
+`/ingestion`, `/sessions`, `/recordings`, `/logs`, only `/api/summary` currently shipped, and the actual remaining live-refresh work.
+
+The codebase overview now includes the current web route map, the present live-refresh model, and clearer page-level source-of-truth boundaries for Summary, Ingestion, Sessions, Recordings, Workspaces, and Logs.
+
+No code changes were needed for this pass.
+
+# gpt-5.4_2026-03-10_2105_56
+
+Yes. I’ve now updated both:
+
+- [task.2026.2026-03-10-dynamic-updates-everywhere.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-10-dynamic-updates-everywhere.md)
+- [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md)
+
+The dynamic-updates note now reflects the current web IA instead of the pre-evening version:
+`/ingestion`, `/sessions`, `/recordings`, `/logs`, only `/api/summary` currently shipped, and the actual remaining live-refresh work.
+
+The codebase overview now includes the current web route map, the present live-refresh model, and clearer page-level source-of-truth boundaries for Summary, Ingestion, Sessions, Recordings, Workspaces, and Logs.
+
+No code changes were needed for this pass.

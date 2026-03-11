@@ -26,6 +26,7 @@
     "@kato/runtime": "./apps/runtime/src/mod.ts"
   },
   "fmt": {
+    "proseWrap": "preserve",
     "exclude": ["dev-docs/notes/**", "**/*.md"]
   }
 }
