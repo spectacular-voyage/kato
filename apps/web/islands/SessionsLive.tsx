@@ -4,39 +4,15 @@ import {
 } from "../src/loaders/activity_state.ts";
 import type {
   SessionActivityRow,
-  SessionIngestionAction,
   SessionsPageData,
 } from "../src/loaders/sessions.ts";
-import {
-  buildIngestionSessionHref,
-  buildSessionInventoryHref,
-} from "../src/session_routes.ts";
+import { buildSessionInventoryHref } from "../src/session_routes.ts";
 import { formatTimestamp } from "../src/time.ts";
+import SessionSnippet from "./SessionSnippet.tsx";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function buildSessionListStateLabel(row: SessionActivityRow): string {
-  if (row.state !== "inactive") {
-    return activityStateLabel(row.state);
-  }
-  switch (row.ingestionAction) {
-    case "start":
-      return "not ingested";
-    case "continue":
-      return "continue ingestion";
-    case "none":
-      return row.canOpenIngestView ? "idle" : "not ingested";
-  }
-}
-
-function ingestionActionLabel(action: SessionIngestionAction): string {
-  switch (action) {
-    case "start":
-      return "start ingestion";
-    case "continue":
-      return "continue ingestion";
-    case "none":
-      return "";
-  }
+  return activityStateLabel(row.state);
 }
 
 function buildPageTitle(
@@ -56,14 +32,13 @@ function buildCountSummary(options: {
   if (!options.includeStale) {
     return `Active: ${options.activeSessionCount}`;
   }
-  return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Not ingested: ${options.inactiveSessionCount}`;
+  return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Inactive: ${options.inactiveSessionCount}`;
 }
 
 export default function SessionsLive(
   props: {
     initialData: SessionsPageData;
     endpoint: string;
-    csrfToken?: string;
   },
 ) {
   const pageData = usePolledJson({
@@ -142,6 +117,7 @@ export default function SessionsLive(
               <li
                 key={row.sessionKey}
                 class={`session-list-row ${row.state}`}
+                id={`session-${row.sessionId}`}
               >
                 <div class="session-list-action">
                   <span
@@ -152,81 +128,21 @@ export default function SessionsLive(
                     {activityStateDot(row.state)}
                   </span>
                 </div>
-                {!row.canOpenIngestView
-                  ? (
-                    <span class="session-list-copy">
-                      <span class="session-list-primary">
-                        <span class="mono">{row.provider}:</span>{" "}
-                        <strong>{row.snippet ?? "(no snippet)"}</strong>{" "}
-                        <span class="mono">({row.sessionShortId})</span>
-                      </span>{" "}
-                      <span class="muted mono session-list-updated">
-                        Updated {formatTimestamp(row.updatedAt)}
-                      </span>
-                    </span>
-                  )
-                  : (
-                    <a
-                      class="session-list-link"
-                      href={buildIngestionSessionHref(row.sessionId, {
-                        includeStale: pageData.includeStale,
-                        workspaceFilter: pageData.workspaceFilter,
-                      })}
-                    >
-                      <span class="session-list-copy">
-                        <span class="session-list-primary">
-                          <span class="mono">{row.provider}:</span>{" "}
-                          <strong>{row.snippet ?? "(no snippet)"}</strong>{" "}
-                          <span class="mono">({row.sessionShortId})</span>
-                        </span>{" "}
-                        <span class="muted mono session-list-updated">
-                          Updated {formatTimestamp(row.updatedAt)}
-                        </span>
-                      </span>
-                    </a>
-                  )}
-                <div class="session-list-right">
-                  {row.ingestionAction !== "none"
-                    ? (
-                      <form
-                        method="post"
-                        class="session-list-action-form"
-                      >
-                        <input
-                          type="hidden"
-                          name="action"
-                          value="start-ingestion"
-                        />
-                        <input
-                          type="hidden"
-                          name="csrfToken"
-                          value={props.csrfToken ?? ""}
-                        />
-                        <input
-                          type="hidden"
-                          name="sessionId"
-                          value={row.sessionId}
-                        />
-                        <input
-                          type="hidden"
-                          name="includeStale"
-                          value={String(pageData.includeStale)}
-                        />
-                        <input
-                          type="hidden"
-                          name="workspaceFilter"
-                          value={pageData.workspaceFilter ?? ""}
-                        />
-                        <button
-                          type="submit"
-                          class="mono session-inline-action"
-                        >
-                          {ingestionActionLabel(row.ingestionAction)}
-                        </button>
-                      </form>
-                    )
-                    : null}
-                </div>
+                <span class="session-list-copy">
+                  <span class="session-list-primary">
+                    <span class="mono">{row.provider}:</span>{" "}
+                    <SessionSnippet
+                      sessionId={row.sessionId}
+                      snippet={row.snippet}
+                      snippetClass="session-list-snippet"
+                    />{" "}
+                    <span class="mono">({row.sessionShortId})</span>
+                  </span>{" "}
+                  <span class="muted mono session-list-updated">
+                    Updated {formatTimestamp(row.updatedAt)}
+                  </span>
+                </span>
+                <div class="session-list-right" />
               </li>
             ))}
         </ul>

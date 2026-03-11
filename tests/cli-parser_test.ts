@@ -172,8 +172,9 @@ Deno.test("cli parser parses clean day ranges and flags", () => {
     "clean",
     "--recordings",
     "7",
-    "--sessions",
+    "--twins",
     "30",
+    "--delete-metadata",
     "--dry-run",
   ]);
   assertEquals(command, {
@@ -181,7 +182,8 @@ Deno.test("cli parser parses clean day ranges and flags", () => {
     all: false,
     dryRun: true,
     recordingsDays: 7,
-    sessionsDays: 30,
+    twinsDays: 30,
+    deleteTwinMetadata: true,
   });
 });
 
@@ -191,7 +193,11 @@ Deno.test("cli parser validates clean argument values", () => {
     CliUsageError,
   );
   assertThrows(
-    () => parseDaemonCliArgs(["clean", "--sessions", "abc"]),
+    () => parseDaemonCliArgs(["clean", "--twins", "abc"]),
+    CliUsageError,
+  );
+  assertThrows(
+    () => parseDaemonCliArgs(["clean", "--delete-metadata"]),
     CliUsageError,
   );
   assertThrows(

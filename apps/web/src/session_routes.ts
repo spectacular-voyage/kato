@@ -29,17 +29,17 @@ export function buildSessionInventoryHref(
   return `${url.pathname}${url.search}`;
 }
 
-export function buildIngestionHref(
-  options: SessionRouteOptions = {},
-): string {
-  const url = new URL("http://kato.local/ingestion");
-  applySessionRouteOptions(url, options);
-  return `${url.pathname}${url.search}`;
-}
-
-export function buildIngestionSessionHref(
+export function buildSessionInventorySessionHref(
   sessionId: string,
   options: SessionRouteOptions = {},
 ): string {
-  return `${buildIngestionHref(options)}#session-${sessionId}`;
+  return `${buildSessionInventoryHref(options)}#session-${sessionId}`;
+}
+
+export function buildMaintenanceHref(
+  options: SessionRouteOptions = {},
+): string {
+  const url = new URL("http://kato.local/maintenance");
+  applySessionRouteOptions(url, options);
+  return `${url.pathname}${url.search}`;
 }

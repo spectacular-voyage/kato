@@ -25,7 +25,6 @@ import {
   type DaemonProcessLauncherLike,
   type DaemonStatusSnapshotStoreLike,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
-  resolveDefaultSessionsDir,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   type RuntimeConfigStoreLike,
@@ -36,6 +35,7 @@ import {
 import {
   createDefaultWebConfig,
   createDefaultWebServerStatus,
+  PersistentSessionStateStore,
 } from "../apps/runtime/src/mod.ts";
 import {
   CliUsageError,
@@ -2837,8 +2837,49 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
   });
 });
 
-Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts", async () => {
-  await withTestTempDir("daemon-cli-clean-sessions-", async (rootDir) => {
+async function createCliTwinCleanupFixture(options: {
+  rootDir: string;
+  sessionId: string;
+  providerSessionId: string;
+  sourceName: string;
+  twinTime: string;
+}) {
+  const sourceDir = `${options.rootDir}/sources`;
+  await Deno.mkdir(sourceDir, { recursive: true });
+  const sourceFilePath = `${sourceDir}/${options.sourceName}.jsonl`;
+  await Deno.writeTextFile(sourceFilePath, "{}\n");
+
+  const store = new PersistentSessionStateStore({
+    katoDir: options.rootDir,
+    now: () => new Date("2026-02-22T10:00:00.000Z"),
+    makeSessionId: () => options.sessionId,
+  });
+  const metadata = await store.getOrCreateSessionMetadata({
+    provider: "codex",
+    providerSessionId: options.providerSessionId,
+    sourceFilePath,
+    initialCursor: { kind: "byte-offset", value: 0 },
+  });
+  metadata.nextTwinSeq = 2;
+  metadata.recentFingerprints = ["fingerprint-1"];
+  metadata.ingestionActivatedAt = "2026-02-10T00:00:00.000Z";
+  await store.saveSessionMetadata(metadata);
+  await Deno.writeTextFile(metadata.twinPath, '{"event":"twin"}\n');
+  const twinTime = new Date(options.twinTime);
+  await Deno.utime(metadata.twinPath, twinTime, twinTime);
+  const indexEntry = (await store.loadDaemonControlIndex()).sessions.find((
+    entry,
+  ) => entry.sessionId === metadata.sessionId);
+
+  return {
+    metadataPath: indexEntry?.metadataPath ?? "",
+    twinPath: metadata.twinPath,
+    sessionId: metadata.sessionId,
+  };
+}
+
+Deno.test("runDaemonCli clean --twins removes old twin files and preserves metadata by default", async () => {
+  await withTestTempDir("daemon-cli-clean-twins-", async (rootDir) => {
     const runtimeDir = `${rootDir}/runtime`;
     await Deno.mkdir(runtimeDir, { recursive: true });
     const controlStore = makeInMemoryControlStore();
@@ -2849,27 +2890,22 @@ Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts
     );
     const harness = makeRuntimeHarness(runtimeDir);
 
-    const sessionsDir = resolveDefaultSessionsDir(rootDir);
-    await Deno.mkdir(sessionsDir, { recursive: true });
-    const oldMetaPath = `${sessionsDir}/old.meta.json`;
-    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
-    const recentMetaPath = `${sessionsDir}/recent.meta.json`;
-    const recentTwinPath = `${sessionsDir}/recent.twin.jsonl`;
+    const oldSession = await createCliTwinCleanupFixture({
+      rootDir,
+      sessionId: "cli-clean-old",
+      providerSessionId: "cli-clean-old",
+      sourceName: "cli-clean-old",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
+    const recentSession = await createCliTwinCleanupFixture({
+      rootDir,
+      sessionId: "cli-clean-recent",
+      providerSessionId: "cli-clean-recent",
+      sourceName: "cli-clean-recent",
+      twinTime: "2026-02-25T00:00:00.000Z",
+    });
 
-    for (
-      const path of [oldMetaPath, oldTwinPath, recentMetaPath, recentTwinPath]
-    ) {
-      await Deno.writeTextFile(path, "{}\n");
-    }
-
-    const oldTime = new Date("2026-02-01T00:00:00.000Z");
-    const recentTime = new Date("2026-02-25T00:00:00.000Z");
-    await Deno.utime(oldMetaPath, oldTime, oldTime);
-    await Deno.utime(oldTwinPath, oldTime, oldTime);
-    await Deno.utime(recentMetaPath, recentTime, recentTime);
-    await Deno.utime(recentTwinPath, recentTime, recentTime);
-
-    const code = await runDaemonCli(["clean", "--sessions", "7"], {
+    const code = await runDaemonCli(["clean", "--twins", "7"], {
       runtime: harness.runtime,
       defaultRuntimeConfig,
       configStore,
@@ -2879,25 +2915,30 @@ Deno.test("runDaemonCli clean --sessions removes old persisted session artifacts
 
     assertEquals(code, 0);
     assertStringIncludes(harness.stdout.join(""), "clean completed");
-    assertStringIncludes(harness.stdout.join(""), "sessionsDeleted=1");
-    assertStringIncludes(harness.stdout.join(""), "sessionFilesDeleted=2");
+    assertStringIncludes(harness.stdout.join(""), "twinsDeleted=1");
+    assertStringIncludes(harness.stdout.join(""), "twinFilesDeleted=1");
 
+    await Deno.stat(oldSession.metadataPath);
     await assertRejects(
-      () => Deno.stat(oldMetaPath),
+      () => Deno.stat(oldSession.twinPath),
       Deno.errors.NotFound,
     );
-    await assertRejects(
-      () => Deno.stat(oldTwinPath),
-      Deno.errors.NotFound,
+    await Deno.stat(recentSession.metadataPath);
+    await Deno.stat(recentSession.twinPath);
+
+    const store = new PersistentSessionStateStore({ katoDir: rootDir });
+    const reloaded = (await store.listSessionMetadata()).find((entry) =>
+      entry.sessionId === oldSession.sessionId
     );
-    await Deno.stat(recentMetaPath);
-    await Deno.stat(recentTwinPath);
+    assertEquals(reloaded?.nextTwinSeq, 1);
+    assertEquals(reloaded?.recentFingerprints, []);
+    assertEquals(reloaded?.ingestionActivatedAt, undefined);
   });
 });
 
-Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", async () => {
+Deno.test("runDaemonCli clean --twins --delete-metadata removes matched metadata files", async () => {
   await withTestTempDir(
-    "daemon-cli-clean-sessions-dry-",
+    "daemon-cli-clean-twins-delete-meta-",
     async (rootDir) => {
       const runtimeDir = `${rootDir}/runtime`;
       await Deno.mkdir(runtimeDir, { recursive: true });
@@ -2909,18 +2950,16 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
       );
       const harness = makeRuntimeHarness(runtimeDir);
 
-      const sessionsDir = resolveDefaultSessionsDir(rootDir);
-      await Deno.mkdir(sessionsDir, { recursive: true });
-      const oldMetaPath = `${sessionsDir}/old.meta.json`;
-      const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
-      await Deno.writeTextFile(oldMetaPath, "{}\n");
-      await Deno.writeTextFile(oldTwinPath, "{}\n");
-      const oldTime = new Date("2026-02-01T00:00:00.000Z");
-      await Deno.utime(oldMetaPath, oldTime, oldTime);
-      await Deno.utime(oldTwinPath, oldTime, oldTime);
+      const oldSession = await createCliTwinCleanupFixture({
+        rootDir,
+        sessionId: "cli-clean-delete-meta",
+        providerSessionId: "cli-clean-delete-meta",
+        sourceName: "cli-clean-delete-meta",
+        twinTime: "2026-02-01T00:00:00.000Z",
+      });
 
       const code = await runDaemonCli(
-        ["clean", "--sessions", "7", "--dry-run"],
+        ["clean", "--twins", "7", "--delete-metadata"],
         {
           runtime: harness.runtime,
           defaultRuntimeConfig,
@@ -2931,15 +2970,64 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
       );
 
       assertEquals(code, 0);
-      assertStringIncludes(harness.stdout.join(""), "sessionsToDelete=1");
-      assertStringIncludes(harness.stdout.join(""), "sessionFilesToDelete=2");
-      await Deno.stat(oldMetaPath);
-      await Deno.stat(oldTwinPath);
+      assertStringIncludes(harness.stdout.join(""), "deleteMetadata=true");
+      assertStringIncludes(harness.stdout.join(""), "metadataFilesDeleted=1");
+      await assertRejects(
+        () => Deno.stat(oldSession.metadataPath),
+        Deno.errors.NotFound,
+      );
+      await assertRejects(
+        () => Deno.stat(oldSession.twinPath),
+        Deno.errors.NotFound,
+      );
     },
   );
 });
 
-Deno.test("runDaemonCli clean --sessions allows cleanup while daemon is running", async () => {
+Deno.test("runDaemonCli clean --twins dry-run reports candidate counts", async () => {
+  await withTestTempDir(
+    "daemon-cli-clean-twins-dry-",
+    async (rootDir) => {
+      const runtimeDir = `${rootDir}/runtime`;
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const controlStore = makeInMemoryControlStore();
+      const statusStore = makeInMemoryStatusStore();
+      const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const harness = makeRuntimeHarness(runtimeDir);
+
+      const oldSession = await createCliTwinCleanupFixture({
+        rootDir,
+        sessionId: "cli-clean-dry-run",
+        providerSessionId: "cli-clean-dry-run",
+        sourceName: "cli-clean-dry-run",
+        twinTime: "2026-02-01T00:00:00.000Z",
+      });
+
+      const code = await runDaemonCli(
+        ["clean", "--twins", "7", "--delete-metadata", "--dry-run"],
+        {
+          runtime: harness.runtime,
+          defaultRuntimeConfig,
+          configStore,
+          statusStore,
+          controlStore: controlStore.store,
+        },
+      );
+
+      assertEquals(code, 0);
+      assertStringIncludes(harness.stdout.join(""), "twinsToDelete=1");
+      assertStringIncludes(harness.stdout.join(""), "twinFilesToDelete=1");
+      assertStringIncludes(harness.stdout.join(""), "metadataFilesToDelete=1");
+      await Deno.stat(oldSession.metadataPath);
+      await Deno.stat(oldSession.twinPath);
+    },
+  );
+});
+
+Deno.test("runDaemonCli clean --twins allows cleanup while daemon is running", async () => {
   await withTestTempDir("daemon-cli-clean-running-", async (rootDir) => {
     const runtimeDir = `${rootDir}/runtime`;
     await Deno.mkdir(runtimeDir, { recursive: true });
@@ -2962,17 +3050,15 @@ Deno.test("runDaemonCli clean --sessions allows cleanup while daemon is running"
     );
     const harness = makeRuntimeHarness(runtimeDir);
 
-    const sessionsDir = resolveDefaultSessionsDir(rootDir);
-    await Deno.mkdir(sessionsDir, { recursive: true });
-    const oldMetaPath = `${sessionsDir}/old.meta.json`;
-    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
-    await Deno.writeTextFile(oldMetaPath, "{}\n");
-    await Deno.writeTextFile(oldTwinPath, "{}\n");
-    const oldTime = new Date("2026-02-01T00:00:00.000Z");
-    await Deno.utime(oldMetaPath, oldTime, oldTime);
-    await Deno.utime(oldTwinPath, oldTime, oldTime);
+    const oldSession = await createCliTwinCleanupFixture({
+      rootDir,
+      sessionId: "cli-clean-running",
+      providerSessionId: "cli-clean-running",
+      sourceName: "cli-clean-running",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
 
-    const code = await runDaemonCli(["clean", "--sessions", "7"], {
+    const code = await runDaemonCli(["clean", "--twins", "7"], {
       runtime: harness.runtime,
       defaultRuntimeConfig,
       configStore,
@@ -2981,9 +3067,12 @@ Deno.test("runDaemonCli clean --sessions allows cleanup while daemon is running"
     });
 
     assertEquals(code, 0);
-    assertStringIncludes(harness.stdout.join(""), "sessionsDeleted=1");
-    await assertRejects(() => Deno.stat(oldMetaPath), Deno.errors.NotFound);
-    await assertRejects(() => Deno.stat(oldTwinPath), Deno.errors.NotFound);
+    assertStringIncludes(harness.stdout.join(""), "twinsDeleted=1");
+    await Deno.stat(oldSession.metadataPath);
+    await assertRejects(
+      () => Deno.stat(oldSession.twinPath),
+      Deno.errors.NotFound,
+    );
   });
 });
 

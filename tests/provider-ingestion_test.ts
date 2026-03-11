@@ -212,7 +212,7 @@ Deno.test(
         provider: "test-provider",
         watchRoots: [dir],
         sessionSnapshotStore: store,
-        autoGenerateSnapshots: true,
+        autoGenerateTwins: true,
         discoveryIntervalMs: 0,
         now: () => new Date(currentNowMs),
         discoverSessions() {
@@ -279,7 +279,7 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
           stateRoot,
           "session-uuid-abcdef12",
         ),
-        autoGenerateSnapshots: true,
+        autoGenerateTwins: true,
         discoverSessions() {
           return Promise.resolve([{
             sessionId: "session-persist",
@@ -329,7 +329,7 @@ Deno.test("FileProviderIngestionRunner restores persisted cursor and hydrates sn
 });
 
 Deno.test(
-  "FileProviderIngestionRunner persists session twin when a workspace output is active",
+  "FileProviderIngestionRunner keeps workspace output sessions metadata-only when auto-twins are off",
   async () => {
     await withTempDir(
       "provider-ingestion-workspace-output-twin-",
@@ -385,7 +385,7 @@ Deno.test(
             stateRoot,
             "session-uuid-workspace-output-1234",
           ),
-          autoGenerateSnapshots: false,
+          autoGenerateTwins: false,
           discoverSessions() {
             return Promise.resolve([{
               sessionId: "session-workspace-output",
@@ -427,14 +427,18 @@ Deno.test(
           initialCursor: { kind: "byte-offset", value: 0 },
         });
         const twinEvents = await reloadedStore.readTwinEvents(reloaded, 1);
-        assertEquals(reloaded.nextTwinSeq, 2);
-        assertEquals(twinEvents.map((event) => event.seq), [1]);
+        assertEquals(reloaded.nextTwinSeq, 1);
+        assertEquals(twinEvents, []);
+        assertEquals(reloaded.ingestCursor, {
+          kind: "byte-offset",
+          value: 10,
+        });
       },
     );
   },
 );
 
-Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it on resumed cursors", async () => {
+Deno.test("FileProviderIngestionRunner rebuilds first-user snippet from twin history without persisting metadata snippets", async () => {
   await withTempDir("provider-ingestion-snippet-persist-", async (dir) => {
     const sessionFile = join(dir, "session-snippet-persist.jsonl");
     await Deno.writeTextFile(sessionFile, `${"x".repeat(256)}\n`);
@@ -452,7 +456,7 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
           stateRoot,
           "session-snippet-persist-uuid",
         ),
-        autoGenerateSnapshots: false,
+        autoGenerateTwins: true,
         discoverSessions() {
           return Promise.resolve([{
             sessionId: "session-snippet-persist",
@@ -528,11 +532,18 @@ Deno.test("FileProviderIngestionRunner persists first-user snippet and reuses it
         sourceFilePath: sessionFile,
         initialCursor: { kind: "byte-offset", value: 0 },
       });
-    assertEquals(reloadedMetadata.snippet, "first user message");
     assertEquals(reloadedMetadata.ingestCursor, {
       kind: "byte-offset",
       value: 100,
     });
+    const metadataPath = reloadedStateStore.resolveLocation({
+      provider: "codex",
+      providerSessionId: "session-snippet-persist",
+    }).metadataPath;
+    const persistedMetadata = JSON.parse(
+      await Deno.readTextFile(metadataPath),
+    ) as Record<string, unknown>;
+    assertEquals("snippet" in persistedMetadata, false);
 
     const secondStore = new InMemorySessionSnapshotStore();
     const secondRunner = makeRunner(secondStore);
@@ -634,7 +645,7 @@ Deno.test("FileProviderIngestionRunner backs up Codex cursor near compaction mar
           stateRoot,
           "session-codex-compaction-uuid",
         ),
-        autoGenerateSnapshots: false,
+        autoGenerateTwins: false,
         discoverSessions() {
           return Promise.resolve([{
             sessionId: "session-codex-compaction",
@@ -783,7 +794,7 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
             stateRoot,
             "session-uuid-bootstrap-1",
           ),
-          autoGenerateSnapshots: true,
+          autoGenerateTwins: true,
           discoverSessions() {
             return Promise.resolve([{
               sessionId: "session-bootstrap",
@@ -881,6 +892,73 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
   );
 });
 
+Deno.test(
+  "FileProviderIngestionRunner does not mark a missing twin as available when bootstrap finds no events",
+  async () => {
+    await withTempDir(
+      "provider-ingestion-empty-bootstrap-",
+      async (dir) => {
+        const sessionFile = join(dir, "session-empty-bootstrap.jsonl");
+        await Deno.writeTextFile(sessionFile, "placeholder\n");
+        const stateRoot = join(dir, ".kato");
+        const sessionStateStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-empty-bootstrap-1",
+        );
+        const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-empty-bootstrap",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        metadata.nextTwinSeq = 2;
+        metadata.recentFingerprints = ["fingerprint-empty-bootstrap"];
+        await sessionStateStore.saveSessionMetadata(metadata);
+
+        const snapshotStore = new InMemorySessionSnapshotStore();
+        const runner = makeFileProviderTestRunner({
+          dir,
+          provider: "test-provider",
+          sessionSnapshotStore: snapshotStore,
+          sessionStateStore,
+          autoGenerateTwins: true,
+          discoverSessions() {
+            return Promise.resolve([{
+              sessionId: "session-empty-bootstrap",
+              filePath: sessionFile,
+              modifiedAtMs: Date.now(),
+            }]);
+          },
+          parseEvents() {
+            return (async function* () {})();
+          },
+        });
+
+        await runner.start();
+        const result = await runner.poll();
+        await runner.stop();
+
+        assertEquals(result.sessionsUpdated, 0);
+        assertEquals(result.eventsObserved, 0);
+        assertEquals(
+          snapshotStore.get("session-empty-bootstrap"),
+          undefined,
+        );
+
+        const reloaded = await sessionStateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-empty-bootstrap",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        assertEquals(reloaded.nextTwinSeq, 1);
+        assertEquals(reloaded.recentFingerprints, []);
+        assertEquals(await sessionStateStore.readTwinEvents(reloaded, 1), []);
+      },
+    );
+  },
+);
+
 Deno.test("FileProviderIngestionRunner fails closed for session with unsupported metadata schema", async () => {
   await withTempDir("provider-ingestion-fail-closed-schema-", async (dir) => {
     const sessionFile = join(dir, "session-fail-closed.jsonl");
@@ -924,7 +1002,7 @@ Deno.test("FileProviderIngestionRunner fails closed for session with unsupported
       provider: "test-provider",
       sessionSnapshotStore: new InMemorySessionSnapshotStore(),
       sessionStateStore: stateStore,
-      autoGenerateSnapshots: true,
+      autoGenerateTwins: true,
       operationalLogger,
       auditLogger,
       discoverSessions() {

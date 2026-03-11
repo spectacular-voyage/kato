@@ -45,7 +45,9 @@ async function loadLogLayerModule(): Promise<LogLayerModuleShape | null> {
 
   cachedLogLayerModulePromise = (async () => {
     try {
-      const module = await import("loglayer");
+      // Keep the optional npm dependency opaque to Vite import analysis.
+      const moduleSpecifier = "loglayer";
+      const module = await import(/* @vite-ignore */ moduleSpecifier);
       return module as unknown as LogLayerModuleShape;
     } catch {
       return null;

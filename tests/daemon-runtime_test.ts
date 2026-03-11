@@ -7,6 +7,7 @@ import type {
 } from "@kato/shared";
 import {
   AuditLogger,
+  createDefaultUserConfig,
   createDefaultWorkspaceMarkdownFrontmatterConfig,
   type DaemonControlRequestStoreLike,
   type DaemonStatusSnapshotStoreLike,
@@ -82,6 +83,94 @@ function makeEventForSession(
       providerEventId: id,
     },
   } as unknown as ConversationEvent;
+}
+
+function makeClaudeReplayEvent(
+  sessionId: string,
+  entryUuid: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+  timestamp: string,
+): ConversationEvent {
+  return {
+    eventId: `${entryUuid}:${kind}`,
+    provider: "claude",
+    sessionId,
+    timestamp,
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    turnId: entryUuid,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: entryUuid,
+      rawCursor: { kind: "byte-offset", value: 0 },
+    },
+  } as unknown as ConversationEvent;
+}
+
+async function writeClaudeReplayFixture(options: {
+  filePath: string;
+  sessionId: string;
+  firstUserContent: string;
+  assistantContent: string;
+  tailUserContent: string;
+}): Promise<void> {
+  await Deno.writeTextFile(
+    options.filePath,
+    [
+      JSON.stringify({
+        type: "user",
+        uuid: "msg-u-history",
+        parentUuid: null,
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:00.000Z",
+        cwd: "/tmp/project",
+        version: "2.1.39",
+        message: {
+          role: "user",
+          content: [{
+            type: "text",
+            text: options.firstUserContent,
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        uuid: "msg-a-history",
+        parentUuid: "msg-u-history",
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:01.000Z",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-6",
+          content: [{
+            type: "text",
+            text: options.assistantContent,
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "msg-u-tail",
+        parentUuid: "msg-a-history",
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:02.000Z",
+        cwd: "/tmp/project",
+        version: "2.1.39",
+        message: {
+          role: "user",
+          content: [{
+            type: "text",
+            text: options.tailUserContent,
+          }],
+        },
+      }),
+    ].join("\n") + "\n",
+  );
 }
 
 class CaptureSink {
@@ -671,6 +760,66 @@ function findScenarioMetadata(metadataList: ScenarioMetadataList) {
   return session;
 }
 
+function makeStopControlStore(
+  requestId: string,
+  requestedAt = "2026-02-22T10:00:05.000Z",
+): DaemonControlRequestStoreLike {
+  const requests = [{
+    requestId,
+    requestedAt,
+    command: "stop" as const,
+  }];
+  return {
+    list() {
+      return Promise.resolve(requests.map((request) => ({ ...request })));
+    },
+    enqueue(_request) {
+      throw new Error("enqueue should not be called");
+    },
+    markProcessed(processedRequestId: string) {
+      const idx = requests.findIndex((request) =>
+        request.requestId === processedRequestId
+      );
+      if (idx >= 0) {
+        requests.splice(0, idx + 1);
+      }
+      return Promise.resolve();
+    },
+  };
+}
+
+function makeRuntimeStatusStore(): DaemonStatusSnapshotStoreLike {
+  let currentStatus: DaemonStatusSnapshot = {
+    schemaVersion: 1,
+    generatedAt: "2026-02-22T10:00:00.000Z",
+    heartbeatAt: "2026-02-22T10:00:00.000Z",
+    daemonRunning: false,
+    providers: [],
+    recordings: { activeRecordings: 0, destinations: 0 },
+  };
+  return {
+    load() {
+      return Promise.resolve({
+        ...currentStatus,
+        providers: [...currentStatus.providers],
+        recordings: { ...currentStatus.recordings },
+        ...(currentStatus.sessions
+          ? { sessions: [...currentStatus.sessions] }
+          : {}),
+      });
+    },
+    save(snapshot) {
+      currentStatus = {
+        ...snapshot,
+        providers: [...snapshot.providers],
+        recordings: { ...snapshot.recordings },
+        ...(snapshot.sessions ? { sessions: [...snapshot.sessions] } : {}),
+      };
+      return Promise.resolve();
+    },
+  };
+}
+
 Deno.test(
   "runDaemonRuntimeLoop persistent in-chat rejects bare ::init as unsupported",
   async () => {
@@ -1061,6 +1210,80 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> stops after repeated generated destination conflicts",
+  async () => {
+    await withScenarioDirs(
+      "daemon-runtime-capture-conflict-retries-exceeded-",
+      async (scenarioDir, setStateDir) => {
+        const oldDestination = join(scenarioDir, "old.md");
+        const captureTargets: string[] = [];
+        const { sink, operationalLogger, auditLogger } = makeDebugLoggers();
+
+        const result = await runPersistentInChatScenario({
+          events: [
+            makeEvent(
+              "u-capture-conflict-loop",
+              "message.user",
+              `::capture-${TEST_WORKSPACE_ALIAS}`,
+            ),
+          ],
+          recordingPipeline: makePersistentInChatRecordingPipeline({
+            async captureSnapshot(input) {
+              captureTargets.push(input.targetPath);
+              await Deno.writeTextFile(input.targetPath, "occupied by race");
+              throw new Deno.errors.AlreadyExists(
+                "capture destination exists",
+              );
+            },
+          }),
+          operationalLogger,
+          auditLogger,
+          prepopulate: makeSingleWorkspaceOutputPrepopulate(() => ({
+            currentResolvedPath: oldDestination,
+            desiredState: "on",
+            writeCursor: 1,
+            activeRecordingCycleId: "cycle-before-conflict-loop",
+            recordingCycles: [{
+              recordingCycleId: "cycle-before-conflict-loop",
+              startedCursor: 0,
+              startedAt: "2026-02-22T09:59:00.000Z",
+            }],
+          })),
+        });
+        setStateDir(result.stateDir);
+
+        const firstTarget = join(
+          result.workspace.profile.resolvedDefaultOutputDir,
+          "codex-session.md",
+        );
+        assertEquals(captureTargets.length, 6);
+        assertEquals(captureTargets[0], firstTarget);
+        assertEquals(new Set(captureTargets).size, 6);
+        assert(captureTargets.every((target) => target.endsWith(".md")));
+
+        const session = findScenarioMetadata(result.metadataList);
+        const output = findWorkspaceOutputState(session);
+        assertEquals(output.currentResolvedPath, oldDestination);
+        assertEquals(output.desiredState, "on");
+        assertEquals(
+          output.activeRecordingCycleId,
+          "cycle-before-conflict-loop",
+        );
+        assert(
+          sink.records.some((record) =>
+            record.event === "recording.command.failed" &&
+            String(record.attributes?.["command"] ?? "") === "capture" &&
+            String(record.attributes?.["error"] ?? "").includes(
+              "Capture destination conflict retries exceeded",
+            )
+          ),
+        );
+      },
+    );
+  },
+);
+
+Deno.test(
   "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> does not retry on generic already-exists message errors",
   async () => {
     await withScenarioDirs(
@@ -1185,6 +1408,70 @@ Deno.test(
         setStateDir(result.stateDir);
 
         assertEquals(captureTitles, [storedSnippet]);
+      },
+    );
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop persistent in-chat ::capture-<alias> falls back to extracted conversation snippet for title",
+  async () => {
+    await withScenarioDirs(
+      "daemon-runtime-capture-title-events-",
+      async (scenarioDir, setStateDir) => {
+        const destination = join(scenarioDir, "pointer.md");
+        const captureTitles: string[] = [];
+        const conversationSnippet =
+          "Please document the control queue lifecycle for operators.";
+        const result = await runPersistentInChatScenario({
+          events: [
+            makeEvent(
+              "u-title-source",
+              "message.user",
+              conversationSnippet,
+            ),
+            makeEvent(
+              "a-title-source",
+              "message.assistant",
+              "I can do that.",
+            ),
+            makeEvent(
+              "u-capture-title-fallback",
+              "message.user",
+              `::capture-${TEST_WORKSPACE_ALIAS}`,
+            ),
+          ],
+          recordingPipeline: makePersistentInChatRecordingPipeline({
+            captureSnapshot(input) {
+              assertExists(input.title);
+              captureTitles.push(input.title);
+              return Promise.resolve({
+                outputPath: input.targetPath,
+                writeResult: {
+                  mode: "overwrite",
+                  outputPath: input.targetPath,
+                  wrote: true,
+                  deduped: false,
+                },
+                format: "markdown" as const,
+              });
+            },
+          }),
+          prepopulate: makeSingleWorkspaceOutputPrepopulate(() => ({
+            currentResolvedPath: destination,
+            desiredState: "on",
+            writeCursor: 1,
+            activeRecordingCycleId: "cycle-pointer-fallback",
+            recordingCycles: [{
+              recordingCycleId: "cycle-pointer-fallback",
+              startedCursor: 0,
+              startedAt: "2026-02-22T09:59:00.000Z",
+            }],
+          })),
+        });
+        setStateDir(result.stateDir);
+
+        assertEquals(captureTitles, [conversationSnippet]);
       },
     );
   },
@@ -2870,6 +3157,381 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
   const last = statusHistory[statusHistory.length - 1];
   assertExists(last);
   assertEquals(last?.daemonRunning, false);
+});
+
+Deno.test("runDaemonRuntimeLoop replays provider source for export requests when a session has no twin history", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-export-source-replay-",
+  );
+
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const providerSessionId = "session-export-source-replay";
+    const sourceFilePath = join(stateDir, "export-source-replay-claude.jsonl");
+    await writeClaudeReplayFixture({
+      filePath: sourceFilePath,
+      sessionId: providerSessionId,
+      firstUserContent: "export source replay context",
+      assistantContent: "export source replay reply",
+      tailUserContent: "export source replay tail",
+    });
+
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-export-source-start-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "claude",
+      providerSessionId,
+      sourceFilePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const requests = [
+      {
+        requestId: "req-export-source-replay",
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: providerSessionId,
+          resolvedOutputPath: ".kato/test-runtime/source-replay-export.md",
+        },
+      },
+      {
+        requestId: "req-stop-source-replay",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "stop" as const,
+      },
+    ];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let exported:
+      | {
+        provider: string;
+        sessionId: string;
+        targetPath: string;
+        contents: Array<string | undefined>;
+      }
+      | undefined;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot(input) {
+        exported = {
+          provider: input.provider,
+          sessionId: input.sessionId,
+          targetPath: input.targetPath,
+          contents: input.events.map((event) => {
+            if (
+              event.kind === "message.user" ||
+              event.kind === "message.assistant" ||
+              event.kind === "message.system" ||
+              event.kind === "thinking" ||
+              event.kind === "provider.info"
+            ) {
+              return event.content;
+            }
+            return undefined;
+          }),
+        };
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertExists(exported);
+    assertEquals(exported.provider, "claude");
+    assertEquals(exported.sessionId, providerSessionId);
+    assertEquals(
+      exported.targetPath,
+      ".kato/test-runtime/source-replay-export.md",
+    );
+    assertEquals(exported.contents, [
+      "export source replay context",
+      "export source replay reply",
+      "export source replay tail",
+    ]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop falls back to the live snapshot when persisted history loading fails", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-export-live-fallback-",
+  );
+
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const providerSessionId = "session-export-live-fallback";
+    const brokenSourcePath = join(stateDir, "broken-source");
+    await Deno.mkdir(brokenSourcePath, { recursive: true });
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: providerSessionId,
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [
+        makeEventForSession(
+          providerSessionId,
+          "m-live-fallback",
+          "message.assistant",
+          "live snapshot fallback",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ],
+    });
+
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-export-live-fallback-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId,
+      sourceFilePath: brokenSourcePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const requests = [
+      {
+        requestId: "req-export-live-fallback",
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: providerSessionId,
+          resolvedOutputPath: ".kato/test-runtime/live-fallback-export.md",
+        },
+      },
+      {
+        requestId: "req-stop-live-fallback",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "stop" as const,
+      },
+    ];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let exported:
+      | {
+        provider: string;
+        sessionId: string;
+        targetPath: string;
+        contents: Array<string | undefined>;
+      }
+      | undefined;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot(input) {
+        exported = {
+          provider: input.provider,
+          sessionId: input.sessionId,
+          targetPath: input.targetPath,
+          contents: input.events.map((event) => {
+            if (
+              event.kind === "message.user" ||
+              event.kind === "message.assistant" ||
+              event.kind === "message.system" ||
+              event.kind === "thinking" ||
+              event.kind === "provider.info"
+            ) {
+              return event.content;
+            }
+            return undefined;
+          }),
+        };
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertExists(exported);
+    assertEquals(exported.provider, "codex");
+    assertEquals(exported.sessionId, providerSessionId);
+    assertEquals(
+      exported.targetPath,
+      ".kato/test-runtime/live-fallback-export.md",
+    );
+    assertEquals(exported.contents, ["live snapshot fallback"]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
 });
 
 Deno.test("runDaemonRuntimeLoop starts, polls, and stops ingestion runners", async () => {
@@ -4687,6 +5349,545 @@ Deno.test("runDaemonRuntimeLoop persists recording state via sessionStateStore",
   }
 });
 
+Deno.test(
+  "runDaemonRuntimeLoop appends persisted workspace outputs using source config overrides after workspace unregister",
+  async () => {
+    const stateDir = await makeTestTempDir(
+      "daemon-runtime-persisted-output-config-",
+    );
+    try {
+      const workspace = await createTestWorkspaceFixture(stateDir);
+      await Deno.writeTextFile(
+        workspace.profile.configPath,
+        [
+          `workspaceId: ${workspace.profile.workspaceId}`,
+          'workspaceTimezone: "UTC"',
+          "workspaceFeatureFlags:",
+          "  writerIncludeToolResults: true",
+          "  writerIncludeDecisionSelection: false",
+          "markdownFrontmatter:",
+          "  includeFrontmatterInMarkdownRecordings: false",
+          "  addParticipantUsernameToHeadings: true",
+        ].join("\n") + "\n",
+      );
+
+      const sourceFilePath = join(stateDir, "persisted-source-config.jsonl");
+      await Deno.writeTextFile(sourceFilePath, "[]\n");
+
+      const statusStore = makeRuntimeStatusStore();
+      const controlStore = makeStopControlStore(
+        "req-stop-persisted-output-config",
+      );
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => "kato-session-persisted-output-config-1234",
+      });
+      const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "session-persisted-output-config",
+        sourceFilePath,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      metadata.workspaceOutputs = [
+        makeWorkspaceOutputState(workspace, {
+          currentResolvedPath: join(stateDir, "persisted-output-config.md"),
+          desiredState: "on",
+          writeCursor: 0,
+          activeRecordingCycleId: "cycle-persisted-config",
+          recordingCycles: [{
+            recordingCycleId: "cycle-persisted-config",
+            startedCursor: 0,
+            startedAt: "2026-02-22T09:59:00.000Z",
+          }],
+        }),
+      ];
+      await sessionStateStore.saveSessionMetadata(metadata);
+
+      sessionSnapshotStore.upsert({
+        provider: "codex",
+        sessionId: "session-persisted-output-config",
+        cursor: { kind: "byte-offset", value: 1 },
+        events: [
+          makeEventForSession(
+            "session-persisted-output-config",
+            "u-persisted-config",
+            "message.user",
+            "Persisted output config fallback",
+            "2026-02-22T10:00:00.000Z",
+          ),
+        ],
+      });
+
+      let appendInput:
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
+        | undefined;
+      const recordingPipeline: RecordingPipelineLike = {
+        activateRecording() {
+          throw new Error("not used");
+        },
+        captureSnapshot() {
+          throw new Error("not used");
+        },
+        exportSnapshot() {
+          throw new Error("not used");
+        },
+        appendToActiveRecording() {
+          return Promise.resolve({ appended: false, deduped: false });
+        },
+        appendToDestination(input) {
+          appendInput = input;
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+        stopRecording() {
+          return true;
+        },
+        getActiveRecording() {
+          return undefined;
+        },
+        listActiveRecordings() {
+          return [];
+        },
+        getRecordingSummary() {
+          return { activeRecordings: 0, destinations: 0 };
+        },
+      };
+
+      const emptyWorkspaceCatalog: WorkspaceCatalogLike = {
+        getByAlias() {
+          return Promise.resolve(undefined);
+        },
+        getByWorkspaceId() {
+          return Promise.resolve(undefined);
+        },
+        list() {
+          return Promise.resolve([]);
+        },
+        refreshIfChanged() {
+          return Promise.resolve();
+        },
+      };
+      const unusedWorkspaceProfileResolver: WorkspaceProfileResolverLike = {
+        resolveForCommand() {
+          throw new Error("resolveForCommand should not be called");
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        sessionSnapshotStore,
+        sessionStateStore,
+        userConfig: createDefaultUserConfig({
+          workspaceUsernames: {
+            [workspace.profile.workspaceId]: "persisted-user",
+          },
+        }),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog: emptyWorkspaceCatalog,
+        workspaceProfileResolver: unusedWorkspaceProfileResolver,
+      });
+
+      assertExists(appendInput);
+      assertEquals(
+        appendInput.targetPath,
+        join(stateDir, "persisted-output-config.md"),
+      );
+      assertEquals(appendInput.workspaceIds, [workspace.profile.workspaceId]);
+      assertEquals(appendInput.recordingCycleIds, ["cycle-persisted-config"]);
+      const outputOverrides = appendInput.outputOverrides;
+      assertExists(outputOverrides);
+      const renderOptions = outputOverrides.renderOptions;
+      assertExists(renderOptions);
+      assertEquals(outputOverrides.includeFrontmatter, false);
+      assertEquals(
+        renderOptions.includeToolResults,
+        true,
+      );
+      assertEquals(
+        renderOptions.includeDecisionSelection,
+        false,
+      );
+      assertEquals(
+        renderOptions.headingTimestampTimezone,
+        "UTC",
+      );
+      assertEquals(
+        renderOptions.speakerNames?.user,
+        "persisted-user",
+      );
+
+      const reloaded = (await sessionStateStore.listSessionMetadata())[0];
+      assertExists(reloaded);
+      const output = findWorkspaceOutputState(reloaded);
+      assertEquals(output.writeCursor, 1);
+      assertEquals(output.sourceConfigPath, workspace.profile.configPath);
+    } finally {
+      await Deno.remove(stateDir, { recursive: true });
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop appends persisted workspace outputs with stored defaults when source config is gone",
+  async () => {
+    const stateDir = await makeTestTempDir(
+      "daemon-runtime-persisted-output-defaults-",
+    );
+    try {
+      const workspace = await createTestWorkspaceFixture(stateDir);
+      const missingConfigPath = join(stateDir, "missing-workspace-config.yaml");
+      const sourceFilePath = join(stateDir, "persisted-source-defaults.jsonl");
+      await Deno.writeTextFile(sourceFilePath, "[]\n");
+
+      const statusStore = makeRuntimeStatusStore();
+      const controlStore = makeStopControlStore(
+        "req-stop-persisted-output-defaults",
+      );
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => "kato-session-persisted-output-defaults-1234",
+      });
+      const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "session-persisted-output-defaults",
+        sourceFilePath,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      const output = makeWorkspaceOutputState(workspace, {
+        currentResolvedPath: join(stateDir, "persisted-output-defaults.md"),
+        desiredState: "on",
+        writeCursor: 0,
+        activeRecordingCycleId: "cycle-persisted-defaults",
+        recordingCycles: [{
+          recordingCycleId: "cycle-persisted-defaults",
+          startedCursor: 0,
+          startedAt: "2026-02-22T09:59:00.000Z",
+        }],
+      });
+      output.sourceConfigPath = missingConfigPath;
+      output.writerFeatureFlags = {
+        ...output.writerFeatureFlags,
+        writerIncludeToolResults: true,
+        writerIncludeDecisionSelection: false,
+        writerItalicizeUserMessages: true,
+      };
+      metadata.workspaceOutputs = [output];
+      await sessionStateStore.saveSessionMetadata(metadata);
+
+      sessionSnapshotStore.upsert({
+        provider: "codex",
+        sessionId: "session-persisted-output-defaults",
+        cursor: { kind: "byte-offset", value: 1 },
+        events: [
+          makeEventForSession(
+            "session-persisted-output-defaults",
+            "u-persisted-defaults",
+            "message.user",
+            "Persisted output default fallback",
+            "2026-02-22T10:00:00.000Z",
+          ),
+        ],
+      });
+
+      let appendInput:
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
+        | undefined;
+      const recordingPipeline: RecordingPipelineLike = {
+        activateRecording() {
+          throw new Error("not used");
+        },
+        captureSnapshot() {
+          throw new Error("not used");
+        },
+        exportSnapshot() {
+          throw new Error("not used");
+        },
+        appendToActiveRecording() {
+          return Promise.resolve({ appended: false, deduped: false });
+        },
+        appendToDestination(input) {
+          appendInput = input;
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+        stopRecording() {
+          return true;
+        },
+        getActiveRecording() {
+          return undefined;
+        },
+        listActiveRecordings() {
+          return [];
+        },
+        getRecordingSummary() {
+          return { activeRecordings: 0, destinations: 0 };
+        },
+      };
+
+      const emptyWorkspaceCatalog: WorkspaceCatalogLike = {
+        getByAlias() {
+          return Promise.resolve(undefined);
+        },
+        getByWorkspaceId() {
+          return Promise.resolve(undefined);
+        },
+        list() {
+          return Promise.resolve([]);
+        },
+        refreshIfChanged() {
+          return Promise.resolve();
+        },
+      };
+      const unusedWorkspaceProfileResolver: WorkspaceProfileResolverLike = {
+        resolveForCommand() {
+          throw new Error("resolveForCommand should not be called");
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        sessionSnapshotStore,
+        sessionStateStore,
+        userConfig: createDefaultUserConfig(),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog: emptyWorkspaceCatalog,
+        workspaceProfileResolver: unusedWorkspaceProfileResolver,
+      });
+
+      assertExists(appendInput);
+      const outputOverrides = appendInput.outputOverrides;
+      assertExists(outputOverrides);
+      const renderOptions = outputOverrides.renderOptions;
+      assertExists(renderOptions);
+      assertEquals(
+        renderOptions.includeToolResults,
+        true,
+      );
+      assertEquals(
+        renderOptions.includeDecisionSelection,
+        false,
+      );
+      assertEquals(
+        renderOptions.italicizeUserMessages,
+        true,
+      );
+      assertEquals(
+        renderOptions.headingTimestampTimezone,
+        "local",
+      );
+      assertEquals(outputOverrides.includeFrontmatter, true);
+      assertEquals(
+        renderOptions.speakerNames,
+        undefined,
+      );
+
+      const reloaded = (await sessionStateStore.listSessionMetadata())[0];
+      assertExists(reloaded);
+      const reloadedOutput = findWorkspaceOutputState(reloaded);
+      assertEquals(reloadedOutput.writeCursor, 1);
+      assertEquals(reloadedOutput.sourceConfigPath, missingConfigPath);
+    } finally {
+      await Deno.remove(stateDir, { recursive: true });
+    }
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop appends persisted workspace outputs with stored defaults when source config was never recorded",
+  async () => {
+    const stateDir = await makeTestTempDir(
+      "daemon-runtime-persisted-output-no-config-path-",
+    );
+    try {
+      const workspace = await createTestWorkspaceFixture(stateDir);
+      const sourceFilePath = join(stateDir, "persisted-source-no-config.jsonl");
+      await Deno.writeTextFile(sourceFilePath, "[]\n");
+
+      const statusStore = makeRuntimeStatusStore();
+      const controlStore = makeStopControlStore(
+        "req-stop-persisted-output-no-config-path",
+      );
+      const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+      const sessionStateStore = new PersistentSessionStateStore({
+        katoDir: join(stateDir, ".kato"),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        makeSessionId: () => "kato-session-persisted-output-no-config-1234",
+      });
+      const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "session-persisted-output-no-config-path",
+        sourceFilePath,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      const output = makeWorkspaceOutputState(workspace, {
+        currentResolvedPath: join(stateDir, "persisted-output-no-config.md"),
+        desiredState: "on",
+        writeCursor: 0,
+        activeRecordingCycleId: "cycle-persisted-no-config",
+        recordingCycles: [{
+          recordingCycleId: "cycle-persisted-no-config",
+          startedCursor: 0,
+          startedAt: "2026-02-22T09:59:00.000Z",
+        }],
+      });
+      output.sourceConfigPath = undefined;
+      output.writerFeatureFlags = {
+        ...output.writerFeatureFlags,
+        writerIncludeToolResults: true,
+        writerIncludeDecisionSelection: false,
+      };
+      metadata.workspaceOutputs = [output];
+      await sessionStateStore.saveSessionMetadata(metadata);
+
+      sessionSnapshotStore.upsert({
+        provider: "codex",
+        sessionId: "session-persisted-output-no-config-path",
+        cursor: { kind: "byte-offset", value: 1 },
+        events: [
+          makeEventForSession(
+            "session-persisted-output-no-config-path",
+            "u-persisted-no-config",
+            "message.user",
+            "Persisted output no-config fallback",
+            "2026-02-22T10:00:00.000Z",
+          ),
+        ],
+      });
+
+      let appendInput:
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
+        | undefined;
+      const recordingPipeline: RecordingPipelineLike = {
+        activateRecording() {
+          throw new Error("not used");
+        },
+        captureSnapshot() {
+          throw new Error("not used");
+        },
+        exportSnapshot() {
+          throw new Error("not used");
+        },
+        appendToActiveRecording() {
+          return Promise.resolve({ appended: false, deduped: false });
+        },
+        appendToDestination(input) {
+          appendInput = input;
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+        stopRecording() {
+          return true;
+        },
+        getActiveRecording() {
+          return undefined;
+        },
+        listActiveRecordings() {
+          return [];
+        },
+        getRecordingSummary() {
+          return { activeRecordings: 0, destinations: 0 };
+        },
+      };
+
+      const emptyWorkspaceCatalog: WorkspaceCatalogLike = {
+        getByAlias() {
+          return Promise.resolve(undefined);
+        },
+        getByWorkspaceId() {
+          return Promise.resolve(undefined);
+        },
+        list() {
+          return Promise.resolve([]);
+        },
+        refreshIfChanged() {
+          return Promise.resolve();
+        },
+      };
+      const unusedWorkspaceProfileResolver: WorkspaceProfileResolverLike = {
+        resolveForCommand() {
+          throw new Error("resolveForCommand should not be called");
+        },
+      };
+
+      await runDaemonRuntimeLoop({
+        statusStore,
+        controlStore,
+        recordingPipeline,
+        sessionSnapshotStore,
+        sessionStateStore,
+        userConfig: createDefaultUserConfig({
+          workspaceUsernames: {
+            [workspace.profile.workspaceId]: "persisted-user",
+          },
+        }),
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+        pid: 4242,
+        heartbeatIntervalMs: 50,
+        pollIntervalMs: 10,
+        workspaceCatalog: emptyWorkspaceCatalog,
+        workspaceProfileResolver: unusedWorkspaceProfileResolver,
+      });
+
+      assertExists(appendInput);
+      const outputOverrides = appendInput.outputOverrides;
+      assertExists(outputOverrides);
+      const renderOptions = outputOverrides.renderOptions;
+      assertExists(renderOptions);
+      assertEquals(outputOverrides.includeFrontmatter, true);
+      assertEquals(renderOptions.includeToolResults, true);
+      assertEquals(renderOptions.includeDecisionSelection, false);
+      assertEquals(renderOptions.headingTimestampTimezone, "local");
+      assertEquals(renderOptions.speakerNames, undefined);
+
+      const reloaded = (await sessionStateStore.listSessionMetadata())[0];
+      assertExists(reloaded);
+      const reloadedOutput = findWorkspaceOutputState(reloaded);
+      assertEquals(reloadedOutput.writeCursor, 1);
+      assertEquals(reloadedOutput.sourceConfigPath, undefined);
+    } finally {
+      await Deno.remove(stateDir, { recursive: true });
+    }
+  },
+);
+
 Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is truncated", async () => {
   const stateDir = await makeTestTempDir("daemon-runtime-capture-twin-start-");
 
@@ -4896,6 +6097,209 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
     assertEquals(capturedSummary, [
       { kind: "message.user", content: "early context" },
       { kind: "message.assistant", content: "early reply" },
+      {
+        kind: "message.user",
+        content:
+          `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+      },
+    ]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop captures from provider source when no twin exists and snapshot is truncated", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-capture-source-start-",
+  );
+
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const provider = "claude";
+    const providerSessionId = "session-capture-source-start";
+    const sourceFilePath = join(stateDir, "source-replay-claude.jsonl");
+    await writeClaudeReplayFixture({
+      filePath: sourceFilePath,
+      sessionId: providerSessionId,
+      firstUserContent: "source replay early context",
+      assistantContent: "source replay early reply",
+      tailUserContent:
+        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+    });
+
+    const fullConversation = [
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-u-history",
+        "message.user",
+        "source replay early context",
+        "2026-02-22T10:00:00.000Z",
+      ),
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-a-history",
+        "message.assistant",
+        "source replay early reply",
+        "2026-02-22T10:00:01.000Z",
+      ),
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-u-tail",
+        "message.user",
+        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+        "2026-02-22T10:00:02.000Z",
+      ),
+    ];
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      retention: {
+        maxSessions: 200,
+        maxEventsPerSession: 1,
+      },
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-capture-source-start-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider,
+      providerSessionId,
+      sourceFilePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    sessionSnapshotStore.upsert({
+      provider,
+      sessionId: providerSessionId,
+      cursor: { kind: "byte-offset", value: 3 },
+      events: fullConversation,
+    });
+
+    const requests = [{
+      requestId: "req-stop-capture-from-source-start",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let capturedSummary: Array<{ kind: string; content?: string }> = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot(input) {
+        capturedSummary = input.events.map((event) => {
+          if (
+            event.kind === "message.user" ||
+            event.kind === "message.assistant" ||
+            event.kind === "message.system" ||
+            event.kind === "thinking" ||
+            event.kind === "provider.info"
+          ) {
+            return { kind: event.kind, content: event.content };
+          }
+          return { kind: event.kind };
+        });
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination() {
+        return Promise.resolve({
+          mode: "append",
+          outputPath: DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH,
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+      workspaceCatalog: workspace.workspaceCatalog,
+      workspaceProfileResolver: workspace.workspaceProfileResolver,
+    });
+
+    assertEquals(capturedSummary, [
+      { kind: "message.user", content: "source replay early context" },
+      { kind: "message.assistant", content: "source replay early reply" },
       {
         kind: "message.user",
         content:

@@ -13,7 +13,7 @@ import {
   type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
-  providerAutoGeneratesSnapshots,
+  providerAutoGeneratesTwins,
 } from "./activity_state.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -61,7 +61,7 @@ export interface AppChromeStatus {
 
 export interface ConfiguredProvider {
   provider: string;
-  autoGenerateSnapshots: boolean;
+  autoGenerateTwins: boolean;
 }
 
 export interface SummarySessionRow {
@@ -71,7 +71,6 @@ export interface SummarySessionRow {
   snippet?: string;
   updatedAt: string;
   state: ActivityState;
-  canOpenIngestView: boolean;
 }
 
 export interface SummaryPageData {
@@ -188,7 +187,7 @@ export async function loadSummaryPageData(
     .filter((p) => (runtimeConfig.providerSessionRoots[p] ?? []).length > 0)
     .map((p) => ({
       provider: p,
-      autoGenerateSnapshots: providerAutoGeneratesSnapshots(p, runtimeConfig),
+      autoGenerateTwins: providerAutoGeneratesTwins(p, runtimeConfig),
     }));
   const sessionGenerationCounts = summarizeSessionGenerationState(
     sessionActivityRows,
@@ -250,7 +249,6 @@ function buildSummarySessionRows(
       snippet: row.snippet,
       updatedAt: row.updatedAt,
       state: row.state,
-      canOpenIngestView: row.canOpenIngestView,
     })),
     ...liveOnlySessions.map((session) => ({
       provider: session.provider,
@@ -266,7 +264,6 @@ function buildSummarySessionRows(
         },
         runtimeConfig,
       ),
-      canOpenIngestView: false,
     })),
   ];
 

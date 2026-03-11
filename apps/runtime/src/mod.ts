@@ -78,10 +78,12 @@ export { DenoDetachedDaemonLauncher } from "./orchestrator/launcher.ts";
 export type {
   GetOrCreateSessionMetadataInput,
   PersistentSessionStateStoreOptions,
+  ResetSessionTwinPersistenceOptions,
   SessionStateIdentity,
   SessionStateLocation,
 } from "./orchestrator/session_state_store.ts";
 export {
+  clearSessionTwinPersistence,
   makeDefaultSessionCursor,
   PersistentSessionStateStore,
   resolveDefaultDaemonControlIndexPath,
@@ -188,6 +190,12 @@ export type {
   MaintenanceCleanStats,
 } from "./maintenance/mod.ts";
 export { runMaintenanceClean } from "./maintenance/mod.ts";
+export type { TwinToConversationOptions } from "./session_history.ts";
+export {
+  loadPersistedSessionHistoryEvents,
+  mapTwinEventsToConversation,
+  replayProviderSourceEvents,
+} from "./session_history.ts";
 export type {
   WebProcessLauncherLike,
   WebServerStatus,

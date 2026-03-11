@@ -592,3 +592,78 @@ created: 1771779490894
     materially reduces CLI/web duplication.
   - Add the remaining shell/docs polish work, including logo/wordmark wiring
     and a codebase-overview refresh when the next major web slice lands.
+
+### Distinguish Live Ingestion from Twin Persistence
+
+- Decision:
+  - Keep provider ingestion into the in-memory snapshot store independent from
+    persisted twin creation.
+  - Rename runtime config persistence controls from
+    `globalAutoGenerateSnapshots` / `providerAutoGenerateSnapshots` to
+    `globalAutoGenerateTwins` / `providerAutoGenerateTwins`, and fail fast if
+    the old keys are present.
+  - Persist durable session metadata across restarts even when twin persistence
+    is disabled.
+  - Persist twins only when the provider auto-twin policy allows it or the user
+    explicitly requests `create twin` / `update twin`.
+  - Remove durable `snippet` storage from session metadata; derive snippets from
+    live snapshots or twin/source replay when needed.
+  - Replace the top-level web `/ingestion` surface with `/twins`, and treat
+    `/sessions` as the primary live session inventory.
+- Owner: Kato engineering
+- Date: 2026-03-11
+- Why:
+  - The old model conflated live parsing, durable metadata, and durable
+    conversation history, which made transcript persistence happen as an
+    implicit side effect of discovery.
+  - Separating those concerns keeps command detection and restart continuity
+    working without forcing transcript retention for every provider session.
+  - The web app needed a cleaner distinction between live session state and
+    persisted twin state; `/ingestion` no longer reflected the actual product
+    concept.
+- Tradeoffs:
+  - Non-auto-twin sessions now rely on provider-source replay for some
+    full-history `capture` / `export` flows after restart, which can reduce
+    historical timestamp fidelity for Codex compared with live/auto-twin paths.
+  - Web loaders and routes now carry two distinct inventories (`/sessions` and
+    `/twins`) instead of overloading one page for both concerns.
+- Follow-up tasks:
+  - Document the Codex replay timestamp caveat anywhere operator-facing replay
+    behavior is described.
+  - Clarify shutdown cleanup docs so privacy does not rely on twin-file
+    deletion semantics.
+
+### Move Twin Management Into Maintenance
+
+- Decision:
+  - Remove the top-level web `/twins` route/tab and move persisted twin
+    inspection plus cleanup into `Maintenance`.
+  - Derive maintenance twin state from actual twin availability plus source
+    freshness, instead of reusing Sessions-page twin visibility heuristics.
+  - Keep Sessions focused on live activity/recordings and use explicit
+    `show snippet` affordances for missing snippets.
+  - Resolve snippets on demand from live snapshot, twin replay, or explicit
+    source replay, then cache revealed snippets in the browser so they can
+    appear across web surfaces for that operator after first reveal.
+  - Delete twins inline from Maintenance and immediately rewrite metadata to
+    canonical no-twin state while preserving non-twin session continuity.
+- Owner: Kato engineering
+- Date: 2026-03-11
+- Why:
+  - The separate `/twins` page made a troubleshooting/cleanup concern look like
+    a primary navigation concept.
+  - Reusing Sessions-page twin heuristics produced contradictory UI states such
+    as `current` plus `create twin`.
+  - On-demand snippet reveal preserves default privacy for old sessions without
+    requiring startup-time snippet backfill.
+- Tradeoffs:
+  - Revealed snippets are cached per browser/operator rather than persisted in
+    durable session metadata, so cross-browser visibility still requires a new
+    reveal.
+  - Maintenance now owns a denser mixed surface (cleanup plus twin
+    troubleshooting), which increases that page's complexity slightly.
+- Follow-up tasks:
+  - Add browser-level UI coverage for the revealed-snippet cache behavior if
+    we later expand frontend test infrastructure.
+  - Revisit whether any Maintenance filter state should be preserved across the
+    other cleanup forms.

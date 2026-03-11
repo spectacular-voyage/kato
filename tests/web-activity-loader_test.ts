@@ -13,6 +13,7 @@ import {
   UserConfigFileStore,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
+import { loadMaintenanceTwinsData } from "../apps/web/src/loaders/maintenance_twins.ts";
 import { loadRecordingsPageData } from "../apps/web/src/loaders/recordings.ts";
 import { loadSessionsPageData } from "../apps/web/src/loaders/sessions.ts";
 import { loadWorkspacesPageData } from "../apps/web/src/loaders/workspaces.ts";
@@ -90,7 +91,6 @@ async function createSessionFixture(options: {
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
-  metadata.snippet = options.snippet;
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs;
   metadata.lastObservedMtimeMs = options.lastObservedMtimeMs;
@@ -492,7 +492,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         assertEquals(betaRow.recordings[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
           alphaRow.recordings[0]?.sessionLink,
-          "/ingestion?workspace=ws-alpha#session-sess-mixed",
+          "/sessions?workspace=ws-alpha#session-sess-mixed",
         );
       });
     } finally {
@@ -501,7 +501,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
   });
 });
 
-Deno.test("loadSessionsPageData handles ingestion continuation and recording fallbacks", async () => {
+Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
 
@@ -632,6 +632,7 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
         );
 
         const allSessions = await loadSessionsPageData();
+        const allTwins = await loadMaintenanceTwinsData();
         assertEquals(allSessions.sessionCount, 3);
         assertEquals(allSessions.activeSessionCount, 0);
         assertEquals(allSessions.staleSessionCount, 3);
@@ -639,8 +640,13 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
         const continuationRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-continue"
         );
+        const continuationTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-continue"
+        );
         assertExists(continuationRow);
-        assertEquals(continuationRow.ingestionAction, "continue");
+        assertExists(continuationTwinRow);
+        assertEquals(continuationTwinRow.twinState, "absent");
+        assertEquals(continuationTwinRow.twinAction, "create");
         assertEquals(continuationRow.recordings.length, 1);
         assertEquals(continuationRow.recordings[0]?.state, "engaged-stale");
         assertEquals(
@@ -651,8 +657,13 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
         const stoppedRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-stopped"
         );
+        const stoppedTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-stopped"
+        );
         assertExists(stoppedRow);
-        assertEquals(stoppedRow.ingestionAction, "none");
+        assertExists(stoppedTwinRow);
+        assertEquals(stoppedTwinRow.twinState, "absent");
+        assertEquals(stoppedTwinRow.twinAction, "create");
         assertEquals(stoppedRow.recordings[0]?.state, "stopped");
         assertEquals(
           stoppedRow.recordings[0]?.recordingCycleId,
@@ -662,10 +673,14 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
         const legacyRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-legacy"
         );
+        const legacyTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-legacy"
+        );
         assertExists(legacyRow);
+        assertExists(legacyTwinRow);
         assertEquals(legacyRow.state, "stale");
-        assertEquals(legacyRow.canOpenIngestView, true);
-        assertEquals(legacyRow.ingestionAction, "none");
+        assertEquals(legacyTwinRow.twinState, "absent");
+        assertEquals(legacyTwinRow.twinAction, "create");
 
         const filtered = await loadSessionsPageData({
           workspaceFilter: "ws-gamma",

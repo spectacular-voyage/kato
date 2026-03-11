@@ -56,7 +56,6 @@ async function createSessionFixture(options: {
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
-  metadata.snippet = options.snippet;
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs?.map((output) => ({
     workspaceId: output.workspaceId,
@@ -387,8 +386,8 @@ Deno.test("loadSummaryPageData counts non-generating sessions as inactive", asyn
           createDefaultRuntimeConfig({
             runtimeDir,
             katoDir,
-            globalAutoGenerateSnapshots: false,
-            providerAutoGenerateSnapshots: {
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
               claude: false,
               codex: false,
               gemini: false,

@@ -46,7 +46,8 @@ export type DaemonCliCommand =
     all: boolean;
     dryRun: boolean;
     recordingsDays?: number;
-    sessionsDays?: number;
+    twinsDays?: number;
+    deleteTwinMetadata?: boolean;
   }
   | {
     name: "user-init";

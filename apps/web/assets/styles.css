@@ -682,6 +682,10 @@ a {
   line-height: 1.35;
 }
 
+.session-list-snippet {
+  font-weight: 700;
+}
+
 .session-list-updated {
   font-size: 0.72rem;
   line-height: 1.15;
@@ -708,6 +712,39 @@ a {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.maintenance-twin-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.maintenance-twin-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  text-align: right;
+}
+
+.maintenance-twin-delete-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.maintenance-twin-delete-button:hover,
+.maintenance-twin-delete-button:focus-visible {
+  color: var(--danger);
+}
+
+.maintenance-twin-delete-icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
 }
 
 .session-activity-copy,
@@ -992,6 +1029,10 @@ a {
   grid-column: span 5;
 }
 
+.span-6 {
+  grid-column: span 6;
+}
+
 .span-7 {
   grid-column: span 7;
 }
@@ -1085,6 +1126,7 @@ a {
 
   .span-4,
   .span-5,
+  .span-6,
   .span-7 {
     grid-column: span 12;
   }

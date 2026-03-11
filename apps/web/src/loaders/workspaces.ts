@@ -12,7 +12,7 @@ import {
   type WorkspaceSummaryRow,
 } from "./status.ts";
 import { loadSessionActivityRows } from "./sessions.ts";
-import { buildIngestionSessionHref } from "../session_routes.ts";
+import { buildSessionInventorySessionHref } from "../session_routes.ts";
 
 export interface WorkspaceRecordingEntry {
   key: string;
@@ -93,7 +93,7 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
         startedAt: recording.startedAt,
         stoppedAt: recording.stoppedAt,
         lastWriteAt: recording.lastWriteAt,
-        sessionLink: buildIngestionSessionHref(session.sessionId, {
+        sessionLink: buildSessionInventorySessionHref(session.sessionId, {
           workspaceFilter: recording.workspaceId,
         }),
       };

@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
   createDefaultSharedBehaviorConfig,
@@ -18,9 +18,10 @@ import {
 import { LIVE_JSON_CACHE_CONTROL } from "../apps/web/src/api_response.ts";
 import {
   getChromeStatusResponse,
-  getIngestionResponse,
   getLogsResponse,
+  getMaintenanceTwinsResponse,
   getRecordingsResponse,
+  getSessionSnippetResponse,
   getSessionsResponse,
   getSummaryResponse,
   getWorkspacesResponse,
@@ -32,6 +33,9 @@ import {
   withLockedEnvironment,
 } from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
+
+const THIS_DIR = dirname(fromFileUrl(import.meta.url));
+const CLAUDE_FIXTURE = join(THIS_DIR, "fixtures", "claude-session.jsonl");
 
 function makeWorkspaceOutput(options: {
   workspaceId: string;
@@ -96,7 +100,6 @@ async function createSessionFixture(options: {
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
-  metadata.snippet = options.snippet;
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs;
   await store.saveSessionMetadata(metadata);
@@ -147,8 +150,8 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
     createDefaultRuntimeConfig({
       runtimeDir,
       katoDir,
-      globalAutoGenerateSnapshots: false,
-      providerAutoGenerateSnapshots: {
+      globalAutoGenerateTwins: false,
+      providerAutoGenerateTwins: {
         claude: false,
         codex: false,
         gemini: false,
@@ -365,7 +368,7 @@ Deno.test("live API routes disable caching and return expected page models", asy
   });
 });
 
-Deno.test("sessions, ingestion, and recordings APIs preserve current query semantics", async () => {
+Deno.test("sessions, maintenance twins, and recordings APIs preserve current query semantics", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
 
@@ -392,8 +395,8 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
             "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
           ),
         );
-        const ingestionActiveResponse = await getIngestionResponse(
-          new URL("http://kato.local/api/ingestion?view=active"),
+        const twinsActiveResponse = await getMaintenanceTwinsResponse(
+          new URL("http://kato.local/api/maintenance-twins?view=active"),
         );
         const recordingsFilteredResponse = await getRecordingsResponse(
           new URL(
@@ -407,7 +410,7 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
             sessionsActiveResponse,
             sessionsWorkspaceResponse,
             sessionsCombinedResponse,
-            ingestionActiveResponse,
+            twinsActiveResponse,
             recordingsFilteredResponse,
           ]
         ) {
@@ -432,7 +435,7 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
           workspaceFilterId?: string;
           rows: Array<{ sessionId: string }>;
         };
-        const ingestionActiveData = await ingestionActiveResponse.json() as {
+        const twinsActiveData = await twinsActiveResponse.json() as {
           includeStale: boolean;
           rows: Array<{ sessionId: string }>;
         };
@@ -461,8 +464,8 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
         assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
           "sess-active",
         ]);
-        assertEquals(ingestionActiveData.includeStale, false);
-        assertEquals(ingestionActiveData.rows.map((row) => row.sessionId), [
+        assertEquals(twinsActiveData.includeStale, false);
+        assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
           "sess-active",
         ]);
         assertEquals(recordingsFilteredData.workspaceFilterId, "ws-beta");
@@ -480,6 +483,97 @@ Deno.test("sessions, ingestion, and recordings APIs preserve current query seman
       restoreRuntimeEnv(env);
     }
   });
+});
+
+Deno.test("session snippet API reconstructs a snippet from persisted source history on demand", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-live-session-snippet-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-source-snippet",
+        });
+        await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "sess-001",
+          sourceFilePath: CLAUDE_FIXTURE,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+
+        const response = await getSessionSnippetResponse(
+          new URL(
+            "http://kato.local/api/session-snippet?sessionId=sess-source-snippet&source=1",
+          ),
+        );
+        assertNoStore(response);
+
+        const payload = await response.json() as {
+          sessionId: string;
+          status: string;
+          source?: string;
+          snippet?: string;
+        };
+        assertEquals(payload.sessionId, "sess-source-snippet");
+        assertEquals(payload.status, "ready");
+        assertEquals(payload.source, "source");
+        assertEquals(
+          payload.snippet,
+          "I want to add authentication to my app. Can you help?",
+        );
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("session snippet API rejects missing sessionId with a no-store error payload", async () => {
+  const response = await getSessionSnippetResponse(
+    new URL("http://kato.local/api/session-snippet?sessionId=%20%20"),
+  );
+
+  assertEquals(response.status, 400);
+  assertEquals(
+    response.headers.get("cache-control"),
+    "no-store, no-cache, must-revalidate",
+  );
+
+  const payload = await response.json() as {
+    sessionId: string;
+    status: string;
+    error?: string;
+  };
+  assertEquals(payload.sessionId, "");
+  assertEquals(payload.status, "unavailable");
+  assertEquals(payload.error, "sessionId is required");
 });
 
 Deno.test("logs API preserves channel, scope, level, event, and text filters", async () => {

@@ -8,6 +8,7 @@ import type {
   RecordingStateFilter,
 } from "../src/loaders/recordings.ts";
 import { formatTimestamp } from "../src/time.ts";
+import SessionSnippet from "./SessionSnippet.tsx";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function buildRecordingsHref(
@@ -171,7 +172,11 @@ export default function RecordingsLive(
                     >
                       {row.provider}: {row.sessionShortId}
                     </a>{" "}
-                    {row.snippet ? `· ${row.snippet}` : ""}
+                    ·{" "}
+                    <SessionSnippet
+                      sessionId={row.sessionId}
+                      snippet={row.snippet}
+                    />
                   </div>
                   <div class="muted">
                     Started {formatTimestamp(row.startedAt)}

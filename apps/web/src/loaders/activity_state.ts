@@ -46,8 +46,7 @@ export function deriveSessionGenerationState(
   input: SessionGenerationStateInput,
   runtimeConfig: RuntimeConfig,
 ): ActivityState {
-  const engaged =
-    providerAutoGeneratesSnapshots(input.provider, runtimeConfig) ||
+  const engaged = providerAutoGeneratesTwins(input.provider, runtimeConfig) ||
     (input.activeRecordingCount ?? 0) > 0 ||
     (input.staleRecordingCount ?? 0) > 0 ||
     (input.recordingCount ?? 0) > 0;
@@ -69,14 +68,14 @@ export async function loadRuntimeConfigOrDefault(): Promise<RuntimeConfig> {
   }
 }
 
-export function providerAutoGeneratesSnapshots(
+export function providerAutoGeneratesTwins(
   provider: string,
   runtimeConfig: RuntimeConfig,
 ): boolean {
-  const perProvider = runtimeConfig.providerAutoGenerateSnapshots as Record<
+  const perProvider = runtimeConfig.providerAutoGenerateTwins as Record<
     string,
     boolean | undefined
   >;
-  return perProvider[provider] ?? runtimeConfig.globalAutoGenerateSnapshots ??
+  return perProvider[provider] ?? runtimeConfig.globalAutoGenerateTwins ??
     false;
 }

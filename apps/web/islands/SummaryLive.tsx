@@ -1,5 +1,5 @@
 import type { SummaryPageData } from "../src/loaders/status.ts";
-import { buildIngestionSessionHref } from "../src/session_routes.ts";
+import { buildSessionInventorySessionHref } from "../src/session_routes.ts";
 import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
@@ -85,7 +85,7 @@ export default function SummaryLive(
   const workspacePrimaryState = data.workspaceSummary.unavailableReason
     ? "neutral"
     : "active";
-  const activeIngestionRows = data.summarySessions
+  const activeSessionRows = data.summarySessions
     .filter((session) => session.state === "active")
     .slice(0, 10);
 
@@ -95,18 +95,18 @@ export default function SummaryLive(
         <h2>Activity</h2>
         <div class="metrics">
           <div class="metric">
-            <span class="label">Ingestion</span>
+            <span class="label">Sessions</span>
             <span class={metricPrimaryStateClass("active")}>
               <span class="metric-primary-count mono">
                 {data.generatingSessionCount}
               </span>
-              <span class="metric-primary-label">active</span>
+              <span class="metric-primary-label">generating</span>
             </span>
             <span class="metric-note mono activity-stale">
               {data.staleGeneratingSessionCount} idle
             </span>
             <span class="metric-note mono">
-              {data.inactiveSessionCount} not ingested
+              {data.inactiveSessionCount} not generating
             </span>
           </div>
           <div class="metric">
@@ -180,7 +180,7 @@ export default function SummaryLive(
                 </div>
                 <div class="muted">
                   Automatic Twin Generation:{" "}
-                  {provider.autoGenerateSnapshots ? "on" : "off"}
+                  {provider.autoGenerateTwins ? "on" : "off"}
                 </div>
               </li>
             ))}
@@ -188,19 +188,19 @@ export default function SummaryLive(
       </article>
 
       <article class="card span-8">
-        <h3>Active Ingestion</h3>
+        <h3>Generating Sessions</h3>
         <ul class="session-list">
-          {activeIngestionRows.length === 0
+          {activeSessionRows.length === 0
             ? (
               <li class="muted">
-                No provider sessions are actively being ingested.
+                No provider sessions are currently generating twins.
               </li>
             )
-            : activeIngestionRows.map((session) => (
+            : activeSessionRows.map((session) => (
               <li key={`${session.provider}:${session.sessionId}`}>
                 <a
                   class="mono summary-ingestion-link"
-                  href={buildIngestionSessionHref(session.sessionId)}
+                  href={buildSessionInventorySessionHref(session.sessionId)}
                   title={`${session.provider}: ${
                     session.snippet ?? "(no snippet)"
                   }`}

@@ -32,6 +32,11 @@ than top-level `.coverage*` directories. The root `test:coverage` task now uses
 subdirectory such as `.test-tmp/coverage/status` or
 `.test-tmp/coverage/provider-ingestion`.
 
+Focused tests that use `tests/test_temp.ts` or otherwise create real files
+under `.test-tmp/` should be run with filesystem permission, typically
+`deno test -A <file>` during local development. A plain `deno test <file>`
+will fail with `NotCapable` for those suites.
+
 ## Test Levels
 
 1. Fast local verification:
@@ -76,6 +81,65 @@ Helper modules under `tests/` such as `tests/test_env.ts` and
 Import them from test files, but do not point scripted runs at `tests/**/*.ts`
 or they will be loaded as zero-test modules.
 
+## Focused Regression Slices
+
+When working on twin-cleanup behavior, the most useful focused slice is:
+
+- `deno test -A tests/maintenance-clean_test.ts`
+- `deno test -A tests/daemon-cli_test.ts`
+- `deno test -A tests/cli-parser_test.ts`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- runtime dry-run and execute behavior for `clean --twins`
+- default twin cleanup preserving metadata while clearing twin-only state
+- opt-in metadata deletion via `--delete-metadata` / Maintenance checkbox
+- CLI parser enforcement that metadata deletion is only accepted with
+  `--twins`
+
+When working on on-demand snippet recovery, the most useful focused slice is:
+
+- `deno test -A tests/web-session-snippets_test.ts`
+- `deno test -A tests/web-live-routes_test.ts --filter "session snippet"`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- `resolveSessionSnippet()` preferring live snippets over replayed persisted
+  history
+- twin-history recovery when source replay is intentionally disabled
+- twin-history precedence over source replay when both paths are allowed
+- unavailable outcomes for missing metadata, no twin history, and empty source
+  replay
+
+If you want per-file coverage confirmation for that helper, run:
+
+- `deno test -A --coverage=.test-tmp/coverage/web-session-snippets tests/web-session-snippets_test.ts tests/web-live-routes_test.ts`
+- `deno coverage --detailed .test-tmp/coverage/web-session-snippets`
+
+That focused coverage run currently drives
+`apps/web/src/session_snippets.ts` to `100%` branch and `100%` line coverage.
+
+When working on session inventory/manual-ingestion route behavior, the most
+useful focused slice is:
+
+- `deno test -A tests/web-session-routes_test.ts`
+- `deno test -A tests/web-live-routes_test.ts`
+- `deno test -A tests/web-session-ingestion_test.ts`
+- `deno test -A tests/daemon-runtime_test.ts --filter "title"`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- session and maintenance href builders normalizing `view=active` and trimmed
+  workspace filters
+- the session-snippet live route failing closed when `sessionId` is missing
+- manual ingestion preserving `ingestionActivatedAt` on no-op twin updates
+- manual ingestion rejecting opaque resume cursors instead of guessing
+- daemon capture title fallback from stored snapshot snippet to extracted
+  conversation snippet
+
 ## Coverage Workflow
 
 1. Generate a fresh raw coverage profile:
@@ -90,11 +154,14 @@ of rerunning the whole suite. If you need a manual raw profile, write it under
 `.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
 directory.
 
-Current local timings from 2026-03-06:
+Current local timings from 2026-03-11:
 
-- `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
-- `deno task test:coverage --frozen --quiet`: `492` passing tests, `80.9%` line
-  coverage, `85.2%` branch coverage, `8.94s` real
+- `deno task test --frozen --quiet`: `607` passing tests, `12.88s` real
+- `deno task test:coverage --frozen --quiet`: `607` passing tests, `80.0%` line
+  coverage, `84.9%` branch coverage, `14.17s` real
+
+Treat those numbers as a dated baseline, not a contract. Refresh this block
+after material test-count or runtime changes land.
 
 Current coverage-report caveat:
 

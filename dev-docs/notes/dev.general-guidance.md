@@ -31,11 +31,14 @@ see [[dev.testing]]
   change it.
 - Keep monorepo boundaries clear:
   - `apps/daemon` for local runtime behavior
-  - `apps/web` for read-only status surfaces
+  - `apps/web` for local operator surfaces, live status views, and bounded guided workflows
   - `apps/cloud` for centralized config/aggregation services
   - `shared/src` for contracts and types used by 2+ apps
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
 - [[dev.security-baseline]] is the normative security contract.
+- Treat `/sessions` as the live provider-session inventory and `Maintenance` as
+  the persisted twin troubleshooting/cleanup surface. When those concepts
+  diverge, prefer explicit route/model renames over compatibility aliases.
 - Startup/config behavior is fail-closed by default:
   - daemon subprocess startup must load runtime config successfully before
     entering runtime loop.
@@ -133,4 +136,3 @@ deno task ci
   `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
   `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
   control commands, and must be ignored by LLMs.
-

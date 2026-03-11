@@ -51,7 +51,7 @@ export interface ProviderSessionRoots {
   gemini: string[];
 }
 
-export interface ProviderAutoGenerateSnapshots {
+export interface ProviderAutoGenerateTwins {
   claude?: boolean;
   codex?: boolean;
   gemini?: boolean;
@@ -90,8 +90,8 @@ export interface RuntimeConfig {
   runtimeDir: string;
   katoDir?: string;
   providerSessionRoots: ProviderSessionRoots;
-  globalAutoGenerateSnapshots?: boolean;
-  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
+  globalAutoGenerateTwins?: boolean;
+  providerAutoGenerateTwins?: ProviderAutoGenerateTwins;
   cleanSessionStatesOnShutdown?: boolean;
   daemonFeatureFlags: DaemonFeatureFlags;
   logging: RuntimeLoggingConfig;

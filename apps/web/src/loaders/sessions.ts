@@ -17,9 +17,9 @@ import {
   type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
-  providerAutoGeneratesSnapshots,
+  providerAutoGeneratesTwins,
 } from "./activity_state.ts";
-import { buildIngestionSessionHref } from "../session_routes.ts";
+import { buildSessionInventorySessionHref } from "../session_routes.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
@@ -46,10 +46,6 @@ export interface SessionActivityRow {
   lastEventAt?: string;
   stale: boolean;
   state: ActivityState;
-  canOpenIngestView: boolean;
-  ingestionAction: SessionIngestionAction;
-  sourceFilePath: string;
-  twinPath: string;
   activeRecordingCount: number;
   staleRecordingCount: number;
   stoppedRecordingCount: number;
@@ -80,8 +76,6 @@ export interface LoadSessionActivityRowsOptions {
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
 }
-
-export type SessionIngestionAction = "start" | "continue" | "none";
 
 export interface ResolvedWorkspaceFilter {
   selector: string;
@@ -204,14 +198,36 @@ function hasTwinHistory(metadata: SessionMetadataV1): boolean {
   return metadata.nextTwinSeq > 1;
 }
 
+function hasPersistedTwinState(metadata: SessionMetadataV1): boolean {
+  return hasTwinHistory(metadata) ||
+    metadata.recentFingerprints.length > 0 ||
+    metadata.ingestionActivatedAt !== undefined;
+}
+
+async function twinFileExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function hasLegacyManualIngestionHistory(metadata: SessionMetadataV1): boolean {
   return hasTwinHistory(metadata) &&
     (metadata.commandCursor ?? 0) === 0;
 }
 
-function hasExplicitIngestionHistory(metadata: SessionMetadataV1): boolean {
+function hasExplicitTwinHistory(metadata: SessionMetadataV1): boolean {
   return metadata.ingestionActivatedAt !== undefined ||
-    hasLegacyManualIngestionHistory(metadata) ||
+    hasLegacyManualIngestionHistory(metadata);
+}
+
+function hasExplicitIngestionHistory(metadata: SessionMetadataV1): boolean {
+  return hasExplicitTwinHistory(metadata) ||
     (metadata.workspaceOutputs?.length ?? 0) > 0;
 }
 
@@ -220,7 +236,7 @@ function hasVisibleIngestionHistory(
   runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
 ): boolean {
   return hasExplicitIngestionHistory(metadata) ||
-    providerAutoGeneratesSnapshots(metadata.provider, runtimeConfig);
+    providerAutoGeneratesTwins(metadata.provider, runtimeConfig);
 }
 
 function normalizePersistedSessionState(
@@ -237,55 +253,17 @@ function normalizePersistedSessionState(
   return state;
 }
 
-async function needsIngestionContinuation(
+async function normalizePersistedTwinMetadata(
+  sessionStore: PersistentSessionStateStore,
   metadata: SessionMetadataV1,
-): Promise<boolean> {
-  const lastObservedMtimeMs = metadata.lastObservedMtimeMs;
-  if (
-    lastObservedMtimeMs === undefined || !Number.isFinite(lastObservedMtimeMs)
-  ) {
-    return false;
+): Promise<SessionMetadataV1> {
+  if (!hasPersistedTwinState(metadata)) {
+    return metadata;
   }
-
-  try {
-    const sourceFileMtimeMs = (await Deno.stat(metadata.sourceFilePath)).mtime
-      ?.getTime();
-    return sourceFileMtimeMs !== undefined &&
-      Number.isFinite(sourceFileMtimeMs) &&
-      sourceFileMtimeMs > lastObservedMtimeMs;
-  } catch {
-    return false;
+  if (await twinFileExists(metadata.twinPath)) {
+    return metadata;
   }
-}
-
-async function resolveSessionIngestionUiState(
-  metadata: SessionMetadataV1,
-  state: ActivityState,
-  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
-): Promise<{
-  canOpenIngestView: boolean;
-  ingestionAction: SessionIngestionAction;
-}> {
-  if (!hasVisibleIngestionHistory(metadata, runtimeConfig)) {
-    return {
-      canOpenIngestView: false,
-      ingestionAction: "start",
-    };
-  }
-
-  if (state === "active") {
-    return {
-      canOpenIngestView: true,
-      ingestionAction: "none",
-    };
-  }
-
-  return {
-    canOpenIngestView: true,
-    ingestionAction: await needsIngestionContinuation(metadata)
-      ? "continue"
-      : "none",
-  };
+  return await sessionStore.resetSessionTwinPersistence(metadata);
 }
 
 function findActiveCycle(
@@ -533,7 +511,7 @@ export function flattenSessionRecordings(
       sessionShortId: row.sessionShortId,
       snippet: row.snippet,
       sessionState: row.state,
-      sessionHref: buildIngestionSessionHref(row.sessionId),
+      sessionHref: buildSessionInventorySessionHref(row.sessionId),
       updatedAt: row.updatedAt,
       lastEventAt: row.lastEventAt,
     }))
@@ -579,6 +557,11 @@ export async function loadSessionActivityRows(
     sessionStore.listSessionMetadata(),
     loadRuntimeConfigOrDefault(),
   ]);
+  const normalizedMetadataList = await Promise.all(
+    metadataList.map((metadata) =>
+      normalizePersistedTwinMetadata(sessionStore, metadata)
+    ),
+  );
 
   const liveBySessionId = new Map(
     (snapshot.sessions ?? []).map((session) => [session.sessionId, session]),
@@ -590,9 +573,9 @@ export async function loadSessionActivityRows(
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
 
-  const rows = (await Promise.all(metadataList.map(async (
+  const rows = (await Promise.all(normalizedMetadataList.map((
     metadata,
-  ): Promise<SessionActivityRow> => {
+  ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
     const recordings = buildRecordingRows(metadata, live, recordingsMode);
     const filteredRecordings = resolvedWorkspaceFilter
@@ -619,26 +602,17 @@ export async function loadSessionActivityRows(
       ),
       runtimeConfig,
     );
-    const ingestionUiState = await resolveSessionIngestionUiState(
-      metadata,
-      state,
-      runtimeConfig,
-    );
     return {
       sessionKey: metadata.sessionKey,
       provider: metadata.provider,
       sessionId: metadata.sessionId,
       sessionShortId: deriveSessionShortId(metadata, live),
       providerSessionId: metadata.providerSessionId,
-      snippet: live?.snippet ?? metadata.snippet,
+      snippet: live?.snippet,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
       stale: live?.stale ?? true,
       state,
-      canOpenIngestView: ingestionUiState.canOpenIngestView,
-      ingestionAction: ingestionUiState.ingestionAction,
-      sourceFilePath: metadata.sourceFilePath,
-      twinPath: metadata.twinPath,
       activeRecordingCount,
       staleRecordingCount,
       stoppedRecordingCount:

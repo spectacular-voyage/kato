@@ -1,8 +1,4 @@
-import {
-  type ConversationEvent,
-  extractSnippet,
-  type ProviderCursor,
-} from "@kato/shared";
+import type { ConversationEvent, ProviderCursor } from "@kato/shared";
 import {
   type AuditLogger,
   PersistentSessionStateStore,
@@ -27,6 +23,7 @@ export interface IngestPersistedSessionResult {
   sessionShortId: string;
   provider: string;
   providerSessionId: string;
+  twinAction: "create" | "update";
   parsedEvents: number;
   appendedTwinEvents: number;
   droppedAsDuplicate: number;
@@ -55,6 +52,29 @@ function resolveParser(provider: string) {
   }
 }
 
+async function twinFileExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function removeFileIfExists(path: string): Promise<void> {
+  try {
+    await Deno.remove(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function ingestPersistedSession(
   options: IngestPersistedSessionOptions,
 ): Promise<IngestPersistedSessionResult> {
@@ -78,9 +98,30 @@ export async function ingestPersistedSession(
       metadata.ingestCursor.value > fileStat.size
     ? { ...metadata.ingestCursor, value: fileStat.size }
     : metadata.ingestCursor;
-  const fromPosition = resolveCursorPosition(resumeCursor);
+  const hasTwinFile = await twinFileExists(metadata.twinPath);
+  const shouldCreateTwin = !hasTwinFile || metadata.nextTwinSeq <= 1;
+  const twinAction: "create" | "update" = shouldCreateTwin
+    ? "create"
+    : "update";
+
+  if (shouldCreateTwin) {
+    await removeFileIfExists(metadata.twinPath);
+    metadata.nextTwinSeq = 1;
+    metadata.recentFingerprints = [];
+    await sessionStore.saveSessionMetadata(metadata);
+  }
+
+  const fromPosition = shouldCreateTwin
+    ? 0
+    : resolveCursorPosition(resumeCursor);
   const incomingEvents: ConversationEvent[] = [];
-  let latestCursor = resumeCursor;
+  let latestCursor = shouldCreateTwin
+    ? (
+      metadata.provider === "gemini"
+        ? { kind: "item-index" as const, value: 0 }
+        : { kind: "byte-offset" as const, value: 0 }
+    )
+    : resumeCursor;
 
   for await (
     const { event, cursor } of parser(
@@ -125,10 +166,6 @@ export async function ingestPersistedSession(
     });
   }
 
-  const snippet = refreshed.snippet ?? extractSnippet(incomingEvents);
-  if (snippet && refreshed.snippet !== snippet) {
-    refreshed.snippet = snippet;
-  }
   if (!refreshed.ingestionActivatedAt) {
     refreshed.ingestionActivatedAt = nowIso;
   }
@@ -142,19 +179,20 @@ export async function ingestPersistedSession(
     sessionShortId: refreshed.sessionId.slice(0, 8),
     provider: refreshed.provider,
     providerSessionId: refreshed.providerSessionId,
+    twinAction,
     sourceFilePath: refreshed.sourceFilePath,
     parsedEvents: incomingEvents.length,
     appendedTwinEvents,
     droppedAsDuplicate,
   };
   await options.operationalLogger?.info(
-    "web.sessions.ingestion.completed",
-    "Manual session ingestion completed",
+    "web.sessions.twin.completed",
+    "Manual session twin action completed",
     logAttributes,
   );
   await options.auditLogger?.record(
-    "web.sessions.ingestion.completed",
-    "Manual session ingestion completed",
+    "web.sessions.twin.completed",
+    "Manual session twin action completed",
     logAttributes,
   );
 
@@ -163,6 +201,7 @@ export async function ingestPersistedSession(
     sessionShortId: refreshed.sessionId.slice(0, 8),
     provider: refreshed.provider,
     providerSessionId: refreshed.providerSessionId,
+    twinAction,
     parsedEvents: incomingEvents.length,
     appendedTwinEvents,
     droppedAsDuplicate,

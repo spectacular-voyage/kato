@@ -58,6 +58,11 @@ export interface AppendTwinEventsOptions {
   touchUpdatedAt?: boolean;
 }
 
+export interface ResetSessionTwinPersistenceOptions {
+  deleteTwinFile?: boolean;
+  touchUpdatedAt?: boolean;
+}
+
 interface TwinAppendResult {
   appended: SessionTwinEventV1[];
   droppedAsDuplicate: number;
@@ -123,7 +128,6 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     createdAt: metadata.createdAt,
     updatedAt: metadata.updatedAt,
     sourceFilePath: metadata.sourceFilePath,
-    ...(metadata.snippet !== undefined ? { snippet: metadata.snippet } : {}),
     ...(metadata.lastObservedMtimeMs !== undefined
       ? { lastObservedMtimeMs: metadata.lastObservedMtimeMs }
       : {}),
@@ -319,6 +323,16 @@ function cloneDaemonControlIndex(
     updatedAt: index.updatedAt,
     sessions: index.sessions.map((entry) => ({ ...entry })),
   };
+}
+
+export function clearSessionTwinPersistence(
+  metadata: SessionMetadataV1,
+): SessionMetadataV1 {
+  const cloned = cloneSessionMetadata(metadata);
+  cloned.nextTwinSeq = 1;
+  cloned.recentFingerprints = [];
+  delete cloned.ingestionActivatedAt;
+  return cloned;
 }
 
 export class PersistentSessionStateStore {
@@ -559,6 +573,20 @@ export class PersistentSessionStateStore {
       events.push(parsed);
     }
     return events;
+  }
+
+  async resetSessionTwinPersistence(
+    metadata: SessionMetadataV1,
+    options: ResetSessionTwinPersistenceOptions = {},
+  ): Promise<SessionMetadataV1> {
+    const nextMetadata = clearSessionTwinPersistence(metadata);
+    if (options.deleteTwinFile) {
+      await this.removeFileIfExists(nextMetadata.twinPath);
+    }
+    await this.saveSessionMetadata(nextMetadata, {
+      touchUpdatedAt: options.touchUpdatedAt,
+    });
+    return nextMetadata;
   }
 
   async loadDaemonControlIndex(): Promise<DaemonControlIndexV1> {

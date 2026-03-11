@@ -11,15 +11,14 @@ import { resolveExportsLogPath } from "../utils/exports_log.ts";
 
 type PathMutationResult = "missing" | "flushed" | "would-flush";
 
-interface SessionFileCandidate {
-  path: string;
-  mtimeMs: number;
-}
+const SESSION_META_SUFFIX = ".meta.json";
+const SESSION_TWIN_SUFFIX = ".twin.jsonl";
 
-interface SessionCleanupCandidate {
+interface TwinCleanupCandidate {
   key: string;
-  files: SessionFileCandidate[];
-  newestMtimeMs: number;
+  twinPath: string;
+  metadataPath: string;
+  twinMtimeMs: number;
 }
 
 export interface MaintenanceCleanStats {
@@ -27,11 +26,13 @@ export interface MaintenanceCleanStats {
   logFilesWouldFlush: number;
   missingFiles: number;
   deletionFailures: number;
-  sessionFilesDeleted: number;
-  sessionFilesWouldDelete: number;
-  sessionsDeleted: number;
-  sessionsWouldDelete: number;
-  sessionsMatched: number;
+  twinFilesDeleted: number;
+  twinFilesWouldDelete: number;
+  metadataFilesDeleted: number;
+  metadataFilesWouldDelete: number;
+  twinsDeleted: number;
+  twinsWouldDelete: number;
+  twinsMatched: number;
   skippedScopes: string[];
 }
 
@@ -39,7 +40,8 @@ export interface MaintenanceCleanOptions {
   all: boolean;
   dryRun: boolean;
   recordingsDays?: number;
-  sessionsDays?: number;
+  twinsDays?: number;
+  deleteTwinMetadata?: boolean;
   runtimeDir?: string;
   katoDir?: string;
   now?: () => Date;
@@ -54,31 +56,13 @@ export interface MaintenanceCleanResult {
   summary: string;
 }
 
-function parseSessionStorageKey(fileName: string): {
-  key: string;
-  kind: "meta" | "twin";
-} | undefined {
-  if (fileName.endsWith(".meta.json")) {
-    return { key: fileName.slice(0, -".meta.json".length), kind: "meta" };
-  }
-  if (fileName.endsWith(".twin.jsonl")) {
-    return { key: fileName.slice(0, -".twin.jsonl".length), kind: "twin" };
-  }
-  return undefined;
-}
-
-async function listSessionCleanupCandidates(
+async function listTwinCleanupCandidates(
   sessionsDir: string,
-): Promise<SessionCleanupCandidate[]> {
-  const byKey = new Map<string, SessionCleanupCandidate>();
+): Promise<TwinCleanupCandidate[]> {
+  const candidates: TwinCleanupCandidate[] = [];
   try {
     for await (const entry of Deno.readDir(sessionsDir)) {
-      if (!entry.isFile) {
-        continue;
-      }
-
-      const parsed = parseSessionStorageKey(entry.name);
-      if (!parsed) {
+      if (!entry.isFile || !entry.name.endsWith(SESSION_TWIN_SUFFIX)) {
         continue;
       }
 
@@ -95,20 +79,13 @@ async function listSessionCleanupCandidates(
       if (!stat.mtime) {
         continue;
       }
-      const mtimeMs = stat.mtime.getTime();
-      const existing = byKey.get(parsed.key);
-      if (!existing) {
-        byKey.set(parsed.key, {
-          key: parsed.key,
-          files: [{ path, mtimeMs }],
-          newestMtimeMs: mtimeMs,
-        });
-        continue;
-      }
-      existing.files.push({ path, mtimeMs });
-      if (mtimeMs > existing.newestMtimeMs) {
-        existing.newestMtimeMs = mtimeMs;
-      }
+      const key = entry.name.slice(0, -SESSION_TWIN_SUFFIX.length);
+      candidates.push({
+        key,
+        twinPath: path,
+        metadataPath: join(sessionsDir, `${key}${SESSION_META_SUFFIX}`),
+        twinMtimeMs: stat.mtime.getTime(),
+      });
     }
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
@@ -117,14 +94,14 @@ async function listSessionCleanupCandidates(
     throw error;
   }
 
-  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+  return candidates.sort((a, b) => a.key.localeCompare(b.key));
 }
 
-function shouldDeleteSessionCandidate(
-  candidate: SessionCleanupCandidate,
+function shouldDeleteTwinCandidate(
+  candidate: TwinCleanupCandidate,
   olderThanMs: number,
 ): boolean {
-  return candidate.newestMtimeMs <= olderThanMs;
+  return candidate.twinMtimeMs <= olderThanMs;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -176,19 +153,22 @@ function createEmptyStats(): MaintenanceCleanStats {
     logFilesWouldFlush: 0,
     missingFiles: 0,
     deletionFailures: 0,
-    sessionFilesDeleted: 0,
-    sessionFilesWouldDelete: 0,
-    sessionsDeleted: 0,
-    sessionsWouldDelete: 0,
-    sessionsMatched: 0,
+    twinFilesDeleted: 0,
+    twinFilesWouldDelete: 0,
+    metadataFilesDeleted: 0,
+    metadataFilesWouldDelete: 0,
+    twinsDeleted: 0,
+    twinsWouldDelete: 0,
+    twinsMatched: 0,
     skippedScopes: [],
   };
 }
 
-async function executeSessionCleanup(
+async function executeTwinCleanup(
   options: {
     dryRun: boolean;
-    sessionsDays: number | undefined;
+    twinsDays: number | undefined;
+    deleteTwinMetadata?: boolean;
     now: () => Date;
     katoDir: string;
     operationalLogger?: StructuredLogger;
@@ -196,76 +176,112 @@ async function executeSessionCleanup(
   },
   stats: MaintenanceCleanStats,
 ): Promise<void> {
-  if (options.sessionsDays === undefined) {
+  if (options.twinsDays === undefined) {
     return;
   }
 
   const nowMs = options.now().getTime();
-  const olderThanMs = nowMs - (options.sessionsDays * 24 * 60 * 60 * 1000);
+  const olderThanMs = nowMs - (options.twinsDays * 24 * 60 * 60 * 1000);
   const sessionsDir = resolveDefaultSessionsDir(options.katoDir);
-  const sessionStateStore = new PersistentSessionStateStore({
-    daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(
-      options.katoDir,
-    ),
-    sessionsDir,
-    now: options.now,
-  });
-  const candidates = await listSessionCleanupCandidates(sessionsDir);
+  const deleteTwinMetadata = options.deleteTwinMetadata === true;
+  const candidates = await listTwinCleanupCandidates(sessionsDir);
   const matched = candidates.filter((candidate) =>
-    shouldDeleteSessionCandidate(candidate, olderThanMs)
+    shouldDeleteTwinCandidate(candidate, olderThanMs)
   );
-  stats.sessionsMatched = matched.length;
+  stats.twinsMatched = matched.length;
+  const sessionStateStore = options.dryRun
+    ? undefined
+    : new PersistentSessionStateStore({
+      daemonControlIndexPath: resolveDefaultDaemonControlIndexPath(
+        options.katoDir,
+      ),
+      sessionsDir,
+      now: options.now,
+    });
+  if (sessionStateStore && !deleteTwinMetadata) {
+    await sessionStateStore.rebuildDaemonControlIndex();
+  }
+  const metadataByTwinPath = sessionStateStore && !deleteTwinMetadata
+    ? new Map(
+      (await sessionStateStore.listSessionMetadata()).map((metadata) => [
+        metadata.twinPath,
+        metadata,
+      ]),
+    )
+    : undefined;
 
   for (const candidate of matched) {
     if (options.dryRun) {
-      stats.sessionsWouldDelete += 1;
-      stats.sessionFilesWouldDelete += candidate.files.length;
-      continue;
-    }
-
-    let sessionFailed = false;
-    let deletedFiles = 0;
-    let missingFiles = 0;
-    let deletionFailures = 0;
-    for (const file of candidate.files) {
-      try {
-        await Deno.remove(file.path);
-        deletedFiles += 1;
-      } catch (error) {
-        if (error instanceof Deno.errors.NotFound) {
-          missingFiles += 1;
-          continue;
-        }
-        sessionFailed = true;
-        deletionFailures += 1;
+      stats.twinsWouldDelete += 1;
+      stats.twinFilesWouldDelete += 1;
+      if (deleteTwinMetadata && await pathExists(candidate.metadataPath)) {
+        stats.metadataFilesWouldDelete += 1;
       }
-    }
-    stats.missingFiles += missingFiles;
-    if (sessionFailed) {
-      stats.deletionFailures += deletionFailures;
       continue;
     }
 
-    stats.sessionsDeleted += 1;
-    stats.sessionFilesDeleted += deletedFiles;
+    try {
+      if (deleteTwinMetadata) {
+        try {
+          await Deno.remove(candidate.twinPath);
+          stats.twinFilesDeleted += 1;
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) {
+            stats.missingFiles += 1;
+          } else {
+            throw error;
+          }
+        }
+        try {
+          await Deno.remove(candidate.metadataPath);
+          stats.metadataFilesDeleted += 1;
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) {
+            stats.missingFiles += 1;
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        const metadata = metadataByTwinPath?.get(candidate.twinPath);
+        if (metadata && sessionStateStore) {
+          await sessionStateStore.resetSessionTwinPersistence(metadata, {
+            deleteTwinFile: true,
+          });
+        } else {
+          await Deno.remove(candidate.twinPath);
+        }
+        stats.twinFilesDeleted += 1;
+      }
+      stats.twinsDeleted += 1;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        stats.missingFiles += 1;
+        continue;
+      }
+      stats.deletionFailures += 1;
+    }
   }
 
-  if (!options.dryRun) {
+  if (sessionStateStore && deleteTwinMetadata) {
     await sessionStateStore.rebuildDaemonControlIndex();
   }
 
   await options.operationalLogger?.info(
-    "clean.sessions",
-    "Session artifact cleanup completed",
+    "clean.twins",
+    "Twin cleanup completed",
     {
       source: options.source,
       dryRun: options.dryRun,
-      sessionsDays: options.sessionsDays,
-      sessionsMatched: matched.length,
-      sessionsDeleted: stats.sessionsDeleted,
-      sessionsWouldDelete: stats.sessionsWouldDelete,
-      sessionFilesDeleted: stats.sessionFilesDeleted,
-      sessionFilesWouldDelete: stats.sessionFilesWouldDelete,
+      twinsDays: options.twinsDays,
+      deleteTwinMetadata,
+      twinsMatched: matched.length,
+      twinsDeleted: stats.twinsDeleted,
+      twinsWouldDelete: stats.twinsWouldDelete,
+      twinFilesDeleted: stats.twinFilesDeleted,
+      twinFilesWouldDelete: stats.twinFilesWouldDelete,
+      metadataFilesDeleted: stats.metadataFilesDeleted,
+      metadataFilesWouldDelete: stats.metadataFilesWouldDelete,
     },
   );
 }
@@ -273,7 +289,7 @@ async function executeSessionCleanup(
 function buildSummary(
   options: Pick<
     MaintenanceCleanOptions,
-    "all" | "dryRun" | "recordingsDays" | "sessionsDays"
+    "all" | "dryRun" | "recordingsDays" | "twinsDays" | "deleteTwinMetadata"
   >,
   stats: MaintenanceCleanStats,
 ): string {
@@ -285,21 +301,30 @@ function buildSummary(
   if (options.recordingsDays !== undefined) {
     parts.push(`recordings=${options.recordingsDays}d`);
   }
-  if (options.sessionsDays !== undefined) {
-    parts.push(`sessions=${options.sessionsDays}d`);
+  if (options.twinsDays !== undefined) {
+    parts.push(`twins=${options.twinsDays}d`);
+    if (options.deleteTwinMetadata) {
+      parts.push("deleteMetadata=true");
+    }
   }
   if (options.dryRun) {
     parts.push(`logsToFlush=${stats.logFilesWouldFlush}`);
   } else {
     parts.push(`logsFlushed=${stats.logFilesFlushed}`);
   }
-  if (options.sessionsDays !== undefined) {
+  if (options.twinsDays !== undefined) {
     if (options.dryRun) {
-      parts.push(`sessionsToDelete=${stats.sessionsWouldDelete}`);
-      parts.push(`sessionFilesToDelete=${stats.sessionFilesWouldDelete}`);
+      parts.push(`twinsToDelete=${stats.twinsWouldDelete}`);
+      parts.push(`twinFilesToDelete=${stats.twinFilesWouldDelete}`);
+      if (options.deleteTwinMetadata) {
+        parts.push(`metadataFilesToDelete=${stats.metadataFilesWouldDelete}`);
+      }
     } else {
-      parts.push(`sessionsDeleted=${stats.sessionsDeleted}`);
-      parts.push(`sessionFilesDeleted=${stats.sessionFilesDeleted}`);
+      parts.push(`twinsDeleted=${stats.twinsDeleted}`);
+      parts.push(`twinFilesDeleted=${stats.twinFilesDeleted}`);
+      if (options.deleteTwinMetadata) {
+        parts.push(`metadataFilesDeleted=${stats.metadataFilesDeleted}`);
+      }
     }
   }
   parts.push(`missingFiles=${stats.missingFiles}`);
@@ -314,7 +339,12 @@ async function recordAuditEvent(
   auditLogger: AuditLogger | undefined,
   options: Pick<
     MaintenanceCleanOptions,
-    "all" | "dryRun" | "recordingsDays" | "sessionsDays" | "source"
+    | "all"
+    | "dryRun"
+    | "recordingsDays"
+    | "twinsDays"
+    | "deleteTwinMetadata"
+    | "source"
   >,
   stats: MaintenanceCleanStats,
 ): Promise<void> {
@@ -326,13 +356,16 @@ async function recordAuditEvent(
     all: options.all,
     dryRun: options.dryRun,
     recordingsDays: options.recordingsDays,
-    sessionsDays: options.sessionsDays,
+    twinsDays: options.twinsDays,
+    deleteTwinMetadata: options.deleteTwinMetadata,
     logFilesFlushed: stats.logFilesFlushed,
     logFilesWouldFlush: stats.logFilesWouldFlush,
-    sessionFilesDeleted: stats.sessionFilesDeleted,
-    sessionFilesWouldDelete: stats.sessionFilesWouldDelete,
-    sessionsDeleted: stats.sessionsDeleted,
-    sessionsWouldDelete: stats.sessionsWouldDelete,
+    twinFilesDeleted: stats.twinFilesDeleted,
+    twinFilesWouldDelete: stats.twinFilesWouldDelete,
+    metadataFilesDeleted: stats.metadataFilesDeleted,
+    metadataFilesWouldDelete: stats.metadataFilesWouldDelete,
+    twinsDeleted: stats.twinsDeleted,
+    twinsWouldDelete: stats.twinsWouldDelete,
     missingFiles: stats.missingFiles,
     deletionFailures: stats.deletionFailures,
     skippedScopes: [...stats.skippedScopes],
@@ -361,9 +394,15 @@ export async function runMaintenanceClean(
   if (
     !options.all &&
     options.recordingsDays === undefined &&
-    options.sessionsDays === undefined
+    options.twinsDays === undefined
   ) {
     throw new Error("At least one cleanup scope is required");
+  }
+  if (options.recordingsDays !== undefined && options.recordingsDays < 0) {
+    throw new Error("recordingsDays must be greater than or equal to 0");
+  }
+  if (options.twinsDays !== undefined && options.twinsDays < 0) {
+    throw new Error("twinsDays must be greater than or equal to 0");
   }
 
   const stats = createEmptyStats();
@@ -385,9 +424,10 @@ export async function runMaintenanceClean(
     }
   }
 
-  await executeSessionCleanup({
+  await executeTwinCleanup({
     dryRun: options.dryRun,
-    sessionsDays: options.sessionsDays,
+    twinsDays: options.twinsDays,
+    deleteTwinMetadata: options.deleteTwinMetadata,
     now,
     katoDir,
     operationalLogger: options.operationalLogger,
@@ -417,13 +457,16 @@ export async function runMaintenanceClean(
       all: options.all,
       dryRun: options.dryRun,
       recordingsDays: options.recordingsDays,
-      sessionsDays: options.sessionsDays,
+      twinsDays: options.twinsDays,
+      deleteTwinMetadata: options.deleteTwinMetadata,
       logFilesFlushed: stats.logFilesFlushed,
       logFilesWouldFlush: stats.logFilesWouldFlush,
-      sessionFilesDeleted: stats.sessionFilesDeleted,
-      sessionFilesWouldDelete: stats.sessionFilesWouldDelete,
-      sessionsDeleted: stats.sessionsDeleted,
-      sessionsWouldDelete: stats.sessionsWouldDelete,
+      twinFilesDeleted: stats.twinFilesDeleted,
+      twinFilesWouldDelete: stats.twinFilesWouldDelete,
+      metadataFilesDeleted: stats.metadataFilesDeleted,
+      metadataFilesWouldDelete: stats.metadataFilesWouldDelete,
+      twinsDeleted: stats.twinsDeleted,
+      twinsWouldDelete: stats.twinsWouldDelete,
       missingFiles: stats.missingFiles,
       deletionFailures: stats.deletionFailures,
       skippedScopes: [...stats.skippedScopes],
@@ -434,7 +477,8 @@ export async function runMaintenanceClean(
     all: options.all,
     dryRun: options.dryRun,
     recordingsDays: options.recordingsDays,
-    sessionsDays: options.sessionsDays,
+    twinsDays: options.twinsDays,
+    deleteTwinMetadata: options.deleteTwinMetadata,
     source,
   }, stats);
 

@@ -45,7 +45,7 @@ Related notes:
   ingest cursor, dedupe fingerprints, command cursor/anchor, and recording
   bindings.
 - **SessionTwin**: canonical per-provider-session event log (`*.twin.jsonl`) for
-  replay and durable cursor/write state.
+  replay and opt-in persisted conversation history.
 - **Runtime snapshot**: bounded in-memory projection of parsed events used by
   status, in-chat command handling, and export.
 - **First-seen provider session**: daemon has no prior command cursor/anchor
@@ -72,21 +72,19 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/ingestion`: operational ingest view for provider-session ingestion state
-  and the latest recording per destination, backed by
-  `loadSessionsPageData()`.
-- `/sessions`: full discovered chat-session inventory, also backed by
-  `loadSessionsPageData()`, with manual `start ingestion` /
-  `continue ingestion` actions.
+- `/sessions`: primary discovered chat-session inventory, backed by
+  `loadSessionsPageData()` and `/api/sessions`, with live activity,
+  recording state, and on-demand snippet reveal.
 - `/recordings`: flattened recording history across sessions and workspaces,
-  backed by `loadRecordingsPageData()`.
+  backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister plus workspace-level recording
-  rollups, backed by `loadWorkspacesPageData()`.
+  rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/logs`: combined daemon + web operational/security log view with shared
-  filter semantics, backed by `loadLogPageData()`.
+  filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.
 - `/maintenance`: guided cleanup workflows for logs and old derived session
-  artifacts.
+  artifacts, plus the persisted twin troubleshooting/cleanup surface backed by
+  `loadMaintenanceTwinsData()` and `/api/maintenance-twins`.
 - `/login` and `/logout`: local auth/session entry points.
 
 Supporting web files worth knowing:
@@ -94,11 +92,17 @@ Supporting web files worth knowing:
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
 - `apps/web/src/session_routes.ts`: canonical href builders for
-  `/ingestion`, `/sessions`, and session anchor links.
-- `apps/web/routes/api/summary.ts`: currently the only shipped live JSON
-  endpoint.
-- `apps/web/src/summary_api.ts`: shared no-store response helper for the Summary
-  API.
+  `/maintenance`, `/sessions`, and session anchor links.
+- `apps/web/src/live_routes.ts`: shared live JSON handlers for
+  `/api/chrome-status`, `/api/summary`, `/api/maintenance-twins`,
+  `/api/sessions`, `/api/recordings`, `/api/session-snippet`,
+  `/api/workspaces`, and `/api/logs`.
+- `apps/web/routes/api/*`: thin route entrypoints that delegate to
+  `apps/web/src/live_routes.ts`.
+- `apps/web/src/api_response.ts`: shared no-store response helper for live JSON
+  endpoints.
+- `apps/web/src/session_snippets.ts`: shared on-demand snippet resolution from
+  live snapshot, twin replay, or explicit provider-source replay.
 
 ## Default Filesystem Layout
 
@@ -217,11 +221,11 @@ graph TD
 | Area                | Primary responsibility                                                                             | Key modules                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status        | `apps/cli/src/*`                                       |
-| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows     | `apps/web/{routes,islands,src}/*`                      |
+| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows      | `apps/web/{routes,islands,src}/*`                      |
 | Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                | `apps/runtime/src/orchestrator/launcher.ts`            |
 | Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                            | `apps/daemon/src/main.ts`                              |
 | Control plane       | Persist/list/mark control requests, persist/load status snapshots                                  | `apps/runtime/src/orchestrator/control_plane.ts`       |
-| Ingestion           | Discover/watch provider source files, parse incremental events, project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts`   |
+| Provider ingestion  | Discover/watch provider source files, parse incremental events, and project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts`   |
 | Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache             | `apps/runtime/src/orchestrator/session_state_store.ts` |
 | Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                 | `apps/daemon/src/writer/*`                             |
 | Workspace layer     | Registry + workspace profile/template resolution                                                   | `apps/runtime/src/workspace/*`                         |
@@ -272,10 +276,16 @@ Ingestion runners:
 - discover/watch provider source files
 - resume by provider session identity + persisted cursor
 - parse incremental events
-- append SessionTwin with bounded dedupe
 - persist metadata and project into in-memory snapshot store
+- append SessionTwin with bounded dedupe only when twin persistence is enabled
+  for the provider or the user explicitly requests `create twin` / `update twin`
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
+
+When a session has no usable twin history after restart, full-history
+`capture` / `export` replay comes from the provider source file on demand
+instead of persisted twin events. For Codex sessions, those replayed historical
+timestamps may be less precise than live-captured or auto-twinned events.
 
 ### Naming Guardrail
 
@@ -307,7 +317,7 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 - The shared `DAEMON` / `SNAPSHOT` header stack is still server-rendered on
   non-Summary pages from `loadAppChromeStatus()`; it is not yet a reusable live
   island.
-- `Ingestion`, `Sessions`, `Recordings`, `Workspaces`, `Logs`, `Settings`, and
+- `Twins`, `Sessions`, `Recordings`, `Workspaces`, `Logs`, `Settings`, and
   `Maintenance` are currently server-rendered page loads with URL-driven
   filters and PRG mutation flows where applicable.
 - Any future live-expansion work should preserve route/query semantics rather
@@ -325,15 +335,22 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 - `~/.kato/web/kato-web-status.json`: local web process runstate heartbeat.
 - provider source files (Codex/Claude/Gemini transcript files): external inputs,
   not authoritative control state.
-- `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session state.
+- `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session
+  metadata plus opt-in persisted twin history.
 - in-memory snapshot store: runtime projection cache.
 - markdown/jsonl exports: derived artifacts.
+
+Privacy cleanup note:
+
+- shutdown cleanup may still remove twin files, but snippet privacy no longer
+  depends on cleanup because snippets are not persisted in durable session
+  metadata.
 
 Page-level web source-of-truth guidance:
 
 - Summary and app-chrome status read primarily from `~/.kato/shared/status.json`
   plus recent daemon/web log tails.
-- `Ingestion`, `Sessions`, `Recordings`, and most workspace recording details
+- `Twins`, `Sessions`, `Recordings`, and most workspace recording details
   come from persistent session metadata/twin state under
   `~/.kato/shared/sessions/*`, with the current daemon snapshot merged in where
   live runtime status exists.

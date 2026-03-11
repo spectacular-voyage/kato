@@ -51,7 +51,7 @@ workflows for non-CLI-comfortable users.
 - Support these non-read-only workflows in the browser:
   - register or update workspaces
   - set or delete workspace username mappings, plus default-user settings
-  - clean logs and old session artifacts
+  - clean logs and old twins, with optional twin-metadata deletion
 - Keep destructive actions deliberate: browser routes should use POST-only
   handlers, audit logging, dry-run where it exists already, and explicit
   confirmation for cleanup execution.
@@ -110,7 +110,7 @@ Proposed route-backed information architecture:
 - `/security` security-audit log viewer with the same filter model
 - `/settings` view/edit user defaults, exclude-me behavior, and workspace
   username mappings
-- `/maintenance` guided cleanup workflows for logs and old session artifacts,
+- `/maintenance` guided cleanup workflows for logs and old twins,
   with dry-run and confirmation
 - `/performance` memory snapshot, counters, and eventually a
   memory-usage-over-time graph
@@ -219,7 +219,7 @@ operator actions for people who are not comfortable with CLI flows:
 
 - workspace register/update
 - user default and workspace username mapping changes
-- cleanup of logs and old session artifacts
+- cleanup of logs and old twins
 
 Mutation guidance:
 
@@ -447,7 +447,7 @@ Validation workflow before merge:
 - Do not introduce network dependencies or cloud coupling for baseline local
   operation.
 - Do not broaden maintenance beyond the requested scopes without a separate
-  design: logs and old session artifacts are in scope; `clean --recordings` is
+  design: logs and old twins are in scope; `clean --recordings` is
   still unimplemented and should stay that way unless separately designed.
 - Do not treat remote multi-user auth/authorization as part of this slice;
   optional local auth is acceptable, but broader remote access and role models

@@ -730,7 +730,8 @@ export async function runDaemonCli(
           all: intent.command.all,
           dryRun: intent.command.dryRun,
           recordingsDays: intent.command.recordingsDays,
-          sessionsDays: intent.command.sessionsDays,
+          twinsDays: intent.command.twinsDays,
+          deleteTwinMetadata: intent.command.deleteTwinMetadata,
         });
         return 0;
       case "user-map-set":

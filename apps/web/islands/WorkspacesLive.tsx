@@ -3,7 +3,7 @@ import {
   activityStateDot,
 } from "../src/loaders/activity_state.ts";
 import type { WorkspacesPageData } from "../src/loaders/workspaces.ts";
-import { buildIngestionHref } from "../src/session_routes.ts";
+import { buildSessionInventoryHref } from "../src/session_routes.ts";
 import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
@@ -93,11 +93,11 @@ export default function WorkspacesLive(
                       <div class="workspace-row-actions">
                         <a
                           class="secondary-button"
-                          href={buildIngestionHref({
+                          href={buildSessionInventoryHref({
                             workspaceFilter: row.workspaceId,
                           })}
                         >
-                          View Ingestion
+                          View Sessions
                         </a>
                         <a
                           class="secondary-button"
