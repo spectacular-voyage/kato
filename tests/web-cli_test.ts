@@ -183,8 +183,22 @@ Deno.test(
         join(rootDir, "web", "kato-web-status.json"),
         () => new Date("2026-03-07T20:00:00.000Z"),
       );
+      const launchedPid = Deno.pid;
       const webLauncher: WebProcessLauncherLike = {
-        launchDetached: () => Promise.resolve(Deno.pid),
+        async launchDetached() {
+          await webStatusStore.save({
+            schemaVersion: 1,
+            running: true,
+            hostname: "127.0.0.1",
+            port: 3187,
+            pid: launchedPid,
+            startedAt: "2026-03-07T20:00:00.000Z",
+            heartbeatAt: "2026-03-07T20:00:00.000Z",
+            url: "http://127.0.0.1:3187/",
+            version: "test-build",
+          });
+          return launchedPid;
+        },
       };
 
       const initHarness = makeRuntimeHarness(runtimeDir);
@@ -229,6 +243,9 @@ Deno.test(
         startHarness.stdout.join(""),
         "kato web started in background",
       );
+      const savedStatus = await webStatusStore.load();
+      assertEquals(savedStatus.running, true);
+      assertEquals(savedStatus.pid, launchedPid);
 
       const statusHarness = makeRuntimeHarness(runtimeDir);
       const statusCode = await runDaemonCli(["web", "status", "--json"], {
@@ -250,6 +267,67 @@ Deno.test(
       assertEquals(statusPayload.configured, true);
       assertEquals(["running", "stale"].includes(statusPayload.state), true);
       assertEquals(statusPayload.port, 3187);
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli web start clears status when startup acknowledgement never arrives",
+  async () => {
+    await withTestTempDir("web-cli-start-ack-failure-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      const webStatusStore = new WebServerStatusFileStore(
+        join(rootDir, "web", "kato-web-status.json"),
+        () => new Date("2026-03-07T20:00:00.000Z"),
+      );
+      const webLauncher: WebProcessLauncherLike = {
+        launchDetached: () => Promise.resolve(999999),
+      };
+
+      const initHarness = makeRuntimeHarness(runtimeDir);
+      const initCode = await runDaemonCli(
+        [
+          "web",
+          "init",
+          "--username",
+          "dj",
+          "--password",
+          "secret-pass",
+        ],
+        {
+          runtime: initHarness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+          webConfigStore,
+          webStatusStore,
+          webLauncher,
+        },
+      );
+      assertEquals(initCode, 0);
+
+      const startHarness = makeRuntimeHarness(runtimeDir);
+      const startCode = await runDaemonCli(["web", "start"], {
+        runtime: startHarness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+        webLauncher,
+      });
+
+      assertEquals(startCode, 1);
+      assertStringIncludes(
+        startHarness.stderr.join(""),
+        "startup acknowledgement",
+      );
+
+      const savedStatus = await webStatusStore.load();
+      assertEquals(savedStatus.running, false);
+      assertEquals(savedStatus.pid, undefined);
     });
   },
 );

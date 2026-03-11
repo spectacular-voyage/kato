@@ -2134,3 +2134,53 @@ We don't need to maintain compatibility, and should fail daemon start if the old
 # gpt-5.4_2026-03-10_2211_06
 
 I’m checking the remaining snippet call sites before I lock that assumption in. The question is whether removing persisted snippets is only a convenience loss or whether any current paths rely on it for behavior, titles, or UI before a fresh reparse happens.
+
+# gpt-5.4_2026-03-10_2211_39
+
+I have enough to make the task note decision-complete. I’m writing the plan into the note with the current-runtime correction baked in: restart recovery is twin-backed today, not generic source replay.
+
+# gpt-5.4_2026-03-10_2212_07
+
+Yes, with one caveat: under the target design, we can avoid persisted `snippet`, but only if we are willing to derive it from another source when needed.
+
+Right now that snippet comes from:
+- the live in-memory snapshot, if the daemon has it
+- the twin, after restart, if one exists
+
+It is not currently coming from generic source replay after restart. Today restart recovery is twin-backed, not source-replay-backed. That’s why removing persisted snippets cleanly goes together with adding on-demand provider source replay for:
+- full-history `capture` / `export` when no twin exists
+- snippet derivation when a route or title actually needs it
+
+I drafted the plan into [task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md). It now locks the decisions you just made:
+- rename to `globalAutoGenerateTwins` / `providerAutoGenerateTwins`
+- fail daemon start if the old keys are present
+- keep metadata persistence
+- stop persisting `snippet`
+- keep memory-only ingestion for command detection
+- make twins opt-in / auto only per the new twin config
+- add on-demand provider source replay so non-twin sessions can still do full-history capture/export after restart
+
+I did not run tests, since this was a task-note update only.
+
+# gpt-5.4_2026-03-10_2212_08
+
+Yes, with one caveat: under the target design, we can avoid persisted `snippet`, but only if we are willing to derive it from another source when needed.
+
+Right now that snippet comes from:
+- the live in-memory snapshot, if the daemon has it
+- the twin, after restart, if one exists
+
+It is not currently coming from generic source replay after restart. Today restart recovery is twin-backed, not source-replay-backed. That’s why removing persisted snippets cleanly goes together with adding on-demand provider source replay for:
+- full-history `capture` / `export` when no twin exists
+- snippet derivation when a route or title actually needs it
+
+I drafted the plan into [task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md). It now locks the decisions you just made:
+- rename to `globalAutoGenerateTwins` / `providerAutoGenerateTwins`
+- fail daemon start if the old keys are present
+- keep metadata persistence
+- stop persisting `snippet`
+- keep memory-only ingestion for command detection
+- make twins opt-in / auto only per the new twin config
+- add on-demand provider source replay so non-twin sessions can still do full-history capture/export after restart
+
+I did not run tests, since this was a task-note update only.

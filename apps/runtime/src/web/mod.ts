@@ -142,14 +142,50 @@ export class WebServerStatusFileStore implements WebServerStatusStoreLike {
 }
 
 type DenoCommandOptions = ConstructorParameters<typeof Deno.Command>[1];
-type CommandLike = { spawn(): { pid: number } };
+type CommandOutputLike = {
+  code: number;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+};
+type CommandLike = {
+  spawn(): { pid: number };
+  output?(): Promise<CommandOutputLike>;
+};
 type DenoCommandFactory = (
   command: string,
   options: DenoCommandOptions,
 ) => CommandLike;
 
 function resolveWorkspaceRoot(): string {
-  return dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url)))));
+  return dirname(
+    dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url))))),
+  );
+}
+
+function resolveWebAppRoot(workspaceRoot: string): string {
+  return join(workspaceRoot, "apps", "web");
+}
+
+function resolveViteCliPath(webAppRoot: string): string {
+  return Deno.realPathSync(join(webAppRoot, "node_modules", ".bin", "vite"));
+}
+
+function toShellSingleQuoted(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
+function toPowerShellSingleQuoted(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function toPowerShellEncodedCommand(script: string): string {
+  const bytes = new Uint8Array(script.length * 2);
+  for (let i = 0; i < script.length; i += 1) {
+    const code = script.charCodeAt(i);
+    bytes[i * 2] = code & 0xff;
+    bytes[i * 2 + 1] = code >> 8;
+  }
+  return btoa(String.fromCharCode(...bytes));
 }
 
 export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
@@ -158,29 +194,121 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     private readonly workspaceRoot: string = resolveWorkspaceRoot(),
     private readonly commandFactory: DenoCommandFactory = (command, options) =>
       new Deno.Command(command, options),
+    private readonly preferPowerShellStartProcessOnWindows: boolean = true,
   ) {}
+
+  private launchDetachedViaShell(
+    args: string[],
+    workingDirectory: string,
+  ): Promise<number> {
+    const quotedCommand = [this.denoExecPath, ...args].map(
+      toShellSingleQuoted,
+    ).join(" ");
+    const script = `cd ${
+      toShellSingleQuoted(workingDirectory)
+    } && if command -v setsid >/dev/null 2>&1; then setsid ${quotedCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
+    const command = this.commandFactory("sh", {
+      args: ["-lc", script],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+      env: { CI: "true" },
+    });
+    if (typeof command.output !== "function") {
+      throw new Error(
+        "Detached shell launcher requires commandFactory output() support",
+      );
+    }
+    return command.output().then((result) => {
+      if (result.code !== 0) {
+        const errorText = new TextDecoder().decode(result.stderr).trim();
+        throw new Error(
+          `Detached shell launch failed (exit ${result.code}): ${errorText}`,
+        );
+      }
+      const stdoutText = new TextDecoder().decode(result.stdout).trim();
+      const pid = Number.parseInt(stdoutText, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        throw new Error(
+          `Detached shell launch did not return a valid PID: '${stdoutText}'`,
+        );
+      }
+      return pid;
+    });
+  }
+
+  private launchDetachedViaPowerShell(
+    args: string[],
+    workingDirectory: string,
+  ): Promise<number> {
+    const argList = args.map(toPowerShellSingleQuoted).join(", ");
+    const script = `$ErrorActionPreference = 'Stop';
+$argList = @(${argList});
+$proc = Start-Process -FilePath ${
+      toPowerShellSingleQuoted(this.denoExecPath)
+    } -ArgumentList $argList -WorkingDirectory ${
+      toPowerShellSingleQuoted(workingDirectory)
+    } -WindowStyle Hidden -PassThru;
+[Console]::Out.WriteLine($proc.Id);`;
+    const encodedCommand = toPowerShellEncodedCommand(script);
+    const command = this.commandFactory("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encodedCommand,
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+      env: { CI: "true" },
+    });
+    if (typeof command.output !== "function") {
+      throw new Error(
+        "Detached PowerShell launcher requires commandFactory output() support",
+      );
+    }
+    return command.output().then((result) => {
+      if (result.code !== 0) {
+        const errorText = new TextDecoder().decode(result.stderr).trim();
+        throw new Error(
+          `PowerShell Start-Process launch failed (exit ${result.code}): ${errorText}`,
+        );
+      }
+      const stdoutText = new TextDecoder().decode(result.stdout).trim();
+      const pid = Number.parseInt(stdoutText, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        throw new Error(
+          `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
+        );
+      }
+      return pid;
+    });
+  }
 
   async launchDetached(
     options: { hostname: string; port: number },
   ): Promise<number> {
-    const command = this.commandFactory(this.denoExecPath, {
-      cwd: this.workspaceRoot,
-      args: [
-        "task",
-        "--cwd",
-        "apps/web",
-        "dev",
-        "--",
-        "--host",
-        options.hostname,
-        "--port",
-        String(options.port),
-      ],
-      stdin: "null",
-      stdout: "null",
-      stderr: "inherit",
-    });
-    const child = command.spawn();
-    return await Promise.resolve(child.pid);
+    const webAppRoot = resolveWebAppRoot(this.workspaceRoot);
+    const viteCliPath = resolveViteCliPath(webAppRoot);
+    const args = [
+      "run",
+      "--ext=js",
+      "-A",
+      viteCliPath,
+      "--host",
+      options.hostname,
+      "--port",
+      String(options.port),
+    ];
+
+    if (
+      this.preferPowerShellStartProcessOnWindows &&
+      Deno.build.os === "windows"
+    ) {
+      return this.launchDetachedViaPowerShell(args, webAppRoot);
+    }
+
+    return this.launchDetachedViaShell(args, webAppRoot);
   }
 }

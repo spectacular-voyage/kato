@@ -2,6 +2,86 @@ import type { DaemonCliCommandContext } from "./context.ts";
 import { DEFAULT_KATO_WEB_HOSTNAME, DEFAULT_KATO_WEB_PORT } from "@kato/shared";
 import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
 
+const STARTUP_ACK_TIMEOUT_MS = 10_000;
+const STARTUP_ACK_POLL_INTERVAL_MS = 100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForWebStartupAck(
+  ctx: DaemonCliCommandContext,
+  launchedPid: number,
+  launchedAtMs: number,
+  url: string,
+): Promise<{
+  heartbeatAt: string;
+  ackLatencyMs: number;
+  version?: string;
+}> {
+  const deadline = Date.now() + STARTUP_ACK_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    let status: Awaited<ReturnType<typeof ctx.webStatusStore.load>> | undefined;
+    try {
+      status = await ctx.webStatusStore.load();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        await ctx.operationalLogger.debug(
+          "web.start.ack_poll_retry",
+          "Transient web status read failure while waiting for startup acknowledgement",
+          {
+            launchedPid,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+      await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (status.running && status.pid === launchedPid) {
+      const heartbeatMs = Date.parse(status.heartbeatAt);
+      if (Number.isFinite(heartbeatMs) && heartbeatMs >= launchedAtMs) {
+        return {
+          heartbeatAt: status.heartbeatAt,
+          ackLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
+          version: status.version,
+        };
+      }
+    }
+
+    if (!isProcessAlive(launchedPid)) {
+      throw new Error(
+        `Web server exited before startup acknowledgement (pid: ${launchedPid})`,
+      );
+    }
+
+    try {
+      const response = await fetch(url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(STARTUP_ACK_POLL_INTERVAL_MS),
+      });
+      response.body?.cancel();
+      return {
+        heartbeatAt: new Date().toISOString(),
+        ackLatencyMs: Math.max(0, Date.now() - launchedAtMs),
+        version: status?.version,
+      };
+    } catch {
+      // Keep polling until the process either responds or exits.
+    }
+
+    await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `Timed out waiting for web startup acknowledgement (pid: ${launchedPid})`,
+  );
+}
+
 export async function runWebInitCommand(
   ctx: DaemonCliCommandContext,
   options: {
@@ -65,13 +145,26 @@ export async function runWebStartCommand(
     return;
   }
 
+  const launchedAtMs = ctx.runtime.now().getTime();
   const pid = await ctx.webLauncher.launchDetached({
     hostname: ctx.webConfig.hostname,
     port: ctx.webConfig.port,
   });
-  const startedAt = ctx.runtime.now().toISOString();
   const url = `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`;
-
+  const startedAt = new Date(launchedAtMs).toISOString();
+  const ack = await waitForWebStartupAck(ctx, pid, launchedAtMs, url).catch(
+    async (error) => {
+      await ctx.webStatusStore.save({
+        schemaVersion: 1,
+        running: false,
+        hostname: ctx.webConfig?.hostname,
+        port: ctx.webConfig?.port,
+        heartbeatAt: ctx.runtime.now().toISOString(),
+        url,
+      });
+      throw error;
+    },
+  );
   await ctx.webStatusStore.save({
     schemaVersion: 1,
     running: true,
@@ -79,19 +172,32 @@ export async function runWebStartCommand(
     port: ctx.webConfig.port,
     pid,
     startedAt,
-    heartbeatAt: startedAt,
+    heartbeatAt: ack.heartbeatAt,
     url,
+    version: ack.version,
   });
+
   await ctx.operationalLogger.info(
     "web.start",
-    "Web server started in background",
-    { pid, hostname: ctx.webConfig.hostname, port: ctx.webConfig.port, url },
+    "Web server startup acknowledged by runtime heartbeat",
+    {
+      pid,
+      hostname: ctx.webConfig.hostname,
+      port: ctx.webConfig.port,
+      url,
+      startupAckHeartbeatAt: ack.heartbeatAt,
+      startupAckLatencyMs: ack.ackLatencyMs,
+      version: ack.version,
+    },
   );
   await ctx.auditLogger.command("web.start", {
     pid,
     hostname: ctx.webConfig.hostname,
     port: ctx.webConfig.port,
     url,
+    startupAckHeartbeatAt: ack.heartbeatAt,
+    startupAckLatencyMs: ack.ackLatencyMs,
+    version: ack.version,
   });
   ctx.runtime.writeStdout(
     `kato web started in background (pid: ${pid}) at ${url}\n`,
