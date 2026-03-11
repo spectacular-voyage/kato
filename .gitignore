@@ -8,6 +8,7 @@ coverage/
 .coverage.*
 coverage.lcov
 .test-tmp/
+apps/web/.vite/
 apps/web/_fresh/
 apps/web/node_modules/
 
