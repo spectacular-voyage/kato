@@ -7,6 +7,7 @@ import type {
   CliConfig,
   RuntimeConfig,
   SharedBehaviorConfig,
+  WebConfig,
 } from "@kato/shared";
 import { dirname, join, resolve } from "@std/path";
 import {
@@ -21,14 +22,22 @@ import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   DenoDetachedDaemonLauncher,
+  DenoDetachedWebLauncher,
   resolveDefaultCliConfigPath,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
   resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
+  resolveDefaultWebConfigPath,
+  resolveDefaultWebStatusPath,
   resolveHomeDir,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
+  WebConfigFileStore,
+  type WebConfigStoreLike,
+  type WebProcessLauncherLike,
+  WebServerStatusFileStore,
+  type WebServerStatusStoreLike,
 } from "@kato/runtime";
 import {
   expandHomePath,
@@ -65,6 +74,10 @@ import {
   runUserMapDeleteCommand,
   runUserMapListCommand,
   runUserMapSetCommand,
+  runWebInitCommand,
+  runWebStartCommand,
+  runWebStatusCommand,
+  runWebStopCommand,
   runWorkspaceInitCommand,
   runWorkspaceListCommand,
   runWorkspaceRegisterCommand,
@@ -84,6 +97,9 @@ export interface RunDaemonCliOptions {
   daemonLauncher?: DaemonProcessLauncherLike;
   pathPolicyGate?: WritePathPolicyGateLike;
   userConfigStore?: UserConfigStoreLike;
+  webConfigStore?: WebConfigStoreLike;
+  webStatusStore?: WebServerStatusStoreLike;
+  webLauncher?: WebProcessLauncherLike;
   autoInitOnStart?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -306,6 +322,7 @@ export async function runDaemonCli(
     new RuntimeConfigFileStore(runtime.configPath);
   let resolvedSharedConfigStore = options.sharedConfigStore;
   let resolvedCliConfigStore = options.cliConfigStore;
+  let resolvedWebConfigStore = options.webConfigStore;
   const resolveRuntimeKatoDir = (config: RuntimeConfig): string =>
     expandHomePath(config.katoDir ?? dirname(config.runtimeDir));
   const resolveSharedConfigStore = (
@@ -327,6 +344,15 @@ export async function runDaemonCli(
       resolveDefaultCliConfigPath(katoDir),
     );
     return resolvedCliConfigStore;
+  };
+  const resolveWebConfigStore = (katoDir: string): WebConfigStoreLike => {
+    if (resolvedWebConfigStore) {
+      return resolvedWebConfigStore;
+    }
+    resolvedWebConfigStore = new WebConfigFileStore(
+      resolveDefaultWebConfigPath(katoDir),
+    );
+    return resolvedWebConfigStore;
   };
 
   let intent;
@@ -354,12 +380,17 @@ export async function runDaemonCli(
   let runtimeConfig = defaultRuntimeConfig;
   let sharedConfig = defaultSharedConfig;
   let cliConfig = defaultCliConfig;
+  let webConfig: WebConfig | undefined;
   let autoInitializedRuntimeConfigPath: string | undefined;
   let autoInitializedSharedConfigPath: string | undefined;
   let autoInitializedCliConfigPath: string | undefined;
   let autoInitializedDefaultWorkspaceConfigPath: string | undefined;
   let autoInitializedUserConfigPath: string | undefined;
   const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
+    intent.command.name === "web-init" ||
+    intent.command.name === "web-start" ||
+    intent.command.name === "web-stop" ||
+    intent.command.name === "web-status" ||
     intent.command.name === "workspace-init" ||
     intent.command.name === "workspace-register" ||
     intent.command.name === "workspace-list" ||
@@ -430,6 +461,7 @@ export async function runDaemonCli(
   const runtimeKatoDir = resolveRuntimeKatoDir(runtimeConfig);
   const sharedConfigStore = resolveSharedConfigStore(runtimeKatoDir);
   const cliConfigStore = resolveCliConfigStore(runtimeKatoDir);
+  const webConfigStore = resolveWebConfigStore(runtimeKatoDir);
   if (commandShouldTryLoadingRuntimeConfig) {
     try {
       sharedConfig = await sharedConfigStore.load();
@@ -486,6 +518,20 @@ export async function runDaemonCli(
     }
   }
 
+  const commandShouldTryLoadingWebConfig = intent.command.name === "status" ||
+    intent.command.name === "web-start" ||
+    intent.command.name === "web-status";
+  if (commandShouldTryLoadingWebConfig) {
+    try {
+      webConfig = await webConfigStore.load();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+      webConfig = undefined;
+    }
+  }
+
   const effectiveKatoDir = runtimeKatoDir;
   const effectiveRuntime: DaemonCliRuntime = {
     ...runtime,
@@ -501,6 +547,11 @@ export async function runDaemonCli(
   };
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(effectiveRuntime.statusPath, runtime.now);
+  const webStatusStore = options.webStatusStore ??
+    new WebServerStatusFileStore(
+      resolveDefaultWebStatusPath(effectiveKatoDir),
+      runtime.now,
+    );
   const controlStore = options.controlStore ??
     new DaemonControlRequestFileStore(
       effectiveRuntime.controlPath,
@@ -508,6 +559,7 @@ export async function runDaemonCli(
     );
   const daemonLauncher = options.daemonLauncher ??
     new DenoDetachedDaemonLauncher(effectiveRuntime);
+  const webLauncher = options.webLauncher ?? new DenoDetachedWebLauncher();
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
       allowedRoots: sharedConfig.allowedWriteRoots,
@@ -550,6 +602,10 @@ export async function runDaemonCli(
     defaultRuntimeConfig,
     defaultSharedConfig,
     defaultCliConfig,
+    webConfigStore,
+    webConfig,
+    webStatusStore,
+    webLauncher,
     statusStore,
     controlStore,
     daemonLauncher,
@@ -624,6 +680,23 @@ export async function runDaemonCli(
           intent.command.all,
           intent.command.live,
         );
+        return 0;
+      case "web-init":
+        await runWebInitCommand(commandContext, {
+          hostname: intent.command.hostname,
+          port: intent.command.port,
+          username: intent.command.username,
+          passwordFromStdin: intent.command.passwordFromStdin,
+        });
+        return 0;
+      case "web-start":
+        await runWebStartCommand(commandContext);
+        return 0;
+      case "web-stop":
+        await runWebStopCommand(commandContext);
+        return 0;
+      case "web-status":
+        await runWebStatusCommand(commandContext, intent.command.asJson);
         return 0;
       case "workspace-init":
         await runWorkspaceInitCommand(commandContext, intent.command.dirPath);

@@ -16,6 +16,34 @@ import {
   type WorkspaceCatalogLike,
   type WorkspaceProfileResolverLike,
 } from "../apps/daemon/src/mod.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const PARTICIPANT_RUNTIME_SOURCE_PATH = resolveTestTempPath(
+  "runtime-participant",
+  "session.jsonl",
+);
+const PARTICIPANT_RUNTIME_TWIN_PATH = resolveTestTempPath(
+  "runtime-participant",
+  "session.twin.jsonl",
+);
+const PARTICIPANT_RUNTIME_WORKSPACE_ROOT = resolveTestTempPath(
+  "runtime-participant",
+  "workspace",
+);
+const PARTICIPANT_RUNTIME_WORKSPACE_CONFIG_PATH = resolveTestTempPath(
+  "runtime-participant",
+  "workspace",
+  ".kato-workspace-config.yaml",
+);
+const PARTICIPANT_RUNTIME_OUTPUT_PATH = resolveTestTempPath(
+  "runtime-participant",
+  "workspace-output.md",
+);
+const PARTICIPANT_RUNTIME_DEFAULT_OUTPUT_DIR = resolveTestTempPath(
+  "runtime-participant",
+  "workspace",
+  "notes",
+);
 
 function makeAssistantEvent(sessionId: string): ConversationEvent {
   return {
@@ -60,9 +88,9 @@ function makeMetadata(sessionId: string): SessionMetadataV1 {
     sessionId: "session-short-1",
     createdAt: "2026-03-03T10:00:00.000Z",
     updatedAt: "2026-03-03T10:00:00.000Z",
-    sourceFilePath: "/tmp/session.jsonl",
+    sourceFilePath: PARTICIPANT_RUNTIME_SOURCE_PATH,
     ingestCursor: { kind: "opaque", value: "cursor-1" },
-    twinPath: "/tmp/session.twin.jsonl",
+    twinPath: PARTICIPANT_RUNTIME_TWIN_PATH,
     nextTwinSeq: 1,
     recentFingerprints: [],
     commandCursor: 1,
@@ -73,11 +101,11 @@ function makeMetadata(sessionId: string): SessionMetadataV1 {
         desiredState: "on",
         currentDestination: {
           kind: "absolute-explicit",
-          absolutePath: "/tmp/workspace-output.md",
+          absolutePath: PARTICIPANT_RUNTIME_OUTPUT_PATH,
         },
-        currentResolvedPath: "/tmp/workspace-output.md",
-        workspaceRootSnapshot: "/tmp/workspace",
-        resolvedDefaultOutputDir: "/tmp/workspace/notes",
+        currentResolvedPath: PARTICIPANT_RUNTIME_OUTPUT_PATH,
+        workspaceRootSnapshot: PARTICIPANT_RUNTIME_WORKSPACE_ROOT,
+        resolvedDefaultOutputDir: PARTICIPANT_RUNTIME_DEFAULT_OUTPUT_DIR,
         filenameTemplate: "{provider}.md",
         writerFeatureFlags: {
           writerIncludeCommentary: true,
@@ -242,8 +270,8 @@ async function runWorkspaceResolutionScenario(
       return Promise.resolve({
         workspaceId: "workspace-1",
         alias: "My.Proj",
-        workspaceRoot: "/tmp/workspace",
-        configPath: "/tmp/workspace/.kato-workspace-config.yaml",
+        workspaceRoot: PARTICIPANT_RUNTIME_WORKSPACE_ROOT,
+        configPath: PARTICIPANT_RUNTIME_WORKSPACE_CONFIG_PATH,
         registeredAt: "2026-03-03T10:00:00.000Z",
       });
     },
@@ -260,9 +288,9 @@ async function runWorkspaceResolutionScenario(
       return Promise.resolve({
         workspaceId: "workspace-1",
         alias: "My.Proj",
-        workspaceRoot: "/tmp/workspace",
-        configPath: "/tmp/workspace/.kato-workspace-config.yaml",
-        resolvedDefaultOutputDir: "/tmp/workspace/notes",
+        workspaceRoot: PARTICIPANT_RUNTIME_WORKSPACE_ROOT,
+        configPath: PARTICIPANT_RUNTIME_WORKSPACE_CONFIG_PATH,
+        resolvedDefaultOutputDir: PARTICIPANT_RUNTIME_DEFAULT_OUTPUT_DIR,
         defaultOutputDirTemplate: "{workspace_dir}/notes",
         filenameTemplate: "{provider}.md",
         workspaceTimezone: "local",

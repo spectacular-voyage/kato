@@ -11,6 +11,11 @@ import {
   writeCommandCursor,
 } from "../apps/daemon/src/orchestrator/runtime_command_state.ts";
 
+const COMMAND_STATE_SESSION_PATH = ".test-tmp/command-state/session.jsonl";
+const COMMAND_STATE_CAPTURE_PATH = ".test-tmp/command-state/out.md";
+const COMMAND_STATE_OLD_CAPTURE_PATH = ".test-tmp/command-state/old.md";
+const COMMAND_STATE_NEW_CAPTURE_PATH = ".test-tmp/command-state/new.md";
+
 function makeUserEvent(
   id: string,
   content: string,
@@ -58,7 +63,7 @@ function makeMetadata(
     schemaVersion: 1,
     provider: "codex",
     providerSessionId: "session-1",
-    sourceFilePath: "/tmp/session.jsonl",
+    sourceFilePath: COMMAND_STATE_SESSION_PATH,
     firstSeenAt: "2026-02-22T19:00:00.000Z",
     lastUpdatedAt: "2026-02-22T19:00:00.000Z",
     ...overrides,
@@ -70,7 +75,7 @@ Deno.test("resolveCommandBoundaries maps command lines to non-overlapping segmen
     "intro",
     "::record-k",
     "record body",
-    "::capture-k /tmp/out.md",
+    `::capture-k ${COMMAND_STATE_CAPTURE_PATH}`,
     "capture body",
   ].join("\n");
 
@@ -86,9 +91,9 @@ Deno.test("resolveCommandBoundaries maps command lines to non-overlapping segmen
       verb: "capture",
       name: "capture",
       alias: "k",
-      argument: "/tmp/out.md",
+      argument: COMMAND_STATE_CAPTURE_PATH,
       line: 4,
-      raw: "::capture-k /tmp/out.md",
+      raw: `::capture-k ${COMMAND_STATE_CAPTURE_PATH}`,
     },
   ]);
 
@@ -109,9 +114,9 @@ Deno.test("resolveCommandBoundaries maps command lines to non-overlapping segmen
         verb: "capture",
         name: "capture",
         alias: "k",
-        argument: "/tmp/out.md",
+        argument: COMMAND_STATE_CAPTURE_PATH,
         line: 4,
-        raw: "::capture-k /tmp/out.md",
+        raw: `::capture-k ${COMMAND_STATE_CAPTURE_PATH}`,
       },
       nextCommandLine: 6,
       lastLineInSegment: 5,
@@ -162,7 +167,7 @@ Deno.test("resolveCommandStartCursor resumes from the anchor event when the stor
   const events = [
     makeUserEvent(
       "u-capture-before-anchor",
-      "::capture-k /tmp/old.md",
+      `::capture-k ${COMMAND_STATE_OLD_CAPTURE_PATH}`,
       "2026-02-22T19:00:00.000Z",
     ),
     makeAssistantEvent(
@@ -172,7 +177,7 @@ Deno.test("resolveCommandStartCursor resumes from the anchor event when the stor
     ),
     makeUserEvent(
       "u-capture-after-anchor",
-      "::capture-k /tmp/new.md",
+      `::capture-k ${COMMAND_STATE_NEW_CAPTURE_PATH}`,
       "2026-02-22T19:00:02.000Z",
     ),
   ];
@@ -197,7 +202,7 @@ Deno.test("resolveCommandStartCursor falls back to the anchor timestamp when the
   const events = [
     makeUserEvent(
       "u-older",
-      "::capture-k /tmp/old.md",
+      `::capture-k ${COMMAND_STATE_OLD_CAPTURE_PATH}`,
       "2026-02-22T19:00:00.000Z",
     ),
     makeAssistantEvent(
@@ -207,7 +212,7 @@ Deno.test("resolveCommandStartCursor falls back to the anchor timestamp when the
     ),
     makeUserEvent(
       "u-newer",
-      "::capture-k /tmp/new.md",
+      `::capture-k ${COMMAND_STATE_NEW_CAPTURE_PATH}`,
       "2026-02-22T19:00:02.000Z",
     ),
   ];

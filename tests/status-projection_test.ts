@@ -7,6 +7,7 @@ import {
   isSessionStale,
   projectSessionStatus,
   sortSessionsByRecency,
+  summarizeRecordingActivity,
 } from "@kato/shared";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -442,3 +443,58 @@ Deno.test(
     assertEquals(result[1].sessionId, "stale-recording");
   },
 );
+
+Deno.test(
+  "summarizeRecordingActivity counts active recordings, idle active sessions, and stale-session recordings",
+  () => {
+    const summary = summarizeRecordingActivity([
+      {
+        provider: "claude",
+        sessionId: "active-recording",
+        stale: false,
+        updatedAt: "2026-02-24T09:00:00.000Z",
+        recordings: [{
+          outputPath: "/active-a.md",
+          startedAt: "2026-02-24T08:00:00.000Z",
+          lastWriteAt: "2026-02-24T09:00:00.000Z",
+        }, {
+          outputPath: "/active-b.md",
+          startedAt: "2026-02-24T08:05:00.000Z",
+          lastWriteAt: "2026-02-24T09:00:00.000Z",
+        }],
+      },
+      {
+        provider: "claude",
+        sessionId: "active-no-recording",
+        stale: false,
+        updatedAt: "2026-02-24T10:00:00.000Z",
+      },
+      {
+        provider: "claude",
+        sessionId: "stale-recording",
+        stale: true,
+        updatedAt: "2026-02-24T11:00:00.000Z",
+        recordings: [{
+          outputPath: "/stale-a.md",
+          startedAt: "2026-02-24T08:30:00.000Z",
+          lastWriteAt: "2026-02-24T11:00:00.000Z",
+        }],
+      },
+    ]);
+
+    assertEquals(summary.activeRecordings, 2);
+    assertEquals(summary.inactiveRecordings, 2);
+    assertEquals(summary.destinations, 2);
+  },
+);
+
+Deno.test("summarizeRecordingActivity falls back when sessions are unavailable", () => {
+  const summary = summarizeRecordingActivity(undefined, {
+    activeRecordings: 3,
+    destinations: 2,
+  });
+
+  assertEquals(summary.activeRecordings, 3);
+  assertEquals(summary.inactiveRecordings, 0);
+  assertEquals(summary.destinations, 2);
+});

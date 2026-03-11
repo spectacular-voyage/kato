@@ -5,10 +5,14 @@ import {
   resolveStatusErrorCursorPath,
   saveSuppressedRecentErrorKeys,
 } from "../apps/cli/src/commands/status_error_cursor.ts";
-import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
+import {
+  makeTestTempDir,
+  removePathIfPresent,
+  resolveTestTempPath,
+} from "./test_temp.ts";
 
 Deno.test("resolveStatusErrorCursorPath uses runtime dir", () => {
-  const runtimeDir = join("/tmp", "kato-runtime");
+  const runtimeDir = resolveTestTempPath("kato-runtime");
   assertEquals(
     resolveStatusErrorCursorPath(runtimeDir),
     join(runtimeDir, "status-error-cursor.json"),

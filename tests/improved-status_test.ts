@@ -12,6 +12,7 @@ import {
   isLiveFlushKey,
   renderStatusText,
   type StatusRecentError,
+  type StatusWebState,
   type WorkspaceStatusSummary,
 } from "../apps/cli/src/commands/status.ts";
 import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
@@ -139,7 +140,8 @@ Deno.test("renderStatusText: no sessions shows (none)", () => {
     now: NOW,
     stale: false,
   });
-  assertStringIncludes(out, `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon`);
+  assertStringIncludes(out, `kato CLI (v${CLI_APP_VERSION})`);
+  assertStringIncludes(out, "kato daemon");
   assertStringIncludes(out, "Sessions");
   assertStringIncludes(out, "(none");
 });
@@ -287,6 +289,43 @@ Deno.test("renderStatusText: recent errors section renders warn/error records", 
   assertStringIncludes(out, "ERROR audit recording.command.failed");
   assertStringIncludes(out, "permission denied");
   assertStringIncludes(out, "capture destination already exists");
+});
+
+Deno.test("renderStatusText: web status and web recent errors are labeled distinctly", () => {
+  const recentErrors: StatusRecentError[] = [{
+    timestamp: "2026-02-24T09:59:30.000Z",
+    level: "error",
+    channel: "operational",
+    event: "web.settings.mutation.failed",
+    message: "invalid username",
+    scope: "web",
+  }];
+  const webStatus: StatusWebState = {
+    configured: true,
+    running: true,
+    stale: false,
+    state: "running",
+    version: CLI_APP_VERSION,
+    url: "http://127.0.0.1:3173/",
+    pid: 4242,
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    recentErrors,
+    webStatus,
+    terminalWidth: 160,
+  });
+  assertStringIncludes(
+    out,
+    `kato web (v${CLI_APP_VERSION}): running (http://127.0.0.1:3173/, pid 4242)`,
+  );
+  assertStringIncludes(
+    out,
+    "ERROR web operational web.settings.mutation.failed",
+  );
+  assertStringIncludes(out, "invalid username");
 });
 
 Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {
@@ -641,10 +680,11 @@ Deno.test("renderStatusText: memory summary line present", () => {
     showAll: false,
     now: NOW,
     stale: false,
+    terminalWidth: 140,
   });
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
   assertStringIncludes(out, "MB /");
-  assertStringIncludes(out, "snapshots");
+  assertStringIncludes(out, "session data size:");
 });
 
 Deno.test("renderStatusText: over-budget shows warning", () => {
@@ -703,9 +743,9 @@ Deno.test("renderStatusText: narrow width keeps lines within width", () => {
   });
   const tooWideLine = out.split("\n").find((line) => line.length > width);
   assertEquals(tooWideLine, undefined);
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
   assertStringIncludes(out, "recordings:");
-  assertStringIncludes(out, "stale sessions");
+  assertStringIncludes(out, "off");
 });
 
 Deno.test("renderStatusText: wide width keeps two-column summary", () => {
@@ -716,14 +756,19 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     terminalWidth: 120,
   });
   assertStringIncludes(out, "kato daemon");
-  assertStringIncludes(out, "memory:");
+  assertStringIncludes(out, "daemon memory:");
+  assertStringIncludes(out, "session data size:");
   const daemonLineCount =
     out.split("\n").filter((line) => line.includes("kato daemon")).length;
   assertEquals(daemonLineCount, 1);
   assert(
     out.split("\n").some((line) =>
-      line.includes("recordings:") && line.includes("memory:")
+      line.includes("recordings:") && line.includes("daemon memory:")
     ),
+  );
+  assertEquals(
+    out.split("\n").some((line) => line.includes("session data size:")),
+    true,
   );
 });
 

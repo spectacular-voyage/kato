@@ -31,8 +31,14 @@ export type {
   SharedBehaviorConfig,
   UserConfig,
   UserParticipantsConfig,
+  WebAuthConfig,
+  WebConfig,
 } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
+export {
+  DEFAULT_KATO_WEB_HOSTNAME,
+  DEFAULT_KATO_WEB_PORT,
+} from "./web_defaults.ts";
 export {
   DEFAULT_STATUS_STALE_AFTER_MS,
   extractSnippet,
@@ -40,8 +46,10 @@ export {
   isSessionStale,
   projectSessionStatus,
   sortSessionsByRecency,
+  summarizeRecordingActivity,
 } from "./status_projection.ts";
 export type {
+  RecordingActivitySummary,
   RecordingProjectionInput,
   SessionProjectionInput,
 } from "./status_projection.ts";

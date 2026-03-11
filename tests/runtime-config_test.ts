@@ -13,7 +13,14 @@ import {
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
 import { withLockedEnvironment } from "./test_env.ts";
-import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
+import {
+  makeTestTempPath,
+  removePathIfPresent,
+  resolveTestTempPath,
+} from "./test_temp.ts";
+
+const INVALID_RUNTIME_DIR = resolveTestTempPath("kato-daemon");
+const INVALID_ALLOWED_WRITE_ROOT = resolveTestTempPath("allowed-write-root");
 
 function makeSandboxRoot(): string {
   return makeTestTempPath("test-runtime-config-");
@@ -295,7 +302,7 @@ Deno.test("createDefaultRuntimeConfig rejects invalid env logging override", asy
       assertThrows(
         () =>
           createDefaultRuntimeConfig({
-            runtimeDir: "/tmp/kato-daemon",
+            runtimeDir: INVALID_RUNTIME_DIR,
           }),
         Error,
         "KATO_LOGGING_OPERATIONAL_LEVEL must be one of",
@@ -310,7 +317,7 @@ Deno.test("createDefaultRuntimeConfig rejects invalid daemonMaxMemoryMb override
   assertThrows(
     () =>
       createDefaultRuntimeConfig({
-        runtimeDir: "/tmp/kato-daemon",
+        runtimeDir: INVALID_RUNTIME_DIR,
         daemonMaxMemoryMb: 0,
       }),
     Error,
@@ -580,7 +587,7 @@ Deno.test("createDefaultSharedBehaviorConfig rejects invalid export timezones", 
   assertThrows(
     () =>
       createDefaultSharedBehaviorConfig({
-        allowedWriteRoots: ["/tmp"],
+        allowedWriteRoots: [INVALID_ALLOWED_WRITE_ROOT],
         exportTimezone: "Mars/Phobos",
       }),
     Error,

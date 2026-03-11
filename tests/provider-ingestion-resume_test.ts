@@ -9,6 +9,16 @@ import {
   resolveInitialIngestionCursor,
   resolveNextIngestAnchor,
 } from "../apps/daemon/src/orchestrator/provider_ingestion_resume.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const RESUME_SESSION_A_PATH = resolveTestTempPath(
+  "provider-resume",
+  "session-a.jsonl",
+);
+const RESUME_SESSION_B_PATH = resolveTestTempPath(
+  "provider-resume",
+  "session-b.jsonl",
+);
 
 function makeGeminiMessage(
   id: string,
@@ -26,10 +36,10 @@ function makeGeminiMessage(
 Deno.test("resolveInitialIngestionCursor resets persisted cursor when source file path changes", () => {
   const result = resolveInitialIngestionCursor({
     persistedCursor: makeByteOffsetCursor(10),
-    persistedSourceFilePath: "/tmp/session-a.jsonl",
+    persistedSourceFilePath: RESUME_SESSION_A_PATH,
     memoryCursor: makeByteOffsetCursor(20),
-    memoryCursorSourcePath: "/tmp/session-a.jsonl",
-    sessionFilePath: "/tmp/session-b.jsonl",
+    memoryCursorSourcePath: RESUME_SESSION_A_PATH,
+    sessionFilePath: RESUME_SESSION_B_PATH,
   });
 
   assertEquals(result, {
@@ -45,8 +55,8 @@ Deno.test("resolveInitialIngestionCursor resets memory cursor when tracked sourc
     persistedCursor: undefined,
     persistedSourceFilePath: undefined,
     memoryCursor: makeByteOffsetCursor(20),
-    memoryCursorSourcePath: "/tmp/session-a.jsonl",
-    sessionFilePath: "/tmp/session-b.jsonl",
+    memoryCursorSourcePath: RESUME_SESSION_A_PATH,
+    sessionFilePath: RESUME_SESSION_B_PATH,
   });
 
   assertEquals(result, {

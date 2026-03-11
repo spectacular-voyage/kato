@@ -2,7 +2,7 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772813360935
+updated: 1772901113251
 created: 1771724621833
 ---
 
@@ -42,6 +42,7 @@ see [[dev.testing]]
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
   - Windows detached daemon launch should use `Start-Process` semantics to
     avoid parent/child lifecycle coupling seen with direct subprocess spawn.
+- commit messages should include a "semantic commits"-style summary line and then detailed bullet points describing developer-relevant changes
 
 ## Task notes
 

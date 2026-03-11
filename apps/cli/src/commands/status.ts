@@ -1,8 +1,16 @@
-import type { DaemonSessionStatus, DaemonStatusSnapshot } from "@kato/shared";
-import { filterSessionsForDisplay, isSessionStale } from "@kato/shared";
+import type {
+  DaemonSessionStatus,
+  DaemonStatusSnapshot,
+  RecordingActivitySummary,
+} from "@kato/shared";
+import {
+  filterSessionsForDisplay,
+  isSessionStale,
+  summarizeRecordingActivity,
+} from "@kato/shared";
 import { join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isStatusSnapshotStale } from "@kato/runtime";
+import { isProcessAlive, isStatusSnapshotStale } from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -41,6 +49,10 @@ const KEY_UPPER_Q = 81;
 const KEY_LOWER_F = 102;
 const KEY_UPPER_F = 70;
 const ANSI_ESCAPE = String.fromCharCode(0x1b);
+const ANSI_RESET = `${ANSI_ESCAPE}[0m`;
+const ANSI_GREEN = `${ANSI_ESCAPE}[32m`;
+const ANSI_AMBER = `${ANSI_ESCAPE}[38;5;178m`;
+const ANSI_RED = `${ANSI_ESCAPE}[31m`;
 const ANSI_OSC_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
   "g",
@@ -57,6 +69,21 @@ export interface StatusRecentError {
   event: string;
   message: string;
   source?: "log" | "workspace";
+  scope?: "daemon" | "web" | "workspace";
+}
+
+export interface StatusWebState {
+  configured: boolean;
+  running: boolean;
+  stale: boolean;
+  state: "running" | "stopped" | "stale" | "unconfigured";
+  hostname?: string;
+  port?: number;
+  pid?: number;
+  startedAt?: string;
+  heartbeatAt?: string;
+  url?: string;
+  version?: string;
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -98,6 +125,50 @@ function formatBytes(bytes: number): string {
 
 function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function colorizeText(
+  text: string,
+  tone: "green" | "amber" | "red",
+  enabled: boolean,
+): string {
+  if (!enabled) {
+    return text;
+  }
+  const color = tone === "green"
+    ? ANSI_GREEN
+    : tone === "amber"
+    ? ANSI_AMBER
+    : ANSI_RED;
+  return `${color}${text}${ANSI_RESET}`;
+}
+
+function formatStateCount(
+  count: number,
+  label: "active" | "stale" | "inactive" | "invalid",
+  colorize: boolean,
+): string {
+  switch (label) {
+    case "active":
+      return colorizeText(`${count} active`, "green", colorize);
+    case "stale":
+      return colorizeText(`${count} idle`, "amber", colorize);
+    case "invalid":
+      return colorizeText(`${count} invalid`, "red", colorize);
+    case "inactive":
+      return `${count} off`;
+  }
+}
+
+function formatStatusToken(
+  text: string,
+  tone: "green" | "amber" | "red" | "plain",
+  colorize: boolean,
+): string {
+  if (tone === "plain") {
+    return text;
+  }
+  return colorizeText(text, tone, colorize);
 }
 
 function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
@@ -162,6 +233,14 @@ function resolveTerminalWidth(): number {
   }
 }
 
+function shouldColorizeStatusOutput(): boolean {
+  try {
+    return Deno.stdout.isTerminal();
+  } catch {
+    return false;
+  }
+}
+
 async function readTailText(
   filePath: string,
   maxBytes: number,
@@ -209,6 +288,7 @@ async function readTailText(
 
 function parseStatusRecentError(
   value: unknown,
+  scope: StatusRecentError["scope"] = "daemon",
 ): StatusRecentError | undefined {
   if (
     typeof value !== "object" ||
@@ -245,11 +325,13 @@ function parseStatusRecentError(
       ? sanitizeInlineText(message)
       : "no message",
     source: "log",
+    scope,
   };
 }
 
 async function loadRecentErrorsFromLog(
   filePath: string,
+  scope: StatusRecentError["scope"] = "daemon",
 ): Promise<StatusRecentError[]> {
   const tail = await readTailText(filePath, RECENT_ERRORS_TAIL_BYTES);
   if (!tail) {
@@ -264,7 +346,7 @@ async function loadRecentErrorsFromLog(
     }
     try {
       const parsed = JSON.parse(line) as unknown;
-      const errorRecord = parseStatusRecentError(parsed);
+      const errorRecord = parseStatusRecentError(parsed, scope);
       if (!errorRecord) {
         continue;
       }
@@ -279,6 +361,7 @@ async function loadRecentErrorsFromLog(
 async function loadRecentStatusErrors(
   ctx: DaemonCliCommandContext,
 ): Promise<StatusRecentError[]> {
+  const katoDir = ctx.runtimeConfig.katoDir ?? ctx.runtime.runtimeDir;
   const operationalPath = join(
     ctx.runtime.runtimeDir,
     "logs",
@@ -289,13 +372,103 @@ async function loadRecentStatusErrors(
     "logs",
     SECURITY_AUDIT_LOG_FILENAME,
   );
-  const [operational, securityAudit] = await Promise.all([
-    loadRecentErrorsFromLog(operationalPath),
-    loadRecentErrorsFromLog(securityAuditPath),
-  ]);
-  return [...operational, ...securityAudit]
+  const webOperationalPath = join(
+    katoDir,
+    "web",
+    "logs",
+    OPERATIONAL_LOG_FILENAME,
+  );
+  const webSecurityAuditPath = join(
+    katoDir,
+    "web",
+    "logs",
+    SECURITY_AUDIT_LOG_FILENAME,
+  );
+  const [operational, securityAudit, webOperational, webSecurityAudit] =
+    await Promise.all([
+      loadRecentErrorsFromLog(operationalPath, "daemon"),
+      loadRecentErrorsFromLog(securityAuditPath, "daemon"),
+      loadRecentErrorsFromLog(webOperationalPath, "web"),
+      loadRecentErrorsFromLog(webSecurityAuditPath, "web"),
+    ]);
+  return [
+    ...operational,
+    ...securityAudit,
+    ...webOperational,
+    ...webSecurityAudit,
+  ]
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, RECENT_ERRORS_LIMIT);
+}
+
+async function loadStatusWebState(
+  ctx: DaemonCliCommandContext,
+): Promise<StatusWebState> {
+  const stored = await ctx.webStatusStore.load();
+  const alive = stored.running && isProcessAlive(stored.pid);
+  const stale = stored.running && !alive;
+  const configured = ctx.webConfig !== undefined;
+  const url = ctx.webConfig
+    ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
+    : stored.url;
+  const state = alive
+    ? "running"
+    : stale
+    ? "stale"
+    : configured
+    ? "stopped"
+    : "unconfigured";
+
+  return {
+    configured,
+    running: alive,
+    stale,
+    state,
+    hostname: ctx.webConfig?.hostname ?? stored.hostname,
+    port: ctx.webConfig?.port ?? stored.port,
+    pid: stored.pid,
+    startedAt: stored.startedAt,
+    heartbeatAt: stored.heartbeatAt,
+    url,
+    version: stored.version,
+  };
+}
+
+function renderWebStatusText(
+  webStatus: StatusWebState | undefined,
+  colorize: boolean = false,
+): string | undefined {
+  if (!webStatus) {
+    return undefined;
+  }
+  if (webStatus.state === "unconfigured") {
+    return "unconfigured";
+  }
+  if (webStatus.state === "running") {
+    return `${formatStatusToken("running", "green", colorize)} (${
+      webStatus.url ?? "url unavailable"
+    }, pid ${webStatus.pid ?? "unknown"})`;
+  }
+  if (webStatus.state === "stale") {
+    return `${formatStatusToken("stale status", "amber", colorize)} (${
+      webStatus.url ?? "url unavailable"
+    }, pid ${webStatus.pid ?? "unknown"}, heartbeat ${
+      formatLocalTimestamp(webStatus.heartbeatAt)
+    })`;
+  }
+  return `stopped (${webStatus.url ?? "url unavailable"})`;
+}
+
+function renderWebHeaderLine(
+  webStatus: StatusWebState | undefined,
+  colorize: boolean = false,
+): string | undefined {
+  const webText = renderWebStatusText(webStatus, colorize);
+  if (!webText) {
+    return undefined;
+  }
+  const version = webStatus?.version ?? CLI_APP_VERSION;
+  return `kato web (v${version}): ${webText}`;
 }
 
 function deriveWorkspaceStatusErrors(
@@ -317,6 +490,7 @@ function deriveWorkspaceStatusErrors(
       event: "workspace.status.unavailable",
       message: sanitizeInlineText(workspaceStatus.unavailableReason),
       source: "workspace",
+      scope: "workspace",
     });
     return errors;
   }
@@ -340,6 +514,7 @@ function deriveWorkspaceStatusErrors(
       event,
       message: `${alias} (${row.workspaceId}): ${reason}`,
       source: "workspace",
+      scope: "workspace",
     });
   }
 
@@ -359,7 +534,9 @@ export function isLiveFlushKey(keyByte: number): boolean {
 export function getStatusRecentErrorKey(error: StatusRecentError): string {
   const event = sanitizeInlineText(error.event);
   const message = sanitizeInlineText(error.message);
-  const base = `${error.level}|${error.channel}|${event}|${message}`;
+  const scopePrefix = error.scope === "web" ? "web|" : "";
+  const base =
+    `${scopePrefix}${error.level}|${error.channel}|${event}|${message}`;
   if (error.source === "workspace") {
     // Workspace-derived rows are synthetic "current state" errors, so keep
     // the key stable across refreshes to suppress until the state changes.
@@ -371,7 +548,8 @@ export function getStatusRecentErrorKey(error: StatusRecentError): string {
 function getRecentErrorDedupeKey(error: StatusRecentError): string {
   const event = sanitizeInlineText(error.event);
   const message = sanitizeInlineText(error.message);
-  return `${error.level}|${error.channel}|${event}|${message}`;
+  const scopePrefix = error.scope === "web" ? "web|" : "";
+  return `${scopePrefix}${error.level}|${error.channel}|${event}|${message}`;
 }
 
 function dedupeRecentErrors(errors: StatusRecentError[]): StatusRecentError[] {
@@ -471,7 +649,10 @@ async function persistSuppressedRecentErrorKeysBestEffort(
 function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   const mem = snapshot.memory;
   if (!mem) {
-    return ["memory: unavailable"];
+    return [
+      "daemon memory: unavailable",
+      "session data size: unavailable",
+    ];
   }
 
   const budgetMb = Math.round(mem.daemonMaxMemoryBytes / (1024 * 1024));
@@ -479,29 +660,11 @@ function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   const snapshotBytes = formatBytes(mem.snapshots.estimatedBytes);
   const overBudget = mem.snapshots.overBudget ? "  ⚠ OVER BUDGET" : "";
 
-  const line1 =
-    `memory: ${rssMb} MB / ${budgetMb} MB${overBudget}  ·  snapshots ${snapshotBytes}`;
-  const line2 =
-    `sessions ${mem.snapshots.sessionCount}  ·  events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
-  return [line1, line2];
-}
-
-function summarizeRecordingsFromSessions(
-  sessions: DaemonSessionStatus[] | undefined,
-  fallback: DaemonStatusSnapshot["recordings"],
-): DaemonStatusSnapshot["recordings"] {
-  if (!sessions) {
-    return fallback ?? { activeRecordings: 0, destinations: 0 };
-  }
-  const activeRecordings = sessions.flatMap((session) =>
-    !session.stale ? (session.recordings ?? []) : []
-  );
-  return {
-    activeRecordings: activeRecordings.length,
-    destinations:
-      new Set(activeRecordings.map((recording) => recording.outputPath))
-        .size,
-  };
+  const line1 = `daemon memory: ${rssMb} MB / ${budgetMb} MB${overBudget}`;
+  const line2 = `session data size: ${snapshotBytes}`;
+  const line3 =
+    `events ${mem.snapshots.eventCount}  ·  evictions ${mem.snapshots.evictionsTotal}`;
+  return [line1, line2, line3];
 }
 
 function normalizeSnapshotForStatusDisplay(
@@ -517,13 +680,17 @@ function normalizeSnapshotForStatusDisplay(
       ? session.stale
       : true,
   }));
+  const recordingActivity = summarizeRecordingActivity(
+    normalizedSessions,
+    snapshot.recordings,
+  );
   return {
     ...snapshot,
     sessions: normalizedSessions,
-    recordings: summarizeRecordingsFromSessions(
-      normalizedSessions,
-      snapshot.recordings,
-    ),
+    recordings: {
+      activeRecordings: recordingActivity.activeRecordings,
+      destinations: recordingActivity.destinations,
+    },
   };
 }
 
@@ -533,25 +700,42 @@ function renderTopSummarySection(
     activeCount: number;
     staleCount: number;
     width: number;
-    recordingSummary: DaemonStatusSnapshot["recordings"];
+    recordingActivity: RecordingActivitySummary;
+    colorize?: boolean;
   },
 ): string[] {
-  const { activeCount, staleCount, width, recordingSummary } = opts;
+  const { activeCount, staleCount, width, recordingActivity } = opts;
+  const colorize = opts.colorize ?? false;
   const memoryLines = buildMemoryLines(snapshot);
-  const recordingLine =
-    `recordings: ${recordingSummary.activeRecordings} active, ${staleCount} stale sessions`;
+  const recordingLine = `recordings: ${
+    formatStateCount(recordingActivity.activeRecordings, "active", colorize)
+  }, ${
+    formatStateCount(
+      recordingActivity.inactiveRecordings,
+      "inactive",
+      colorize,
+    )
+  }`;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
     return [
       truncate(memoryLines[0], width),
       truncate(memoryLines[1], width),
       truncate(recordingLine, width),
+      truncate(
+        `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
+          formatStateCount(staleCount, "stale", colorize)
+        }`,
+        width,
+      ),
     ];
   }
 
   const leftLines = [
-    `recordings: ${recordingSummary.activeRecordings} active`,
-    `sessions: ${activeCount} active, ${staleCount} stale`,
+    recordingLine,
+    `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
+      formatStateCount(staleCount, "stale", colorize)
+    }`,
   ];
   const rightLines = memoryLines;
 
@@ -586,8 +770,11 @@ function renderSessionRow(
   s: DaemonSessionStatus,
   now: Date,
   width: number,
+  colorize: boolean = false,
 ): string[] {
-  const marker = s.stale ? "○" : "●";
+  const marker = s.stale
+    ? colorizeText("○", "amber", colorize)
+    : colorizeText("●", "green", colorize);
   const label = s.snippet
     ? `"${sanitizeInlineText(s.snippet)}"`
     : "(no user message)";
@@ -609,7 +796,9 @@ function renderSessionRow(
     return lines;
   }
 
-  const recMarker = s.stale ? "○" : "●";
+  const recMarker = s.stale
+    ? colorizeText("○", "amber", colorize)
+    : colorizeText("●", "green", colorize);
   for (const recording of s.recordings) {
     const recordingIdentity = recording.recordingShortId ??
       recording.recordingId ??
@@ -644,6 +833,7 @@ function renderSessionRow(
 
 function renderWorkspaceSummaryLine(
   workspaceStatus: WorkspaceStatusSummary | undefined,
+  colorize: boolean = false,
 ): string | undefined {
   if (!workspaceStatus) {
     return undefined;
@@ -651,12 +841,15 @@ function renderWorkspaceSummaryLine(
   if (workspaceStatus.unavailableReason) {
     return `workspaces: unavailable (${workspaceStatus.unavailableReason})`;
   }
-  return `workspaces: ${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid`;
+  return `workspaces: ${
+    formatStateCount(workspaceStatus.activeCount, "active", colorize)
+  }, ${formatStateCount(workspaceStatus.invalidCount, "invalid", colorize)}`;
 }
 
 function renderWorkspaceSection(
   workspaceStatus: WorkspaceStatusSummary,
   width: number,
+  colorize: boolean = false,
 ): string[] {
   if (workspaceStatus.unavailableReason) {
     return [
@@ -671,7 +864,9 @@ function renderWorkspaceSection(
   }
 
   const lines: string[] = [
-    `Workspaces (${workspaceStatus.activeCount} active, ${workspaceStatus.invalidCount} invalid)`,
+    `Workspaces (${
+      formatStateCount(workspaceStatus.activeCount, "active", colorize)
+    }, ${formatStateCount(workspaceStatus.invalidCount, "invalid", colorize)})`,
     "",
   ];
 
@@ -681,11 +876,15 @@ function renderWorkspaceSection(
   }
 
   for (const row of workspaceStatus.rows) {
-    const marker = row.valid ? "●" : "○";
+    const marker = row.valid
+      ? colorizeText("●", "green", colorize)
+      : colorizeText("○", "red", colorize);
     const alias = resolveDisplayWorkspaceAlias(row.alias);
     const statusLabel = row.valid
-      ? "valid"
-      : `invalid: ${row.invalidReason ?? "unknown error"}`;
+      ? formatStatusToken("valid", "green", colorize)
+      : `${formatStatusToken("invalid", "red", colorize)}: ${
+        row.invalidReason ?? "unknown error"
+      }`;
     lines.push(
       formatPrefixedLine(
         `  ${marker} `,
@@ -728,16 +927,23 @@ export function renderStatusText(
     stale: boolean;
     terminalWidth?: number;
     workspaceStatus?: WorkspaceStatusSummary;
+    webStatus?: StatusWebState;
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
     suppressedRecentErrorKeys?: ReadonlySet<string>;
+    colorize?: boolean;
   },
 ): string {
   const { showAll, now, stale } = opts;
   const sessionCap = opts.sessionCap ?? Infinity;
   const width = resolveRenderWidth(opts.terminalWidth);
+  const colorize = opts.colorize ?? false;
   const divider = "─".repeat(width);
-  const workspaceSummary = renderWorkspaceSummaryLine(opts.workspaceStatus);
+  const workspaceSummary = renderWorkspaceSummaryLine(
+    opts.workspaceStatus,
+    colorize,
+  );
+  const webHeaderLine = renderWebHeaderLine(opts.webStatus, colorize);
   const recentErrors = collectRecentErrors(
     now,
     opts.workspaceStatus,
@@ -763,7 +969,7 @@ export function renderStatusText(
   const allSessions = snapshot.sessions ?? [];
   const activeCount = allSessions.filter((s) => !s.stale).length;
   const staleCount = allSessions.length - activeCount;
-  const recordingSummary = summarizeRecordingsFromSessions(
+  const recordingActivity = summarizeRecordingActivity(
     allSessions,
     snapshot.recordings,
   );
@@ -773,23 +979,30 @@ export function renderStatusText(
 
   const sessionSummary = allSessions.length === 0
     ? ""
-    : ` (${activeCount} active, ${staleCount} stale)`;
+    : ` (${activeCount} active, ${staleCount} idle)`;
 
   const refreshedAt = now.toTimeString().slice(0, 8);
   const daemonVersion = snapshot.daemonVersion ?? "unknown";
   lines.push(
     truncate(
-      `kato CLI (v${CLI_APP_VERSION})  ·  kato daemon (v${daemonVersion}): ${daemonText}  ·  refreshed ${refreshedAt}`,
+      `kato CLI (v${CLI_APP_VERSION})  ·  refreshed ${refreshedAt}`,
       width,
     ),
   );
+  lines.push(
+    truncate(`kato daemon (v${daemonVersion}): ${daemonText}`, width),
+  );
+  if (webHeaderLine) {
+    lines.push(truncate(webHeaderLine, width));
+  }
   lines.push(divider);
   lines.push(
     ...renderTopSummarySection(snapshot, {
       activeCount,
       staleCount,
       width,
-      recordingSummary,
+      recordingActivity,
+      colorize,
     }),
   );
   if (workspaceSummary) {
@@ -797,7 +1010,9 @@ export function renderStatusText(
   }
   lines.push(divider);
   if (opts.showWorkspaceDetails && opts.workspaceStatus) {
-    lines.push(...renderWorkspaceSection(opts.workspaceStatus, width));
+    lines.push(
+      ...renderWorkspaceSection(opts.workspaceStatus, width, colorize),
+    );
     lines.push(divider);
   }
 
@@ -805,12 +1020,17 @@ export function renderStatusText(
   if (visibleRecentErrors.length > 0) {
     lines.push("");
     for (const recentError of visibleRecentErrors) {
+      const scopePrefix = recentError.scope === "web" ? "web " : "";
       const channel = recentError.channel === "security-audit"
         ? "audit"
         : "operational";
+      const level = recentError.level.toUpperCase();
+      const renderedLevel = recentError.level === "error"
+        ? colorizeText(level, "red", colorize)
+        : colorizeText(level, "amber", colorize);
       const detail = `[${
         formatLocalTimestamp(recentError.timestamp)
-      }] ${recentError.level.toUpperCase()} ${channel} ${
+      }] ${renderedLevel} ${scopePrefix}${channel} ${
         sanitizeInlineText(recentError.event)
       } · ${sanitizeInlineText(recentError.message)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
@@ -828,11 +1048,11 @@ export function renderStatusText(
         ? "  (daemon not running)"
         : showAll
         ? "  (none)"
-        : `  (none active — run with --all to show ${staleCount} stale)`,
+        : `  (none active — run with --all to show ${staleCount} idle)`,
     );
   } else {
     for (const s of displaySessions) {
-      lines.push(...renderSessionRow(s, now, width));
+      lines.push(...renderSessionRow(s, now, width, colorize));
       lines.push("");
     }
   }
@@ -907,7 +1127,7 @@ async function runLiveMode(
         await ctx.statusStore.load(),
         now,
       );
-      const [workspaceStatus, recentErrors] = await Promise.all([
+      const [workspaceStatus, recentErrors, webStatus] = await Promise.all([
         loadWorkspaceStatusSummary(
           () => resolveWorkspaceRegistryStore(ctx).load(),
           {
@@ -916,6 +1136,7 @@ async function runLiveMode(
           },
         ),
         loadRecentStatusErrors(ctx),
+        loadStatusWebState(ctx),
       ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
@@ -953,8 +1174,10 @@ async function runLiveMode(
         stale,
         terminalWidth,
         workspaceStatus,
+        webStatus,
         recentErrors,
         suppressedRecentErrorKeys,
+        colorize: shouldColorizeStatusOutput(),
       });
 
       // Clear screen and draw
@@ -1008,6 +1231,7 @@ export async function runStatusCommand(
       readWorkspaceConfigWorkspaceId,
     },
   );
+  const webStatus = await loadStatusWebState(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
   const suppressedRecentErrorKeys = asJson
@@ -1050,13 +1274,34 @@ export async function runStatusCommand(
       workspaceInvalidCount: workspaceStatus?.invalidCount,
       workspaceStatusUnavailable:
         workspaceStatus?.unavailableReason !== undefined,
+      webConfigured: webStatus.configured,
+      webState: webStatus.state,
     },
   );
   await ctx.auditLogger.command("status", { asJson, showAll });
 
   if (asJson) {
     const filtered = filterSnapshotForJson(snapshot, showAll);
-    ctx.runtime.writeStdout(`${JSON.stringify(filtered, null, 2)}\n`);
+    const recordingActivity = summarizeRecordingActivity(
+      snapshot.sessions,
+      snapshot.recordings,
+    );
+    ctx.runtime.writeStdout(
+      `${
+        JSON.stringify(
+          {
+            ...filtered,
+            recordings: {
+              ...filtered.recordings,
+              inactiveRecordings: recordingActivity.inactiveRecordings,
+            },
+            web: webStatus,
+          },
+          null,
+          2,
+        )
+      }\n`,
+    );
     return;
   }
 
@@ -1068,9 +1313,11 @@ export async function runStatusCommand(
       stale,
       terminalWidth,
       workspaceStatus,
+      webStatus,
       showWorkspaceDetails: true,
       recentErrors,
       suppressedRecentErrorKeys,
+      colorize: shouldColorizeStatusOutput(),
     }) + "\n",
   );
 }

@@ -30,6 +30,11 @@ export function makeTestTempPath(prefix: string): string {
   return join(TEST_TEMP_ROOT, `${prefix}${crypto.randomUUID()}`);
 }
 
+export function resolveTestTempPath(...parts: string[]): string {
+  ensureTestTempRoot();
+  return join(TEST_TEMP_ROOT, ...parts);
+}
+
 export async function removePathIfPresent(
   path: string | undefined,
 ): Promise<void> {

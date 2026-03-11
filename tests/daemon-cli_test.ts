@@ -1,4 +1,5 @@
 import {
+  assert,
   assertEquals,
   assertExists,
   assertRejects,
@@ -33,6 +34,10 @@ import {
   type WritePathPolicyGateLike,
 } from "../apps/daemon/src/mod.ts";
 import {
+  createDefaultWebConfig,
+  createDefaultWebServerStatus,
+} from "../apps/runtime/src/mod.ts";
+import {
   CliUsageError,
   parseDaemonCliArgs,
   runDaemonCli,
@@ -51,7 +56,16 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+
+const DAEMON_CLI_ACTIVE_OUTPUT_PATH = resolveTestTempPath(
+  "daemon-cli",
+  "active.md",
+);
+const DAEMON_CLI_STALE_OUTPUT_PATH = resolveTestTempPath(
+  "daemon-cli",
+  "stale.md",
+);
 
 type DaemonCliRuntimeConfigFixture = DaemonRuntimeConfig & {
   statusPath: string;
@@ -394,6 +408,21 @@ function makeInMemoryStatusStore(
   };
 }
 
+function makeInMemoryWebStatusStore(
+  initial = createDefaultWebServerStatus(new Date("2026-02-22T10:00:00.000Z")),
+) {
+  let state = { ...initial };
+  return {
+    load() {
+      return Promise.resolve({ ...state });
+    },
+    save(next: typeof initial) {
+      state = { ...next };
+      return Promise.resolve();
+    },
+  };
+}
+
 function makeInMemoryControlStore(): {
   requests: DaemonControlRequest[];
   store: DaemonControlRequestStoreLike;
@@ -618,8 +647,6 @@ Deno.test("cli parser accepts workspace commands", () => {
   const register = parseDaemonCliArgs([
     "workspace",
     "register",
-    "--alias",
-    "My.Proj",
   ]);
   assertEquals(register.kind, "command");
   if (
@@ -628,7 +655,7 @@ Deno.test("cli parser accepts workspace commands", () => {
   ) {
     throw new Error("expected workspace-register command");
   }
-  assertEquals(register.command.alias, "My.Proj");
+  assertEquals(register.command.alias, undefined);
   const registerWithDir = parseDaemonCliArgs([
     "workspace",
     "register",
@@ -685,21 +712,15 @@ Deno.test("cli parser preserves Windows-style workspace register path input", ()
   assertEquals(parsed.command.alias, "Win.Proj");
 });
 
-Deno.test("cli parser requires non-empty workspace register alias", () => {
-  assertThrows(
-    () => parseDaemonCliArgs(["workspace", "register"]),
-    CliUsageError,
-  );
-  assertThrows(
-    () =>
-      parseDaemonCliArgs([
-        "workspace",
-        "register",
-        "--alias",
-        "   ",
-      ]),
-    CliUsageError,
-  );
+Deno.test("cli parser allows workspace register without alias", () => {
+  const parsed = parseDaemonCliArgs(["workspace", "register"]);
+  assertEquals(parsed.kind, "command");
+  if (
+    parsed.kind !== "command" || parsed.command.name !== "workspace-register"
+  ) {
+    throw new Error("expected workspace-register command");
+  }
+  assertEquals(parsed.command.alias, undefined);
 });
 
 Deno.test("cli parser accepts user commands", () => {
@@ -918,7 +939,15 @@ Deno.test(
       );
       assertStringIncludes(
         await Deno.readTextFile(configPath),
-        "includeSessionIds: true",
+        "includeSessionIds: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeWorkspaceIds: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeRecordingIds: false",
       );
 
       const { code: registerCode, harness: registerHarness } =
@@ -1099,6 +1128,61 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli workspace register defaults alias to the workspace folder name",
+  async () => {
+    await withTestTempDir(
+      "daemon-cli-workspace-default-alias-",
+      async (tempDir) => {
+        const runtimeDir = join(tempDir, "runtime");
+        const katoDir = join(tempDir, ".kato");
+        const workspaceDir = join(tempDir, "default-alias-workspace");
+        const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+        await Deno.mkdir(workspaceDir, { recursive: true });
+
+        const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+          ...makeDefaultRuntimeConfig(runtimeDir),
+          katoDir,
+          allowedWriteRoots: [tempDir, katoDir],
+        };
+
+        assertEquals(
+          (
+            await runDaemonCliWithHarness(
+              ["workspace", "init"],
+              runtimeDir,
+              {
+                cwdPath: workspaceDir,
+                defaultRuntimeConfig,
+              },
+            )
+          ).code,
+          0,
+        );
+
+        const { code: registerCode, harness: registerHarness } =
+          await runDaemonCliWithHarness(
+            ["workspace", "register"],
+            runtimeDir,
+            {
+              cwdPath: workspaceDir,
+              defaultRuntimeConfig,
+            },
+          );
+        assertEquals(registerCode, 0);
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "workspace registered: default-alias-workspace (",
+        );
+        assertStringIncludes(
+          await Deno.readTextFile(registryPath),
+          `"alias": "default-alias-workspace"`,
+        );
+      },
+    );
+  },
+);
+
+Deno.test(
   "runDaemonCli status reports workspace validity with mappings",
   async () => {
     await withTestTempDir("daemon-cli-status-workspaces-", async (tempDir) => {
@@ -1246,7 +1330,11 @@ Deno.test(
             updatedAt: "2026-02-22T09:59:00.000Z",
             lastEventAt: "2026-02-22T09:59:00.000Z",
             stale: false,
-            recordings: [],
+            recordings: [{
+              outputPath: DAEMON_CLI_ACTIVE_OUTPUT_PATH,
+              startedAt: "2026-02-22T09:30:00.000Z",
+              lastWriteAt: "2026-02-22T09:59:00.000Z",
+            }],
           },
           {
             provider: "claude",
@@ -1256,7 +1344,11 @@ Deno.test(
             updatedAt: "2026-02-20T10:00:00.000Z",
             lastEventAt: "2026-02-20T10:00:00.000Z",
             stale: false,
-            recordings: [],
+            recordings: [{
+              outputPath: DAEMON_CLI_STALE_OUTPUT_PATH,
+              startedAt: "2026-02-20T09:30:00.000Z",
+              lastWriteAt: "2026-02-20T10:00:00.000Z",
+            }],
           },
         ],
       });
@@ -1274,10 +1366,19 @@ Deno.test(
       assertEquals(jsonCode, 0);
       const filtered = JSON.parse(
         jsonHarness.stdout.join(""),
-      ) as DaemonStatusSnapshot;
+      ) as DaemonStatusSnapshot & {
+        web?: { configured: boolean; state: string };
+      };
       assertEquals(filtered.sessions?.map((session) => session.sessionId), [
         "sess-active",
       ]);
+      assertEquals(
+        (filtered.recordings as { inactiveRecordings?: number })
+          .inactiveRecordings,
+        1,
+      );
+      assertEquals(filtered.web?.configured, false);
+      assertEquals(filtered.web?.state, "unconfigured");
 
       const allHarness = makeRuntimeHarness(runtimeDir);
       const allCode = await runDaemonCli(["status", "--json", "--all"], {
@@ -1291,11 +1392,134 @@ Deno.test(
       assertEquals(allCode, 0);
       const unfiltered = JSON.parse(
         allHarness.stdout.join(""),
-      ) as DaemonStatusSnapshot;
+      ) as DaemonStatusSnapshot & {
+        web?: { configured: boolean; state: string };
+      };
       assertEquals(unfiltered.sessions?.map((session) => session.sessionId), [
         "sess-active",
         "sess-stale",
       ]);
+      assertEquals(
+        (unfiltered.recordings as { inactiveRecordings?: number })
+          .inactiveRecordings,
+        1,
+      );
+      assertEquals(unfiltered.web?.configured, false);
+      assertEquals(unfiltered.web?.state, "unconfigured");
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli status reports Kato Web runstate and recent web errors",
+  async () => {
+    await withTestTempDir("daemon-cli-status-web-", async (tempDir) => {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const webLogsDir = join(katoDir, "web", "logs");
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      await Deno.mkdir(webLogsDir, { recursive: true });
+      await Deno.mkdir(dirname(registryPath), { recursive: true });
+      await Deno.writeTextFile(
+        registryPath,
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            updatedAt: "2026-03-02T10:00:00.000Z",
+            workspaces: [],
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      await Deno.writeTextFile(
+        join(webLogsDir, "operational.jsonl"),
+        `${
+          JSON.stringify({
+            timestamp: "2026-03-02T10:01:00.000Z",
+            level: "error",
+            channel: "operational",
+            event: "web.settings.mutation.failed",
+            message: "invalid username",
+          })
+        }\n`,
+      );
+
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+      const { store: configStore } = makeInMemoryConfigStore(
+        defaultRuntimeConfig,
+      );
+      const statusStore = makeInMemoryStatusStore({
+        schemaVersion: 1,
+        generatedAt: "2026-03-02T10:02:00.000Z",
+        heartbeatAt: "2026-03-02T10:02:00.000Z",
+        daemonRunning: true,
+        daemonPid: 4242,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      });
+      const controlStore = makeInMemoryControlStore();
+      const webStatusStore = makeInMemoryWebStatusStore({
+        ...createDefaultWebServerStatus(new Date("2026-03-02T10:02:00.000Z")),
+        running: true,
+        hostname: "127.0.0.1",
+        port: 3173,
+        pid: Deno.pid,
+        startedAt: "2026-03-02T10:00:00.000Z",
+        heartbeatAt: "2026-03-02T10:02:00.000Z",
+        url: "http://127.0.0.1:3173/",
+      });
+      const webConfig = createDefaultWebConfig({
+        hostname: "127.0.0.1",
+        port: 3173,
+      });
+      const webConfigStore = {
+        load() {
+          return Promise.resolve(webConfig);
+        },
+        ensureInitialized(defaultConfig = webConfig) {
+          return Promise.resolve({
+            created: false,
+            config: defaultConfig,
+            path: join(katoDir, "web", "kato-web-config.yaml"),
+          });
+        },
+      };
+
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["status"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig,
+        configStore,
+        statusStore,
+        controlStore: controlStore.store,
+        webConfigStore,
+        webStatusStore,
+      });
+
+      assertEquals(code, 0);
+      const output = harness.stdout.join("");
+      assert(
+        new RegExp(
+          `kato web \\(v${
+            CLI_APP_VERSION.replaceAll(".", "\\.")
+          }\\): (running|stale status) \\(http://127\\.0\\.0\\.1:3173/`,
+        ).test(output),
+      );
+      assertStringIncludes(
+        output,
+        "ERROR web operational web.settings.mutation.failed",
+      );
+      assertStringIncludes(output, "invalid username");
     });
   },
 );
@@ -2446,8 +2670,8 @@ Deno.test(
 
     assertEquals(code, 0);
     const output = harness.stdout.join("");
-    assertStringIncludes(output, "sessions: 0 active, 1 stale");
-    assertStringIncludes(output, "run with --all to show 1 stale");
+    assertStringIncludes(output, "sessions: 0 active, 1 idle");
+    assertStringIncludes(output, "run with --all to show 1 idle");
   },
 );
 
@@ -2501,13 +2725,14 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
     daemonRunning: boolean;
     heartbeatAt: string;
     daemonPid?: number;
-    recordings: { activeRecordings: number };
+    recordings: { activeRecordings: number; inactiveRecordings?: number };
   };
   assertEquals(statusPayload.schemaVersion, 1);
   assertEquals(statusPayload.daemonRunning, true);
   assertEquals(statusPayload.daemonPid, 31337);
   assertEquals(statusPayload.heartbeatAt, "2026-02-22T10:00:00.000Z");
   assertEquals(statusPayload.recordings.activeRecordings, 3);
+  assertEquals(statusPayload.recordings.inactiveRecordings, 0);
 
   const stopHarness = makeRuntimeHarness(runtimeDir);
   const stopCode = await runDaemonCli(["stop"], {
@@ -2581,9 +2806,15 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     const logsDir = `${runtimeDir}/logs`;
     const operationalLogPath = `${logsDir}/operational.jsonl`;
     const auditLogPath = `${logsDir}/security-audit.jsonl`;
+    const webLogsDir = `${dirname(runtimeDir)}/web/logs`;
+    const webOperationalLogPath = `${webLogsDir}/operational.jsonl`;
+    const webAuditLogPath = `${webLogsDir}/security-audit.jsonl`;
     await Deno.mkdir(logsDir, { recursive: true });
+    await Deno.mkdir(webLogsDir, { recursive: true });
     await Deno.writeTextFile(operationalLogPath, '{"old":"operational"}\n');
     await Deno.writeTextFile(auditLogPath, '{"old":"audit"}\n');
+    await Deno.writeTextFile(webOperationalLogPath, '{"old":"web-op"}\n');
+    await Deno.writeTextFile(webAuditLogPath, '{"old":"web-audit"}\n');
 
     const cleanHarness = makeRuntimeHarness(runtimeDir);
     const cleanCode = await runDaemonCli(["clean", "--logs"], {
@@ -2596,10 +2827,12 @@ Deno.test("runDaemonCli queues export and handles clean in CLI", async () => {
     });
     assertEquals(cleanCode, 0);
     assertStringIncludes(cleanHarness.stdout.join(""), "clean completed");
-    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=3");
+    assertStringIncludes(cleanHarness.stdout.join(""), "logsFlushed=5");
     assertEquals(controlStore.requests.length, 1);
     assertEquals(await Deno.readTextFile(operationalLogPath), "");
     assertEquals(await Deno.readTextFile(auditLogPath), "");
+    assertEquals(await Deno.readTextFile(webOperationalLogPath), "");
+    assertEquals(await Deno.readTextFile(webAuditLogPath), "");
     assertEquals(await Deno.readTextFile(exportsLogPath), "");
   });
 });
@@ -2706,38 +2939,52 @@ Deno.test("runDaemonCli clean --sessions dry-run reports candidate counts", asyn
   );
 });
 
-Deno.test("runDaemonCli clean --sessions refuses while daemon is running", async () => {
-  const runtimeDir = ".kato/test-runtime";
-  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
-  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
-  const controlStore = makeInMemoryControlStore();
-  const statusStore = makeInMemoryStatusStore({
-    schemaVersion: 1,
-    generatedAt: "2026-02-22T10:00:00.000Z",
-    heartbeatAt: "2026-02-22T10:00:00.000Z",
-    daemonRunning: true,
-    daemonPid: 1234,
-    providers: [],
-    recordings: {
-      activeRecordings: 0,
-      destinations: 0,
-    },
-  });
-  const harness = makeRuntimeHarness(runtimeDir);
+Deno.test("runDaemonCli clean --sessions allows cleanup while daemon is running", async () => {
+  await withTestTempDir("daemon-cli-clean-running-", async (rootDir) => {
+    const runtimeDir = `${rootDir}/runtime`;
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const controlStore = makeInMemoryControlStore();
+    const statusStore = makeInMemoryStatusStore({
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: true,
+      daemonPid: 1234,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    });
+    const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+    const { store: configStore } = makeInMemoryConfigStore(
+      defaultRuntimeConfig,
+    );
+    const harness = makeRuntimeHarness(runtimeDir);
 
-  const code = await runDaemonCli(["clean", "--sessions", "7"], {
-    runtime: harness.runtime,
-    defaultRuntimeConfig,
-    configStore,
-    statusStore,
-    controlStore: controlStore.store,
-  });
+    const sessionsDir = resolveDefaultSessionsDir(rootDir);
+    await Deno.mkdir(sessionsDir, { recursive: true });
+    const oldMetaPath = `${sessionsDir}/old.meta.json`;
+    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
+    await Deno.writeTextFile(oldMetaPath, "{}\n");
+    await Deno.writeTextFile(oldTwinPath, "{}\n");
+    const oldTime = new Date("2026-02-01T00:00:00.000Z");
+    await Deno.utime(oldMetaPath, oldTime, oldTime);
+    await Deno.utime(oldTwinPath, oldTime, oldTime);
 
-  assertEquals(code, 1);
-  assertStringIncludes(
-    harness.stderr.join(""),
-    "Refusing clean --sessions while daemon is running",
-  );
+    const code = await runDaemonCli(["clean", "--sessions", "7"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig,
+      configStore,
+      statusStore,
+      controlStore: controlStore.store,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "sessionsDeleted=1");
+    await assertRejects(() => Deno.stat(oldMetaPath), Deno.errors.NotFound);
+    await assertRejects(() => Deno.stat(oldTwinPath), Deno.errors.NotFound);
+  });
 });
 
 Deno.test("runDaemonCli export fails when daemon is not running", async () => {

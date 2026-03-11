@@ -10,6 +10,12 @@ export { runStartCommand } from "./start.ts";
 export { runStatusCommand } from "./status.ts";
 export { runStopCommand } from "./stop.ts";
 export {
+  runWebInitCommand,
+  runWebStartCommand,
+  runWebStatusCommand,
+  runWebStopCommand,
+} from "./web.ts";
+export {
   runUserDefaultClearCommand,
   runUserDefaultSetCommand,
   runUserExcludeMeCommand,

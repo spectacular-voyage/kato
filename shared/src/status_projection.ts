@@ -41,6 +41,12 @@ export interface RecordingProjectionInput {
   lastWriteAt: string;
 }
 
+export interface RecordingActivitySummary {
+  activeRecordings: number;
+  inactiveRecordings: number;
+  destinations: number;
+}
+
 /**
  * Derive a short snippet from the first user message in a session's events.
  * Using the first message keeps the label stable as the conversation grows.
@@ -146,6 +152,52 @@ function recencyKey(s: DaemonSessionStatus): number {
 
 function hasActiveRecording(s: DaemonSessionStatus): boolean {
   return !s.stale && (s.recordings?.length ?? 0) > 0;
+}
+
+/**
+ * Summarize recording activity from session status rows.
+ *
+ * Inactive recordings are counted as:
+ * - active sessions with no current recording
+ * - recordings attached to stale sessions
+ */
+export function summarizeRecordingActivity(
+  sessions: DaemonSessionStatus[] | undefined,
+  fallback?: { activeRecordings: number; destinations: number },
+): RecordingActivitySummary {
+  if (!sessions) {
+    return {
+      activeRecordings: fallback?.activeRecordings ?? 0,
+      inactiveRecordings: 0,
+      destinations: fallback?.destinations ?? 0,
+    };
+  }
+
+  let activeRecordings = 0;
+  let inactiveRecordings = 0;
+  const destinations = new Set<string>();
+
+  for (const session of sessions) {
+    const recordings = session.recordings ?? [];
+    if (session.stale) {
+      inactiveRecordings += recordings.length;
+      continue;
+    }
+    if (recordings.length === 0) {
+      inactiveRecordings += 1;
+      continue;
+    }
+    activeRecordings += recordings.length;
+    for (const recording of recordings) {
+      destinations.add(recording.outputPath);
+    }
+  }
+
+  return {
+    activeRecordings,
+    inactiveRecordings,
+    destinations: destinations.size,
+  };
 }
 
 /**

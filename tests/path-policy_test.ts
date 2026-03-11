@@ -5,7 +5,17 @@ import {
   WritePathPolicyGate,
 } from "../apps/daemon/src/mod.ts";
 import { withLockedEnvironment } from "./test_env.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+
+const PATH_POLICY_FALLBACK_ROOT = resolveTestTempPath(
+  "path-policy",
+  "fallback",
+);
+const PATH_POLICY_EXPORTS_ROOT = resolveTestTempPath("path-policy", "exports");
+const PATH_POLICY_SINGLE_ROOT = resolveTestTempPath(
+  "path-policy",
+  "single-root",
+);
 
 const PATH_POLICY_ENV_KEYS = [
   "KATO_ALLOWED_WRITE_ROOT",
@@ -51,18 +61,18 @@ Deno.test("resolveDefaultAllowedWriteRoots prefers JSON env and trims entries", 
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({
-        KATO_ALLOWED_WRITE_ROOT: "/tmp/fallback",
+        KATO_ALLOWED_WRITE_ROOT: PATH_POLICY_FALLBACK_ROOT,
         KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify([
           " ./notes ",
           "",
           7,
-          "/tmp/exports",
+          PATH_POLICY_EXPORTS_ROOT,
         ]),
       });
 
       assertEquals(resolveDefaultAllowedWriteRoots(), [
         "./notes",
-        "/tmp/exports",
+        PATH_POLICY_EXPORTS_ROOT,
       ]);
     } finally {
       restorePathPolicyEnv(snapshot);
@@ -75,7 +85,7 @@ Deno.test("resolveDefaultAllowedWriteRoots fails closed on invalid JSON env", as
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({
-        KATO_ALLOWED_WRITE_ROOT: "/tmp/fallback",
+        KATO_ALLOWED_WRITE_ROOT: PATH_POLICY_FALLBACK_ROOT,
         KATO_ALLOWED_WRITE_ROOTS_JSON: "not-json",
       });
 
@@ -91,10 +101,12 @@ Deno.test("resolveDefaultAllowedWriteRoots falls back to single-root env or cwd"
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({
-        KATO_ALLOWED_WRITE_ROOT: "/tmp/single-root",
+        KATO_ALLOWED_WRITE_ROOT: PATH_POLICY_SINGLE_ROOT,
         KATO_ALLOWED_WRITE_ROOTS_JSON: undefined,
       });
-      assertEquals(resolveDefaultAllowedWriteRoots(), ["/tmp/single-root"]);
+      assertEquals(resolveDefaultAllowedWriteRoots(), [
+        PATH_POLICY_SINGLE_ROOT,
+      ]);
 
       setPathPolicyEnv({
         KATO_ALLOWED_WRITE_ROOT: undefined,

@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1772759921935
+updated: 1773200234092
 created: 1771812869620
 ---
 
@@ -111,3 +111,4 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
       enumerated, and an implementation PR is opened (or explicitly deferred).
       Owner: @djradon. Target: 2026-03-15.
 
+- [ ] update cli based on new web summary functionality and tightened session/ingest differentiation

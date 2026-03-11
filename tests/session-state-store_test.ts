@@ -5,7 +5,28 @@ import {
   makeDefaultSessionCursor,
   PersistentSessionStateStore,
 } from "../apps/daemon/src/mod.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+
+const SESSION_STATE_SOURCE_PATH = resolveTestTempPath(
+  "session-state-store",
+  "codex-session-1.jsonl",
+);
+const SESSION_STATE_LEGACY_SOURCE_PATH = resolveTestTempPath(
+  "session-state-store",
+  "codex-legacy-session-1.jsonl",
+);
+const SESSION_STATE_INDEX_HEALING_SOURCE_PATH = resolveTestTempPath(
+  "session-state-store",
+  "codex-index-healing-session-1.jsonl",
+);
+const SESSION_STATE_UPDATED_AT_SOURCE_PATH = resolveTestTempPath(
+  "session-state-store",
+  "codex-session-updated-at.jsonl",
+);
+const SESSION_STATE_WORKSPACE_OUTPUT_SOURCE_PATH = resolveTestTempPath(
+  "session-state-store",
+  "codex-session-workspace-output.jsonl",
+);
 
 async function withTempDir(
   prefix: string,
@@ -49,7 +70,7 @@ Deno.test("PersistentSessionStateStore persists metadata and rebuilds daemon ind
     const metadata = await store.getOrCreateSessionMetadata({
       provider: "codex",
       providerSessionId: "session-1",
-      sourceFilePath: "/tmp/codex-session-1.jsonl",
+      sourceFilePath: SESSION_STATE_SOURCE_PATH,
       initialCursor: makeDefaultSessionCursor("codex"),
     });
 
@@ -113,7 +134,7 @@ Deno.test("PersistentSessionStateStore uses Windows-safe storage keys", async ()
     const metadata = await store.getOrCreateSessionMetadata({
       provider: "codex",
       providerSessionId: "session-1",
-      sourceFilePath: "/tmp/codex-session-1.jsonl",
+      sourceFilePath: SESSION_STATE_SOURCE_PATH,
       initialCursor: makeDefaultSessionCursor("codex"),
     });
     assertEquals(metadata.twinPath, location.twinPath);
@@ -138,7 +159,7 @@ Deno.test({
       });
       const created = await initialStore.getOrCreateSessionMetadata({
         ...identity,
-        sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+        sourceFilePath: SESSION_STATE_LEGACY_SOURCE_PATH,
         initialCursor: makeDefaultSessionCursor("codex"),
       });
       await initialStore.appendTwinEvents(created, [
@@ -188,7 +209,7 @@ Deno.test({
       });
       const restored = await restartedStore.getOrCreateSessionMetadata({
         ...identity,
-        sourceFilePath: "/tmp/codex-legacy-session-1.jsonl",
+        sourceFilePath: SESSION_STATE_LEGACY_SOURCE_PATH,
         initialCursor: makeDefaultSessionCursor("codex"),
       });
 
@@ -235,7 +256,7 @@ Deno.test(
       });
       const created = await initialStore.getOrCreateSessionMetadata({
         ...identity,
-        sourceFilePath: "/tmp/codex-index-healing-session-1.jsonl",
+        sourceFilePath: SESSION_STATE_INDEX_HEALING_SOURCE_PATH,
         initialCursor: makeDefaultSessionCursor("codex"),
       });
       const canonicalLocation = initialStore.resolveLocation(identity);
@@ -273,7 +294,7 @@ Deno.test(
       });
       const restored = await restartedStore.getOrCreateSessionMetadata({
         ...identity,
-        sourceFilePath: "/tmp/codex-index-healing-session-1.jsonl",
+        sourceFilePath: SESSION_STATE_INDEX_HEALING_SOURCE_PATH,
         initialCursor: makeDefaultSessionCursor("codex"),
       });
 
@@ -304,7 +325,7 @@ Deno.test(
       const created = await store.getOrCreateSessionMetadata({
         provider: "codex",
         providerSessionId: "session-updated-at",
-        sourceFilePath: "/tmp/codex-session-updated-at.jsonl",
+        sourceFilePath: SESSION_STATE_UPDATED_AT_SOURCE_PATH,
         initialCursor: makeDefaultSessionCursor("codex"),
       });
       assertEquals(created.updatedAt, "2026-02-26T10:00:00.000Z");
@@ -375,7 +396,7 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
     const created = await store.getOrCreateSessionMetadata({
       provider: "codex",
       providerSessionId: "session-workspace-output",
-      sourceFilePath: "/tmp/codex-session-workspace-output.jsonl",
+      sourceFilePath: SESSION_STATE_WORKSPACE_OUTPUT_SOURCE_PATH,
       initialCursor: makeDefaultSessionCursor("codex"),
     });
 

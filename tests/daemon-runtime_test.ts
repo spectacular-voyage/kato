@@ -34,6 +34,7 @@ import {
   makeTestTempDir,
   makeTestTempPath,
   removePathIfPresent as removeDirIfPresent,
+  resolveTestTempPath,
 } from "./test_temp.ts";
 
 function toPosixPath(path: string): string {
@@ -117,6 +118,30 @@ function makeDebugLoggers(nowIso = "2026-02-22T10:00:00.000Z"): {
 const TEST_WORKSPACE_ALIAS = "My.Proj";
 const TEST_WORKSPACE_ID = "workspace-my-proj";
 const TEST_WORKSPACE_REGISTERED_AT = "2026-02-22T09:55:00.000Z";
+const DAEMON_RUNTIME_MOCK_SOURCE_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "mock-source.jsonl",
+);
+const DAEMON_RUNTIME_MOCK_SESSION_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "mock-session.jsonl",
+);
+const DAEMON_RUNTIME_CAPTURE_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "captured.md",
+);
+const DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "first-seen.md",
+);
+const DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "capture-from-twin.md",
+);
+const DAEMON_RUNTIME_OTHER_DESTINATION_PATH = resolveTestTempPath(
+  "daemon-runtime",
+  "other-destination.md",
+);
 
 type SessionMetadataEntry = Awaited<
   ReturnType<PersistentSessionStateStore["listSessionMetadata"]>
@@ -617,7 +642,7 @@ async function prepopulateScenarioSessionMetadata(
   const metadata = await sessionStateStore.getOrCreateSessionMetadata({
     provider: "codex",
     providerSessionId: "session-1",
-    sourceFilePath: "/tmp/mock-source.jsonl",
+    sourceFilePath: DAEMON_RUNTIME_MOCK_SOURCE_PATH,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
   mutate(metadata);
@@ -2404,23 +2429,15 @@ Deno.test(
         const content = await Deno.readTextFile(destination);
         const session = findScenarioMetadata(result.metadataList);
         const output = findWorkspaceOutputState(session);
-        assert(content.includes("kato-sessionIds: [session-1]"));
-        assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+        assertEquals(content.includes("kato-sessionIds:"), false);
+        assertEquals(content.includes("kato-workspaceIds:"), false);
         assertExists(output.activeRecordingCycleId);
-        const recordingShortId = output.activeRecordingCycleId
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "")
-          .slice(0, 8);
         const idLine = content.split("\n").find((line) =>
           line.startsWith("id: ")
         );
         assertExists(idLine);
-        assert(idLine.endsWith(`-${recordingShortId}`));
-        assert(
-          content.includes(
-            `kato-recordingIds: [${output.activeRecordingCycleId}]`,
-          ),
-        );
+        assert(/^id: [a-z0-9-]+-[a-z0-9]{6}$/.test(idLine));
+        assertEquals(content.includes("kato-recordingIds:"), false);
         assert(content.includes("Before capture"));
         assert(content.includes("After capture"));
         assert(content.includes("# User_2026-02-22_1100_00"));
@@ -2456,8 +2473,8 @@ Deno.test(
         setStateDir(result.stateDir);
 
         const content = await Deno.readTextFile(destination);
-        assert(content.includes("kato-sessionIds: [session-1]"));
-        assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+        assertEquals(content.includes("kato-sessionIds:"), false);
+        assertEquals(content.includes("kato-workspaceIds:"), false);
         assertEquals(content.includes("kato-recordingIds:"), false);
         assert(content.includes("Before export"));
         assert(content.includes("After export"));
@@ -3441,7 +3458,7 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
       const captureCommandMessage = makeEvent(
         "m2",
         "message.user",
-        `::capture-${TEST_WORKSPACE_ALIAS} /tmp/captured.md\ncapture now`,
+        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_PATH}\ncapture now`,
         "2026-02-22T10:00:01.000Z",
       );
       const assistantReply = makeEvent(
@@ -3631,11 +3648,17 @@ Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates 
 
   assertEquals(callOrder, ["capture", "record"]);
   assertEquals(captureTargets.length, 1);
-  assertEquals(toPosixPath(captureTargets[0] ?? ""), "/tmp/captured.md");
+  assertEquals(
+    toPosixPath(captureTargets[0] ?? ""),
+    toPosixPath(DAEMON_RUNTIME_CAPTURE_PATH),
+  );
   assertEquals(captureRecordingCycleIds.length, 1);
   assertEquals(captureRecordingCycleIds[0]?.length, 1);
   assertEquals(activatedTargets.length, 1);
-  assertEquals(toPosixPath(activatedTargets[0] ?? ""), "/tmp/captured.md");
+  assertEquals(
+    toPosixPath(activatedTargets[0] ?? ""),
+    toPosixPath(DAEMON_RUNTIME_CAPTURE_PATH),
+  );
   assertEquals(activatedRecordingIds.length, 1);
   assertEquals(activatedRecordingIds[0], captureRecordingCycleIds[0]?.[0]);
   assertEquals(appendedMessageIds, ["m2", "m3"]);
@@ -3699,7 +3722,7 @@ Deno.test(
               makeEvent(
                 "m1",
                 "message.user",
-                `::capture-${TEST_WORKSPACE_ALIAS} /tmp/first-seen.md`,
+                `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH}`,
                 "2026-02-22T10:00:01.000Z",
               ),
             ],
@@ -3823,11 +3846,14 @@ Deno.test(
 
     assertEquals(callOrder, ["capture", "record"]);
     assertEquals(captureTargets.length, 1);
-    assertEquals(toPosixPath(captureTargets[0] ?? ""), "/tmp/first-seen.md");
+    assertEquals(
+      toPosixPath(captureTargets[0] ?? ""),
+      toPosixPath(DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH),
+    );
     assertEquals(activatedTargets.length, 1);
     assertEquals(
       toPosixPath(activatedTargets[0] ?? ""),
-      "/tmp/first-seen.md",
+      toPosixPath(DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH),
     );
   },
 );
@@ -4741,7 +4767,7 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
     const captureCommand = makeLocalEvent(
       "u-capture-tail",
       "message.user",
-      `::capture-${TEST_WORKSPACE_ALIAS} /tmp/capture-from-twin.md`,
+      `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
       "2026-02-22T10:00:02.000Z",
     );
     const fullConversation = [
@@ -4753,7 +4779,7 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
     const metadata = await sessionStateStore.getOrCreateSessionMetadata({
       provider,
       providerSessionId,
-      sourceFilePath: "/tmp/mock-source.jsonl",
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SOURCE_PATH,
       initialCursor: { kind: "byte-offset", value: 0 },
     });
     const twinEvents = mapConversationEventsToTwin({
@@ -4834,7 +4860,7 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
       appendToDestination() {
         return Promise.resolve({
           mode: "append",
-          outputPath: "/tmp/capture-from-twin.md",
+          outputPath: DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH,
           wrote: true,
           deduped: false,
         });
@@ -4872,7 +4898,8 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
       { kind: "message.assistant", content: "early reply" },
       {
         kind: "message.user",
-        content: `::capture-${TEST_WORKSPACE_ALIAS} /tmp/capture-from-twin.md`,
+        content:
+          `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
       },
     ]);
   } finally {
@@ -5072,12 +5099,12 @@ Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error 
     const metadata = await sessionStateStore.getOrCreateSessionMetadata({
       provider: "codex",
       providerSessionId: "session-ambiguous-stop",
-      sourceFilePath: "/tmp/mock-session.jsonl",
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SESSION_PATH,
       initialCursor: { kind: "byte-offset", value: 0 },
     });
     metadata.workspaceOutputs = [
       makeWorkspaceOutputState(workspace, {
-        currentResolvedPath: "/tmp/other-destination.md",
+        currentResolvedPath: DAEMON_RUNTIME_OTHER_DESTINATION_PATH,
         desiredState: "on",
         activeRecordingCycleId: "deadbeef-1111-1111-1111-111111111111",
         recordingCycles: [{

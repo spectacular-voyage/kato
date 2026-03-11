@@ -8,11 +8,11 @@ created: 1771787449702
 
 ## Purpose
 
-This note explains Kato's current architecture after CLI/daemon separation:
+This note explains Kato's current architecture after CLI/daemon/web separation:
 
 - process and package boundaries
 - ownership of config/state files
-- control/data flow between CLI and daemon
+- control/data flow between CLI, web, and daemon
 - where to extend behavior safely
 
 Related notes:
@@ -27,6 +27,9 @@ Related notes:
   intent and reads/writes config, status, and control-plane files.
 - **Daemon process**: long-running ingest/export orchestrator (`apps/daemon`)
   launched by CLI and acknowledged via status heartbeat.
+- **Web app process**: local authenticated operator console (`apps/web`) that
+  renders browser views from status/config/session/log stores and owns a small
+  set of guided local workflows.
 - **Runtime library**: shared Deno implementation package (`apps/runtime`) used
   by both CLI and daemon (stores, resolvers, policy, observability).
 - **Contracts library**: pure shared contracts (`shared/src`) used across app
@@ -58,8 +61,44 @@ Related notes:
   resolvers/control-plane/policy/workspace/observability).
 - `shared/src`: contracts and projection utilities (`config`, `status`,
   `session_state`, `events`, `messages`, `ipc`, etc.).
-- `apps/web/src`, `apps/cloud/src`: placeholders.
+- `apps/web`: local Fresh-based operator console (routes, loaders, API
+  handlers, islands, auth/session handling, and small guided workflows).
+- `apps/cloud/src`: placeholder.
 - `tests`: behavior and contract coverage.
+
+## Web Route Map
+
+Current top-level web routes are:
+
+- `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
+  island, backed by `loadSummaryPageData()` and `/api/summary`.
+- `/ingestion`: operational ingest view for provider-session ingestion state
+  and the latest recording per destination, backed by
+  `loadSessionsPageData()`.
+- `/sessions`: full discovered chat-session inventory, also backed by
+  `loadSessionsPageData()`, with manual `start ingestion` /
+  `continue ingestion` actions.
+- `/recordings`: flattened recording history across sessions and workspaces,
+  backed by `loadRecordingsPageData()`.
+- `/workspaces`: workspace register/unregister plus workspace-level recording
+  rollups, backed by `loadWorkspacesPageData()`.
+- `/logs`: combined daemon + web operational/security log view with shared
+  filter semantics, backed by `loadLogPageData()`.
+- `/settings`: guided user-default and workspace-username mapping workflows.
+- `/maintenance`: guided cleanup workflows for logs and old derived session
+  artifacts.
+- `/login` and `/logout`: local auth/session entry points.
+
+Supporting web files worth knowing:
+
+- `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
+  handlers.
+- `apps/web/src/session_routes.ts`: canonical href builders for
+  `/ingestion`, `/sessions`, and session anchor links.
+- `apps/web/routes/api/summary.ts`: currently the only shipped live JSON
+  endpoint.
+- `apps/web/src/summary_api.ts`: shared no-store response helper for the Summary
+  API.
 
 ## Default Filesystem Layout
 
@@ -78,23 +117,34 @@ Related notes:
 - `~/.kato/cli/kato-cli-config.yaml`
 - `~/.kato/cli/logs/operational.jsonl`
 - `~/.kato/cli/logs/security-audit.jsonl`
+- `~/.kato/web/kato-web-config.yaml`
+- `~/.kato/web/kato-web-status.json`
+- `~/.kato/web/logs/operational.jsonl`
+- `~/.kato/web/logs/security-audit.jsonl`
 
 Workspace-local config remains `<workspace>/.kato-workspace-config.yaml`.
 Captured/exported conversation files are workspace-root data and do not belong
 under `~/.kato` by default.
+Generated defaults derived from workspace `defaultOutputDir` remain
+workspace-root-contained after template expansion; only explicit command paths
+may target outside the workspace root.
 
 ## Topology
 
 ```mermaid
 graph TD
   subgraph User
-    U[User Shell]
+    U[User Shell / Browser]
   end
 
   subgraph CLIProcess[CLI Process apps/cli]
     PARSE[parse args + route]
     CMDS[command handlers]
     LCH[detached launcher]
+  end
+
+  subgraph WebProcess[Web Process apps/web]
+    WEB[Fresh routes + loaders + islands]
   end
 
   subgraph DaemonProcess[Daemon Process apps/daemon]
@@ -119,9 +169,13 @@ graph TD
     WTPL[shared/default-kato-workspace-config.yaml]
     DLOG[daemon/logs/*.jsonl]
     CLOG[cli/logs/*.jsonl]
+    WCFG[web/kato-web-config.yaml]
+    WSTAT[web/kato-web-status.json]
+    WLOG[web/logs/*.jsonl]
   end
 
   U --> PARSE
+  U --> WEB
   PARSE --> CMDS
   CMDS --> DCFG
   CMDS --> SHCFG
@@ -133,6 +187,13 @@ graph TD
   CMDS --> STAT
   CMDS --> CLOG
   CMDS --> LCH
+  WEB --> WCFG
+  WEB --> WSTAT
+  WEB --> STAT
+  WEB --> WREG
+  WEB --> SESS
+  WEB --> DLOG
+  WEB --> WLOG
 
   LCH --> MAIN
   MAIN --> DCFG
@@ -156,6 +217,7 @@ graph TD
 | Area                | Primary responsibility                                                                             | Key modules                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status        | `apps/cli/src/*`                                       |
+| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows     | `apps/web/{routes,islands,src}/*`                      |
 | Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                | `apps/runtime/src/orchestrator/launcher.ts`            |
 | Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                            | `apps/daemon/src/main.ts`                              |
 | Control plane       | Persist/list/mark control requests, persist/load status snapshots                                  | `apps/runtime/src/orchestrator/control_plane.ts`       |
@@ -163,7 +225,7 @@ graph TD
 | Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache             | `apps/runtime/src/orchestrator/session_state_store.ts` |
 | Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                 | `apps/daemon/src/writer/*`                             |
 | Workspace layer     | Registry + workspace profile/template resolution                                                   | `apps/runtime/src/workspace/*`                         |
-| Observability       | Structured operational/audit events for CLI and daemon                                             | `apps/runtime/src/observability/*`                     |
+| Observability       | Structured operational/audit events for CLI, daemon, and web                                       | `apps/runtime/src/observability/*`                     |
 
 ## Daemon Subsystems
 
@@ -235,6 +297,22 @@ Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
 
 Missing/invalid/empty snapshots fail safe (no silent empty writes).
 
+## Current Web Live Refresh Model
+
+- Only the Summary body is live-polled today.
+- `apps/web/islands/SummaryLive.tsx` polls `/api/summary` every `2s` and keeps
+  the last good render if a request fails.
+- `/api/summary` returns `SummaryPageData` with no-store cache headers via
+  `apps/web/src/summary_api.ts`.
+- The shared `DAEMON` / `SNAPSHOT` header stack is still server-rendered on
+  non-Summary pages from `loadAppChromeStatus()`; it is not yet a reusable live
+  island.
+- `Ingestion`, `Sessions`, `Recordings`, `Workspaces`, `Logs`, `Settings`, and
+  `Maintenance` are currently server-rendered page loads with URL-driven
+  filters and PRG mutation flows where applicable.
+- Any future live-expansion work should preserve route/query semantics rather
+  than inventing separate client-only filter state.
+
 ## Source-of-Truth Boundaries
 
 - `~/.kato/daemon/kato-daemon-config.yaml`: daemon process settings.
@@ -243,11 +321,28 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 - `~/.kato/cli/kato-cli-config.yaml`: CLI-only settings (currently logging).
 - `~/.kato/shared/ipc/daemon-control.json`: queued daemon commands.
 - `~/.kato/shared/status.json`: externally readable daemon status snapshot.
+- `~/.kato/web/kato-web-config.yaml`: local web bind/auth configuration.
+- `~/.kato/web/kato-web-status.json`: local web process runstate heartbeat.
 - provider source files (Codex/Claude/Gemini transcript files): external inputs,
   not authoritative control state.
 - `~/.kato/shared/sessions/*.meta.json` + `*.twin.jsonl`: durable session state.
 - in-memory snapshot store: runtime projection cache.
 - markdown/jsonl exports: derived artifacts.
+
+Page-level web source-of-truth guidance:
+
+- Summary and app-chrome status read primarily from `~/.kato/shared/status.json`
+  plus recent daemon/web log tails.
+- `Ingestion`, `Sessions`, `Recordings`, and most workspace recording details
+  come from persistent session metadata/twin state under
+  `~/.kato/shared/sessions/*`, with the current daemon snapshot merged in where
+  live runtime status exists.
+- `Workspaces` additionally depends on
+  `~/.kato/shared/workspace-registry.json`,
+  workspace-local `.kato-workspace-config.yaml`, shared behavior config, and
+  user settings for workspace-username mappings.
+- `Logs` reads both daemon and web log files and applies filtering at load time;
+  it is not a projection of `status.json`.
 
 ## Extension Guide
 
@@ -269,5 +364,7 @@ To add a control command:
 ## Current Limits
 
 - control plane is local file IPC; no remote orchestration
+- web console is local-only and auth-gated; it is not a remote multi-user
+  control plane
 - service-manager integration is deferred
 - queue hardening beyond single-file JSON is tracked separately

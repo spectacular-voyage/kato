@@ -467,9 +467,9 @@ export function createDefaultWorkspaceMarkdownFrontmatterConfig(
       overrides.addParticipantUsernameToFrontmatter ?? false,
     addParticipantUsernameToHeadings:
       overrides.addParticipantUsernameToHeadings ?? false,
-    includeSessionIds: overrides.includeSessionIds ?? true,
-    includeWorkspaceIds: overrides.includeWorkspaceIds ?? true,
-    includeRecordingIds: overrides.includeRecordingIds ?? true,
+    includeSessionIds: overrides.includeSessionIds ?? false,
+    includeWorkspaceIds: overrides.includeWorkspaceIds ?? false,
+    includeRecordingIds: overrides.includeRecordingIds ?? false,
     includeConversationEventKinds: overrides.includeConversationEventKinds ??
       false,
   };
@@ -899,9 +899,9 @@ export function createWorkspaceConfigScaffold(): string {
     "  includeUpdatedInFrontmatter: false",
     "  addParticipantUsernameToFrontmatter: false",
     "  addParticipantUsernameToHeadings: false",
-    "  includeSessionIds: true",
-    "  includeWorkspaceIds: true",
-    "  includeRecordingIds: true",
+    "  includeSessionIds: false",
+    "  includeWorkspaceIds: false",
+    "  includeRecordingIds: false",
     "  includeConversationEventKinds: false",
     "workspaceFeatureFlags:",
     "  writerIncludeCommentary: true",

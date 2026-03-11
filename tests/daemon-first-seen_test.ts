@@ -5,6 +5,17 @@ import {
   resolveFirstSeenSourceFileFreshness,
 } from "../apps/daemon/src/orchestrator/runtime_first_seen.ts";
 
+const FIRST_SEEN_SOURCE_PATH = ".test-tmp/first-seen/provider-session.jsonl";
+const FIRST_SEEN_MISSING_SOURCE_PATH =
+  ".test-tmp/first-seen/missing-session.jsonl";
+const FIRST_SEEN_OLD_COMMAND_PATH = ".test-tmp/first-seen/old-command.md";
+const FIRST_SEEN_STALE_COMMAND_PATH = ".test-tmp/first-seen/stale.md";
+const FIRST_SEEN_FRESH_COMMAND_PATH = ".test-tmp/first-seen/fresh.md";
+const FIRST_SEEN_NO_TIMESTAMP_FRESH_PATH =
+  ".test-tmp/first-seen/no-timestamp-fresh.md";
+const FIRST_SEEN_NO_TIMESTAMP_STALE_PATH =
+  ".test-tmp/first-seen/no-timestamp-stale.md";
+
 function makeUserEvent(
   id: string,
   content: string,
@@ -47,7 +58,7 @@ function makeAssistantEvent(
 
 Deno.test("resolveFirstSeenSourceFileFreshness prefers birthtime over mtime", async () => {
   const freshness = await resolveFirstSeenSourceFileFreshness({
-    sourceFilePath: "/tmp/provider-session.jsonl",
+    sourceFilePath: FIRST_SEEN_SOURCE_PATH,
     metadataLastObservedMtimeMs: new Date("2026-02-22T09:59:49.000Z").getTime(),
     statPath() {
       return Promise.resolve({
@@ -65,7 +76,7 @@ Deno.test("resolveFirstSeenSourceFileFreshness prefers birthtime over mtime", as
 
 Deno.test("resolveFirstSeenSourceFileFreshness falls back to metadata when stat is unavailable", async () => {
   const freshness = await resolveFirstSeenSourceFileFreshness({
-    sourceFilePath: "/tmp/missing-session.jsonl",
+    sourceFilePath: FIRST_SEEN_MISSING_SOURCE_PATH,
     metadataLastObservedMtimeMs: new Date("2026-02-22T09:59:49.000Z").getTime(),
     statPath() {
       return Promise.reject(new Deno.errors.NotFound("missing"));
@@ -83,7 +94,7 @@ Deno.test("resolveFirstSeenProviderSessionCommandCursor skips stale timestamped 
     events: [
       makeUserEvent(
         "u-old-capture",
-        "::capture-My.Proj /tmp/old-command.md",
+        `::capture-My.Proj ${FIRST_SEEN_OLD_COMMAND_PATH}`,
         "2026-02-22T09:59:40.000Z",
       ),
     ],
@@ -104,12 +115,12 @@ Deno.test("resolveFirstSeenProviderSessionCommandCursor picks the first near-rea
     events: [
       makeUserEvent(
         "u-capture-stale",
-        "::capture-My.Proj /tmp/stale.md",
+        `::capture-My.Proj ${FIRST_SEEN_STALE_COMMAND_PATH}`,
         "2026-02-22T09:59:40.000Z",
       ),
       makeUserEvent(
         "u-capture-fresh",
-        "::capture-My.Proj /tmp/fresh.md",
+        `::capture-My.Proj ${FIRST_SEEN_FRESH_COMMAND_PATH}`,
         "2026-02-22T09:59:56.000Z",
       ),
       makeAssistantEvent(
@@ -138,7 +149,7 @@ Deno.test("resolveFirstSeenProviderSessionCommandCursor uses source freshness fo
       events: [
         makeUserEvent(
           "u-capture-no-timestamp-fresh",
-          "::capture-My.Proj /tmp/no-timestamp-fresh.md",
+          `::capture-My.Proj ${FIRST_SEEN_NO_TIMESTAMP_FRESH_PATH}`,
         ),
       ],
       daemonStartMs,
@@ -157,7 +168,7 @@ Deno.test("resolveFirstSeenProviderSessionCommandCursor uses source freshness fo
       events: [
         makeUserEvent(
           "u-capture-no-timestamp-stale",
-          "::capture-My.Proj /tmp/no-timestamp-stale.md",
+          `::capture-My.Proj ${FIRST_SEEN_NO_TIMESTAMP_STALE_PATH}`,
         ),
       ],
       daemonStartMs,

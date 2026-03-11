@@ -1,4 +1,5 @@
 export {
+  clearDefaultUsername,
   CliConfigFileStore,
   type CliConfigStoreLike,
   createDefaultCliConfig,
@@ -8,23 +9,50 @@ export {
   createDefaultRuntimeMarkdownFrontmatterConfig,
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
+  createDefaultWebConfig,
+  createInitializedWebConfig,
+  deleteWorkspaceUsernameMapping,
   type EnsureCliConfigResult,
   type EnsureRuntimeConfigResult,
   type EnsureSharedBehaviorConfigResult,
   type EnsureUserConfigResult,
+  type EnsureWebConfigResult,
+  hashWebPassword,
+  loadUserSettings,
   resolveDefaultCliConfigPath,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,
   resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
+  resolveDefaultWebConfigPath,
   resolveFrontmatterParticipantUsername,
   RuntimeConfigFileStore,
   type RuntimeConfigStoreLike,
+  setDefaultUsername,
+  setExcludeMeFromParticipantList,
+  setWorkspaceUsernameMapping,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
   UserConfigFileStore,
   type UserConfigStoreLike,
   validateAndNormalizeParticipantUsername,
+  WebConfigFileStore,
+  type WebConfigStoreLike,
+} from "./config/mod.ts";
+export type {
+  ClearDefaultUsernameOptions,
+  ClearDefaultUsernameResult,
+  DeleteWorkspaceUsernameMappingOptions,
+  DeleteWorkspaceUsernameMappingResult,
+  LoadUserSettingsOptions,
+  LoadUserSettingsResult,
+  SetDefaultUsernameOptions,
+  SetDefaultUsernameResult,
+  SetExcludeMeOptions,
+  SetExcludeMeResult,
+  SetWorkspaceUsernameMappingOptions,
+  SetWorkspaceUsernameMappingResult,
+  UserWorkspaceMappingListEntry,
 } from "./config/mod.ts";
 
 export type {
@@ -112,12 +140,20 @@ export {
   loadDefaultWorkspaceConfigOverrides,
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
+  registerWorkspace,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
+  unregisterWorkspace,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
+} from "./workspace/mod.ts";
+export type {
+  RegisterWorkspaceMutationOptions,
+  RegisterWorkspaceMutationResult,
+  UnregisterWorkspaceMutationOptions,
+  UnregisterWorkspaceMutationResult,
 } from "./workspace/mod.ts";
 
 export type {
@@ -146,3 +182,21 @@ export {
 } from "./utils/exports_log.ts";
 export { hashStringFNV1a, stableStringify } from "./utils/hash.ts";
 export { normalizeText, utf8ByteLength } from "./utils/text.ts";
+export type {
+  MaintenanceCleanOptions,
+  MaintenanceCleanResult,
+  MaintenanceCleanStats,
+} from "./maintenance/mod.ts";
+export { runMaintenanceClean } from "./maintenance/mod.ts";
+export type {
+  WebProcessLauncherLike,
+  WebServerStatus,
+  WebServerStatusStoreLike,
+} from "./web/mod.ts";
+export {
+  createDefaultWebServerStatus,
+  DenoDetachedWebLauncher,
+  isProcessAlive,
+  resolveDefaultWebStatusPath,
+  WebServerStatusFileStore,
+} from "./web/mod.ts";

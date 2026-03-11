@@ -39,7 +39,7 @@ export class WorkspaceNotFoundError extends Error {
 
   constructor(selector: string) {
     super(
-      `Workspace not found: ${selector}. Register it first with \`kato workspace register --alias <alias>\`.`,
+      `Workspace not found: ${selector}. Register it first with \`kato workspace register [<dir>] [--alias <alias>]\`.`,
     );
     this.name = "WorkspaceNotFoundError";
     this.selector = selector;

@@ -6,6 +6,7 @@ export type DaemonCliCommandName =
   | "restart"
   | "stop"
   | "status"
+  | "web"
   | "workspace-init"
   | "workspace-register"
   | "workspace-list"
@@ -20,8 +21,18 @@ export type DaemonCliCommand =
   | { name: "restart" }
   | { name: "stop" }
   | { name: "status"; asJson: boolean; all: boolean; live: boolean }
+  | {
+    name: "web-init";
+    hostname?: string;
+    port?: number;
+    username: string;
+    passwordFromStdin?: boolean;
+  }
+  | { name: "web-start" }
+  | { name: "web-stop" }
+  | { name: "web-status"; asJson: boolean }
   | { name: "workspace-init"; dirPath?: string }
-  | { name: "workspace-register"; alias: string; dirPath?: string }
+  | { name: "workspace-register"; alias?: string; dirPath?: string }
   | { name: "workspace-list" }
   | { name: "workspace-unregister"; selector: string }
   | {
