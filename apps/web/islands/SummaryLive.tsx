@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import AppHeader from "../src/app_header.tsx";
 import type { SummaryPageData } from "../src/loaders/status.ts";
+import { buildIngestionSessionHref } from "../src/session_routes.ts";
 
 const POLL_INTERVAL_MS = 2_000;
 
@@ -74,6 +75,10 @@ function metricPrimaryStateClass(
   return `metric-primary activity-${state}`;
 }
 
+function activityStateDot(state: "active" | "stale" | "inactive"): string {
+  return state === "inactive" ? "○" : "●";
+}
+
 export default function SummaryLive(
   { initialData }: { initialData: SummaryPageData },
 ) {
@@ -87,6 +92,9 @@ export default function SummaryLive(
   const workspacePrimaryState = data.workspaceSummary.unavailableReason
     ? "neutral"
     : "active";
+  const activeIngestionRows = data.summarySessions
+    .filter((session) => session.state === "active")
+    .slice(0, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,24 +241,36 @@ export default function SummaryLive(
         </article>
 
         <article class="card span-8">
-          <h3>Sessions</h3>
+          <h3>Active Ingestion</h3>
           <ul class="session-list">
-            {data.sessions.length === 0
+            {activeIngestionRows.length === 0
               ? (
                 <li class="muted">
-                  No active sessions in the current snapshot.
+                  No active ingestion sessions.
                 </li>
               )
-              : data.sessions.map((session) => (
+              : activeIngestionRows.map((session) => (
                 <li key={`${session.provider}:${session.sessionId}`}>
-                  <div class="mono">
-                    {session.stale ? "○" : "●"} {session.provider}:{" "}
-                    {session.sessionShortId ?? session.sessionId}
-                  </div>
-                  <div>{session.snippet ?? "(no snippet)"}</div>
-                  <div class="muted">
-                    Updated {formatTimestamp(session.updatedAt)}
-                  </div>
+                  <a
+                    class="mono summary-ingestion-link"
+                    href={buildIngestionSessionHref(session.sessionId)}
+                    title={`${session.provider}: ${
+                      session.snippet ?? "(no snippet)"
+                    }`}
+                  >
+                    <span
+                      class={`activity-state-dot ${session.state}`}
+                      aria-hidden="true"
+                    >
+                      {activityStateDot(session.state)}
+                    </span>{" "}
+                    <span class="summary-ingestion-provider">
+                      {session.provider}:
+                    </span>{" "}
+                    <span class="summary-ingestion-snippet">
+                      {session.snippet ?? "(no snippet)"}
+                    </span>
+                  </a>
                 </li>
               ))}
           </ul>

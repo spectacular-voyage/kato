@@ -1511,3 +1511,121 @@ The checklist line patched cleanly in isolation, but the decisions block still n
 I updated [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md) to close out that stale remaining checkbox and explicitly defer the broad CLI/web projection unification.
 
 I think that’s the right call. The web app has already diverged enough from the CLI surface that forcing a shared view-model layer now would mostly create churn. From my perspective, that leaves no essential implementation work on the original web finalization task beyond already-deferred items like the Performance page, plus any optional terminology/docs cleanup you still want.
+
+# djradon_2026-03-10_2039_36
+
+On the Summary page, can we apply the new session logic to the "Sessions" tile and move it up next to the Providers tile?
+
+# gpt-5.4_2026-03-10_2039_45
+
+I’m updating the Summary layout and session counts now. First I’m checking how the Summary tiles are ordered and whether the Sessions tile is still using the old `not ingested` semantics anywhere in the island or loader.
+
+# gpt-5.4_2026-03-10_2040_13
+
+I’m tracing the Summary loader one level deeper before I edit it. The key question is whether the Summary `Sessions` card is still fed by the live snapshot-only view model; if it is, I’ll switch it to the same persisted session activity rows the Sessions page uses.
+
+# gpt-5.4_2026-03-10_2040_18
+
+The Summary loader is still feeding that card from the snapshot-only view model, so it’s definitely on the old logic. I’m going to switch the card over to the persisted session activity rows and keep the top Summary counts consistent with the newer active/idle/not-ingested split.
+
+# gpt-5.4_2026-03-10_2041_24
+
+I have the shape of the change. I’m keeping the Summary API additive: the old snapshot-only `sessions` field stays alone for now, and I’m adding a new summary-session row model sourced from the same persisted activity rows as the Sessions page, then switching the Summary card over to that.
+
+# gpt-5.4_2026-03-10_2041_38
+
+The loader is now producing a summary-session list from the persisted session activity model. I’m updating the Summary island to render that list, with the new active/idle/not-ingested semantics and a count line at the top of the card.
+
+# gpt-5.4_2026-03-10_2042_01
+
+The Summary card wiring is in. I’m running the focused summary checks now to catch any type drift from the new `summarySessions` field, then I’ll do a web compile pass.
+
+# gpt-5.4_2026-03-10_2042_09
+
+Updated the Summary `Sessions` card in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) to use the newer session model instead of the old snapshot-only list. It now shows the active/idle/not-ingested count line and renders rows from the persisted session activity data with the newer dot/status logic.
+
+The loader side is in [status.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/status.ts), which now exposes `summarySessions` built from the same activity rows the Sessions page uses, with live-only snapshot rows merged in as fallback. I also updated [web-summary-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-summary-loader_test.ts).
+
+The Sessions card was already the card adjacent to Providers on desktop, so I left the grid placement alone and changed the data/model feeding that card.
+
+Verified with `deno test -A tests/web-summary-loader_test.ts` and `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2048_25
+
+For the "Session" tile, let's make it "Active Ingestion" and limit to 10 items, and each  gets only one line: status dot, provider and possibly-truncated snippet, which is a link to the individual ingestion on the Ingestion page.
+
+# gpt-5.4_2026-03-10_2048_37
+
+I’m tightening the Summary session card now. I’m switching it from the broader discovered-session list to a compact active-ingestion list, capped at 10, with one-line linked rows into `/ingestion#session-…`.
+
+# gpt-5.4_2026-03-10_2048_53
+
+I’m keeping this to the Summary island and CSS. The tile is becoming a compact ingestion watchlist: active/idle rows only, max 10, one-line truncated links into `/ingestion#session-…`.
+
+# djradon_2026-03-10_2049_03
+
+Oh, and move it up next to "Providers"
+
+# gpt-5.4_2026-03-10_2049_23
+
+I checked the Summary grid placement before moving anything. The `Active Ingestion` card is already in the same row as `Providers` on desktop, so there isn’t a separate layout move to apply there; I’m just validating the content change from the last edit now.
+
+# gpt-5.4_2026-03-10_2049_27
+
+`Active Ingestion` now uses the compact one-line linked rows in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), and the truncation styling is in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+On the layout point: that card was already in the same desktop row as `Providers`, so there wasn’t a separate move to make. I verified the current arrangement and the updated tile behavior with `deno task --cwd apps/web check`.
+
+# gpt-5.4_2026-03-10_2049_29
+
+`Active Ingestion` now uses the compact one-line linked rows in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx), and the truncation styling is in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+On the layout point: that card was already in the same desktop row as `Providers`, so there wasn’t a separate move to make. I verified the current arrangement and the updated tile behavior with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2051_44
+
+It's showing on the next row for me. Do we have to width-shrink it and/or providers?
+
+# gpt-5.4_2026-03-10_2051_55
+
+I’m checking the Summary grid CSS now. If that card is dropping below `Providers` at your viewport, it’s almost certainly the responsive breakpoint or the span mix, so I’ll verify that first and then tighten the widths if needed.
+
+# gpt-5.4_2026-03-10_2052_11
+
+I found a concrete bug while checking the layout: the Summary card is using `span-8`, but there is no `.span-8` rule in the shared CSS. That means the card isn’t actually getting the intended grid width at all, which explains why it can drop in surprising ways. I’m fixing that directly rather than guessing at content width.
+
+# gpt-5.4_2026-03-10_2052_13
+
+I’m fixing the missing grid class now. This is a real layout bug, not just a tuning issue: `span-8` was referenced in the Summary markup but never defined in the shared stylesheet.
+
+# gpt-5.4_2026-03-10_2052_17
+
+The missing span rule is in. I’m running the web check now, but the main point is already clear: that card should now actually occupy 8 grid columns and sit beside the 4-column Providers card on desktop.
+
+# gpt-5.4_2026-03-10_2052_22
+
+Yes. The issue was not the tile content width, it was that `span-8` was missing from the shared grid CSS entirely.
+
+I added the missing `.span-8` rule in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css), along with the matching mobile collapse rule. That means the `Active Ingestion` card now actually spans 8 columns and should sit beside the 4-column `Providers` card on desktop as intended.
+
+Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2053_23
+
+Also, I only want actually Active ingestion (which I think is staleness-calculated, maybe using a configurable value?), please exclude idle ingestion from the summary page "Active Ingestion" tile.
+
+# gpt-5.4_2026-03-10_2053_29
+
+I’m narrowing that Summary tile now. I’m changing it from “active or idle ingestion watchlist” to true active-only ingestion rows, which means it will only show sessions currently in the `active` activity state and drop stale/idle rows entirely.
+
+# gpt-5.4_2026-03-10_2053_39
+
+The tile is now active-only. I removed the stale/idle inclusion path as well so lint won’t complain about dead helpers, and I’m running the web check now.
+
+# gpt-5.4_2026-03-10_2053_47
+
+Changed the Summary `Active Ingestion` tile in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) so it now shows only truly `active` ingestion rows, capped at 10. Idle/stale ingestion sessions are excluded.
+
+Yes, that `active` state is still derived from the existing activity/staleness logic underneath, so this stays tied to the current staleness-calculated model rather than introducing a separate threshold here.
+
+Verified with `deno task --cwd apps/web check`.

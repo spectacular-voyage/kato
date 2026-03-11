@@ -10,6 +10,7 @@ import {
   resolveDefaultStatusPath,
 } from "../../../runtime/src/orchestrator/control_plane.ts";
 import {
+  type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
   providerAutoGeneratesSnapshots,
@@ -63,6 +64,16 @@ export interface ConfiguredProvider {
   autoGenerateSnapshots: boolean;
 }
 
+export interface SummarySessionRow {
+  provider: string;
+  sessionId: string;
+  sessionShortId: string;
+  snippet?: string;
+  updatedAt: string;
+  state: ActivityState;
+  canOpenIngestView: boolean;
+}
+
 export interface SummaryPageData {
   generatedAt: string;
   heartbeatAt: string;
@@ -79,6 +90,7 @@ export interface SummaryPageData {
   staleRecordingCount: number;
   stoppedRecordingCount: number;
   sessions: DaemonSessionStatus[];
+  summarySessions: SummarySessionRow[];
   providers: ProviderStatus[];
   configuredProviders: ConfiguredProvider[];
   memory?: MemoryStatus;
@@ -183,6 +195,11 @@ export async function loadSummaryPageData(
     liveOnlySessions,
     runtimeConfig,
   );
+  const summarySessions = buildSummarySessionRows(
+    sessionActivityRows,
+    liveOnlySessions,
+    runtimeConfig,
+  );
   const workspaceSummary = summarizeWorkspaceActivity(
     await loadWorkspaceSummary(),
     sessionActivityRows,
@@ -205,6 +222,7 @@ export async function loadSummaryPageData(
     staleRecordingCount,
     stoppedRecordingCount,
     sessions: viewModel.sessions,
+    summarySessions,
     providers: snapshot.providers,
     configuredProviders,
     memory: viewModel.memory,
@@ -217,6 +235,59 @@ export async function loadSummaryPageData(
 
 function makeProviderSessionKey(provider: string, sessionId: string): string {
   return `${provider}:${sessionId}`;
+}
+
+function buildSummarySessionRows(
+  sessionActivityRows: Awaited<ReturnType<typeof loadSessionActivityRows>>,
+  liveOnlySessions: Array<DaemonSessionStatus>,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
+): SummarySessionRow[] {
+  const rows: SummarySessionRow[] = [
+    ...sessionActivityRows.map((row) => ({
+      provider: row.provider,
+      sessionId: row.sessionId,
+      sessionShortId: row.sessionShortId,
+      snippet: row.snippet,
+      updatedAt: row.updatedAt,
+      state: row.state,
+      canOpenIngestView: row.canOpenIngestView,
+    })),
+    ...liveOnlySessions.map((session) => ({
+      provider: session.provider,
+      sessionId: session.sessionId,
+      sessionShortId: session.sessionShortId ?? session.sessionId.slice(0, 8),
+      snippet: session.snippet,
+      updatedAt: session.updatedAt,
+      state: deriveSessionGenerationState(
+        {
+          provider: session.provider,
+          stale: session.stale,
+          recordingCount: session.recordings?.length ?? 0,
+        },
+        runtimeConfig,
+      ),
+      canOpenIngestView: false,
+    })),
+  ];
+
+  return rows.sort((a, b) => {
+    const order = {
+      active: 0,
+      stale: 1,
+      inactive: 2,
+    } as const;
+    const stateDiff = order[a.state] - order[b.state];
+    if (stateDiff !== 0) {
+      return stateDiff;
+    }
+    const updatedDiff = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+    if (Number.isFinite(updatedDiff) && updatedDiff !== 0) {
+      return updatedDiff;
+    }
+    return `${a.provider}:${a.sessionId}`.localeCompare(
+      `${b.provider}:${b.sessionId}`,
+    );
+  });
 }
 
 function summarizeSessionGenerationState(

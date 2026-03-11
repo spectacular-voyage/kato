@@ -149,6 +149,9 @@ Deno.test("loadSummaryPageData reads the default shared status snapshot", async 
         assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.providers.length, 1);
         assertEquals(data.sessions[0]?.sessionId, "sess-001");
+        assertEquals(data.summarySessions.length, 1);
+        assertEquals(data.summarySessions[0]?.sessionId, "sess-001");
+        assertEquals(data.summarySessions[0]?.state, "active");
         assertEquals(data.stale, false);
         assertEquals(data.statusPath, statusPath);
       });
@@ -260,6 +263,11 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
         assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.sessions.length, 1);
         assertEquals(data.sessions[0]?.sessionId, "sess-active");
+        assertEquals(data.summarySessions.length, 2);
+        assertEquals(data.summarySessions[0]?.sessionId, "sess-active");
+        assertEquals(data.summarySessions[0]?.state, "active");
+        assertEquals(data.summarySessions[1]?.sessionId, "sess-stale");
+        assertEquals(data.summarySessions[1]?.state, "stale");
       });
     } finally {
       restoreRuntimeEnv(env);
@@ -412,6 +420,9 @@ Deno.test("loadSummaryPageData counts non-generating sessions as inactive", asyn
         assertEquals(data.generatingSessionCount, 0);
         assertEquals(data.staleGeneratingSessionCount, 0);
         assertEquals(data.inactiveSessionCount, 1);
+        assertEquals(data.summarySessions.length, 1);
+        assertEquals(data.summarySessions[0]?.sessionId, "sess-inactive");
+        assertEquals(data.summarySessions[0]?.state, "inactive");
       });
     } finally {
       restoreRuntimeEnv(env);
