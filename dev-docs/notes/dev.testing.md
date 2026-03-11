@@ -98,6 +98,29 @@ That slice now covers:
 - CLI parser enforcement that metadata deletion is only accepted with
   `--twins`
 
+When working on on-demand snippet recovery, the most useful focused slice is:
+
+- `deno test -A tests/web-session-snippets_test.ts`
+- `deno test -A tests/web-live-routes_test.ts --filter "session snippet"`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- `resolveSessionSnippet()` preferring live snippets over replayed persisted
+  history
+- twin-history recovery when source replay is intentionally disabled
+- twin-history precedence over source replay when both paths are allowed
+- unavailable outcomes for missing metadata, no twin history, and empty source
+  replay
+
+If you want per-file coverage confirmation for that helper, run:
+
+- `deno test -A --coverage=.test-tmp/coverage/web-session-snippets tests/web-session-snippets_test.ts tests/web-live-routes_test.ts`
+- `deno coverage --detailed .test-tmp/coverage/web-session-snippets`
+
+That focused coverage run currently drives
+`apps/web/src/session_snippets.ts` to `100%` branch and `100%` line coverage.
+
 ## Coverage Workflow
 
 1. Generate a fresh raw coverage profile:
@@ -112,11 +135,11 @@ of rerunning the whole suite. If you need a manual raw profile, write it under
 `.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
 directory.
 
-Current local timings from 2026-03-06:
+Current local timings from 2026-03-11:
 
-- `deno task test --frozen --quiet`: `492` passing tests, `7.06s` real
-- `deno task test:coverage --frozen --quiet`: `492` passing tests, `80.9%` line
-  coverage, `85.2%` branch coverage, `8.94s` real
+- `deno task test --frozen --quiet`: `601` passing tests, `10.32s` real
+- `deno task test:coverage --frozen --quiet`: `601` passing tests, `79.8%` line
+  coverage, `84.7%` branch coverage, `11.84s` real
 
 Treat those numbers as a dated baseline, not a contract. Refresh this block
 after material test-count or runtime changes land.

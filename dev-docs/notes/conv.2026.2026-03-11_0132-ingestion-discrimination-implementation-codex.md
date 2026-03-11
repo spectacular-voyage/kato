@@ -992,3 +992,89 @@ Validation:
 # djradon_2026-03-11_0837_39
 
 Could you add valuable/meaningful tests, especially focusing on coverage gaps... (but good tests only!)  and then update [dev.testing.md](dev-docs/notes/dev.testing.md) as appropriate?
+
+# gpt-5.4_2026-03-11_0837_55
+
+I’m checking the current coverage shape first so I can add tests where they buy real signal instead of just inflating counts. Then I’ll patch the highest-value gaps and update `dev.testing.md` with the new focused slices if they prove useful.
+
+# gpt-5.4_2026-03-11_0838_09
+
+I have the current testing note and task wiring. Next I’m running a real coverage pass so I can pick a gap with regression value, not just add more cleanup tests because they’re fresh in context.
+
+# gpt-5.4_2026-03-11_0838_16
+
+The raw profile is still being written, so the detailed report raced it. I’m letting the coverage run finish, then I’ll inspect the actual low-coverage files from the completed profile.
+
+# gpt-5.4_2026-03-11_0838_23
+
+The freshest meaningful gap is `apps/web/src/session_snippets.ts`: low line coverage on a recently added operator-facing path. I’m reading that helper and its current tests now; if the gaps are real branches rather than noise, I’ll cover those directly.
+
+# gpt-5.4_2026-03-11_0838_35
+
+I’ve found the real gap: the snippet helper only has one API-level source-replay test, so its live-path, twin-path, and unavailable branches are mostly uncovered. That’s a good target because it’s recent logic and operator-visible.
+
+# gpt-5.4_2026-03-11_0838_49
+
+I’m going with direct unit tests for the snippet resolver rather than more API-only tests. That gives better branch coverage on the real helper without paying the cost of full web-route setup for each case.
+
+# gpt-5.4_2026-03-11_0839_23
+
+I’m filling the snippet-helper branch matrix rather than just one more end-to-end route test. That should improve coverage where it matters and keep the tests fast enough to use as a focused regression slice.
+
+# gpt-5.4_2026-03-11_0839_51
+
+I’m adding a dedicated `web-session-snippets` test file rather than stuffing more cases into the live-routes suite. That keeps the snippet branch coverage focused and makes the resulting slice cheap enough to recommend in `dev.testing.md`.
+
+# gpt-5.4_2026-03-11_0840_21
+
+The new tests are in. I’m validating them directly first, then I’ll run a small coverage profile for the snippet helper so I can update `dev.testing.md` with something concrete instead of aspirational.
+
+# gpt-5.4_2026-03-11_0840_27
+
+The helper itself is behaving as intended; the failures are from two expected-value blocks that didn’t match the assertions after formatting. I’m correcting those now, then I’ll rerun the file and the focused coverage profile.
+
+# gpt-5.4_2026-03-11_0840_46
+
+The helper gap turned up a real behavioral detail: snippets are derived from user-facing conversation text, so assistant-only twin fixtures don’t count. I’m switching the twin fixtures to `user.message`; that makes the tests assert the real snippet contract rather than an impossible case.
+
+# gpt-5.4_2026-03-11_0840_56
+
+The unit file is clean. I’m waiting on the focused coverage run now so I can see whether `session_snippets.ts` actually moved enough to justify a new recommended slice in the testing note.
+
+# gpt-5.4_2026-03-11_0841_11
+
+I’ve confirmed the targeted gap closed: the new snippet slice drives `apps/web/src/session_snippets.ts` to `100%` branch and line coverage in focused runs. I’m doing one quick full-suite timing pass now so the testing note can mention current counts instead of the older March 6 baseline if the numbers moved materially.
+
+# gpt-5.4_2026-03-11_0842_15
+
+I’m finishing the testing pass by verifying the new snippet-helper coverage, then I’ll patch `dev.testing.md` with only the slices and numbers that are actually supported by the current test results.
+
+# gpt-5.4_2026-03-11_0842_26
+
+I found a real gap worth targeting: the new on-demand snippet resolver had low direct coverage despite being operator-visible logic. I’ve added focused unit tests there, and I’m rerunning the full suite plus coverage once so the testing note can cite current numbers rather than stale ones.
+
+# gpt-5.4_2026-03-11_0842_37
+
+The new tests are in place cleanly. I’m just waiting on the full-suite runs so I can refresh the testing note with current counts and avoid inventing a baseline.
+
+# gpt-5.4_2026-03-11_0842_50
+
+I have the final numbers now. Next step is a small doc patch: add the new snippet-reveal regression slice and refresh the dated baseline block in `dev.testing.md` to match the current `601`-test suite.
+
+# gpt-5.4_2026-03-11_0842_52
+
+I’m patching only the testing note now. The new tests are already in place; this edit just records the useful focused slice and the refreshed baseline/timing block.
+
+# gpt-5.4_2026-03-11_0843_15
+
+Added a focused regression slice in [web-session-snippets_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-snippets_test.ts) for [`resolveSessionSnippet()`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_snippets.ts). I targeted that helper because it was a real coverage gap in new operator-visible logic. The new tests cover live-snippet precedence, twin-only recovery, twin-over-source precedence, and the main unavailable paths. In the focused coverage run, `apps/web/src/session_snippets.ts` is now `100%` branch and `100%` line covered.
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) to document the new snippet-recovery slice and refreshed the dated suite baseline to the current numbers: `601` passing tests, `79.8%` line coverage, `84.7%` branch coverage.
+
+Validation run:
+- `deno test -A tests/web-session-snippets_test.ts`
+- `deno task --cwd apps/web check`
+- `deno task test --frozen --quiet`
+- `deno task test:coverage --frozen --quiet`
+- `deno test -A --coverage=.test-tmp/coverage/web-session-snippets tests/web-session-snippets_test.ts tests/web-live-routes_test.ts`
+- `deno coverage --detailed .test-tmp/coverage/web-session-snippets`
