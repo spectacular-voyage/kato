@@ -36,17 +36,10 @@ export function buildSessionInventorySessionHref(
   return `${buildSessionInventoryHref(options)}#session-${sessionId}`;
 }
 
-export function buildTwinInventoryHref(
+export function buildMaintenanceHref(
   options: SessionRouteOptions = {},
 ): string {
-  const url = new URL("http://kato.local/twins");
+  const url = new URL("http://kato.local/maintenance");
   applySessionRouteOptions(url, options);
   return `${url.pathname}${url.search}`;
-}
-
-export function buildTwinSessionHref(
-  sessionId: string,
-  options: SessionRouteOptions = {},
-): string {
-  return `${buildTwinInventoryHref(options)}#session-${sessionId}`;
 }

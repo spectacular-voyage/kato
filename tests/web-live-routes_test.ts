@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
   createDefaultSharedBehaviorConfig,
@@ -19,10 +19,11 @@ import { LIVE_JSON_CACHE_CONTROL } from "../apps/web/src/api_response.ts";
 import {
   getChromeStatusResponse,
   getLogsResponse,
+  getMaintenanceTwinsResponse,
   getRecordingsResponse,
+  getSessionSnippetResponse,
   getSessionsResponse,
   getSummaryResponse,
-  getTwinsResponse,
   getWorkspacesResponse,
 } from "../apps/web/src/live_routes.ts";
 import {
@@ -32,6 +33,9 @@ import {
   withLockedEnvironment,
 } from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
+
+const THIS_DIR = dirname(fromFileUrl(import.meta.url));
+const CLAUDE_FIXTURE = join(THIS_DIR, "fixtures", "claude-session.jsonl");
 
 function makeWorkspaceOutput(options: {
   workspaceId: string;
@@ -364,7 +368,7 @@ Deno.test("live API routes disable caching and return expected page models", asy
   });
 });
 
-Deno.test("sessions, twins, and recordings APIs preserve current query semantics", async () => {
+Deno.test("sessions, maintenance twins, and recordings APIs preserve current query semantics", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
 
@@ -391,8 +395,8 @@ Deno.test("sessions, twins, and recordings APIs preserve current query semantics
             "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
           ),
         );
-        const twinsActiveResponse = await getTwinsResponse(
-          new URL("http://kato.local/api/twins?view=active"),
+        const twinsActiveResponse = await getMaintenanceTwinsResponse(
+          new URL("http://kato.local/api/maintenance-twins?view=active"),
         );
         const recordingsFilteredResponse = await getRecordingsResponse(
           new URL(
@@ -473,6 +477,76 @@ Deno.test("sessions, twins, and recordings APIs preserve current query semantics
         assertEquals(
           recordingsFilteredData.rows.map((row) => row.state),
           ["engaged-stale"],
+        );
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("session snippet API reconstructs a snippet from persisted source history on demand", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-live-session-snippet-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-source-snippet",
+        });
+        await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "sess-001",
+          sourceFilePath: CLAUDE_FIXTURE,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+
+        const response = await getSessionSnippetResponse(
+          new URL(
+            "http://kato.local/api/session-snippet?sessionId=sess-source-snippet&source=1",
+          ),
+        );
+        assertNoStore(response);
+
+        const payload = await response.json() as {
+          sessionId: string;
+          status: string;
+          source?: string;
+          snippet?: string;
+        };
+        assertEquals(payload.sessionId, "sess-source-snippet");
+        assertEquals(payload.status, "ready");
+        assertEquals(payload.source, "source");
+        assertEquals(
+          payload.snippet,
+          "I want to add authentication to my app. Can you help?",
         );
       });
     } finally {

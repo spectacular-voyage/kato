@@ -3,17 +3,17 @@ import {
   resolveDefaultKatoDir,
 } from "@kato/runtime";
 import type { ActivityState } from "./activity_state.ts";
-import type { SessionRecordingActivityRow } from "./sessions.ts";
+import type { LoadSessionActivityRowsOptions } from "./sessions.ts";
 import {
   loadSessionActivityRows,
-  type LoadSessionActivityRowsOptions,
   resolveWorkspaceFilter,
-  type SessionIngestionAction,
+  type SessionRecordingActivityRow,
 } from "./sessions.ts";
 
-export type TwinPersistenceState = "current" | "behind" | "absent";
+export type MaintenanceTwinState = "current" | "behind" | "absent";
+export type MaintenanceTwinAction = "create" | "update" | "none";
 
-export interface TwinActivityRow {
+export interface MaintenanceTwinRow {
   sessionKey: string;
   provider: string;
   sessionId: string;
@@ -23,9 +23,9 @@ export interface TwinActivityRow {
   updatedAt: string;
   lastEventAt?: string;
   state: ActivityState;
-  twinState: TwinPersistenceState;
+  twinState: MaintenanceTwinState;
+  twinAction: MaintenanceTwinAction;
   twinPresent: boolean;
-  twinAction: SessionIngestionAction;
   twinPath: string;
   sourceFilePath: string;
   activeRecordingCount: number;
@@ -34,7 +34,7 @@ export interface TwinActivityRow {
   recordings: SessionRecordingActivityRow[];
 }
 
-export interface TwinsPageData {
+export interface MaintenanceTwinsData {
   includeStale: boolean;
   workspaceFilter?: string;
   workspaceFilterId?: string;
@@ -43,7 +43,19 @@ export interface TwinsPageData {
   currentTwinCount: number;
   behindTwinCount: number;
   absentTwinCount: number;
-  rows: TwinActivityRow[];
+  rows: MaintenanceTwinRow[];
+}
+
+async function twinFileExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function needsTwinUpdate(
@@ -67,34 +79,45 @@ async function needsTwinUpdate(
   }
 }
 
-export async function loadTwinsPageData(
+function resolveTwinAction(state: MaintenanceTwinState): MaintenanceTwinAction {
+  switch (state) {
+    case "absent":
+      return "create";
+    case "behind":
+      return "update";
+    case "current":
+      return "none";
+  }
+}
+
+export async function loadMaintenanceTwinsData(
   options: LoadSessionActivityRowsOptions = {},
-): Promise<TwinsPageData> {
+): Promise<MaintenanceTwinsData> {
   const includeStale = options.includeStale ?? true;
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const sessionRows = await loadSessionActivityRows({
+    ...options,
+    includeStale,
+    katoDir,
+  });
   const sessionStore = new PersistentSessionStateStore({ katoDir });
-  const [sessionRows, metadataRows, resolvedWorkspaceFilter] = await Promise
-    .all([
-      loadSessionActivityRows({
-        ...options,
-        includeStale,
-        katoDir,
-      }),
-      sessionStore.listSessionMetadata(),
-      resolveWorkspaceFilter(options.workspaceFilter, katoDir),
-    ]);
+  const [metadataRows, resolvedWorkspaceFilter] = await Promise.all([
+    sessionStore.listSessionMetadata(),
+    resolveWorkspaceFilter(options.workspaceFilter, katoDir),
+  ]);
   const metadataBySessionKey = new Map(
     metadataRows.map((metadata) => [metadata.sessionKey, metadata]),
   );
-  const mappedRows: Array<TwinActivityRow | undefined> = await Promise.all(
+  const mappedRows: Array<MaintenanceTwinRow | undefined> = await Promise.all(
     sessionRows.map(async (row) => {
       const metadata = metadataBySessionKey.get(row.sessionKey);
       if (!metadata) {
         return undefined;
       }
 
-      const twinPresent = metadata.nextTwinSeq > 1;
-      const twinState: TwinPersistenceState = !twinPresent
+      const twinFilePresent = await twinFileExists(metadata.twinPath);
+      const twinPresent = twinFilePresent && metadata.nextTwinSeq > 1;
+      const twinState: MaintenanceTwinState = !twinPresent
         ? "absent"
         : await needsTwinUpdate(
             metadata.sourceFilePath,
@@ -114,8 +137,8 @@ export async function loadTwinsPageData(
         lastEventAt: row.lastEventAt,
         state: row.state,
         twinState,
+        twinAction: resolveTwinAction(twinState),
         twinPresent,
-        twinAction: row.ingestionAction,
         twinPath: metadata.twinPath,
         sourceFilePath: metadata.sourceFilePath,
         activeRecordingCount: row.activeRecordingCount,
@@ -125,7 +148,7 @@ export async function loadTwinsPageData(
       };
     }),
   );
-  const rows = mappedRows.filter((row): row is TwinActivityRow =>
+  const rows = mappedRows.filter((row): row is MaintenanceTwinRow =>
     row !== undefined
   );
 

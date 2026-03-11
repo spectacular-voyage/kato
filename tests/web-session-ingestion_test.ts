@@ -5,6 +5,7 @@ import {
   PersistentSessionStateStore,
   RuntimeConfigFileStore,
 } from "../apps/runtime/src/mod.ts";
+import { loadMaintenanceTwinsData } from "../apps/web/src/loaders/maintenance_twins.ts";
 import { loadSessionsPageData } from "../apps/web/src/loaders/sessions.ts";
 import { ingestPersistedSession } from "../apps/web/src/session_ingestion.ts";
 import {
@@ -94,10 +95,11 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
         });
 
         const before = await loadSessionsPageData({ katoDir });
+        const beforeTwins = await loadMaintenanceTwinsData({ katoDir });
         assertEquals(before.rows.length, 1);
         assertEquals(before.rows[0]?.state, "inactive");
-        assertEquals(before.rows[0]?.canOpenIngestView, false);
-        assertEquals(before.rows[0]?.ingestionAction, "start");
+        assertEquals(beforeTwins.rows[0]?.twinState, "absent");
+        assertEquals(beforeTwins.rows[0]?.twinAction, "create");
 
         const result = await ingestPersistedSession({
           sessionId: "sess-kato-001",
@@ -111,12 +113,13 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
         assertEquals(result.appendedTwinEvents > 0, true);
 
         const after = await loadSessionsPageData({ katoDir });
+        const afterTwins = await loadMaintenanceTwinsData({ katoDir });
         assertEquals(after.rows.length, 1);
         assertEquals(after.rows[0]?.state, "stale");
-        assertEquals(after.rows[0]?.canOpenIngestView, true);
-        assertEquals(after.rows[0]?.ingestionAction, "none");
         assertEquals(after.staleSessionCount, 1);
         assertEquals(after.inactiveSessionCount, 0);
+        assertEquals(afterTwins.rows[0]?.twinState, "current");
+        assertEquals(afterTwins.rows[0]?.twinAction, "none");
 
         const reloaded = (await store.listSessionMetadata())[0];
         assertExists(reloaded);
@@ -127,12 +130,15 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
         await Deno.utime(sessionFilePath, continuedAt, continuedAt);
 
         const afterSourceUpdate = await loadSessionsPageData({ katoDir });
+        const afterSourceUpdateTwins = await loadMaintenanceTwinsData({
+          katoDir,
+        });
         assertEquals(afterSourceUpdate.rows.length, 1);
         assertEquals(afterSourceUpdate.rows[0]?.state, "stale");
-        assertEquals(afterSourceUpdate.rows[0]?.canOpenIngestView, true);
-        assertEquals(afterSourceUpdate.rows[0]?.ingestionAction, "continue");
         assertEquals(afterSourceUpdate.staleSessionCount, 1);
         assertEquals(afterSourceUpdate.inactiveSessionCount, 0);
+        assertEquals(afterSourceUpdateTwins.rows[0]?.twinState, "behind");
+        assertEquals(afterSourceUpdateTwins.rows[0]?.twinAction, "update");
       });
     } finally {
       restoreRuntimeEnv(env);
@@ -215,12 +221,13 @@ Deno.test("loadSessionsPageData keeps background twin history inactive until ing
           await store.saveSessionMetadata(metadata, { touchUpdatedAt: true });
 
           const page = await loadSessionsPageData({ katoDir });
+          const twins = await loadMaintenanceTwinsData({ katoDir });
           assertEquals(page.rows.length, 1);
           assertEquals(page.rows[0]?.state, "inactive");
-          assertEquals(page.rows[0]?.canOpenIngestView, false);
-          assertEquals(page.rows[0]?.ingestionAction, "start");
           assertEquals(page.staleSessionCount, 0);
           assertEquals(page.inactiveSessionCount, 1);
+          assertEquals(twins.rows[0]?.twinState, "absent");
+          assertEquals(twins.rows[0]?.twinAction, "create");
         },
       );
     } finally {

@@ -546,3 +546,305 @@ I updated [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacula
 - delete-twin is direct inline delete with no extra confirmation flow
 - immediate metadata rewrite is part of the plan
 - loader healing remains as a fail-safe
+
+# djradon_2026-03-11_0728_50
+
+ok, please implement
+
+# gpt-5.4_2026-03-11_0728_56
+
+I’m implementing the twins follow-up from the task note as a real code slice, starting with the current web/maintenance/twin loaders and session-state helpers so I can cut the changes in a coherent order instead of patching around the current inconsistencies.
+
+# gpt-5.4_2026-03-11_0729_06
+
+I’m gathering the exact current surfaces now: Maintenance route, twin/session/recording loaders, live routes, and the session-state store APIs that can support delete/reset without losing non-twin metadata.
+
+# gpt-5.4_2026-03-11_0729_16
+
+I’ve got the current surfaces. Next I’m looking for the exact store methods around reading twins, deleting twin files, and metadata save semantics so I can add a proper “delete twin and reset state” helper instead of open-coding it in the route.
+
+# gpt-5.4_2026-03-11_0729_22
+
+I’ve got the store API constraints now. I’m checking the current web nav/routes/tests next so I can move twin inventory into Maintenance cleanly and delete the standalone Twins surface in one pass.
+
+# gpt-5.4_2026-03-11_0729_28
+
+I’ve identified the current twins-only files and the remaining references. Now I’m checking the sessions/recordings UI components so I can add `show snippet` without inventing a second interaction model.
+
+# gpt-5.4_2026-03-11_0729_36
+
+I’ve got the current UI pieces. The next question is how much client-side behavior already exists for row-level mutations so I can add `show snippet` and delete-twin without overbuilding a new interaction stack.
+
+# gpt-5.4_2026-03-11_0731_10
+
+I’m checking the available CSS/button patterns before I wire `show snippet`, because this needs to fit the current UI without introducing ad hoc markup that looks wrong on three different pages.
+
+# gpt-5.4_2026-03-11_0731_15
+
+I found a reusable inline button style already in place, so `show snippet` can fit the existing rows without adding a new visual treatment. I’m checking the auth/CSRF pattern once before I wire the snippet endpoint.
+
+# gpt-5.4_2026-03-11_0731_21
+
+The app already reads CSRF from form bodies or an `x-kato-csrf` header, so I’m checking the existing route guard once and then I’ll use the same token path for the snippet endpoint rather than inventing a second auth mechanism.
+
+# gpt-5.4_2026-03-11_0731_30
+
+I’m checking the existing query parser so the Maintenance twin section can keep the same filter semantics without a second bespoke filter format.
+
+# gpt-5.4_2026-03-11_0731_34
+
+The query/filter plumbing can be reused directly. I’m checking the maintenance and route tests now so I can expand the existing coverage instead of starting from zero.
+
+# gpt-5.4_2026-03-11_0731_52
+
+I’m checking how deeply `canOpenIngestView` and the old twin-link semantics are wired before I decide whether to remove them outright or collapse them into a simpler no-link model.
+
+# gpt-5.4_2026-03-11_0733_09
+
+I found a cleaner simplification path: once Maintenance owns twin management, most of the current Sessions twin UI can just go away instead of being renamed. I’m checking which row fields are then actually still needed so I can remove dead logic instead of carrying it forward.
+
+# gpt-5.4_2026-03-11_0733_17
+
+There’s a clean simplification available here: Sessions can drop the twin-link/action fields once Maintenance owns that surface. I’m checking the current store tests so I can add the delete/reset helper coverage in the same style as the existing persistence tests.
+
+# gpt-5.4_2026-03-11_0734_17
+
+Implementing the follow-up slice now. I’m validating the current maintenance, sessions, recordings, and session-state codepaths first so I can replace the Twins surface cleanly instead of layering more compatibility logic.
+
+# gpt-5.4_2026-03-11_0734_29
+
+I’ve confirmed the old twin-specific behavior is still spread across Sessions, the dedicated Twins route, and the loader model. Next I’m cutting a shared runtime path for single-twin delete/reset and a shared snippet-resolution path so the UI can move without duplicating logic.
+
+# gpt-5.4_2026-03-11_0734_57
+
+I have the exact seams now. The code already has a clean persisted-history replay helper in the daemon layer, so I can use that for on-demand snippets instead of inventing a second reconstruction path. Next I’m wiring that into the web surface and deleting the dedicated Twins route rather than repurposing it.
+
+# gpt-5.4_2026-03-11_0736_29
+
+The delete/reset semantics have one subtle dependency: whether a later “create twin” rebuilds from source start or only continues from the stored ingest cursor. I’m checking that before I wire the runtime reset helper, because preserving the wrong fields would make delete look clean in metadata but break reconstruction.
+
+# gpt-5.4_2026-03-11_0741_58
+
+I’ve moved the twin surface into Maintenance and stripped the Sessions page back to inventory/snippet behavior. The next pass is cleanup: remove the dead Twins route/files, then update the tests around the new maintenance and snippet endpoints so the remaining semantics are explicit.
+
+# djradon_2026-03-11_0742_29
+
+Regarding "default to not showing reconstructed snippets until the operator explicitly
+  requests them for that row" -- once a snippet has been reconstructed (i.e., the user has requested "show snippet"), you can show it everywhere.
+
+# gpt-5.4_2026-03-11_0742_58
+
+I’m taking that as a browser-wide reveal cache, not a backend metadata write. That keeps the original privacy behavior on first load, but once an operator clicks `show snippet`, the snippet can appear across Sessions, Recordings, and Maintenance for that browser thereafter.
+
+# gpt-5.4_2026-03-11_0745_09
+
+The remaining cleanup is mostly consistency work now: removing a few dead session-route remnants, tightening tests, and running the focused suite. After that I’ll update the task note checkboxes to match what actually landed.
+
+# gpt-5.4_2026-03-11_0745_39
+
+The code paths are in place now, including the local reveal cache so a snippet shown once can appear across pages for that operator. I’m formatting and running the targeted tests next; if anything breaks, I’ll tighten the model before touching the task checkboxes.
+
+# gpt-5.4_2026-03-11_0745_58
+
+The focused test run is in progress. I’m waiting on compilation/runtime feedback before I touch the task note, because there are enough cross-file deletions here that I want the test pass to be the source of truth.
+
+# gpt-5.4_2026-03-11_0746_13
+
+`deno task check` found two cleanups, both mechanical: a `window` reference in the client snippet loader and an unnecessary `async` in the sessions loader after I removed the old twin action logic. I’m fixing those now and rerunning check.
+
+# gpt-5.4_2026-03-11_0748_41
+
+Implemented the twins follow-up.
+
+Twin management now lives under `Maintenance`, backed by [`loadMaintenanceTwinsData()`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/maintenance_twins.ts) and [`/api/maintenance-twins`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/maintenance-twins.ts). The top-level Twins surface is gone: [`apps/web/routes/twins.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/twins.tsx), [`apps/web/routes/api/twins.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/twins.ts), [`apps/web/islands/TwinsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/TwinsLive.tsx), and [`apps/web/src/loaders/twins.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/twins.ts) were deleted. Sessions is now just the live inventory again in [`apps/web/islands/SessionsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) and [`apps/web/routes/sessions.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx).
+
+On-demand snippet reveal is in place across Sessions, Recordings, and Maintenance via [`apps/web/islands/SessionSnippet.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionSnippet.tsx) and [`apps/web/src/session_snippets.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_snippets.ts). It resolves from live snapshot, twin replay, or explicit source replay, and after a user reveals a snippet it is cached in browser storage so it can appear everywhere for that operator afterward. Recordings now has a snippet area too in [`apps/web/islands/RecordingsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx).
+
+Twin delete/reset is canonicalized in runtime via [`resetSessionTwinPersistence()`](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts) and used by Maintenance delete plus loader healing. That clears twin-only state without dropping ingest cursor, command cursor, or workspace output bindings.
+
+Validation passed: `deno task check` and the focused test slice passed.
+Tests run:
+- `tests/session-state-store_test.ts`
+- `tests/web-session-ingestion_test.ts`
+- `tests/web-activity-loader_test.ts`
+- `tests/web-live-routes_test.ts`
+
+I also updated the task note checkboxes in [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-twins-follow-up.md) and refreshed [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md), [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md), and [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).
+
+# gpt-5.4_2026-03-11_0748_42
+
+Implemented the twins follow-up.
+
+Twin management now lives under `Maintenance`, backed by [`loadMaintenanceTwinsData()`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/maintenance_twins.ts) and [`/api/maintenance-twins`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/maintenance-twins.ts). The top-level Twins surface is gone: [`apps/web/routes/twins.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/twins.tsx), [`apps/web/routes/api/twins.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/api/twins.ts), [`apps/web/islands/TwinsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/TwinsLive.tsx), and [`apps/web/src/loaders/twins.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/twins.ts) were deleted. Sessions is now just the live inventory again in [`apps/web/islands/SessionsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) and [`apps/web/routes/sessions.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx).
+
+On-demand snippet reveal is in place across Sessions, Recordings, and Maintenance via [`apps/web/islands/SessionSnippet.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionSnippet.tsx) and [`apps/web/src/session_snippets.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_snippets.ts). It resolves from live snapshot, twin replay, or explicit source replay, and after a user reveals a snippet it is cached in browser storage so it can appear everywhere for that operator afterward. Recordings now has a snippet area too in [`apps/web/islands/RecordingsLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx).
+
+Twin delete/reset is canonicalized in runtime via [`resetSessionTwinPersistence()`](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts) and used by Maintenance delete plus loader healing. That clears twin-only state without dropping ingest cursor, command cursor, or workspace output bindings.
+
+Validation passed: `deno task check` and the focused test slice passed.
+Tests run:
+- `tests/session-state-store_test.ts`
+- `tests/web-session-ingestion_test.ts`
+- `tests/web-activity-loader_test.ts`
+- `tests/web-live-routes_test.ts`
+
+I also updated the task note checkboxes in [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-twins-follow-up.md) and refreshed [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md), [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md), and [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).
+
+# djradon_2026-03-11_0752_07
+
+"show snippet" isn't working on any of the three pages: it doesn't change to "loading snippet" or "snippet unavailable"
+
+# gpt-5.4_2026-03-11_0752_36
+
+The click handler itself is probably fine. The more likely problem is hydration: I put `SessionSnippet` under `islands/` and then nested it inside other islands, which can leave the inner component non-interactive. I’m checking that wiring and moving it to a plain shared component if that’s the case.
+
+# gpt-5.4_2026-03-11_0752_42
+
+The root cause is the file placement, not the fetch logic. `SessionSnippet` needs to be a normal shared component, because nesting an `islands/` component inside other islands leaves it static in Fresh. I’m moving it out of `islands/` and rewiring the imports.
+
+# djradon_2026-03-11_0753_25
+
+Sorry, it is working. I just needed to restart... not sure which was required, web or daemon restart, I did both. But I would expect that usually changes just get picked up when I'm using deno task dev:daemon/web
+
+# gpt-5.4_2026-03-11_0753_38
+
+I’m checking the web dev loop wiring so I can answer concretely whether that restart should have been necessary here, and if so which process was the likely culprit.
+
+# gpt-5.4_2026-03-11_0754_12
+
+For this specific issue, the web restart was the likely one.
+
+Why:
+
+- `show snippet` is a web-only interaction path: client component + new `/api/session-snippet` route.
+- The button changing to `loading snippet...` does not depend on the daemon.
+- We added/deleted web route/component files in this slice, and that is exactly the class of change most likely to need a `dev:web` restart or at least a hard browser refresh.
+
+One real gap I did confirm: [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) has `dev:daemon` watching only `apps/daemon/src,shared/src`, not `apps/runtime/src`. So daemon-side runtime changes will not auto-restart under `deno task dev:daemon` right now.
+
+So the practical rule is:
+
+- web UI/route changes: usually picked up by `dev:web`, but route/add-delete moves can still need a web restart
+- daemon/runtime changes: daemon restart is currently required if the change is under `apps/runtime/src`
+
+If you want, I can patch `dev:daemon` to watch `apps/runtime/src` too.
+
+# djradon_2026-03-11_0756_08
+
+On the maintenance page, can we move "Session Artifacts" up next to "logs". "Session Artifacts" should support "0" to remove all session artifacts, and state that explicitly.
+
+# gpt-5.4_2026-03-11_0756_16
+
+I’m checking the current Maintenance layout and the cleanup implementation before I change the form semantics. The main question is whether `0` already maps cleanly to “delete all session artifacts” in the runtime layer or whether that needs a backend fix too.
+
+# gpt-5.4_2026-03-11_0756_20
+
+The runtime layer already treats `0` sensibly for “delete everything” because it becomes “older than now,” which matches all existing artifacts. I only need to loosen the web form validation/copy and reorder the cards so Logs and Session Artifacts stay as the first row.
+
+# gpt-5.4_2026-03-11_0756_39
+
+I’m making this narrowly: allow `0` through the Maintenance form/redirect state, change the field copy to say `0 = all`, and keep Session Artifacts in the top row beside Logs. I’ll run a focused validation pass afterward.
+
+# gpt-5.4_2026-03-11_0757_00
+
+I’ve changed the Maintenance form semantics and added a focused test for the `0 = all` cleanup case. I’m formatting and running the maintenance test plus type-check on the touched files now.
+
+# gpt-5.4_2026-03-11_0757_12
+
+The direct `deno check` I tried against a Fresh route wasn’t meaningful from repo root because it bypassed `apps/web`’s import map/JSX config. I’m running the proper web check instead so the validation matches how this app is actually built.
+
+# gpt-5.4_2026-03-11_0757_18
+
+Updated [`apps/web/routes/maintenance.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) so `Session Artifacts` explicitly says `0` removes all session artifacts, and the input now accepts `0` (`min="0"`). I also fixed the web-side parsing/redirect handling so `0` survives round-trips instead of being treated as invalid.
+
+`Session Artifacts` is already rendered in the first row beside `Logs`, and I kept it there. I added coverage for the `sessionsDays=0` behavior in [`tests/maintenance-clean_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/maintenance-clean_test.ts).
+
+Validation:
+- `deno test ... tests/maintenance-clean_test.ts`
+- `deno task --cwd apps/web check`
+
+One note: the standalone `deno check apps/web/routes/maintenance.tsx ...` from repo root is misleading for Fresh files because it bypasses `apps/web`’s own config/import map, so I ignored that and used the proper web task check instead.
+
+# djradon_2026-03-11_0759_38
+
+Please patch dev:daemon to watch apps/runtime/src too and confirm that dev:web is watching everything it should.
+
+Did you forget to move "Session Artifacts" up next to "Logs"?
+
+# gpt-5.4_2026-03-11_0759_54
+
+I’m patching `dev:daemon` first, then I’ll verify the web dev watcher from the Fresh/Vite config rather than guessing. I’ll also recheck the Maintenance layout so I can answer the Session Artifacts question against the actual grid order.
+
+# gpt-5.4_2026-03-11_0800_12
+
+I’m making the `dev:daemon` watch change now. I’m not planning a `dev:web` patch unless I find an actual gap, because the Vite/Fresh config currently has no custom watch restrictions and I don’t want to cargo-cult more file watching into it.
+
+# gpt-5.4_2026-03-11_0800_26
+
+You were right. I checked the markup order and `Session Artifacts` is written immediately after `Logs`, but the grid CSS is missing a `.span-6` rule, so both cards still render full-width and stack. I’m fixing that now.
+
+# gpt-5.4_2026-03-11_0800_35
+
+I found the actual layout bug: `span-6` was never defined in the web CSS, so both Maintenance cards were still defaulting to full-width. I’ve added that rule and included it in the mobile collapse set. I’m running the web check once so this closes cleanly.
+
+# gpt-5.4_2026-03-11_0800_42
+
+Patched `dev:daemon` in [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) to watch `apps/runtime/src` as well as `apps/daemon/src` and `shared/src`.
+
+`dev:web` does not need a similar patch. It runs Vite in [`apps/web/deno.json`](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json), and [`apps/web/vite.config.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/vite.config.ts) has no custom watch restrictions, so Fresh/Vite is already watching the app tree and imported modules as expected. The main caveat is that route/file adds-deletes can still occasionally need a web restart or hard refresh.
+
+You were also right about `Session Artifacts`: I had moved it in the markup, but the layout still stacked because `.span-6` was missing from [`apps/web/assets/styles.css`](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css). That’s fixed now, so `Logs` and `Session Artifacts` should sit side by side on desktop.
+
+Validation: `deno task --cwd apps/web check` passed.
+
+# djradon_2026-03-11_0801_20
+
+For "Session Artifacts" can we just have a single "old than" text input box that works for both buttons?
+
+# gpt-5.4_2026-03-11_0801_35
+
+I’m simplifying the Session Artifacts form into a single shared input with both actions in one submission path, then I’ll run the web check so the form semantics stay valid.
+
+# gpt-5.4_2026-03-11_0801_43
+
+The first pass left an invalid hidden input inside the button. I’m correcting that to proper submit-button `name/value` handling before I run validation.
+
+# gpt-5.4_2026-03-11_0801_52
+
+The single-input form is wired correctly now. I’m formatting the route and running the web check so we don’t leave any JSX issues behind.
+
+# gpt-5.4_2026-03-11_0801_57
+
+Changed `Session Artifacts` to a single shared input in [`apps/web/routes/maintenance.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx). The form now has one `sessionsDays` field and two submit buttons:
+
+- `Dry-Run Session Cleanup`
+- `Execute Session Cleanup`
+
+The execute checkbox is still there, but it’s shared by the same form instead of duplicating the age input.
+
+I also confirmed the earlier layout fix is in place: `Logs` and `Session Artifacts` now sit side by side because `.span-6` is defined in [`apps/web/assets/styles.css`](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Validation: `deno task --cwd apps/web check` passed.
+
+# gpt-5.4_2026-03-11_0801_58
+
+Changed `Session Artifacts` to a single shared input in [`apps/web/routes/maintenance.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx). The form now has one `sessionsDays` field and two submit buttons:
+
+- `Dry-Run Session Cleanup`
+- `Execute Session Cleanup`
+
+The execute checkbox is still there, but it’s shared by the same form instead of duplicating the age input.
+
+I also confirmed the earlier layout fix is in place: `Logs` and `Session Artifacts` now sit side by side because `.span-6` is defined in [`apps/web/assets/styles.css`](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+Validation: `deno task --cwd apps/web check` passed.
+
+# djradon_2026-03-11_0805_25
+
+I believe you said in the Session Artifact cleanup (common code), it doesn't actually delete the metadata? Which should be fine, because without snippets, it's not very privacy-sensitive. Right?
+
+So if we don't need to delete metadata, let's change the web heading to "Twin Cleanup". The CLI should change "--sessions" to "--twins", and update documentation accordingly?
+
+# gpt-5.4_2026-03-11_0805_39
+
+I’m verifying the shared cleanup path first, then I’ll rename the web/CLI surface only if the underlying behavior matches. If it still deletes metadata, I’ll change the implementation too so `Twin Cleanup` and `--twins` are truthful rather than cosmetic.

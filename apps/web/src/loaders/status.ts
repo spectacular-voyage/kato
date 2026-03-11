@@ -71,7 +71,6 @@ export interface SummarySessionRow {
   snippet?: string;
   updatedAt: string;
   state: ActivityState;
-  canOpenIngestView: boolean;
 }
 
 export interface SummaryPageData {
@@ -250,7 +249,6 @@ function buildSummarySessionRows(
       snippet: row.snippet,
       updatedAt: row.updatedAt,
       state: row.state,
-      canOpenIngestView: row.canOpenIngestView,
     })),
     ...liveOnlySessions.map((session) => ({
       provider: session.provider,
@@ -266,7 +264,6 @@ function buildSummarySessionRows(
         },
         runtimeConfig,
       ),
-      canOpenIngestView: false,
     })),
   ];
 

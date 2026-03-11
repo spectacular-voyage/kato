@@ -13,6 +13,7 @@ import {
   UserConfigFileStore,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
+import { loadMaintenanceTwinsData } from "../apps/web/src/loaders/maintenance_twins.ts";
 import { loadRecordingsPageData } from "../apps/web/src/loaders/recordings.ts";
 import { loadSessionsPageData } from "../apps/web/src/loaders/sessions.ts";
 import { loadWorkspacesPageData } from "../apps/web/src/loaders/workspaces.ts";
@@ -631,6 +632,7 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         );
 
         const allSessions = await loadSessionsPageData();
+        const allTwins = await loadMaintenanceTwinsData();
         assertEquals(allSessions.sessionCount, 3);
         assertEquals(allSessions.activeSessionCount, 0);
         assertEquals(allSessions.staleSessionCount, 3);
@@ -638,8 +640,13 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         const continuationRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-continue"
         );
+        const continuationTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-continue"
+        );
         assertExists(continuationRow);
-        assertEquals(continuationRow.ingestionAction, "start");
+        assertExists(continuationTwinRow);
+        assertEquals(continuationTwinRow.twinState, "absent");
+        assertEquals(continuationTwinRow.twinAction, "create");
         assertEquals(continuationRow.recordings.length, 1);
         assertEquals(continuationRow.recordings[0]?.state, "engaged-stale");
         assertEquals(
@@ -650,8 +657,13 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         const stoppedRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-stopped"
         );
+        const stoppedTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-stopped"
+        );
         assertExists(stoppedRow);
-        assertEquals(stoppedRow.ingestionAction, "start");
+        assertExists(stoppedTwinRow);
+        assertEquals(stoppedTwinRow.twinState, "absent");
+        assertEquals(stoppedTwinRow.twinAction, "create");
         assertEquals(stoppedRow.recordings[0]?.state, "stopped");
         assertEquals(
           stoppedRow.recordings[0]?.recordingCycleId,
@@ -661,10 +673,14 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         const legacyRow = allSessions.rows.find((row) =>
           row.sessionId === "sess-legacy"
         );
+        const legacyTwinRow = allTwins.rows.find((row) =>
+          row.sessionId === "sess-legacy"
+        );
         assertExists(legacyRow);
+        assertExists(legacyTwinRow);
         assertEquals(legacyRow.state, "stale");
-        assertEquals(legacyRow.canOpenIngestView, true);
-        assertEquals(legacyRow.ingestionAction, "none");
+        assertEquals(legacyTwinRow.twinState, "absent");
+        assertEquals(legacyTwinRow.twinAction, "create");
 
         const filtered = await loadSessionsPageData({
           workspaceFilter: "ws-gamma",

@@ -632,3 +632,38 @@ created: 1771779490894
     behavior is described.
   - Clarify shutdown cleanup docs so privacy does not rely on twin-file
     deletion semantics.
+
+### Move Twin Management Into Maintenance
+
+- Decision:
+  - Remove the top-level web `/twins` route/tab and move persisted twin
+    inspection plus cleanup into `Maintenance`.
+  - Derive maintenance twin state from actual twin availability plus source
+    freshness, instead of reusing Sessions-page twin visibility heuristics.
+  - Keep Sessions focused on live activity/recordings and use explicit
+    `show snippet` affordances for missing snippets.
+  - Resolve snippets on demand from live snapshot, twin replay, or explicit
+    source replay, then cache revealed snippets in the browser so they can
+    appear across web surfaces for that operator after first reveal.
+  - Delete twins inline from Maintenance and immediately rewrite metadata to
+    canonical no-twin state while preserving non-twin session continuity.
+- Owner: Kato engineering
+- Date: 2026-03-11
+- Why:
+  - The separate `/twins` page made a troubleshooting/cleanup concern look like
+    a primary navigation concept.
+  - Reusing Sessions-page twin heuristics produced contradictory UI states such
+    as `current` plus `create twin`.
+  - On-demand snippet reveal preserves default privacy for old sessions without
+    requiring startup-time snippet backfill.
+- Tradeoffs:
+  - Revealed snippets are cached per browser/operator rather than persisted in
+    durable session metadata, so cross-browser visibility still requires a new
+    reveal.
+  - Maintenance now owns a denser mixed surface (cleanup plus twin
+    troubleshooting), which increases that page's complexity slightly.
+- Follow-up tasks:
+  - Add browser-level UI coverage for the revealed-snippet cache behavior if
+    we later expand frontend test infrastructure.
+  - Revisit whether any Maintenance filter state should be preserved across the
+    other cleanup forms.

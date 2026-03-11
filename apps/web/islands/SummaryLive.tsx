@@ -106,7 +106,7 @@ export default function SummaryLive(
               {data.staleGeneratingSessionCount} idle
             </span>
             <span class="metric-note mono">
-              {data.inactiveSessionCount} no twin
+              {data.inactiveSessionCount} inactive
             </span>
           </div>
           <div class="metric">

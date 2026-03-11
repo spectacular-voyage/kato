@@ -155,6 +155,40 @@ Deno.test("runMaintenanceClean allows session cleanup while daemon is running", 
   });
 });
 
+Deno.test("runMaintenanceClean treats sessionsDays=0 as remove all session artifacts", async () => {
+  await withTestTempDir("maintenance-clean-zero-days-", async (rootDir) => {
+    const runtimeDir = `${rootDir}/daemon`;
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const sessionsDir = resolveDefaultSessionsDir(rootDir);
+    await Deno.mkdir(sessionsDir, { recursive: true });
+
+    const oldMetaPath = `${sessionsDir}/old.meta.json`;
+    const recentTwinPath = `${sessionsDir}/recent.twin.jsonl`;
+    await Deno.writeTextFile(oldMetaPath, "{}\n");
+    await Deno.writeTextFile(recentTwinPath, "{}\n");
+
+    const oldTime = new Date("2026-02-01T00:00:00.000Z");
+    const recentTime = new Date("2026-03-07T00:00:00.000Z");
+    await Deno.utime(oldMetaPath, oldTime, oldTime);
+    await Deno.utime(recentTwinPath, recentTime, recentTime);
+
+    const result = await runMaintenanceClean({
+      all: false,
+      dryRun: true,
+      sessionsDays: 0,
+      runtimeDir,
+      katoDir: rootDir,
+      now: () => new Date("2026-03-07T00:00:00.000Z"),
+      source: "web",
+    });
+
+    assertEquals(result.stats.sessionsWouldDelete, 2);
+    assertEquals(result.stats.sessionFilesWouldDelete, 2);
+    assertStringIncludes(result.summary, "sessions=0d");
+    assertStringIncludes(result.summary, "sessionsToDelete=2");
+  });
+});
+
 Deno.test("runMaintenanceClean flushes supported logs in dry-run mode and records web audits", async () => {
   await withTestTempDir("maintenance-clean-all-dry-run-", async (rootDir) => {
     const runtimeDir = `${rootDir}/daemon`;

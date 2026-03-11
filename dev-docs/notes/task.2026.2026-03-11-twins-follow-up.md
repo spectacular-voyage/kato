@@ -123,7 +123,8 @@ The better model is:
 - do not add a daemon-start global snippet reconstruction pass
 - add a shared on-demand snippet-reveal flow for inventory surfaces
 - default to not showing reconstructed snippets until the operator explicitly
-  requests them for that row
+  requests them for that row, then cache the revealed value so it can appear
+  everywhere for that operator thereafter
 - use user-facing wording:
   - `show snippet`
   - `loading snippet...`
@@ -173,8 +174,8 @@ The better model is:
     exists
   - Maintenance twin row reveal derives snippet from twin history on demand
   - Recordings row shows snippet area and can reveal snippet on demand
-  - reveal is row-scoped and does not globally expose snippets for every old
-    session
+  - initial reveal is row-scoped, but once revealed the snippet can appear
+    elsewhere for that operator without another prompt
   - placeholder remains when no permitted reveal source exists
 - maintenance route tests for:
   - twin rows render under Maintenance with expected labels and filters
@@ -212,50 +213,50 @@ The better model is:
 
 ## 1. Untangle Twin State Semantics
 
-- [ ] introduce a dedicated twin-maintenance row model instead of reusing
+- [x] introduce a dedicated twin-maintenance row model instead of reusing
   Sessions-page action state
-- [ ] remove or rename misleading helpers such as
+- [x] remove or rename misleading helpers such as
   `hasVisibleTwinHistory(...)` where they are no longer the right abstraction
-- [ ] derive maintenance twin state from actual persisted twin condition:
+- [x] derive maintenance twin state from actual persisted twin condition:
   - twin file presence
   - metadata twin counters
   - source-file freshness
-- [ ] treat missing twin files with stale metadata as `no twin` rather than as
+- [x] treat missing twin files with stale metadata as `no twin` rather than as
   a separately visible pseudo-state unless debugging proves otherwise
 
 ## 2. Snippet Reconstitution
 
-- [ ] add a shared snippet-reveal helper that resolves a session snippet in
+- [x] add a shared snippet-reveal helper that resolves a session snippet in
   this order:
   - live snapshot snippet
   - twin-derived snippet
   - explicit source-replay snippet only where the route intentionally opts in
   - placeholder text otherwise
-- [ ] add row-level `show snippet` affordances instead of passive fallback on:
+- [x] add row-level `show snippet` affordances instead of passive fallback on:
   - `Sessions`
   - maintenance twin rows
   - `Recordings`
-- [ ] use that helper for the maintenance twin surface so existing twins no
+- [x] use that helper for the maintenance twin surface so existing twins no
   longer stay at `(no snippet)` when the operator explicitly asks to reveal them
-- [ ] add snippet display support to `Recordings` rows, using the same
+- [x] add snippet display support to `Recordings` rows, using the same
   on-demand reveal path rather than a separate snippet model
-- [ ] keep startup behavior lazy:
+- [x] keep startup behavior lazy:
   - no eager full-session replay pass
   - no background snippet-only hydration job
 
 ## 3. Twin Delete / Reset Flow
 
-- [ ] add a runtime/session-state helper for clearing twin persistence state
+- [x] add a runtime/session-state helper for clearing twin persistence state
   from metadata while preserving non-twin session continuity
-- [ ] implement a maintenance POST action to delete a single twin
-- [ ] implement direct inline delete with no extra confirmation flow
-- [ ] ensure delete-twin removes:
+- [x] implement a maintenance POST action to delete a single twin
+- [x] implement direct inline delete with no extra confirmation flow
+- [x] ensure delete-twin removes:
   - the twin file
   - `nextTwinSeq`
   - recent fingerprint state
   - explicit twin-activation markers that no longer make sense without a twin
-- [ ] rewrite metadata immediately after delete to canonical no-twin state
-- [ ] ensure delete-twin does **not** remove:
+- [x] rewrite metadata immediately after delete to canonical no-twin state
+- [x] ensure delete-twin does **not** remove:
   - provider source files
   - ingest cursor continuity
   - command cursor continuity
@@ -263,38 +264,38 @@ The better model is:
 
 ## 4. Move Twin UI Into Maintenance
 
-- [ ] add a Maintenance section for persisted twin inventory and troubleshooting
-- [ ] move current twin row content into that section:
+- [x] add a Maintenance section for persisted twin inventory and troubleshooting
+- [x] move current twin row content into that section:
   - snippet
   - provider/session id
   - twin path
   - source path
   - state (`current`, `behind source`, `no twin`)
   - action (`create twin`, `update twin`)
-- [ ] place a trash-can delete affordance on the right side of each row, below
+- [x] place a trash-can delete affordance on the right side of each row, below
   the status text
-- [ ] choose a compact confirmation pattern that fits the existing Maintenance
-  form style
-- [ ] remove the top-level `Twins` nav item, route, and route-specific loader
+- [x] use direct inline delete with no confirmation dialog or second-step form
+- [x] remove the top-level `Twins` nav item, route, and route-specific loader
   once the Maintenance section fully replaces it
 
 ## 5. Simplify Sessions
 
-- [ ] remove twin-management-specific presentation from `Sessions` if it is no
+- [x] remove twin-management-specific presentation from `Sessions` if it is no
   longer needed after the Maintenance move
-- [ ] keep Sessions anchored around:
+- [x] keep Sessions anchored around:
   - live activity
   - recording engagement
   - session inventory
-- [ ] keep snippet display privacy-preserving by showing recovered snippets only
-  after an explicit row-level reveal action
-- [ ] update Summary / Workspaces / Recordings backlinks so they point to
+- [x] keep snippet display privacy-preserving by showing recovered snippets only
+  after an explicit row-level reveal action, then allow the revealed snippet to
+  appear elsewhere for that operator
+- [x] update Summary / Workspaces / Recordings backlinks so they point to
   `Sessions` for routine session navigation and to `Maintenance` only for
   explicit twin troubleshooting/cleanup flows
 
 ## 6. Documentation
 
-- [ ] update this note as the follow-up decisions land
-- [ ] update `dev.codebase-overview`
-- [ ] update `dev.decision-log`
-- [ ] update `dev.general-guidance` if the route/navigation guidance changes
+- [x] update this note as the follow-up decisions land
+- [x] update `dev.codebase-overview`
+- [x] update `dev.decision-log`
+- [x] update `dev.general-guidance` if the route/navigation guidance changes

@@ -467,3 +467,91 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
     assertEquals(output.recordingCycles[0]?.startedCursor, 5);
   });
 });
+
+Deno.test("PersistentSessionStateStore resetSessionTwinPersistence clears twin-only state", async () => {
+  await withTempDir("session-state-store-reset-twin-", async (dir) => {
+    const katoDir = join(dir, ".kato");
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-02T10:00:00.000Z"),
+      makeSessionId: () => "session-uuid-reset-twin-1234",
+    });
+
+    const created = await store.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId: "session-reset-twin",
+      sourceFilePath: SESSION_STATE_WORKSPACE_OUTPUT_SOURCE_PATH,
+      initialCursor: makeDefaultSessionCursor("codex"),
+    });
+    const updated = structuredClone(created);
+    updated.ingestionActivatedAt = "2026-03-02T10:05:00.000Z";
+    updated.commandCursor = 11;
+    updated.lastObservedMtimeMs = 123456789;
+    updated.workspaceOutputs = [{
+      workspaceId: "workspace-reset",
+      workspaceAliasSnapshot: "Reset",
+      desiredState: "on",
+      currentDestination: {
+        kind: "workspace-relative",
+        relativePathFromWorkspaceRoot: "notes/reset.md",
+      },
+      currentResolvedPath: `${dir}/workspace/notes/reset.md`,
+      sourceConfigPath: `${dir}/workspace/.kato-workspace-config.yaml`,
+      workspaceRootSnapshot: `${dir}/workspace`,
+      resolvedDefaultOutputDir: `${dir}/workspace/notes`,
+      filenameTemplate: "{provider}.md",
+      writerFeatureFlags: {
+        writerIncludeCommentary: true,
+        writerIncludeThinking: false,
+        writerIncludeToolCalls: true,
+        writerItalicizeUserMessages: false,
+      },
+      activeRecordingCycleId: "cycle-reset",
+      writeCursor: 7,
+      recordingCycles: [{
+        recordingCycleId: "cycle-reset",
+        startedCursor: 3,
+      }],
+    }];
+    await store.saveSessionMetadata(updated);
+
+    const appendResult = await store.appendTwinEvents(updated, [
+      makeTwinEvent(updated.sessionId, 0, "hello"),
+      {
+        ...makeTwinEvent(updated.sessionId, 1, "user hello"),
+        kind: "user.message",
+        payload: { text: "user hello" },
+      },
+    ]);
+    assertEquals(appendResult.appended.length, 2);
+
+    const beforeReset = (await store.listSessionMetadata())[0];
+    assertExists(beforeReset);
+    assertEquals(beforeReset.nextTwinSeq, 3);
+    assertEquals(beforeReset.recentFingerprints.length > 0, true);
+    await Deno.stat(beforeReset.twinPath);
+
+    const reset = await store.resetSessionTwinPersistence(beforeReset, {
+      deleteTwinFile: true,
+    });
+    assertEquals(reset.nextTwinSeq, 1);
+    assertEquals(reset.recentFingerprints, []);
+    assertEquals(reset.ingestionActivatedAt, undefined);
+    assertEquals(reset.commandCursor, 11);
+    assertEquals(reset.lastObservedMtimeMs, 123456789);
+    assertEquals(reset.workspaceOutputs?.length, 1);
+
+    await assertRejects(
+      () => Deno.stat(beforeReset.twinPath),
+      Deno.errors.NotFound,
+    );
+
+    const reloaded = (await store.listSessionMetadata())[0];
+    assertExists(reloaded);
+    assertEquals(reloaded.nextTwinSeq, 1);
+    assertEquals(reloaded.recentFingerprints, []);
+    assertEquals(reloaded.ingestionActivatedAt, undefined);
+    assertEquals(reloaded.commandCursor, 11);
+    assertEquals(reloaded.workspaceOutputs?.length, 1);
+  });
+});

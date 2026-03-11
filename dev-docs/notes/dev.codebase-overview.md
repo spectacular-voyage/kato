@@ -72,11 +72,9 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/twins`: persisted twin inventory, backed by `loadTwinsPageData()` and
-  `/api/twins`.
 - `/sessions`: primary discovered chat-session inventory, backed by
   `loadSessionsPageData()` and `/api/sessions`, with live activity,
-  recording state, and manual `create twin` / `update twin` actions.
+  recording state, and on-demand snippet reveal.
 - `/recordings`: flattened recording history across sessions and workspaces,
   backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister plus workspace-level recording
@@ -85,7 +83,8 @@ Current top-level web routes are:
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.
 - `/maintenance`: guided cleanup workflows for logs and old derived session
-  artifacts.
+  artifacts, plus the persisted twin troubleshooting/cleanup surface backed by
+  `loadMaintenanceTwinsData()` and `/api/maintenance-twins`.
 - `/login` and `/logout`: local auth/session entry points.
 
 Supporting web files worth knowing:
@@ -93,14 +92,17 @@ Supporting web files worth knowing:
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
 - `apps/web/src/session_routes.ts`: canonical href builders for
-  `/twins`, `/sessions`, and session anchor links.
+  `/maintenance`, `/sessions`, and session anchor links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for
-  `/api/chrome-status`, `/api/summary`, `/api/twins`, `/api/sessions`,
-  `/api/recordings`, `/api/workspaces`, and `/api/logs`.
+  `/api/chrome-status`, `/api/summary`, `/api/maintenance-twins`,
+  `/api/sessions`, `/api/recordings`, `/api/session-snippet`,
+  `/api/workspaces`, and `/api/logs`.
 - `apps/web/routes/api/*`: thin route entrypoints that delegate to
   `apps/web/src/live_routes.ts`.
 - `apps/web/src/api_response.ts`: shared no-store response helper for live JSON
   endpoints.
+- `apps/web/src/session_snippets.ts`: shared on-demand snippet resolution from
+  live snapshot, twin replay, or explicit provider-source replay.
 
 ## Default Filesystem Layout
 
