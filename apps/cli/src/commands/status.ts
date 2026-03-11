@@ -722,6 +722,12 @@ function renderTopSummarySection(
       truncate(memoryLines[0], width),
       truncate(memoryLines[1], width),
       truncate(recordingLine, width),
+      truncate(
+        `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
+          formatStateCount(staleCount, "stale", colorize)
+        }`,
+        width,
+      ),
     ];
   }
 
