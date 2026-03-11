@@ -6,7 +6,8 @@ export interface CleanCommandOptions {
   all: boolean;
   dryRun: boolean;
   recordingsDays?: number;
-  sessionsDays?: number;
+  twinsDays?: number;
+  deleteTwinMetadata?: boolean;
 }
 
 export async function runCleanCommand(
@@ -17,7 +18,8 @@ export async function runCleanCommand(
     all: options.all,
     dryRun: options.dryRun,
     recordingsDays: options.recordingsDays,
-    sessionsDays: options.sessionsDays,
+    twinsDays: options.twinsDays,
+    deleteTwinMetadata: options.deleteTwinMetadata,
     runtimeDir: ctx.runtime.runtimeDir,
     katoDir: ctx.runtimeConfig.katoDir ?? dirname(ctx.runtime.runtimeDir),
     now: ctx.runtime.now,

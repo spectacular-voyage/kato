@@ -12,7 +12,8 @@ interface MaintenanceTwinsLiveProps {
   initialData: MaintenanceTwinsData;
   endpoint: string;
   csrfToken?: string;
-  sessionsDays: number;
+  twinsDays: number;
+  deleteTwinMetadata: boolean;
 }
 
 function twinStateLabel(row: MaintenanceTwinRow): string {
@@ -201,9 +202,18 @@ export default function MaintenanceTwinsLive(props: MaintenanceTwinsLiveProps) {
                         />
                         <input
                           type="hidden"
-                          name="sessionsDays"
-                          value={String(props.sessionsDays)}
+                          name="twinsDays"
+                          value={String(props.twinsDays)}
                         />
+                        {props.deleteTwinMetadata
+                          ? (
+                            <input
+                              type="hidden"
+                              name="deleteTwinMetadata"
+                              value="on"
+                            />
+                          )
+                          : null}
                         <button
                           type="submit"
                           class="mono session-inline-action"
@@ -243,9 +253,18 @@ export default function MaintenanceTwinsLive(props: MaintenanceTwinsLiveProps) {
                         />
                         <input
                           type="hidden"
-                          name="sessionsDays"
-                          value={String(props.sessionsDays)}
+                          name="twinsDays"
+                          value={String(props.twinsDays)}
                         />
+                        {props.deleteTwinMetadata
+                          ? (
+                            <input
+                              type="hidden"
+                              name="deleteTwinMetadata"
+                              value="on"
+                            />
+                          )
+                          : null}
                         <button
                           type="submit"
                           class="maintenance-twin-delete-button"

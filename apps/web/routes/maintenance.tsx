@@ -14,7 +14,7 @@ import {
   resolveDefaultKatoDir,
 } from "@kato/runtime";
 
-const DEFAULT_SESSIONS_DAYS = 30;
+const DEFAULT_TWINS_DAYS = 30;
 
 function decodeMessage(value: string | null): string | undefined {
   if (!value) {
@@ -27,23 +27,31 @@ function decodeMessage(value: string | null): string | undefined {
   }
 }
 
-function parseSessionsDays(value: FormDataEntryValue | null): number {
+function parseTwinsDays(value: FormDataEntryValue | null): number {
   const raw = String(value ?? "").trim();
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
-      "Session cleanup days must be a whole number greater than or equal to 0",
+      "Twin cleanup days must be a whole number greater than or equal to 0",
     );
   }
   return parsed;
 }
 
-function resolveSessionsDaysParam(raw: string | null): number {
+function resolveTwinsDaysParam(raw: string | null): number {
   const parsed = Number(raw ?? "");
   if (!Number.isInteger(parsed) || parsed < 0) {
-    return DEFAULT_SESSIONS_DAYS;
+    return DEFAULT_TWINS_DAYS;
   }
   return parsed;
+}
+
+function parseDeleteTwinMetadata(value: FormDataEntryValue | null): boolean {
+  return value === "on";
+}
+
+function resolveDeleteTwinMetadataParam(raw: string | null): boolean {
+  return raw === "true";
 }
 
 function requireConfirmation(
@@ -65,10 +73,10 @@ function buildMaintenanceNotice(
       return `Log truncation dry-run: ${summary}`;
     case "logs-execute":
       return `Log truncation executed: ${summary}`;
-    case "sessions-dry-run":
-      return `Session cleanup dry-run: ${summary}`;
-    case "sessions-execute":
-      return `Session cleanup executed: ${summary}`;
+    case "twins-dry-run":
+      return `Twin cleanup dry-run: ${summary}`;
+    case "twins-execute":
+      return `Twin cleanup executed: ${summary}`;
     default:
       return summary;
   }
@@ -79,7 +87,8 @@ function buildRedirectUrl(
   options: {
     notice?: string;
     error?: string;
-    sessionsDays?: number;
+    twinsDays?: number;
+    deleteTwinMetadata?: boolean;
     includeStale?: boolean;
     workspaceFilter?: string;
   },
@@ -97,8 +106,11 @@ function buildRedirectUrl(
   if (options.error) {
     url.searchParams.set("error", options.error);
   }
-  if (options.sessionsDays !== undefined) {
-    url.searchParams.set("sessionsDays", String(options.sessionsDays));
+  if (options.twinsDays !== undefined) {
+    url.searchParams.set("twinsDays", String(options.twinsDays));
+  }
+  if (options.deleteTwinMetadata) {
+    url.searchParams.set("deleteTwinMetadata", "true");
   }
   return url;
 }
@@ -127,6 +139,9 @@ export const handler = define.handlers({
     const includeStale = String(form.get("includeStale") ?? "true") !== "false";
     const workspaceFilter = String(form.get("workspaceFilter") ?? "").trim() ||
       undefined;
+    const deleteTwinMetadata = parseDeleteTwinMetadata(
+      form.get("deleteTwinMetadata"),
+    );
     const { operationalLogger, auditLogger } = createWebLoggers();
 
     try {
@@ -148,6 +163,10 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             notice: buildMaintenanceNotice(action, result.summary),
+            twinsDays: resolveTwinsDaysParam(
+              String(form.get("twinsDays") ?? ""),
+            ),
+            deleteTwinMetadata,
             includeStale,
             workspaceFilter,
           }),
@@ -155,19 +174,20 @@ export const handler = define.handlers({
         );
       }
 
-      if (action === "sessions-dry-run" || action === "sessions-execute") {
-        const sessionsDays = parseSessionsDays(form.get("sessionsDays"));
-        if (action === "sessions-execute") {
+      if (action === "twins-dry-run" || action === "twins-execute") {
+        const twinsDays = parseTwinsDays(form.get("twinsDays"));
+        if (action === "twins-execute") {
           requireConfirmation(
             form,
-            "confirmSessions",
-            "Explicit confirmation is required before deleting old session artifacts.",
+            "confirmTwins",
+            "Explicit confirmation is required before deleting old twins.",
           );
         }
         const result = await runMaintenanceClean({
           all: false,
-          dryRun: action === "sessions-dry-run",
-          sessionsDays,
+          dryRun: action === "twins-dry-run",
+          twinsDays,
+          deleteTwinMetadata,
           operationalLogger,
           auditLogger,
           source: "web",
@@ -175,7 +195,8 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             notice: buildMaintenanceNotice(action, result.summary),
-            sessionsDays,
+            twinsDays,
+            deleteTwinMetadata,
             includeStale,
             workspaceFilter,
           }),
@@ -201,9 +222,10 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             notice,
-            sessionsDays: resolveSessionsDaysParam(
-              String(form.get("sessionsDays") ?? ""),
+            twinsDays: resolveTwinsDaysParam(
+              String(form.get("twinsDays") ?? ""),
             ),
+            deleteTwinMetadata,
             includeStale,
             workspaceFilter,
           }),
@@ -249,9 +271,10 @@ export const handler = define.handlers({
             notice: `deleted twin: ${metadata.provider} (${
               metadata.sessionId.slice(0, 8)
             })`,
-            sessionsDays: resolveSessionsDaysParam(
-              String(form.get("sessionsDays") ?? ""),
+            twinsDays: resolveTwinsDaysParam(
+              String(form.get("twinsDays") ?? ""),
             ),
+            deleteTwinMetadata,
             includeStale,
             workspaceFilter,
           }),
@@ -261,8 +284,8 @@ export const handler = define.handlers({
 
       return new Response("unsupported maintenance action", { status: 400 });
     } catch (error) {
-      const sessionsDays = Number.parseInt(
-        String(form.get("sessionsDays") ?? ""),
+      const twinsDays = Number.parseInt(
+        String(form.get("twinsDays") ?? ""),
         10,
       );
       await operationalLogger.error(
@@ -276,9 +299,10 @@ export const handler = define.handlers({
       return Response.redirect(
         buildRedirectUrl(ctx.req.url, {
           error: error instanceof Error ? error.message : String(error),
-          sessionsDays: Number.isInteger(sessionsDays) && sessionsDays >= 0
-            ? sessionsDays
+          twinsDays: Number.isInteger(twinsDays) && twinsDays >= 0
+            ? twinsDays
             : undefined,
+          deleteTwinMetadata,
           includeStale,
           workspaceFilter,
         }),
@@ -296,8 +320,11 @@ export default define.page(async function MaintenancePage(ctx) {
   ]);
   const notice = decodeMessage(ctx.url.searchParams.get("notice"));
   const error = decodeMessage(ctx.url.searchParams.get("error"));
-  const sessionsDays = resolveSessionsDaysParam(
-    ctx.url.searchParams.get("sessionsDays"),
+  const twinsDays = resolveTwinsDaysParam(
+    ctx.url.searchParams.get("twinsDays"),
+  );
+  const deleteTwinMetadata = resolveDeleteTwinMetadataParam(
+    ctx.url.searchParams.get("deleteTwinMetadata"),
   );
 
   return (
@@ -308,7 +335,7 @@ export default define.page(async function MaintenancePage(ctx) {
       <div class="shell">
         <AppHeader
           title="Maintenance"
-          description="Run guided cleanup for logs and old session artifacts, and troubleshoot persisted twin state when cleanup or reconstruction is needed."
+          description="Run guided cleanup for logs and old twins, and troubleshoot persisted twin state when cleanup or reconstruction is needed."
           currentPath="/maintenance"
           showLogout
           csrfToken={ctx.state.csrfToken}
@@ -333,6 +360,16 @@ export default define.page(async function MaintenancePage(ctx) {
                 name="csrfToken"
                 value={ctx.state.csrfToken ?? ""}
               />
+              <input type="hidden" name="twinsDays" value={twinsDays} />
+              {deleteTwinMetadata
+                ? (
+                  <input
+                    type="hidden"
+                    name="deleteTwinMetadata"
+                    value="on"
+                  />
+                )
+                : null}
               <button class="secondary-button" type="submit">
                 Dry-Run Log Truncation
               </button>
@@ -345,6 +382,16 @@ export default define.page(async function MaintenancePage(ctx) {
                 name="csrfToken"
                 value={ctx.state.csrfToken ?? ""}
               />
+              <input type="hidden" name="twinsDays" value={twinsDays} />
+              {deleteTwinMetadata
+                ? (
+                  <input
+                    type="hidden"
+                    name="deleteTwinMetadata"
+                    value="on"
+                  />
+                )
+                : null}
               <label class="checkbox-line">
                 <input type="checkbox" name="confirmLogs" required />
                 <span class="mono">
@@ -358,12 +405,14 @@ export default define.page(async function MaintenancePage(ctx) {
           </article>
 
           <article class="card span-6">
-            <h2>Session Artifacts</h2>
+            <h2>Twin Cleanup</h2>
             <p class="muted">
-              Deletes persisted session metadata and twin files older than the
-              selected age in days. Enter <span class="mono">0</span>{" "}
-              to remove all session artifacts. This removes Kato-derived
-              artifacts only; provider source files remain untouched.
+              Deletes persisted twin files older than the selected age in days
+              and rewrites matching metadata to canonical no-twin state. Enter
+              {" "}
+              <span class="mono">0</span>{" "}
+              to remove all twins. Provider source files remain untouched unless
+              you explicitly opt into deleting twin metadata too.
             </p>
 
             <form method="post" class="login-form">
@@ -372,40 +421,48 @@ export default define.page(async function MaintenancePage(ctx) {
                 name="csrfToken"
                 value={ctx.state.csrfToken ?? ""}
               />
-              <label class="form-label" for="sessionsDays">
-                Delete sessions older than (days, 0 = all)
+              <label class="form-label" for="twinsDays">
+                Delete twins older than (days, 0 = all)
               </label>
               <input
                 class="form-input"
-                id="sessionsDays"
-                name="sessionsDays"
+                id="twinsDays"
+                name="twinsDays"
                 type="number"
                 min="0"
                 step="1"
-                defaultValue={sessionsDays}
+                defaultValue={twinsDays}
                 required
               />
               <button
                 class="secondary-button"
                 type="submit"
                 name="action"
-                value="sessions-dry-run"
+                value="twins-dry-run"
               >
-                Dry-Run Session Cleanup
+                Dry-Run Twin Cleanup
               </button>
               <label class="checkbox-line">
-                <input type="checkbox" name="confirmSessions" />
+                <input
+                  type="checkbox"
+                  name="deleteTwinMetadata"
+                  checked={deleteTwinMetadata}
+                />
+                <span class="mono">Also delete twin metadata</span>
+              </label>
+              <label class="checkbox-line">
+                <input type="checkbox" name="confirmTwins" />
                 <span class="mono">
-                  I understand this will delete old session artifacts now
+                  I understand this will delete old twins now
                 </span>
               </label>
               <button
                 class="secondary-button danger-button"
                 type="submit"
                 name="action"
-                value="sessions-execute"
+                value="twins-execute"
               >
-                Execute Session Cleanup
+                Execute Twin Cleanup
               </button>
             </form>
           </article>
@@ -414,7 +471,8 @@ export default define.page(async function MaintenancePage(ctx) {
             initialData={twinsData}
             endpoint={buildMaintenanceTwinsEndpoint(query)}
             csrfToken={ctx.state.csrfToken}
-            sessionsDays={sessionsDays}
+            twinsDays={twinsDays}
+            deleteTwinMetadata={deleteTwinMetadata}
           />
         </section>
       </div>

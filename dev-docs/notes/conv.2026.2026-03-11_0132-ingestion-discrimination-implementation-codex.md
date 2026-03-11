@@ -848,3 +848,147 @@ So if we don't need to delete metadata, let's change the web heading to "Twin Cl
 # gpt-5.4_2026-03-11_0805_39
 
 I’m verifying the shared cleanup path first, then I’ll rename the web/CLI surface only if the underlying behavior matches. If it still deletes metadata, I’ll change the implementation too so `Twin Cleanup` and `--twins` are truthful rather than cosmetic.
+
+# gpt-5.4_2026-03-11_0806_34
+
+I’m checking the shared cleanup path first, because renaming this to `Twin Cleanup` only makes sense if the implementation actually preserves metadata. Then I’ll patch the CLI/web/docs together so the surface matches the behavior exactly.
+
+# gpt-5.4_2026-03-11_0806_46
+
+The cleanup path still treats `.meta.json` and `.twin.jsonl` as the same deletion scope, so I’m changing the runtime behavior as well, not just the label. After that I’ll rename the web and CLI surfaces so `Twin Cleanup` / `--twins` are accurate, not cosmetic.
+
+# gpt-5.4_2026-03-11_0806_51
+
+I’ve confirmed the rename touches more than one layer: runtime option names, CLI parser/help/types, Maintenance form actions and messages, and a few tests/docs. I’m patching the runtime contract first so the rest of the rename doesn’t leave “twins” pointing at metadata deletion.
+
+# gpt-5.4_2026-03-11_0807_05
+
+I’m taking the clean route literally: rename the maintenance scope itself to `twins`, not just the button text. That means the web form/query field names and runtime option names get cleaned up too, since there’s no value in keeping `sessionsDays` around after the behavior becomes twin-only.
+
+# gpt-5.4_2026-03-11_0808_07
+
+I have the shape now. The important behavior change is not “leave metadata untouched”; it’s “preserve the metadata file, but clear twin-specific fields when a twin is deleted,” so the store stays canonical. I’m patching the shared cleanup layer with that model and then I’ll propagate the `twins` rename through web, CLI, tests, and docs.
+
+# gpt-5.4_2026-03-11_0808_52
+
+I’m editing the cleanup core now. The goal is: threshold over twin files only, delete the twin, preserve the metadata file, and clear twin-only metadata fields when the metadata exists. That keeps the rename honest and avoids leaving stale twin pointers behind.
+
+# gpt-5.4_2026-03-11_0809_13
+
+I’ve got the main behavior flipped, but I want to clean one thing before I move on: the first pass left an inefficient metadata lookup path in the loop. I’m tightening that now so we don’t rescan the store per twin candidate.
+
+# gpt-5.4_2026-03-11_0810_08
+
+I’m moving the maintenance page over to the new vocabulary now. This is a real contract rename, so the form actions, query param, and notices all switch from `sessions` to `twins`; I’m not leaving old aliases behind.
+
+# gpt-5.4_2026-03-11_0811_00
+
+The runtime and CLI surfaces are aligned now; I’m rewriting the tests against the new semantics next. The key assertion change is that old metadata should remain, but its twin state should be reset when the matching twin is cleaned.
+
+# gpt-5.4_2026-03-11_0811_40
+
+The tests need a real metadata fixture now, because the cleanup path rewrites metadata instead of deleting it. I’m switching those tests over from raw `{}` files to actual session-state metadata so they verify the new canonical reset behavior instead of the old destructive behavior.
+
+# djradon_2026-03-11_0812_11
+
+Could you add valuable/meaningful tests, especially focusing on coverage gaps... (but good tests only!)  and then update [dev.testing.md](dev-docs/notes/dev.testing.md) as appropriate?
+
+# djradon_2026-03-11_0814_23
+
+Sorry, change of heart. I do want to have a dedicated Twins-only cleanup, but also a checkbox for "Also delete twin metadata", because there is the filename in there which can be based on snippet. I'm glad we're renaming from "Session" to "Twins", but I do want to preserve the option to remove metadata too. Any questions?
+
+# gpt-5.4_2026-03-11_0814_33
+
+I’ve got the requirement change: keep the cleanup scope named `twins`, default it to deleting twin files while preserving metadata, and add an explicit opt-in to delete metadata too. I’m verifying the partial rename state from the interrupted pass first, then I’ll wire the new metadata-delete option through runtime, web, CLI, tests, and `dev.testing.md`.
+
+# gpt-5.4_2026-03-11_0815_00
+
+I’m switching the cleanup semantics one more notch: the default stays “delete twin, preserve metadata,” but the new checkbox/flag will take the harder path and remove the metadata file too. That path needs to keep the daemon index consistent, so I’m checking the state-store APIs before I wire it in.
+
+# gpt-5.4_2026-03-11_0815_45
+
+I’ve confirmed we can support the stronger privacy mode without adding a new state-store helper: delete the twin file plus the metadata file directly, then rebuild the daemon index once at the end. I’m patching that path now and keeping the default path on `resetSessionTwinPersistence()` so ordinary twin cleanup stays canonical.
+
+# gpt-5.4_2026-03-11_0816_21
+
+I’m wiring the checkbox state through the maintenance page now. The important part is not just the new checkbox itself; it also needs to survive POST/redirect/GET and row-level twin actions so the operator doesn’t lose that choice mid-workflow.
+
+# gpt-5.4_2026-03-11_0817_13
+
+I’ve got the runtime, web, and CLI contracts in place. The next step is the high-signal test slice: parser validation, runtime cleanup preserving-vs-deleting metadata, and one CLI execution path so the new `--delete-metadata` flag can’t silently drift.
+
+# gpt-5.4_2026-03-11_0817_31
+
+I’m replacing the old “delete fake `{}` files” tests with real session-state fixtures now. Those old tests only covered filename matching; the new ones actually exercise the metadata-reset path and the opt-in metadata-deletion path, which is where the real regression risk is.
+
+# gpt-5.4_2026-03-11_0818_33
+
+I’m giving the CLI slice the same treatment as the runtime slice: real metadata fixtures instead of dummy files. That’s the only way to verify that `clean --twins` preserves metadata by default, while `clean --twins --delete-metadata` takes the stronger deletion path.
+
+# gpt-5.4_2026-03-11_0820_23
+
+I’m at the verification stage for the code path now. First I’m formatting the touched files, then I’ll run the focused suites that actually exercise this contract: runtime cleanup, CLI parsing/execution, and the web check.
+
+# gpt-5.4_2026-03-11_0820_35
+
+The web check is through route/type analysis cleanly so far. I’m polling the test sessions now; if anything fails, it should be down in the cleanup fixture assumptions rather than the surface renames.
+
+# gpt-5.4_2026-03-11_0820_42
+
+The first test run showed permission-mode noise rather than logic regressions: these suites need filesystem access, so they should run with `-A`. There is one real test issue though: the no-scope assertion needs an explicit `runtimeDir` now, otherwise runtime-dir resolution fails before the scope check. I’m fixing that and rerunning with the right test permissions.
+
+# gpt-5.4_2026-03-11_0820_56
+
+The parser is clean. The remaining failures are all in the CLI execution slice, which means the core contract is close and the remaining adjustments are in expected test outcomes rather than broad type errors. I’m pulling the exact failure details now.
+
+# gpt-5.4_2026-03-11_0821_08
+
+The remaining failures are just from how the tests were locating metadata files. Session metadata filenames are storage-key-based, not just `<provider>:<session>`, so I’m switching the fixtures to read the canonical metadata path from the daemon control index instead of guessing it.
+
+# gpt-5.4_2026-03-11_0821_38
+
+I’m down to the last verification loop. The remaining question is whether the canonical metadata-path lookup fixed the fixture assumptions; if it did, the code slice is stable and I can move on to the docs/tests note updates.
+
+# gpt-5.4_2026-03-11_0821_47
+
+The remaining logic bug is in the cleanup lookup key, not the cleanup behavior itself. I was matching metadata by storage-key basename, but the in-memory metadata map is keyed by logical session identity; switching that lookup to canonical `twinPath` will line the default reset path up with the actual files on disk.
+
+# gpt-5.4_2026-03-11_0822_02
+
+The fix is small and isolated, so this rerun should settle it. If these pass, I’ll do the doc sweep and explicitly note the new coverage additions in `dev.testing.md`.
+
+# gpt-5.4_2026-03-11_0822_26
+
+The code path is stable now, so I’m doing the note sweep. I’m updating the active twin follow-up note plus the older cleanup/release notes so the docs stop saying `session artifacts` / `clean --sessions` and start describing the real contract: `clean --twins`, default metadata preservation, optional metadata deletion.
+
+# gpt-5.4_2026-03-11_0822_49
+
+I’m finishing with the note updates and a last formatting pass. After that I’ll rerun the quick verifiers so the final state reflects both the code change and the doc changes.
+
+# gpt-5.4_2026-03-11_0823_19
+
+Implemented the cleanup rename and the new privacy option. The Maintenance page now exposes `Twin Cleanup` with an `Also delete twin metadata` checkbox in [maintenance.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx). The shared cleanup path in [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) now does this:
+
+- default: delete old twin files and reset matching metadata to canonical no-twin state
+- opt-in: also delete the matching metadata files
+
+The CLI surface is now `kato clean --twins <days> [--delete-metadata]`; `--sessions` is removed. That wiring is in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts), [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts), [types.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/types.ts), and [clean.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/clean.ts).
+
+I added focused regression coverage in [maintenance-clean_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/maintenance-clean_test.ts), [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts), and [cli-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-parser_test.ts) for:
+- default twin cleanup preserving metadata
+- opt-in metadata deletion
+- dry-run counts
+- running-daemon cleanup
+- parser enforcement for `--delete-metadata`
+
+I updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) with the focused twin-cleanup slice and the `deno test -A` note for filesystem-backed tests, and refreshed the related notes in [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-twins-follow-up.md), [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md), [completed.2026.2026-02-25-persistent-state.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/completed.2026.2026-02-25-persistent-state.md), and [release-notes.v0.2.2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.2.md).
+
+Validation:
+- `deno test -A tests/maintenance-clean_test.ts`
+- `deno test -A tests/daemon-cli_test.ts`
+- `deno test -A tests/cli-parser_test.ts`
+- `deno task --cwd apps/web check`
+
+# djradon_2026-03-11_0837_39
+
+Could you add valuable/meaningful tests, especially focusing on coverage gaps... (but good tests only!)  and then update [dev.testing.md](dev-docs/notes/dev.testing.md) as appropriate?

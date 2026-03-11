@@ -2,7 +2,7 @@ import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import {
   AuditLogger,
   NoopSink,
-  resolveDefaultSessionsDir,
+  PersistentSessionStateStore,
   resolveExportsLogPath,
   runMaintenanceClean,
   StructuredLogger,
@@ -82,110 +82,201 @@ function createLoggerSpies() {
   };
 }
 
-Deno.test("runMaintenanceClean dry-run reports old session artifacts without deleting them", async () => {
+async function createTwinCleanupFixture(options: {
+  rootDir: string;
+  sessionId: string;
+  providerSessionId: string;
+  sourceName: string;
+  twinTime: string;
+}) {
+  const sourceDir = `${options.rootDir}/sources`;
+  await Deno.mkdir(sourceDir, { recursive: true });
+  const sourceFilePath = `${sourceDir}/${options.sourceName}.jsonl`;
+  await Deno.writeTextFile(sourceFilePath, "{}\n");
+
+  const store = new PersistentSessionStateStore({
+    katoDir: options.rootDir,
+    now: () => new Date("2026-03-07T00:00:00.000Z"),
+    makeSessionId: () => options.sessionId,
+  });
+  const metadata = await store.getOrCreateSessionMetadata({
+    provider: "codex",
+    providerSessionId: options.providerSessionId,
+    sourceFilePath,
+    initialCursor: { kind: "byte-offset", value: 0 },
+  });
+  metadata.nextTwinSeq = 2;
+  metadata.recentFingerprints = ["fingerprint-1"];
+  metadata.ingestionActivatedAt = "2026-03-01T00:00:00.000Z";
+  await store.saveSessionMetadata(metadata);
+  await Deno.writeTextFile(metadata.twinPath, '{"event":"twin"}\n');
+  const twinTime = new Date(options.twinTime);
+  await Deno.utime(metadata.twinPath, twinTime, twinTime);
+  const indexEntry = (await store.loadDaemonControlIndex()).sessions.find((
+    entry,
+  ) => entry.sessionId === metadata.sessionId);
+
+  return {
+    metadataPath: indexEntry?.metadataPath ?? "",
+    twinPath: metadata.twinPath,
+    sessionId: metadata.sessionId,
+  };
+}
+
+Deno.test("runMaintenanceClean dry-run reports old twins without deleting them", async () => {
   await withTestTempDir("maintenance-clean-", async (rootDir) => {
     const runtimeDir = `${rootDir}/daemon`;
     await Deno.mkdir(runtimeDir, { recursive: true });
-    const sessionsDir = resolveDefaultSessionsDir(rootDir);
-    await Deno.mkdir(sessionsDir, { recursive: true });
-
-    const oldMetaPath = `${sessionsDir}/old.meta.json`;
-    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
-    const recentMetaPath = `${sessionsDir}/recent.meta.json`;
-    await Deno.writeTextFile(oldMetaPath, "{}\n");
-    await Deno.writeTextFile(oldTwinPath, "{}\n");
-    await Deno.writeTextFile(recentMetaPath, "{}\n");
-
-    const oldTime = new Date("2026-02-01T00:00:00.000Z");
-    const recentTime = new Date("2026-03-05T00:00:00.000Z");
-    await Deno.utime(oldMetaPath, oldTime, oldTime);
-    await Deno.utime(oldTwinPath, oldTime, oldTime);
-    await Deno.utime(recentMetaPath, recentTime, recentTime);
+    const oldSession = await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-old-clean",
+      providerSessionId: "provider-old-clean",
+      sourceName: "old-clean",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
+    const recentSession = await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-recent-clean",
+      providerSessionId: "provider-recent-clean",
+      sourceName: "recent-clean",
+      twinTime: "2026-03-05T00:00:00.000Z",
+    });
 
     const result = await runMaintenanceClean({
       all: false,
       dryRun: true,
-      sessionsDays: 7,
+      twinsDays: 7,
       runtimeDir,
       katoDir: rootDir,
       now: () => new Date("2026-03-07T00:00:00.000Z"),
       source: "web",
     });
 
-    assertEquals(result.stats.sessionsWouldDelete, 1);
-    assertEquals(result.stats.sessionFilesWouldDelete, 2);
+    assertEquals(result.stats.twinsWouldDelete, 1);
+    assertEquals(result.stats.twinFilesWouldDelete, 1);
+    assertEquals(result.stats.metadataFilesWouldDelete, 0);
     assertStringIncludes(result.summary, "mode=dry-run");
-    assertStringIncludes(result.summary, "sessionsToDelete=1");
-    await Deno.stat(oldMetaPath);
-    await Deno.stat(oldTwinPath);
-    await Deno.stat(recentMetaPath);
+    assertStringIncludes(result.summary, "twinsToDelete=1");
+    await Deno.stat(oldSession.metadataPath);
+    await Deno.stat(oldSession.twinPath);
+    await Deno.stat(recentSession.metadataPath);
+    await Deno.stat(recentSession.twinPath);
   });
 });
 
-Deno.test("runMaintenanceClean allows session cleanup while daemon is running", async () => {
-  await withTestTempDir("maintenance-clean-running-", async (rootDir) => {
+Deno.test("runMaintenanceClean preserves metadata by default and clears twin-only state", async () => {
+  await withTestTempDir("maintenance-clean-preserve-meta-", async (rootDir) => {
     const runtimeDir = `${rootDir}/daemon`;
     await Deno.mkdir(runtimeDir, { recursive: true });
-    const sessionsDir = resolveDefaultSessionsDir(rootDir);
-    await Deno.mkdir(sessionsDir, { recursive: true });
-
-    const oldMetaPath = `${sessionsDir}/old.meta.json`;
-    const oldTwinPath = `${sessionsDir}/old.twin.jsonl`;
-    await Deno.writeTextFile(oldMetaPath, "{}\n");
-    await Deno.writeTextFile(oldTwinPath, "{}\n");
-
-    const oldTime = new Date("2026-02-01T00:00:00.000Z");
-    await Deno.utime(oldMetaPath, oldTime, oldTime);
-    await Deno.utime(oldTwinPath, oldTime, oldTime);
+    const oldSession = await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-preserve-meta",
+      providerSessionId: "provider-preserve-meta",
+      sourceName: "preserve-meta",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
 
     const result = await runMaintenanceClean({
       all: false,
       dryRun: false,
-      sessionsDays: 7,
+      twinsDays: 7,
       runtimeDir,
       katoDir: rootDir,
       now: () => new Date("2026-03-07T00:00:00.000Z"),
       source: "web",
     });
 
-    assertEquals(result.stats.sessionsDeleted, 1);
-    assertEquals(result.stats.sessionFilesDeleted, 2);
-    await assertRejects(() => Deno.stat(oldMetaPath), Deno.errors.NotFound);
-    await assertRejects(() => Deno.stat(oldTwinPath), Deno.errors.NotFound);
+    assertEquals(result.stats.twinsDeleted, 1);
+    assertEquals(result.stats.twinFilesDeleted, 1);
+    assertEquals(result.stats.metadataFilesDeleted, 0);
+    await Deno.stat(oldSession.metadataPath);
+    await assertRejects(
+      () => Deno.stat(oldSession.twinPath),
+      Deno.errors.NotFound,
+    );
+
+    const store = new PersistentSessionStateStore({ katoDir: rootDir });
+    const reloaded = (await store.listSessionMetadata()).find((entry) =>
+      entry.sessionId === oldSession.sessionId
+    );
+    assertEquals(reloaded?.nextTwinSeq, 1);
+    assertEquals(reloaded?.recentFingerprints, []);
+    assertEquals(reloaded?.ingestionActivatedAt, undefined);
   });
 });
 
-Deno.test("runMaintenanceClean treats sessionsDays=0 as remove all session artifacts", async () => {
+Deno.test("runMaintenanceClean optionally deletes twin metadata too", async () => {
+  await withTestTempDir("maintenance-clean-delete-meta-", async (rootDir) => {
+    const runtimeDir = `${rootDir}/daemon`;
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const oldSession = await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-delete-meta",
+      providerSessionId: "provider-delete-meta",
+      sourceName: "delete-meta",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
+
+    const result = await runMaintenanceClean({
+      all: false,
+      dryRun: false,
+      twinsDays: 7,
+      deleteTwinMetadata: true,
+      runtimeDir,
+      katoDir: rootDir,
+      now: () => new Date("2026-03-07T00:00:00.000Z"),
+      source: "web",
+    });
+
+    assertEquals(result.stats.twinsDeleted, 1);
+    assertEquals(result.stats.twinFilesDeleted, 1);
+    assertEquals(result.stats.metadataFilesDeleted, 1);
+    assertStringIncludes(result.summary, "deleteMetadata=true");
+    assertStringIncludes(result.summary, "metadataFilesDeleted=1");
+    await assertRejects(
+      () => Deno.stat(oldSession.metadataPath),
+      Deno.errors.NotFound,
+    );
+    await assertRejects(
+      () => Deno.stat(oldSession.twinPath),
+      Deno.errors.NotFound,
+    );
+  });
+});
+
+Deno.test("runMaintenanceClean treats twinsDays=0 as remove all twins", async () => {
   await withTestTempDir("maintenance-clean-zero-days-", async (rootDir) => {
     const runtimeDir = `${rootDir}/daemon`;
     await Deno.mkdir(runtimeDir, { recursive: true });
-    const sessionsDir = resolveDefaultSessionsDir(rootDir);
-    await Deno.mkdir(sessionsDir, { recursive: true });
-
-    const oldMetaPath = `${sessionsDir}/old.meta.json`;
-    const recentTwinPath = `${sessionsDir}/recent.twin.jsonl`;
-    await Deno.writeTextFile(oldMetaPath, "{}\n");
-    await Deno.writeTextFile(recentTwinPath, "{}\n");
-
-    const oldTime = new Date("2026-02-01T00:00:00.000Z");
-    const recentTime = new Date("2026-03-07T00:00:00.000Z");
-    await Deno.utime(oldMetaPath, oldTime, oldTime);
-    await Deno.utime(recentTwinPath, recentTime, recentTime);
+    await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-zero-old",
+      providerSessionId: "provider-zero-old",
+      sourceName: "zero-old",
+      twinTime: "2026-02-01T00:00:00.000Z",
+    });
+    await createTwinCleanupFixture({
+      rootDir,
+      sessionId: "session-zero-recent",
+      providerSessionId: "provider-zero-recent",
+      sourceName: "zero-recent",
+      twinTime: "2026-03-07T00:00:00.000Z",
+    });
 
     const result = await runMaintenanceClean({
       all: false,
       dryRun: true,
-      sessionsDays: 0,
+      twinsDays: 0,
       runtimeDir,
       katoDir: rootDir,
       now: () => new Date("2026-03-07T00:00:00.000Z"),
       source: "web",
     });
 
-    assertEquals(result.stats.sessionsWouldDelete, 2);
-    assertEquals(result.stats.sessionFilesWouldDelete, 2);
-    assertStringIncludes(result.summary, "sessions=0d");
-    assertStringIncludes(result.summary, "sessionsToDelete=2");
+    assertEquals(result.stats.twinsWouldDelete, 2);
+    assertEquals(result.stats.twinFilesWouldDelete, 2);
+    assertStringIncludes(result.summary, "twins=0d");
+    assertStringIncludes(result.summary, "twinsToDelete=2");
   });
 });
 
@@ -277,7 +368,7 @@ Deno.test("runMaintenanceClean executes full log cleanup and uses CLI audit comm
       all: true,
       dryRun: false,
       recordingsDays: 14,
-      sessionsDays: 7,
+      twinsDays: 7,
       runtimeDir,
       katoDir: rootDir,
       operationalLogger,
@@ -288,20 +379,20 @@ Deno.test("runMaintenanceClean executes full log cleanup and uses CLI audit comm
     assertEquals(result.stats.logFilesFlushed, 3);
     assertEquals(result.stats.logFilesWouldFlush, 0);
     assertEquals(result.stats.missingFiles, 2);
-    assertEquals(result.stats.sessionsMatched, 0);
-    assertEquals(result.stats.sessionsDeleted, 0);
+    assertEquals(result.stats.twinsMatched, 0);
+    assertEquals(result.stats.twinsDeleted, 0);
     assertEquals(result.stats.skippedScopes, ["recordings"]);
     assertStringIncludes(result.summary, "mode=execute");
     assertStringIncludes(result.summary, "all=true");
     assertStringIncludes(result.summary, "recordings=14d");
-    assertStringIncludes(result.summary, "sessions=7d");
+    assertStringIncludes(result.summary, "twins=7d");
     assertStringIncludes(result.summary, "logsFlushed=3");
-    assertStringIncludes(result.summary, "sessionsDeleted=0");
+    assertStringIncludes(result.summary, "twinsDeleted=0");
     assertEquals(await Deno.readTextFile(daemonAuditLogPath), "");
     assertEquals(await Deno.readTextFile(webAuditLogPath), "");
     assertEquals(await Deno.readTextFile(exportsLogPath), "");
     assertEquals(infoCalls.map((call) => call.event), [
-      "clean.sessions",
+      "clean.twins",
       "clean.completed",
     ]);
     assertEquals(warnCalls.map((call) => call.event), [
@@ -317,11 +408,15 @@ Deno.test("runMaintenanceClean executes full log cleanup and uses CLI audit comm
 });
 
 Deno.test("runMaintenanceClean requires at least one cleanup scope", async () => {
+  const runtimeDir =
+    `${Deno.cwd()}/.test-tmp/maintenance-clean-no-scope-runtime`;
   await assertRejects(
     () =>
       runMaintenanceClean({
         all: false,
         dryRun: true,
+        runtimeDir,
+        katoDir: `${Deno.cwd()}/.test-tmp/maintenance-clean-no-scope-kato`,
       }),
     Error,
     "At least one cleanup scope is required",

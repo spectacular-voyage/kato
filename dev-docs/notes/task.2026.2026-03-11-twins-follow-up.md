@@ -136,6 +136,11 @@ The better model is:
   - resets twin-specific metadata fields
   - preserves provider source path, ingest cursor, command cursor, and
     workspace recording state
+- add a dedicated `Twin Cleanup` maintenance workflow that:
+  - defaults to deleting old twin files while preserving metadata files
+  - rewrites preserved metadata to canonical no-twin state
+  - exposes an explicit operator opt-in to also delete twin metadata files when
+    stronger privacy cleanup is needed
 - use direct inline twin deletion from Maintenance without a separate
   confirmation flow; twin history is reconstructible in the common case and
   provider source files remain untouched

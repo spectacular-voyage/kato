@@ -32,6 +32,11 @@ than top-level `.coverage*` directories. The root `test:coverage` task now uses
 subdirectory such as `.test-tmp/coverage/status` or
 `.test-tmp/coverage/provider-ingestion`.
 
+Focused tests that use `tests/test_temp.ts` or otherwise create real files
+under `.test-tmp/` should be run with filesystem permission, typically
+`deno test -A <file>` during local development. A plain `deno test <file>`
+will fail with `NotCapable` for those suites.
+
 ## Test Levels
 
 1. Fast local verification:
@@ -75,6 +80,23 @@ Helper modules under `tests/` such as `tests/test_env.ts` and
 `tests/test_temp.ts` are shared test utilities, not standalone test modules.
 Import them from test files, but do not point scripted runs at `tests/**/*.ts`
 or they will be loaded as zero-test modules.
+
+## Focused Regression Slices
+
+When working on twin-cleanup behavior, the most useful focused slice is:
+
+- `deno test -A tests/maintenance-clean_test.ts`
+- `deno test -A tests/daemon-cli_test.ts`
+- `deno test -A tests/cli-parser_test.ts`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- runtime dry-run and execute behavior for `clean --twins`
+- default twin cleanup preserving metadata while clearing twin-only state
+- opt-in metadata deletion via `--delete-metadata` / Maintenance checkbox
+- CLI parser enforcement that metadata deletion is only accepted with
+  `--twins`
 
 ## Coverage Workflow
 

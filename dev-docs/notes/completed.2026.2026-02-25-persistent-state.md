@@ -161,8 +161,9 @@ A session could always come back to life, but we should have a clean command tha
 - [x] Fixed symlink-escape path policy coverage and verified deny behavior.
 - [x] Updated persistence docs in `README.md` and `dev-docs/notes/dev.*` notes.
 - [x] Validation: `deno test -A` passes (`213 passed, 0 failed`).
-- [x] Follow-up: add dedicated clean command wiring for persisted session
-      twins/metadata (`clean --sessions`) with running-daemon safety.
+- [x] Follow-up: add dedicated clean command wiring for persisted twin cleanup
+      (`clean --twins`, plus optional metadata deletion) with running-daemon
+      safety.
 - [x] Follow-up: add explicit daemon startup handshake/ack to remove optimistic
       running-status writes before daemon confirmation.
 

@@ -42,7 +42,8 @@ area.
 - The UI now distinguishes active ingestion, discovered session inventory, and
   recording activity more clearly across Summary, Ingestion, Sessions, and
   Recordings.
-- `clean --sessions` no longer requires stopping the daemon first.
+- `clean --twins` no longer requires stopping the daemon first, and can
+  optionally delete matching twin metadata too.
 
 ## Release Packaging
 

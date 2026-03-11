@@ -45,7 +45,7 @@ function requireNoPositionals(
 
 function parseDays(
   value: unknown,
-  flagName: "--recordings" | "--sessions",
+  flagName: "--recordings" | "--twins",
 ): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -401,8 +401,8 @@ function parseExport(rest: string[]): DaemonCliIntent {
 
 function parseClean(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
-    boolean: ["help", "all", "logs", "dry-run"],
-    string: ["recordings", "sessions"],
+    boolean: ["help", "all", "logs", "dry-run", "delete-metadata"],
+    string: ["recordings", "twins"],
     alias: {
       h: "help",
     },
@@ -415,13 +415,19 @@ function parseClean(rest: string[]): DaemonCliIntent {
   requireNoPositionals("clean", toPositionals(parsed));
 
   const recordingsDays = parseDays(parsed.recordings, "--recordings");
-  const sessionsDays = parseDays(parsed.sessions, "--sessions");
+  const twinsDays = parseDays(parsed.twins, "--twins");
+  const deleteTwinMetadata = parsed["delete-metadata"] === true;
   const all = parsed.all === true || parsed.logs === true;
   const dryRun = parsed["dry-run"] === true;
 
-  if (!all && recordingsDays === undefined && sessionsDays === undefined) {
+  if (!all && recordingsDays === undefined && twinsDays === undefined) {
     throw new CliUsageError(
-      "Command 'clean' requires one of --all, --logs, --recordings <days>, or --sessions <days>",
+      "Command 'clean' requires one of --all, --logs, --recordings <days>, or --twins <days>",
+    );
+  }
+  if (deleteTwinMetadata && twinsDays === undefined) {
+    throw new CliUsageError(
+      "Command 'clean' only accepts --delete-metadata together with --twins <days>",
     );
   }
 
@@ -430,7 +436,8 @@ function parseClean(rest: string[]): DaemonCliIntent {
     all,
     dryRun,
     ...(recordingsDays !== undefined ? { recordingsDays } : {}),
-    ...(sessionsDays !== undefined ? { sessionsDays } : {}),
+    ...(twinsDays !== undefined ? { twinsDays } : {}),
+    ...(deleteTwinMetadata ? { deleteTwinMetadata: true } : {}),
   };
 
   return { kind: "command", command };
