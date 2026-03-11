@@ -81,6 +81,7 @@ export interface SessionMetadataV1 {
   twinPath: string;
   nextTwinSeq: number;
   recentFingerprints: string[];
+  ingestionActivatedAt?: string;
   commandCursor?: number;
   commandCursorAnchor?: SessionCommandCursorAnchorV1;
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
@@ -351,6 +352,12 @@ export function isSessionMetadataV1(
   if (
     !Array.isArray(value["recentFingerprints"]) ||
     value["recentFingerprints"].some((item) => typeof item !== "string")
+  ) {
+    return false;
+  }
+  if (
+    value["ingestionActivatedAt"] !== undefined &&
+    !isNonEmptyString(value["ingestionActivatedAt"])
   ) {
     return false;
   }

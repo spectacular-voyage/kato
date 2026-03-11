@@ -1,9 +1,6 @@
-import { useEffect, useState } from "preact/hooks";
-import AppHeader from "../src/app_header.tsx";
 import type { SummaryPageData } from "../src/loaders/status.ts";
 import { buildIngestionSessionHref } from "../src/session_routes.ts";
-
-const POLL_INTERVAL_MS = 2_000;
+import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined) {
@@ -80,11 +77,17 @@ function activityStateDot(state: "active" | "stale" | "inactive"): string {
 }
 
 export default function SummaryLive(
-  { initialData }: { initialData: SummaryPageData },
+  props: { initialData: SummaryPageData; endpoint: string },
 ) {
-  const [data, setData] = useState(initialData);
+  const data = usePolledJson({
+    initialData: props.initialData,
+    endpoint: props.endpoint,
+    intervalMs: LIVE_POLL_INTERVAL_MS,
+  });
   const activeSessionsByProvider = new Map(
-    data.providers.map((p) => [p.provider, p.activeSessions]),
+    data.providers.map((
+      provider,
+    ) => [provider.provider, provider.activeSessions]),
   );
   const workspaceCount = data.workspaceSummary.unavailableReason
     ? "n/a"
@@ -96,227 +99,176 @@ export default function SummaryLive(
     .filter((session) => session.state === "active")
     .slice(0, 10);
 
-  useEffect(() => {
-    let cancelled = false;
-    let polling = false;
-
-    const load = async () => {
-      if (polling) {
-        return;
-      }
-      polling = true;
-      try {
-        const response = await fetch("/api/summary", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const next = await response.json() as SummaryPageData;
-        if (!cancelled) {
-          setData(next);
-        }
-      } catch {
-        // Keep the previous snapshot rendered.
-      } finally {
-        polling = false;
-      }
-    };
-
-    void load();
-    const interval = setInterval(() => {
-      void load();
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
-
   return (
-    <div class="shell">
-      <AppHeader
-        title="Summary"
-        description="Browser access to the daemon status with live polling, workspace health, and recent operator-visible errors."
-        currentPath="/"
-        showLogout
-        appStatus={{
-          daemon: data.daemon,
-          snapshot: data.stale ? "stale" : "current",
-        }}
-      />
-
-      <section class="grid">
-        <article class="card span-7">
-          <h2>Activity</h2>
-          <div class="metrics">
-            <div class="metric">
-              <span class="label">Ingestion</span>
-              <span class={metricPrimaryStateClass("active")}>
-                <span class="metric-primary-count mono">
-                  {data.generatingSessionCount}
-                </span>
-                <span class="metric-primary-label">active</span>
+    <section class="grid">
+      <article class="card span-7">
+        <h2>Activity</h2>
+        <div class="metrics">
+          <div class="metric">
+            <span class="label">Ingestion</span>
+            <span class={metricPrimaryStateClass("active")}>
+              <span class="metric-primary-count mono">
+                {data.generatingSessionCount}
               </span>
-              <span class="metric-note mono activity-stale">
-                {data.staleGeneratingSessionCount} idle
+              <span class="metric-primary-label">active</span>
+            </span>
+            <span class="metric-note mono activity-stale">
+              {data.staleGeneratingSessionCount} idle
+            </span>
+            <span class="metric-note mono">
+              {data.inactiveSessionCount} not ingested
+            </span>
+          </div>
+          <div class="metric">
+            <span class="label">Recordings</span>
+            <span class={metricPrimaryStateClass("active")}>
+              <span class="metric-primary-count mono">
+                {data.recordingCount}
               </span>
-              <span class="metric-note mono">
-                {data.inactiveSessionCount} not ingested
-              </span>
-            </div>
-            <div class="metric">
-              <span class="label">Recordings</span>
-              <span class={metricPrimaryStateClass("active")}>
-                <span class="metric-primary-count mono">
-                  {data.recordingCount}
-                </span>
-                <span class="metric-primary-label">active</span>
-              </span>
-              <span class="metric-note mono activity-stale">
-                {data.staleRecordingCount} idle
-              </span>
-              <span class="metric-note mono">
-                {data.stoppedRecordingCount} stopped
-              </span>
-            </div>
-            <div class="metric">
-              <span class="label">Workspaces</span>
-              <span class={metricPrimaryStateClass(workspacePrimaryState)}>
-                <span class="metric-primary-count mono">{workspaceCount}</span>
-                <span class="metric-primary-label">
-                  {data.workspaceSummary.unavailableReason
-                    ? "unavailable"
-                    : "active"}
-                </span>
-              </span>
-              <span class="metric-note mono activity-stale">
+              <span class="metric-primary-label">active</span>
+            </span>
+            <span class="metric-note mono activity-stale">
+              {data.staleRecordingCount} idle
+            </span>
+            <span class="metric-note mono">
+              {data.stoppedRecordingCount} stopped
+            </span>
+          </div>
+          <div class="metric">
+            <span class="label">Workspaces</span>
+            <span class={metricPrimaryStateClass(workspacePrimaryState)}>
+              <span class="metric-primary-count mono">{workspaceCount}</span>
+              <span class="metric-primary-label">
                 {data.workspaceSummary.unavailableReason
                   ? "unavailable"
-                  : `${data.workspaceSummary.staleCount} idle`}
+                  : "active"}
               </span>
+            </span>
+            <span class="metric-note mono activity-stale">
               {data.workspaceSummary.unavailableReason
-                ? null
-                : (
-                  <span class="metric-note mono danger">
-                    {data.workspaceSummary.invalidCount} invalid
-                  </span>
-                )}
-            </div>
+                ? "unavailable"
+                : `${data.workspaceSummary.staleCount} idle`}
+            </span>
+            {data.workspaceSummary.unavailableReason
+              ? null
+              : (
+                <span class="metric-note mono danger">
+                  {data.workspaceSummary.invalidCount} invalid
+                </span>
+              )}
           </div>
-        </article>
+        </div>
+      </article>
 
-        <article class="card span-5">
-          <h2>Daemon</h2>
-          <p class={data.stale ? "mono stale" : "mono ok"}>
-            {data.stale
-              ? "Snapshot is stale or daemon heartbeat is unavailable."
-              : "Snapshot heartbeat is current."}
-          </p>
-          <p class="mono">Heartbeat: {formatTimestamp(data.heartbeatAt)}</p>
-          <p class="mono">
-            Memory RSS: {formatBytes(data.memory?.process.rss)}
-          </p>
-          <p class="mono">PID: {data.daemonPid ?? "n/a"}</p>
-          <p class="mono">Source: {data.statusPath}</p>
-        </article>
+      <article class="card span-5">
+        <h2>Daemon</h2>
+        <p class={data.stale ? "mono stale" : "mono ok"}>
+          {data.stale
+            ? "Snapshot is stale or daemon heartbeat is unavailable."
+            : "Snapshot heartbeat is current."}
+        </p>
+        <p class="mono">Heartbeat: {formatTimestamp(data.heartbeatAt)}</p>
+        <p class="mono">
+          Memory RSS: {formatBytes(data.memory?.process.rss)}
+        </p>
+        <p class="mono">PID: {data.daemonPid ?? "n/a"}</p>
+        <p class="mono">Source: {data.statusPath}</p>
+      </article>
 
-        <article class="card span-4">
-          <h3>Providers</h3>
-          <ul class="provider-list">
-            {data.configuredProviders.length === 0
-              ? <li class="muted">No providers configured.</li>
-              : data.configuredProviders.map((provider) => (
-                <li key={provider.provider}>
-                  <div class="mono">{provider.provider}</div>
-                  <div class="muted">
-                    {activeSessionsByProvider.get(provider.provider) ?? 0}{" "}
-                    active session(s)
-                  </div>
-                  <div class="muted">
-                    Automatic Twin Generation:{" "}
-                    {provider.autoGenerateSnapshots ? "on" : "off"}
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </article>
+      <article class="card span-4">
+        <h3>Providers</h3>
+        <ul class="provider-list">
+          {data.configuredProviders.length === 0
+            ? <li class="muted">No providers configured.</li>
+            : data.configuredProviders.map((provider) => (
+              <li key={provider.provider}>
+                <div class="mono">{provider.provider}</div>
+                <div class="muted">
+                  {activeSessionsByProvider.get(provider.provider) ?? 0} active
+                  {" "}
+                  session(s)
+                </div>
+                <div class="muted">
+                  Automatic Twin Generation:{" "}
+                  {provider.autoGenerateSnapshots ? "on" : "off"}
+                </div>
+              </li>
+            ))}
+        </ul>
+      </article>
 
-        <article class="card span-8">
-          <h3>Active Ingestion</h3>
-          <ul class="session-list">
-            {activeIngestionRows.length === 0
-              ? (
-                <li class="muted">
-                  No active ingestion sessions.
-                </li>
-              )
-              : activeIngestionRows.map((session) => (
-                <li key={`${session.provider}:${session.sessionId}`}>
-                  <a
-                    class="mono summary-ingestion-link"
-                    href={buildIngestionSessionHref(session.sessionId)}
-                    title={`${session.provider}: ${
-                      session.snippet ?? "(no snippet)"
-                    }`}
+      <article class="card span-8">
+        <h3>Active Ingestion</h3>
+        <ul class="session-list">
+          {activeIngestionRows.length === 0
+            ? <li class="muted">No active ingestion sessions.</li>
+            : activeIngestionRows.map((session) => (
+              <li key={`${session.provider}:${session.sessionId}`}>
+                <a
+                  class="mono summary-ingestion-link"
+                  href={buildIngestionSessionHref(session.sessionId)}
+                  title={`${session.provider}: ${
+                    session.snippet ?? "(no snippet)"
+                  }`}
+                >
+                  <span
+                    class={`activity-state-dot ${session.state}`}
+                    aria-hidden="true"
                   >
-                    <span
-                      class={`activity-state-dot ${session.state}`}
-                      aria-hidden="true"
-                    >
-                      {activityStateDot(session.state)}
-                    </span>{" "}
-                    <span class="summary-ingestion-provider">
-                      {session.provider}:
-                    </span>{" "}
-                    <span class="summary-ingestion-snippet">
-                      {session.snippet ?? "(no snippet)"}
-                    </span>
-                  </a>
-                </li>
-              ))}
-          </ul>
-        </article>
+                    {activityStateDot(session.state)}
+                  </span>{" "}
+                  <span class="summary-ingestion-provider">
+                    {session.provider}:
+                  </span>{" "}
+                  <span class="summary-ingestion-snippet">
+                    {session.snippet ?? "(no snippet)"}
+                  </span>
+                </a>
+              </li>
+            ))}
+        </ul>
+      </article>
 
-        <article class="card span-5">
-          <h3>Workspaces</h3>
-          {data.workspaceSummary.unavailableReason
-            ? <p class="muted">{data.workspaceSummary.unavailableReason}</p>
-            : (
-              <ul class="provider-list">
-                {data.workspaceSummary.rows.length === 0
-                  ? <li class="muted">No workspaces registered.</li>
-                  : data.workspaceSummary.rows.map((row) => (
-                    <li key={row.workspaceId}>
-                      <div class="mono">{row.alias}</div>
-                      <div class={row.valid ? "ok" : "danger"}>
-                        {row.valid ? "valid" : row.invalidReason ?? "invalid"}
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            )}
-        </article>
+      <article class="card span-5">
+        <h3>Workspaces</h3>
+        {data.workspaceSummary.unavailableReason
+          ? <p class="muted">{data.workspaceSummary.unavailableReason}</p>
+          : (
+            <ul class="provider-list">
+              {data.workspaceSummary.rows.length === 0
+                ? <li class="muted">No workspaces registered.</li>
+                : data.workspaceSummary.rows.map((row) => (
+                  <li key={row.workspaceId}>
+                    <div class="mono">{row.alias}</div>
+                    <div class={row.valid ? "ok" : "danger"}>
+                      {row.valid ? "valid" : row.invalidReason ?? "invalid"}
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          )}
+      </article>
 
-        <article class="card span-7">
-          <h3>Recent Errors</h3>
-          <ul class="session-list">
-            {data.recentErrors.length === 0
-              ? <li class="muted">No recent operational or security errors.</li>
-              : data.recentErrors.map((error) => (
-                <li key={`${error.timestamp}:${error.event}:${error.message}`}>
-                  <a class="mono summary-log-link" href={buildLogHref(error)}>
-                    {error.level} · {error.scope} · {error.channel} ·{" "}
-                    {error.event}
-                  </a>
-                  <div>{error.message}</div>
-                  <div class="muted">
-                    {formatTimestamp(error.timestamp)} ·{" "}
-                    {relativeTimestamp(error.timestamp)}
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </article>
-      </section>
-    </div>
+      <article class="card span-7">
+        <h3>Recent Errors</h3>
+        <ul class="session-list">
+          {data.recentErrors.length === 0
+            ? <li class="muted">No recent operational or security errors.</li>
+            : data.recentErrors.map((error) => (
+              <li key={`${error.timestamp}:${error.event}:${error.message}`}>
+                <a class="mono summary-log-link" href={buildLogHref(error)}>
+                  {error.level} · {error.scope} · {error.channel} ·{" "}
+                  {error.event}
+                </a>
+                <div>{error.message}</div>
+                <div class="muted">
+                  {formatTimestamp(error.timestamp)} ·{" "}
+                  {relativeTimestamp(error.timestamp)}
+                </div>
+              </li>
+            ))}
+        </ul>
+      </article>
+    </section>
   );
 }

@@ -1,8 +1,12 @@
+import HeaderStatusLive from "../islands/HeaderStatusLive.tsx";
+import { HeaderStatusStack } from "./header_status.tsx";
+
 interface AppHeaderProps {
   title: string;
   description: string;
   currentPath?: string;
   showLogout?: boolean;
+  liveAppStatus?: boolean;
   appStatus?: {
     daemon: "running" | "stopped";
     snapshot: "current" | "stale";
@@ -25,6 +29,8 @@ function getTabClass(href: string, currentPath: string | undefined): string {
 }
 
 export default function AppHeader(props: AppHeaderProps) {
+  const liveAppStatus = props.liveAppStatus ?? true;
+
   return (
     <section class="app-header">
       <div class="app-header-top">
@@ -51,38 +57,9 @@ export default function AppHeader(props: AppHeaderProps) {
                 ? <a class="logout-link" href="/logout">Log Out</a>
                 : null}
               {props.appStatus
-                ? (
-                  <div
-                    class="status-stack mono"
-                    aria-label="Application status"
-                  >
-                    <div class="status-stack-item">
-                      <span class="status-stack-label">DAEMON:</span>{" "}
-                      <span
-                        class={props.appStatus.daemon === "running"
-                          ? "ok"
-                          : "stale"}
-                      >
-                        {props.appStatus.daemon}
-                      </span>
-                    </div>
-                    <div class="status-stack-item">
-                      <span
-                        class="status-stack-label"
-                        title="Snapshot current means the latest daemon heartbeat in status.json is fresh. It does not describe the web app process."
-                      >
-                        SNAPSHOT:
-                      </span>{" "}
-                      <span
-                        class={props.appStatus.snapshot === "current"
-                          ? "ok"
-                          : "stale"}
-                      >
-                        {props.appStatus.snapshot}
-                      </span>
-                    </div>
-                  </div>
-                )
+                ? liveAppStatus
+                  ? <HeaderStatusLive initialStatus={props.appStatus} />
+                  : <HeaderStatusStack status={props.appStatus} />
                 : null}
             </div>
           )

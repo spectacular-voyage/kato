@@ -17,6 +17,7 @@ import {
   type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
+  providerAutoGeneratesSnapshots,
 } from "./activity_state.ts";
 import { buildIngestionSessionHref } from "../session_routes.ts";
 
@@ -203,11 +204,34 @@ function hasTwinHistory(metadata: SessionMetadataV1): boolean {
   return metadata.nextTwinSeq > 1;
 }
 
+function hasLegacyManualIngestionHistory(metadata: SessionMetadataV1): boolean {
+  return hasTwinHistory(metadata) &&
+    (metadata.commandCursor ?? 0) === 0;
+}
+
+function hasExplicitIngestionHistory(metadata: SessionMetadataV1): boolean {
+  return metadata.ingestionActivatedAt !== undefined ||
+    hasLegacyManualIngestionHistory(metadata) ||
+    (metadata.workspaceOutputs?.length ?? 0) > 0;
+}
+
+function hasVisibleIngestionHistory(
+  metadata: SessionMetadataV1,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
+): boolean {
+  return hasExplicitIngestionHistory(metadata) ||
+    providerAutoGeneratesSnapshots(metadata.provider, runtimeConfig);
+}
+
 function normalizePersistedSessionState(
   metadata: SessionMetadataV1,
   state: ActivityState,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
 ): ActivityState {
-  if (state === "inactive" && hasTwinHistory(metadata)) {
+  if (
+    state === "inactive" &&
+    hasVisibleIngestionHistory(metadata, runtimeConfig)
+  ) {
     return "stale";
   }
   return state;
@@ -237,11 +261,12 @@ async function needsIngestionContinuation(
 async function resolveSessionIngestionUiState(
   metadata: SessionMetadataV1,
   state: ActivityState,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
 ): Promise<{
   canOpenIngestView: boolean;
   ingestionAction: SessionIngestionAction;
 }> {
-  if (!hasTwinHistory(metadata)) {
+  if (!hasVisibleIngestionHistory(metadata, runtimeConfig)) {
     return {
       canOpenIngestView: false,
       ingestionAction: "start",
@@ -587,10 +612,12 @@ export async function loadSessionActivityRows(
         },
         runtimeConfig,
       ),
+      runtimeConfig,
     );
     const ingestionUiState = await resolveSessionIngestionUiState(
       metadata,
       state,
+      runtimeConfig,
     );
     return {
       sessionKey: metadata.sessionKey,

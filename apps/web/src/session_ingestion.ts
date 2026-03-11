@@ -125,10 +125,13 @@ export async function ingestPersistedSession(
   if (snippet && refreshed.snippet !== snippet) {
     refreshed.snippet = snippet;
   }
+  if (!refreshed.ingestionActivatedAt) {
+    refreshed.ingestionActivatedAt = nowIso;
+  }
   refreshed.ingestCursor = latestCursor;
   refreshed.lastObservedMtimeMs = fileStat.mtime?.getTime();
   refreshed.sourceFilePath = metadata.sourceFilePath;
-  await sessionStore.saveSessionMetadata(refreshed);
+  await sessionStore.saveSessionMetadata(refreshed, { touchUpdatedAt: true });
 
   const logAttributes = {
     sessionId: refreshed.sessionId,

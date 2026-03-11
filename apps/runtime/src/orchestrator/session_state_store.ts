@@ -134,6 +134,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     twinPath: metadata.twinPath,
     nextTwinSeq: metadata.nextTwinSeq,
     recentFingerprints: [...metadata.recentFingerprints],
+    ...(metadata.ingestionActivatedAt !== undefined
+      ? { ingestionActivatedAt: metadata.ingestionActivatedAt }
+      : {}),
     ...(metadata.commandCursor !== undefined
       ? { commandCursor: metadata.commandCursor }
       : {}),

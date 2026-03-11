@@ -121,6 +121,7 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
         const reloaded = (await store.listSessionMetadata())[0];
         assertExists(reloaded);
         assertEquals(reloaded.nextTwinSeq > 1, true);
+        assertEquals(typeof reloaded.ingestionActivatedAt, "string");
 
         const continuedAt = new Date("2026-03-11T10:10:00.000Z");
         await Deno.utime(sessionFilePath, continuedAt, continuedAt);
@@ -133,6 +134,95 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
         assertEquals(afterSourceUpdate.staleSessionCount, 1);
         assertEquals(afterSourceUpdate.inactiveSessionCount, 0);
       });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("loadSessionsPageData keeps background twin history inactive until ingestion is explicitly activated", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir(
+        "web-session-ingestion-background-state-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const katoDir = join(homeDir, ".kato");
+          const runtimeDir = join(katoDir, "daemon");
+          const sharedDir = join(katoDir, "shared");
+          await Deno.mkdir(runtimeDir, { recursive: true });
+          await Deno.mkdir(sharedDir, { recursive: true });
+          await Deno.writeTextFile(
+            join(sharedDir, "status.json"),
+            JSON.stringify({
+              schemaVersion: 2,
+              generatedAt: "2026-03-11T10:00:00.000Z",
+              heartbeatAt: "2026-03-11T10:00:00.000Z",
+              daemonRunning: false,
+              providers: [],
+              recordings: {
+                activeRecordings: 0,
+                destinations: 0,
+              },
+              sessions: [],
+            }),
+          );
+
+          const configStore = new RuntimeConfigFileStore(
+            join(runtimeDir, "kato-daemon-config.yaml"),
+          );
+          await configStore.ensureInitialized(
+            createDefaultRuntimeConfig({
+              runtimeDir,
+              katoDir,
+              globalAutoGenerateSnapshots: false,
+              providerAutoGenerateSnapshots: {
+                claude: false,
+                codex: false,
+                gemini: false,
+              },
+            }),
+          );
+
+          const store = new PersistentSessionStateStore({
+            katoDir,
+            now: () => new Date("2026-03-11T10:00:00.000Z"),
+            makeSessionId: () => "sess-kato-002",
+          });
+          const sessionFilePath = join(homeDir, "provider-session-2.jsonl");
+          await copyFixtureWithMtime(
+            sessionFilePath,
+            "2026-03-11T10:00:00.000Z",
+          );
+          const metadata = await store.getOrCreateSessionMetadata({
+            provider: "claude",
+            providerSessionId: "provider-session-2",
+            sourceFilePath: sessionFilePath,
+            initialCursor: { kind: "byte-offset", value: 0 },
+          });
+          const sourceMtimeMs = (await Deno.stat(sessionFilePath)).mtime
+            ?.getTime();
+          metadata.nextTwinSeq = 3;
+          metadata.commandCursor = 2;
+          metadata.lastObservedMtimeMs = sourceMtimeMs;
+          await store.saveSessionMetadata(metadata, { touchUpdatedAt: true });
+
+          const page = await loadSessionsPageData({ katoDir });
+          assertEquals(page.rows.length, 1);
+          assertEquals(page.rows[0]?.state, "inactive");
+          assertEquals(page.rows[0]?.canOpenIngestView, false);
+          assertEquals(page.rows[0]?.ingestionAction, "start");
+          assertEquals(page.staleSessionCount, 0);
+          assertEquals(page.inactiveSessionCount, 1);
+        },
+      );
     } finally {
       restoreRuntimeEnv(env);
     }

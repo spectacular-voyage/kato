@@ -44,6 +44,7 @@ export default define.page(async function LoginPage(ctx) {
         title="Login"
         description="Authenticate to access conversation data and operator state."
         showLogout
+        liveAppStatus={false}
         appStatus={appStatus}
       />
 

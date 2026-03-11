@@ -1715,3 +1715,422 @@ The dynamic-updates note now reflects the current web IA instead of the pre-even
 The codebase overview now includes the current web route map, the present live-refresh model, and clearer page-level source-of-truth boundaries for Summary, Ingestion, Sessions, Recordings, Workspaces, and Logs.
 
 No code changes were needed for this pass.
+
+# djradon_2026-03-10_2116_11
+
+Something is wrong with our ingestion logic around the idle calculation. "claude: "Copilot finished thinking (8136494f) Updated 3/10/2026, 9:10:55 PM" is a new session I started, but it's listed as an idle session. It should NOT have triggered ingestion because I didn't issue a ::record/::capture command. Is it getting nextTwinSeq > 1 erroneously somehow?
+
+# gpt-5.4_2026-03-10_2116_28
+
+I’m tracing that specific session through persisted metadata and the current session-state derivation now. First I’m checking whether it actually has twin history and whether the daemon snapshot ever saw it, because the current “idle” path only happens if we think the session is historically ingested or presently engaged.
+
+# gpt-5.4_2026-03-10_2116_40
+
+I found the immediate issue in your live data: that session is not erroneously marked as having twin history. It really does have `nextTwinSeq: 31`, and the daemon snapshot also saw it as a live Claude session. I’m reading the ingestion runner now, because the real question is why that Claude session got twin events at all if you never explicitly asked Kato to ingest or capture it.
+
+# gpt-5.4_2026-03-10_2117_10
+
+I’ve confirmed the answer to your direct question: `nextTwinSeq > 1` is not erroneous here. The daemon is currently doing exactly that on purpose. I’m checking the existing tests/behavior contracts next, because this is now a design mismatch: the runtime proactively ingests newly modified provider sessions after daemon start, even when provider auto-generate is off and there are no recordings.
+
+# gpt-5.4_2026-03-10_2117_59
+
+I’m tracing the actual ingestion path for that session and the state classification around it. First I’m checking whether the daemon is proactively appending twin events for newly discovered Claude sessions even without explicit record/capture.
+
+# gpt-5.4_2026-03-10_2118_06
+
+I’ve confirmed `nextTwinSeq > 1` is real, not corrupted. The daemon is currently appending twin events for newly discovered sessions by design, so I’m checking whether the intended fix belongs in runtime behavior or only in the web classification layer.
+
+# gpt-5.4_2026-03-10_2118_17
+
+The current tests confirm the behavior is intentional today: manual web ingestion and daemon discovery both create twin history. I’m checking the command-detection path now, because if I simply stop background ingestion for Claude-like sessions I need to be sure we don’t break in-chat `::capture` discovery.
+
+# gpt-5.4_2026-03-10_2118_55
+
+There’s a real design fork here. If I simply stop background parsing for non-auto providers, I may break in-chat `::capture` detection. I’m checking those daemon tests now so I can distinguish “runtime bug” from “UI should stop treating background twin state as user-started ingestion.”
+
+# gpt-5.4_2026-03-10_2119_25
+
+I’ve narrowed it to a semantic bug, not a corrupted counter: `nextTwinSeq` is being advanced by background twin persistence. The safe fix is to stop using “has twin history” as proof that the user actually started ingestion, and add an explicit metadata bit for user-started ingestion so manual `start/continue ingestion` still works.
+
+# gpt-5.4_2026-03-10_2120_53
+
+I’ve got the shape of the fix. I’m editing the shared session metadata contract first so the web can distinguish “background twin history exists” from “the user actually activated ingestion.”
+
+# gpt-5.4_2026-03-10_2121_18
+
+I’m wiring the manual `start/continue ingestion` path now so it leaves an explicit marker in metadata. That gives the UI a stable signal for “the user intentionally activated ingestion” instead of guessing from twin sequence numbers.
+
+# gpt-5.4_2026-03-10_2121_24
+
+I’m adding a regression that matches your case directly: twin history exists and the daemon has advanced `commandCursor`, but there was no explicit ingestion activation or recording binding. That row should stay `not ingested`, not flip to idle.
+
+# gpt-5.4_2026-03-10_2121_42
+
+The code change is in. I’m running focused tests plus a live loader check against your current `.kato` data to confirm that session `8136494f` flips back to `not ingested` instead of `idle`.
+
+# gpt-5.4_2026-03-10_2121_49
+
+The live check is already showing the reported session as `inactive` with `start ingestion`, which is the behavior you expected. I’m waiting on the full test run now in case there are any count regressions in Summary or Sessions.
+
+# gpt-5.4_2026-03-10_2121_52
+
+The focused tests passed. I changed a shared contract as well, so I’m running the repo-wide `deno task check` once before I close this out.
+
+# gpt-5.4_2026-03-10_2122_17
+
+`nextTwinSeq > 1` was not corrupted. The daemon had already appended twin events for that Claude session in the background, and the real bug was that the Sessions page was treating raw twin history as proof that you had explicitly started ingestion.
+
+I fixed that in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), [session_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_ingestion.ts), [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts), and [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts). There is now an explicit `ingestionActivatedAt` marker for user-started ingestion, and the Sessions UI only treats a session as “ingested” if that marker exists, there is workspace recording history, or the provider is configured for auto-generation. Background twin history by itself no longer flips a row to idle. I also kept a small legacy heuristic so older manually-ingested rows do not regress.
+
+I checked your reported session live after the change. `8136494f` now resolves as:
+- state: `inactive`
+- action: `start`
+- open ingest view: `false`
+
+Regression coverage is in [web-session-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-ingestion_test.ts). Validation passed with `deno test -A tests/web-session-ingestion_test.ts tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+One important note: I did not change the underlying daemon behavior that may still append twin history in the background for command-readiness. This fix makes the web classification match your intent. If you want to stop that background twin persistence entirely, that is a separate runtime change.
+
+# gpt-5.4_2026-03-10_2122_24
+
+`nextTwinSeq > 1` was not corrupted. The daemon had already appended twin events for that Claude session in the background, and the real bug was that the Sessions page was treating raw twin history as proof that you had explicitly started ingestion.
+
+I fixed that in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts), [session_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_ingestion.ts), [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts), and [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts). There is now an explicit `ingestionActivatedAt` marker for user-started ingestion, and the Sessions UI only treats a session as “ingested” if that marker exists, there is workspace recording history, or the provider is configured for auto-generation. Background twin history by itself no longer flips a row to idle. I also kept a small legacy heuristic so older manually-ingested rows do not regress.
+
+I checked your reported session live after the change. `8136494f` now resolves as:
+- state: `inactive`
+- action: `start`
+- open ingest view: `false`
+
+Regression coverage is in [web-session-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-ingestion_test.ts). Validation passed with `deno test -A tests/web-session-ingestion_test.ts tests/web-activity-loader_test.ts tests/web-summary-loader_test.ts`, `deno task --cwd apps/web check`, and `deno task check`.
+
+One important note: I did not change the underlying daemon behavior that may still append twin history in the background for command-readiness. This fix makes the web classification match your intent. If you want to stop that background twin persistence entirely, that is a separate runtime change.
+
+# djradon_2026-03-10_2126_58
+
+Sorry, I should've switched to plan mode earlier. So no matter what the setting of globalAutoGenerateSnapshots or providerAutoGenerateSnapshots, the daemon always ingests all of every chat session? I believe there was something where we had to do something because a "::capture" or record command might be issued on the first user prompt. Is that related?
+
+# gpt-5.4_2026-03-10_2127_08
+
+I’m grounding this in the actual daemon behavior before answering. I’ve already checked the runner and runtime paths, so I can answer precisely rather than guessing from the config names.
+
+# gpt-5.4_2026-03-10_2127_39
+
+Yes, that is basically what the current runtime does, with one important qualifier.
+
+`globalAutoGenerateSnapshots` / `providerAutoGenerateSnapshots` do **not** currently mean “do not ingest this provider at all.” They only affect whether a provider is treated as auto-generating / snapshot-hydrating by default. The daemon still proactively parses newly changed sessions and persists twin history in the background.
+
+The current behavior is:
+
+- Newly discovered sessions are queued for ingestion whenever the file changed, or when the session was modified after daemon start. That logic is in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L925) and [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L948).
+- Once a session is ingested, twin events are appended unconditionally when session state is enabled. The code says that explicitly in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1245) and again in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1441).
+- Old sessions that were already stale before daemon startup are not eagerly replayed until they change. That is covered by [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts#L200).
+
+So the accurate statement is not “the daemon ingests every historical session immediately,” but rather:
+
+- it skips stale pre-start sessions
+- it **does** background-ingest sessions that become newly modified while the daemon is running
+- that happens even when `providerAutoGenerateSnapshots` is `false`
+
+And yes, your memory about `::capture` is directly related.
+
+The reason this was built that way is command readiness on first-seen sessions:
+
+- first-seen command cursor initialization is based on near-realtime eligibility in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1848)
+- capture/export can reconstruct from twin start, not just the truncated in-memory snapshot, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L313)
+
+So the current design is effectively:
+
+- background provider ingestion exists partly so an in-chat `::capture` or `::record` in the first user prompt can still be detected and replayed correctly
+- the auto-generate flags do **not** gate that background twin ingestion path
+
+That is why your new Claude session picked up `nextTwinSeq > 1` without you issuing `::record`/`::capture`.
+
+If we plan a runtime change next, the key product decision is this: should `providerAutoGenerateSnapshots: false` become a hard stop for all background parsing/twin ingestion, or do we keep background command-readiness and introduce a separate setting/semantic boundary for it?
+
+# gpt-5.4_2026-03-10_2127_40
+
+Yes, that is basically what the current runtime does, with one important qualifier.
+
+`globalAutoGenerateSnapshots` / `providerAutoGenerateSnapshots` do **not** currently mean “do not ingest this provider at all.” They only affect whether a provider is treated as auto-generating / snapshot-hydrating by default. The daemon still proactively parses newly changed sessions and persists twin history in the background.
+
+The current behavior is:
+
+- Newly discovered sessions are queued for ingestion whenever the file changed, or when the session was modified after daemon start. That logic is in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L925) and [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L948).
+- Once a session is ingested, twin events are appended unconditionally when session state is enabled. The code says that explicitly in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1245) and again in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1441).
+- Old sessions that were already stale before daemon startup are not eagerly replayed until they change. That is covered by [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts#L200).
+
+So the accurate statement is not “the daemon ingests every historical session immediately,” but rather:
+
+- it skips stale pre-start sessions
+- it **does** background-ingest sessions that become newly modified while the daemon is running
+- that happens even when `providerAutoGenerateSnapshots` is `false`
+
+And yes, your memory about `::capture` is directly related.
+
+The reason this was built that way is command readiness on first-seen sessions:
+
+- first-seen command cursor initialization is based on near-realtime eligibility in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1848)
+- capture/export can reconstruct from twin start, not just the truncated in-memory snapshot, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L313)
+
+So the current design is effectively:
+
+- background provider ingestion exists partly so an in-chat `::capture` or `::record` in the first user prompt can still be detected and replayed correctly
+- the auto-generate flags do **not** gate that background twin ingestion path
+
+That is why your new Claude session picked up `nextTwinSeq > 1` without you issuing `::record`/`::capture`.
+
+If we plan a runtime change next, the key product decision is this: should `providerAutoGenerateSnapshots: false` become a hard stop for all background parsing/twin ingestion, or do we keep background command-readiness and introduce a separate setting/semantic boundary for it?
+
+# djradon_2026-03-10_2137_39
+
+I think we want to to carefully disambiguate ingestion (in-memory snapshot creation, done on all new-ish detected session using current logic) in order to parse commands; and twin creation (persisted), which is only done when the user wants it. 
+
+i.e., rename providerAutoGenerateSnapshots to providerAutoGenerateTwins, and same for globalAutoGenerateSnapshots to globalAutoGenerateTwins.
+
+The idea is we don't want to automatically persist every conversation for privacy/security reasons. But especially for Codex, we want users to be able to capture everything in real-time by default (for codex, so that we can get accurate even timestamps)
+
+The question is: can we get away with not creating the twins/not persisting in-memory snapshots between Daemon restarts. i.e., what breaks if we try to straighten this out.
+
+# gpt-5.4_2026-03-10_2137_51
+
+I’m mapping the exact places that rely on persisted session metadata or twins so I can answer what would actually break if persistence became opt-in. The key distinction is command-readiness during one daemon run versus continuity across restarts.
+
+# gpt-5.4_2026-03-10_2138_49
+
+There are two separate things here, and one of them is already true today:
+
+- In-memory snapshots are already not persisted across restarts. The daemon creates an [InMemorySessionSnapshotStore](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/main.ts#L366), and `loadSessionSnapshot` only reads from that live store, not disk, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2111).
+- What persists today is session metadata plus twin files in `sessionStateStore`.
+
+So if we “straighten this out,” the real decision is not about persisted in-memory snapshots. It is about how much of `sessionStateStore` we still keep when twins are opt-in.
+
+If you stop automatic twins but keep metadata, the main breakages are narrower:
+- from-start capture/export replay degrades when the live snapshot has been truncated, because `::capture`/`::export` currently fall back to twin history in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L623)
+- cross-restart exact command replay continuity gets weaker, because command cursor/anchor state is stored in metadata in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1803)
+- `cleanSessionStatesOnShutdown` currently only deletes twin files, not metadata, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2449) and [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts#L639)
+
+If you also stop persisting metadata, much more breaks:
+- active workspace recording continuation across restart, because write cursors / workspace outputs live in metadata and drive append-after-restart in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1951)
+- export lookup by short/internal session id, which resolves through persisted metadata in [runtime_export_request.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_export_request.ts#L239)
+- the web’s Sessions / Recordings / Workspaces historical inventory, which is metadata-driven in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L573)
+
+The current `::capture on the first user prompt` concern is definitely related. That is the reason the daemon currently keeps command-ready state and unconditional twins for newly modified sessions. The startup-skip test in [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts#L200) also shows this is about “new-ish since daemon start,” not all historical sessions.
+
+# Assistant_2026-03-10_2138_51_Tool-decision-persistence-boundary
+
+## Prompt
+
+Which persistence boundary do you want as the target model for this refactor?
+
+## Options
+
+- Keep metadata (Recommended): Persist session/workspace metadata across restarts, but only write twin event history when auto-generate or explicit opt-in says to.
+- Workspace-only metadata: Persist only workspace-bound recording state; non-recorded sessions stop existing after restart.
+- No persistence by default: Do not persist session metadata or twins unless explicitly opted in; restarts lose session inventory and recording continuation.
+
+# Assistant_2026-03-10_2140_35_Tool-decision-persistence-boundary
+
+## Prompt
+
+Which persistence boundary do you want as the target model for this refactor?
+
+## User Selection
+
+Keep metadata (Recommended)
+
+# djradon_2026-03-10_2140_35
+
+I guess I'm unclear on what's persisted from "in-memory snapshots" vs for twins.
+
+# gpt-5.4_2026-03-10_2140_44
+
+I’m pulling the exact snapshot and metadata shapes so I can disambiguate this cleanly. The confusion is reasonable because “snapshot” and “twin” are overlapping views of the same conversation, but they live in different stores and have different durability.
+
+# gpt-5.4_2026-03-10_2140_58
+
+The clean mental model is: today there are actually **three** Kato-side representations, not two.
+
+1. Provider source file
+   This is the real chat session outside Kato, e.g. `~/.claude/...jsonl` or `~/.codex/...`.
+   Kato can always re-read this if it still exists.
+
+2. In-memory session snapshot
+   This is the live daemon cache in [ingestion_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts#L16).
+   It holds:
+   - `events[]`
+   - current `cursor`
+   - transient status metadata like `updatedAt`, `lastEventAt`, `fileModifiedAtMs`, `snippet`
+   It is **not persisted**. When the daemon restarts, this is gone.
+
+3. Persisted session state
+   This is what lives on disk in `sessionStateStore`, and it splits into:
+   - metadata JSON
+   - twin JSONL
+
+The persisted metadata JSON in [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts#L68) is **not** the full conversation. It is bookkeeping:
+- provider / providerSessionId / Kato sessionId
+- source file path
+- `snippet`
+- `ingestCursor` / `lastObservedMtimeMs`
+- command cursor / command anchor
+- workspace output bindings and recording cycles
+- `twinPath`, `nextTwinSeq`, recent fingerprints
+
+The twin file is the persisted event history. `appendTwinEvents()` in [session_state_store.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts#L459) writes actual conversation-derived events to disk as JSONL.
+
+So the short answer is:
+
+- “in-memory snapshots” are already ephemeral
+- “twins” are the persisted conversation log
+- “metadata” is a separate persisted layer that survives restart even if you stop writing twins
+
+That is why your privacy/security concern really has two sub-questions:
+
+- Should automatic twin event persistence stop by default?
+- How much metadata is still acceptable to persist when twins are off?
+
+One important current quirk: `cleanSessionStatesOnShutdown` only removes twin files, not metadata, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2449).
+
+# Assistant_2026-03-10_2141_01_Tool-decision-metadata-privacy-boundary
+
+## Prompt
+
+When twins are off, how much non-twin metadata are you comfortable persisting for non-recorded sessions?
+
+## Options
+
+- Keep full metadata (Recommended): Persist cursors, snippet, source path, command cursor, and session IDs; only the event log twin stays opt-in.
+- Keep metadata, strip snippet: Persist cursors and bindings, but do not persist the conversation snippet for non-twin sessions.
+- Minimal metadata only: Persist only what is needed for restart continuity, and avoid storing snippet/path-like conversational hints for non-twin sessions.
+
+# Assistant_2026-03-10_2142_09_Tool-decision-metadata-privacy-boundary
+
+## Prompt
+
+When twins are off, how much non-twin metadata are you comfortable persisting for non-recorded sessions?
+
+## User Selection
+
+Keep full metadata (Recommended)
+
+# gpt-5.4_2026-03-10_2142_26
+
+The clean split is:
+
+- `provider source file`
+  The real chat transcript outside Kato.
+
+- `in-memory snapshot`
+  Live daemon cache only. This is [RuntimeSessionSnapshot](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/ingestion_runtime.ts#L16): `events[]`, current cursor, and transient status/snippet metadata. It is **not persisted** today.
+
+- `persisted metadata`
+  The JSON bookkeeping record in [SessionMetadataV1](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts#L68). This is not the full conversation. It stores ids, source path, snippet, ingest cursor, command cursor, workspace bindings, recording cycles, and where the twin file would live.
+
+- `twin`
+  The persisted event log. This is what [appendTwinEvents()](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/session_state_store.ts#L459) writes.
+
+So the important correction is: there is no “persisted in-memory snapshot” layer to remove. The daemon already loses snapshots on restart. The real persistence question is:
+
+- keep metadata?
+- keep twins?
+
+With the boundary you just chose, the target model becomes:
+
+- transient snapshots for command detection on all new-ish sessions
+- persisted metadata across restarts
+- persisted twins only when auto-twin is on or the user explicitly opts in
+
+Under that model, the big thing that still breaks for non-twin sessions is full-fidelity replay-from-start when the live snapshot has been truncated or after restart. That affects paths like `::capture` / `::export` from twin start in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L623). But active recording continuity across restart can still survive, because that state lives in metadata, not in the twin.
+
+One other nuance: `cleanSessionStatesOnShutdown` currently only deletes twin files, not metadata, in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2449). So even today, “clean session states” is really “clean twins,” not “wipe all persisted session state.”
+
+# djradon_2026-03-10_2149_13
+
+cleanSessionStatesOnShutdown should definitely clear at least the snippet.
+
+So how does "from-start capture/export replay degrade" ? It would only degrade for captures/exports that weren't started before shutdown?
+
+# gpt-5.4_2026-03-10_2149_31
+
+I’m answering this against the current architecture, not a hypothetical improved one. The key boundary is that the daemon does not persist live snapshots today, so restart matters a lot, but it is not the only degradation case.
+
+# gpt-5.4_2026-03-10_2149_39
+
+Not only after shutdown.
+
+With the current architecture, `from-start capture/export replay` degrades in two cases if twins are absent:
+
+1. After daemon restart
+- all in-memory snapshots are gone
+- metadata survives, but it does not contain the full event history
+- so a later `::capture` / `::export` can no longer reconstruct the earlier conversation from Kato-owned state
+
+2. During the same daemon run, if the live snapshot has been trimmed or evicted
+- the in-memory snapshot store is bounded
+- if early events fell out of the live snapshot, twin fallback is what currently restores full-history capture/export
+- without twins, even a no-restart capture/export can lose earlier context on long sessions
+
+So your sentence is close, but too narrow. A better version is:
+
+- degradation definitely happens for commands issued after restart on sessions with no twin
+- it can also happen before restart if the live snapshot no longer contains the full conversation
+
+What does not necessarily break:
+- continuing an already-started recording after restart can still work if we keep metadata, because workspace bindings and write cursors live in metadata, not the twin
+- command detection itself can still work on new events, because the daemon can keep parsing fresh source changes and persist command cursor metadata
+
+What does break without twins:
+- exact “capture everything from the beginning of the conversation” behavior when the beginning is no longer in the live snapshot
+
+So if you want:
+- privacy by default
+- no automatic twin persistence
+- but still strong after-restart capture/export
+
+then the missing capability is: `on-demand reparse from provider source file for capture/export`, instead of relying on twin history.
+
+That is the key design fork. If you want, I can turn that into a concrete plan with:
+- rename `*AutoGenerateSnapshots` to `*AutoGenerateTwins`
+- scrub snippet on shutdown / maybe when twins are off
+- keep metadata persistence
+- add on-demand source replay for non-twin capture/export so restart does not lose full-history capture when the provider source is still available
+
+# djradon_2026-03-10_2156_34
+
+Yes, please draft a plan to [task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md](dev-docs/notes/task.2026.2026-03-10-discriminate-ingestion-from-twin-creation.md)
+
+I still need help understanding: how are we currently capturing everything from the beginning of the conversation after a restart? We must already be doing the "source replay" no? It's not idealy because Codex will lose timestamps, but we're only talking about the non-AutoGenerate situation anyhow, right?
+
+# gpt-5.4_2026-03-10_2156_47
+
+I’m checking the current restart path and the existing task note so the plan matches what the code actually does today. The key point to settle is whether restart recovery is using twin rebuild or source replay right now.
+
+# gpt-5.4_2026-03-10_2156_56
+
+Today, after a restart, we are **not** doing generic from-start source replay for capture/export.
+
+What happens now is:
+
+- the live in-memory snapshot is gone on restart
+- the provider ingestion runner restores the persisted cursor from metadata and resumes parsing from there, not from byte 0, in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1007) and [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1385)
+- if there is no current in-memory snapshot, it rebuilds the snapshot from the persisted twin file, in [provider_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts#L1557)
+
+That is why restart currently works: the full earlier conversation is coming back from the twin, not from reparsing the provider source from the beginning. The test that encodes that behavior is [provider-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts#L266).
+
+So if we stop automatic twin creation, and do nothing else, then after restart a non-twin session would only have:
+- persisted metadata
+- current provider source file
+- no persisted full event history inside Kato
+
+In that world, to preserve “capture from the beginning” after restart, we would need to add an explicit on-demand source replay path for capture/export.
+
+I have enough to draft the plan, but two choices still materially affect it: whether to keep any config-name compatibility, and whether snippet persistence should be avoided immediately or only cleaned on shutdown.
+
+# djradon_2026-03-10_2210_57
+
+We don't need to maintain compatibility, and should fail daemon start if the old values are present. I think we can avoid snippet persistence entirely because we can just reconstruct it when needed, right?
+
+# gpt-5.4_2026-03-10_2211_06
+
+I’m checking the remaining snippet call sites before I lock that assumption in. The question is whether removing persisted snippets is only a convenience loss or whether any current paths rely on it for behavior, titles, or UI before a fresh reparse happens.
