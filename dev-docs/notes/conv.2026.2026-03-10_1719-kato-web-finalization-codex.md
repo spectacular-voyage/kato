@@ -1425,3 +1425,89 @@ The formatter rewrote the long JSX map blocks after the check had already starte
 Adjusted the Logs filter panel in [log_page.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_page.tsx) so the channel/scope/level selector buttons now collapse together with the Event/Text inputs. The active filter chips remain outside the disclosure, so they stay visible and removable even when the filter area is closed. `Reset` stays pinned in the header opposite `Log Filters`.
 
 Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2029_28
+
+Since "Warn" is selected by default, it should show as a chip immediately.
+
+# gpt-5.4_2026-03-10_2029_46
+
+I’m making a small Logs UI tweak now. I’m changing the chip logic so the default `warn` level is surfaced as an active filter chip immediately, and I’m making sure the chip’s `x` actually removes the level filter to `all` instead of bouncing back to the default.
+
+# gpt-5.4_2026-03-10_2029_54
+
+The chip logic is updated. I’m running the web check now so the final behavior is: `warn` shows as a chip on first load, and clicking its `x` takes the page to `level=all`.
+
+# gpt-5.4_2026-03-10_2029_57
+
+Updated [log_page.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_page.tsx) so the default `warn` level now shows as an active filter chip on first load. I also changed the chip removal target so clicking the `x` on that chip actually clears the level filter to `all` instead of snapping back to the default.
+
+Verified with `deno task --cwd apps/web check`.
+
+# gpt-5.4_2026-03-10_2029_59
+
+Updated [log_page.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_page.tsx) so the default `warn` level now shows as an active filter chip on first load. I also changed the chip removal target so clicking the `x` on that chip actually clears the level filter to `all` instead of snapping back to the default.
+
+Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2033_14
+
+Can you add a flippable chevron by "Log Filters" to indicate that it is actionable?
+
+# gpt-5.4_2026-03-10_2033_26
+
+I’m adding a custom disclosure chevron to the Logs filter summary now. I’m wiring it in the existing `details/summary` structure so it flips with the open state and replaces the browser default marker cleanly.
+
+# gpt-5.4_2026-03-10_2033_32
+
+The markup doesn’t need to change. I’m doing this as a CSS-only disclosure icon: hide the browser marker, draw a custom chevron next to the label, and rotate it off the `details[open]` state.
+
+# gpt-5.4_2026-03-10_2033_35
+
+The chevron styling is in. I’m running the web check now to make sure the CSS change is clean and doesn’t trip formatting or any existing responsive rules.
+
+# gpt-5.4_2026-03-10_2033_38
+
+Added a custom flippable chevron to the `Log Filters` disclosure in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css). It now shows a clear actionable indicator beside the label and rotates with the open/closed state.
+
+Verified with `deno task --cwd apps/web check`.
+
+# gpt-5.4_2026-03-10_2033_39
+
+Added a custom flippable chevron to the `Log Filters` disclosure in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css). It now shows a clear actionable indicator beside the label and rotates with the open/closed state.
+
+Verified with `deno task --cwd apps/web check`.
+
+# djradon_2026-03-10_2034_21
+
+Beautiful, now on to those remaining tasks... factor out CLI code might not be as relevant any more.
+
+# gpt-5.4_2026-03-10_2034_30
+
+I’m checking the task note and the remaining open items now. If the shared CLI projection refactor is no longer worth doing, the useful next step is to update the task note so the project reflects that explicitly instead of leaving a stale “remaining” checkbox behind.
+
+# gpt-5.4_2026-03-10_2034_35
+
+I found the original web task note. The only remaining explicit open item there is still the shared CLI/web projection refactor, so if that’s no longer strategically useful, the right move is to mark it deferred/obsolete in the task note rather than treating it as real remaining scope.
+
+# gpt-5.4_2026-03-10_2034_41
+
+I’m closing out that stale remaining item in the task note now. The CLI/web projection unification only made sense when web was aiming for much tighter CLI parity; with the route split and deeper web-specific views, forcing that refactor now would mostly add churn without much payoff.
+
+# gpt-5.4_2026-03-10_2034_49
+
+The checklist edit missed because the note wording shifted from the last time I read it. I’m patching against the current exact text now and adding the deferral note in the Decisions section so the file clearly says this is no longer a real blocker.
+
+# gpt-5.4_2026-03-10_2034_59
+
+The decision list has slightly different wrapping than I expected. I’m patching the checklist item first, then I’ll insert the explicit deferral note into the Decisions block using the exact local text so it lands cleanly.
+
+# gpt-5.4_2026-03-10_2035_08
+
+The checklist line patched cleanly in isolation, but the decisions block still needs an exact insertion point. I’m locating that exact paragraph and then I’ll drop in the explicit deferral note without touching unrelated wrapping.
+
+# gpt-5.4_2026-03-10_2035_23
+
+I updated [task.2026.2026-03-06-kato-web.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-06-kato-web.md) to close out that stale remaining checkbox and explicitly defer the broad CLI/web projection unification.
+
+I think that’s the right call. The web app has already diverged enough from the CLI surface that forcing a shared view-model layer now would mostly create churn. From my perspective, that leaves no essential implementation work on the original web finalization task beyond already-deferred items like the Performance page, plus any optional terminology/docs cleanup you still want.

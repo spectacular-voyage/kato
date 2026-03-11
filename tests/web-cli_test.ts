@@ -184,7 +184,7 @@ Deno.test(
         () => new Date("2026-03-07T20:00:00.000Z"),
       );
       const webLauncher: WebProcessLauncherLike = {
-        launchDetached: async () => Deno.pid,
+        launchDetached: () => Promise.resolve(Deno.pid),
       };
 
       const initHarness = makeRuntimeHarness(runtimeDir);

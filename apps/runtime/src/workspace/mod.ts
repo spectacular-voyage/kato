@@ -38,7 +38,4 @@ export type {
   UnregisterWorkspaceMutationOptions,
   UnregisterWorkspaceMutationResult,
 } from "./mutations.ts";
-export {
-  registerWorkspace,
-  unregisterWorkspace,
-} from "./mutations.ts";
+export { registerWorkspace, unregisterWorkspace } from "./mutations.ts";

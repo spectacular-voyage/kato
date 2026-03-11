@@ -1,4 +1,3 @@
-import type { UserConfig } from "@kato/shared";
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
   clearDefaultUsername,
@@ -11,17 +10,6 @@ import {
   validateAndNormalizeParticipantUsername,
 } from "@kato/runtime";
 import { resolveWorkspaceRegistryStore } from "./workspace_shared.ts";
-
-async function loadInitializedUserConfig(
-  ctx: DaemonCliCommandContext,
-): Promise<{ config: UserConfig; path: string }> {
-  const store = ctx.resolveUserConfigStore();
-  const initialized = await store.ensureInitialized(createDefaultUserConfig());
-  return {
-    config: initialized.config,
-    path: initialized.path,
-  };
-}
 
 export async function runUserInitCommand(
   ctx: DaemonCliCommandContext,

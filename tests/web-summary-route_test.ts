@@ -4,7 +4,7 @@ import {
   summaryApiResponse,
 } from "../apps/web/src/summary_api.ts";
 
-Deno.test("summary api disables response caching", async () => {
+Deno.test("summary api disables response caching", () => {
   const response = summaryApiResponse(
     {} as Parameters<typeof summaryApiResponse>[0],
   );

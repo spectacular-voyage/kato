@@ -333,6 +333,9 @@ view, not a generic admin template:
 - Include workspace unregister in the first web mutation slice.
 - Use a new persisted ring buffer file as the source of memory history for the
   Performance page if that page ships in this task.
+- Defer broad CLI/web projection unification; keep shared helpers additive where
+  they are clearly useful, but do not force a shared view-model layer now that
+  the web IA has intentionally diverged from the CLI status surface.
 - Update `[[dev.codebase-overview]]`, `[[dev.decision-log]]`,
   `[[dev.general-guidance]]`, and `[[dev.testing]]` as part of the same slice;
   update `[[dev.security-baseline]]` too if auth or request-origin protections
@@ -465,8 +468,11 @@ Validation workflow before merge:
 - [x] Add and document a separate web lifecycle model: web can run without
       daemon, `kato start` stays daemon-only, and `kato web ...` owns web-server
       lifecycle commands.
-- [ ] Move reusable non-CLI-specific status view models into `shared/src` so CLI
-      and web consume the same projection/filtering logic.
+- [x] Re-evaluate whether reusable non-CLI-specific status view models should
+      move into `shared/src`.
+      Decision: defer this refactor. The web surface now has enough distinct
+      route-specific IA and loader behavior that forcing CLI/web projection
+      unification in this slice would add churn without enough benefit.
 - [x] Extract reusable mutation services from the current CLI command handlers
       so CLI and web share the same business rules for: workspace
       register/update, user settings/mappings, and maintenance clean.

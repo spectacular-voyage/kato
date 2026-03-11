@@ -95,9 +95,7 @@ function buildChipRemoveHref(options: {
     basePath: options.basePath,
     channel: options.kind === "channel" ? "all" : options.pageData.channel,
     scope: options.kind === "scope" ? "all" : options.pageData.scope,
-    level: options.kind === "level"
-      ? DEFAULT_LOG_LEVEL_FILTER
-      : options.pageData.level,
+    level: options.kind === "level" ? "all" : options.pageData.level,
     eventFilter: options.kind === "event"
       ? undefined
       : options.pageData.eventFilter,
@@ -330,7 +328,7 @@ export default function LogPageView(props: LogPageViewProps) {
                   </a>
                 )
                 : null}
-              {props.pageData.level !== DEFAULT_LOG_LEVEL_FILTER
+              {props.pageData.level !== "all"
                 ? (
                   <a
                     class="filter-chip"
