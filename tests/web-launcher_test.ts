@@ -20,7 +20,7 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
 }
 
 Deno.test(
-  "DenoDetachedWebLauncher launches via detached shell from the repo root",
+  "DenoDetachedWebLauncher launches via detached shell without requiring a vite binary path",
   async () => {
     let capturedCommand: string | undefined;
     let capturedOptions:
@@ -29,16 +29,6 @@ Deno.test(
 
     await withTestTempDir("web-launcher-", async (workspaceRoot) => {
       const expectedWebRoot = join(workspaceRoot, "apps", "web");
-      const expectedVitePath = join(
-        expectedWebRoot,
-        "node_modules",
-        ".bin",
-        "vite",
-      );
-      await Deno.mkdir(join(expectedWebRoot, "node_modules", ".bin"), {
-        recursive: true,
-      });
-      await Deno.writeTextFile(expectedVitePath, "#!/bin/sh\n");
 
       const launcher = new DenoDetachedWebLauncher(
         "/fake/deno",
@@ -83,11 +73,11 @@ Deno.test(
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        `setsid '/fake/deno' 'run' '--ext=js' '-A' '${expectedVitePath}' '--host' '127.0.0.1' '--port' '5173'`,
+        "setsid '/fake/deno' 'run' '--ext=js' '-A' 'vite' '--host' '127.0.0.1' '--port' '5173'",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        `nohup '/fake/deno' 'run' '--ext=js' '-A' '${expectedVitePath}' '--host' '127.0.0.1' '--port' '5173'`,
+        "nohup '/fake/deno' 'run' '--ext=js' '-A' 'vite' '--host' '127.0.0.1' '--port' '5173'",
       );
     });
   },
@@ -130,7 +120,7 @@ Deno.test(
         ): Promise<number>;
       }
     ).launchDetachedViaPowerShell(
-      ["run", "--ext=js", "-A", "C:\\repo\\apps\\web\\vite", "--port", "3173"],
+      ["run", "--ext=js", "-A", "vite", "--port", "3173"],
       "C:\\repo\\apps\\web",
     );
 
@@ -145,7 +135,7 @@ Deno.test(
     );
     assertStringIncludes(decoded, "Start-Process -FilePath '/fake/deno'");
     assertStringIncludes(decoded, "-WorkingDirectory 'C:\\repo\\apps\\web'");
-    assertStringIncludes(decoded, "'run', '--ext=js', '-A'");
+    assertStringIncludes(decoded, "'run', '--ext=js', '-A', 'vite'");
   },
 );
 

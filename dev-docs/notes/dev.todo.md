@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1773200234092
+updated: 1773256282140
 created: 1771812869620
 ---
 
@@ -112,3 +112,5 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
       Owner: @djradon. Target: 2026-03-15.
 
 - [ ] update cli based on new web summary functionality and tightened session/ingest differentiation
+
+- [ ] interactive password prompt for web init

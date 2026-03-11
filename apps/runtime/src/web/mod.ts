@@ -166,10 +166,6 @@ function resolveWebAppRoot(workspaceRoot: string): string {
   return join(workspaceRoot, "apps", "web");
 }
 
-function resolveViteCliPath(webAppRoot: string): string {
-  return Deno.realPathSync(join(webAppRoot, "node_modules", ".bin", "vite"));
-}
-
 function toShellSingleQuoted(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
@@ -290,12 +286,11 @@ $proc = Start-Process -FilePath ${
     options: { hostname: string; port: number },
   ): Promise<number> {
     const webAppRoot = resolveWebAppRoot(this.workspaceRoot);
-    const viteCliPath = resolveViteCliPath(webAppRoot);
     const args = [
       "run",
       "--ext=js",
       "-A",
-      viteCliPath,
+      "vite",
       "--host",
       options.hostname,
       "--port",
