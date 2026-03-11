@@ -11,8 +11,30 @@ export default define.page(function App({ Component, state }) {
         />
         <title>{state.appName}</title>
       </head>
-      <body>
-        <Component />
+      <body class="app-body">
+        <main class="app-main">
+          <Component />
+        </main>
+        <footer class="app-footer">
+          <img
+            class="footer-wordmark"
+            src="/brand/wordmark"
+            alt="Kato"
+            width="240"
+            height="48"
+          />
+          <p class="footer-copy">
+            © 2026{" "}
+            <a
+              class="footer-link"
+              href="https://spectacular.voyage/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Spectacular Voyage LLC
+            </a>
+          </p>
+        </footer>
       </body>
     </html>
   );

@@ -257,7 +257,7 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
         assertEquals(data.inactiveSessionCount, 0);
         assertEquals(data.recordingCount, 0);
         assertEquals(data.staleRecordingCount, 2);
-        assertEquals(data.stoppedRecordingCount, 1);
+        assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.sessions.length, 1);
         assertEquals(data.sessions[0]?.sessionId, "sess-active");
       });

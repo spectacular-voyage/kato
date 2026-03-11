@@ -454,7 +454,7 @@ Validation workflow before merge:
 
 ## Implementation Plan
 
-- [ ] Decide and record the framework choice in `[[dev.decision-log]]`: use
+- [x] Decide and record the framework choice in `[[dev.decision-log]]`: use
       `Fresh` as the primary `apps/web` framework unless a concrete blocker
       appears during scaffolding.
 - [x] Record the boundary change in `[[dev.decision-log]]` and
@@ -485,7 +485,7 @@ Validation workflow before merge:
       workspaces summary/details, recent errors, and live session rows.
 - [x] Add a lightweight live-refresh mechanism: route handler JSON payload plus
       browser polling on the Summary page.
-- [ ] Wire the supplied logo/wordmark assets into the app shell and Summary
+- [x] Wire the supplied logo/wordmark assets into the app shell and Summary
       header.
 - [x] Add the Workspaces route with register/update flows, including the same
       validation and `allowedWriteRoots` side effects used by CLI today.
@@ -496,7 +496,8 @@ Validation workflow before merge:
       behavior with CLI.
 - [x] Add route-backed detail pages for Sessions, Workspaces, Operational
       Details, Security, and Settings using shared loaders, with recordings
-      integrated into Sessions instead of a separate recordings page.
+      still integrated into Sessions and also available on a dedicated
+      recordings page.
 - [x] Add local-only mutation protections appropriate for a localhost operator
       console: POST-only handlers, origin/CSRF protection, and clear
       confirmation UX for destructive actions.
@@ -512,10 +513,11 @@ Validation workflow before merge:
 - [x] If lifecycle/auth bootstrap UX is in scope, decide whether the clearer
       long-term command is `kato init --interactive`, `kato web init`, or
       `kato web auth init`.
-- [ ] Decide whether Performance is in the first implementation slice: if yes,
+- [x] Decide whether Performance is in the first implementation slice: if yes,
       add a persisted memory-history source and graph page; if not, ship the
       page as a current-snapshot-only placeholder or defer it.
-- [ ] Add focused tests for loaders, shared projections, mutation services, page
+      Decision: defer the Performance page from this slice.
+- [x] Add focused tests for loaders, shared projections, mutation services, page
       handlers, Summary render parity, and any adopted local auth flow.
 - [x] Extend CLI status surfaces to include `Kato Web` runstate and show recent
       web-app operational/auth errors alongside daemon/operator errors where

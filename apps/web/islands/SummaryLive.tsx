@@ -60,14 +60,12 @@ function relativeTimestamp(value: string | undefined): string {
 function buildLogHref(
   error: SummaryPageData["recentErrors"][number],
 ): string {
-  const path = error.channel === "security-audit"
-    ? "/security"
-    : "/operational";
   const params = new URLSearchParams();
+  params.set("channel", error.channel);
   params.set("scope", error.scope);
   params.set("level", error.level);
   params.set("event", error.event);
-  return `${path}?${params.toString()}`;
+  return `/logs?${params.toString()}`;
 }
 
 function metricPrimaryStateClass(
@@ -143,7 +141,7 @@ export default function SummaryLive(
           <h2>Activity</h2>
           <div class="metrics">
             <div class="metric">
-              <span class="label">Sessions</span>
+              <span class="label">Ingestion</span>
               <span class={metricPrimaryStateClass("active")}>
                 <span class="metric-primary-count mono">
                   {data.generatingSessionCount}
@@ -154,7 +152,7 @@ export default function SummaryLive(
                 {data.staleGeneratingSessionCount} idle
               </span>
               <span class="metric-note mono">
-                {data.inactiveSessionCount} not captured
+                {data.inactiveSessionCount} not ingested
               </span>
             </div>
             <div class="metric">

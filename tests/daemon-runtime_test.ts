@@ -2404,23 +2404,15 @@ Deno.test(
         const content = await Deno.readTextFile(destination);
         const session = findScenarioMetadata(result.metadataList);
         const output = findWorkspaceOutputState(session);
-        assert(content.includes("kato-sessionIds: [session-1]"));
-        assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+        assertEquals(content.includes("kato-sessionIds:"), false);
+        assertEquals(content.includes("kato-workspaceIds:"), false);
         assertExists(output.activeRecordingCycleId);
-        const recordingShortId = output.activeRecordingCycleId
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "")
-          .slice(0, 8);
         const idLine = content.split("\n").find((line) =>
           line.startsWith("id: ")
         );
         assertExists(idLine);
-        assert(idLine.endsWith(`-${recordingShortId}`));
-        assert(
-          content.includes(
-            `kato-recordingIds: [${output.activeRecordingCycleId}]`,
-          ),
-        );
+        assert(/^id: [a-z0-9-]+-[a-z0-9]{6}$/.test(idLine));
+        assertEquals(content.includes("kato-recordingIds:"), false);
         assert(content.includes("Before capture"));
         assert(content.includes("After capture"));
         assert(content.includes("# User_2026-02-22_1100_00"));
@@ -2456,8 +2448,8 @@ Deno.test(
         setStateDir(result.stateDir);
 
         const content = await Deno.readTextFile(destination);
-        assert(content.includes("kato-sessionIds: [session-1]"));
-        assert(content.includes(`kato-workspaceIds: [${TEST_WORKSPACE_ID}]`));
+        assertEquals(content.includes("kato-sessionIds:"), false);
+        assertEquals(content.includes("kato-workspaceIds:"), false);
         assertEquals(content.includes("kato-recordingIds:"), false);
         assert(content.includes("Before export"));
         assert(content.includes("After export"));

@@ -930,7 +930,15 @@ Deno.test(
       );
       assertStringIncludes(
         await Deno.readTextFile(configPath),
-        "includeSessionIds: true",
+        "includeSessionIds: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeWorkspaceIds: false",
+      );
+      assertStringIncludes(
+        await Deno.readTextFile(configPath),
+        "includeRecordingIds: false",
       );
 
       const { code: registerCode, harness: registerHarness } =

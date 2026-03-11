@@ -4,6 +4,7 @@ import { join } from "@std/path";
 
 const DEFAULT_LOG_TAIL_BYTES = 4 * 1024 * 1024;
 const DEFAULT_LOG_PAGE_LIMIT = 200;
+export const DEFAULT_LOG_LEVEL_FILTER: LogLevelFilter = "warn";
 
 export type LogScope = "daemon" | "web";
 export type LogChannel = LogRecord["channel"];
@@ -29,7 +30,7 @@ export interface LoadLogEntriesOptions {
 }
 
 export interface LogPageData {
-  channel: LogChannel;
+  channel: LogChannelFilter;
   scope: LogScopeFilter;
   level: LogLevelFilter;
   eventFilter?: string;
@@ -55,7 +56,20 @@ function matchesLevel(
   if (!level || level === "all") {
     return true;
   }
-  return entry.level === level;
+  return levelPriority(entry.level) >= levelPriority(level);
+}
+
+function levelPriority(level: LogLevel): number {
+  switch (level) {
+    case "debug":
+      return 0;
+    case "info":
+      return 1;
+    case "warn":
+      return 2;
+    case "error":
+      return 3;
+  }
 }
 
 function matchesEvent(
@@ -260,7 +274,7 @@ export async function loadLogEntries(
 
 export async function loadLogPageData(
   options: {
-    channel: LogChannel;
+    channel?: LogChannelFilter;
     scope?: LogScopeFilter;
     level?: LogLevelFilter;
     eventFilter?: string;
@@ -270,13 +284,14 @@ export async function loadLogPageData(
     katoDir?: string;
   },
 ): Promise<LogPageData> {
+  const channel = options.channel ?? "all";
   const scope = options.scope ?? "all";
-  const level = options.level ?? "all";
+  const level = options.level ?? DEFAULT_LOG_LEVEL_FILTER;
   const eventFilter = normalizeFilter(options.eventFilter);
   const textFilter = normalizeFilter(options.textFilter);
   const limit = options.limit ?? DEFAULT_LOG_PAGE_LIMIT;
   const filtered = await collectFilteredLogEntries({
-    channel: options.channel,
+    channel,
     scope,
     level,
     eventFilter,
@@ -286,7 +301,7 @@ export async function loadLogPageData(
   });
 
   return {
-    channel: options.channel,
+    channel,
     scope,
     level,
     eventFilter,

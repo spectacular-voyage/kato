@@ -164,7 +164,9 @@ Deno.test(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
       );
-      assertEquals(first.markdownFrontmatter.includeSessionIds, true);
+      assertEquals(first.markdownFrontmatter.includeSessionIds, false);
+      assertEquals(first.markdownFrontmatter.includeWorkspaceIds, false);
+      assertEquals(first.markdownFrontmatter.includeRecordingIds, false);
 
       const firstStat = await Deno.stat(configPath);
       const firstMtimeMs = firstStat.mtime?.getTime() ?? Date.now();

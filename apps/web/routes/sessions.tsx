@@ -1,14 +1,34 @@
 import { Head } from "fresh/runtime";
 import AppHeader from "../src/app_header.tsx";
 import {
-  type ActivityState,
   activityStateDot,
   activityStateLabel,
-  recordingActivityStateLabel,
 } from "../src/loaders/activity_state.ts";
+import { ingestPersistedSession } from "../src/session_ingestion.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
-import { loadSessionsPageData } from "../src/loaders/sessions.ts";
+import {
+  loadSessionsPageData,
+  type SessionActivityRow,
+  type SessionIngestionAction,
+  type SessionsPageData,
+} from "../src/loaders/sessions.ts";
+import { createWebLoggers } from "../src/logging.ts";
+import {
+  buildIngestionSessionHref,
+  buildSessionInventoryHref,
+} from "../src/session_routes.ts";
 import { define } from "../utils.ts";
+
+function decodeMessage(value: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 function formatTimestamp(value: string | undefined): string {
   if (!value) {
@@ -21,35 +41,61 @@ function formatTimestamp(value: string | undefined): string {
   return parsed.toLocaleString();
 }
 
-function buildSessionsHref(
-  options: { includeStale: boolean; workspaceFilter?: string },
+function buildSessionListStateLabel(row: SessionActivityRow): string {
+  if (row.state !== "inactive") {
+    return activityStateLabel(row.state);
+  }
+  switch (row.ingestionAction) {
+    case "start":
+      return "not ingested";
+    case "continue":
+      return "continue ingestion";
+    case "none":
+      return row.canOpenIngestView ? "idle" : "not ingested";
+  }
+}
+
+function ingestionActionLabel(action: SessionIngestionAction): string {
+  switch (action) {
+    case "start":
+      return "start ingestion";
+    case "continue":
+      return "continue ingestion";
+    case "none":
+      return "";
+  }
+}
+
+function buildPageTitle(
+  workspaceAlias: string | undefined,
+  workspaceId: string | undefined,
 ): string {
-  const url = new URL("http://kato.local/sessions");
+  const workspaceLabel = workspaceAlias ?? workspaceId;
+  return workspaceLabel ? `Sessions for ${workspaceLabel}` : "Sessions";
+}
+
+function buildCountSummary(options: {
+  includeStale: boolean;
+  activeSessionCount: number;
+  staleSessionCount: number;
+  inactiveSessionCount: number;
+}): string {
   if (!options.includeStale) {
-    url.searchParams.set("view", "active");
+    return `Active: ${options.activeSessionCount}`;
   }
-  if (options.workspaceFilter) {
-    url.searchParams.set("workspace", options.workspaceFilter);
-  }
-  return `${url.pathname}${url.search}`;
+  return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Not ingested: ${options.inactiveSessionCount}`;
 }
 
-function recordingState(
-  state: "engaged-active" | "engaged-stale" | "stopped",
-): ActivityState {
-  switch (state) {
-    case "engaged-active":
-      return "active";
-    case "engaged-stale":
-      return "stale";
-    case "stopped":
-      return "inactive";
-  }
-}
-
-export default define.page(async function SessionsPage(ctx) {
-  const includeStale = ctx.url.searchParams.get("view") !== "active";
-  const workspaceFilter = ctx.url.searchParams.get("workspace")?.trim() ||
+async function loadSessionsViewData(url: URL): Promise<{
+  appStatus: Awaited<ReturnType<typeof loadAppChromeStatus>>;
+  pageData: SessionsPageData;
+  heading: string;
+  countSummary: string;
+  notice?: string;
+  error?: string;
+}> {
+  const includeStale = url.searchParams.get("view") !== "active";
+  const workspaceFilter = url.searchParams.get("workspace")?.trim() ||
     undefined;
   const [pageData, appStatus] = await Promise.all([
     loadSessionsPageData({
@@ -58,7 +104,33 @@ export default define.page(async function SessionsPage(ctx) {
     }),
     loadAppChromeStatus(),
   ]);
+  return {
+    appStatus,
+    pageData,
+    heading: buildPageTitle(
+      pageData.workspaceFilterAlias,
+      pageData.workspaceFilterId,
+    ),
+    countSummary: buildCountSummary({
+      includeStale: pageData.includeStale,
+      activeSessionCount: pageData.activeSessionCount,
+      staleSessionCount: pageData.staleSessionCount,
+      inactiveSessionCount: pageData.inactiveSessionCount,
+    }),
+    notice: decodeMessage(url.searchParams.get("notice")),
+    error: decodeMessage(url.searchParams.get("error")),
+  };
+}
 
+function SessionsView(props: {
+  appStatus: Awaited<ReturnType<typeof loadAppChromeStatus>>;
+  pageData: SessionsPageData;
+  heading: string;
+  countSummary: string;
+  notice?: string;
+  error?: string;
+  csrfToken?: string;
+}) {
   return (
     <>
       <Head>
@@ -67,145 +139,167 @@ export default define.page(async function SessionsPage(ctx) {
       <div class="shell">
         <AppHeader
           title="Sessions"
-          description="Integrated session and recording view built from the live snapshot plus persistent session metadata."
+          description="Discovered chat-session inventory with current ingestion status and links into operational ingestion details."
           currentPath="/sessions"
           showLogout
-          appStatus={appStatus}
+          appStatus={props.appStatus}
         />
+
+        {props.notice ? <p class="notice-banner ok">{props.notice}</p> : null}
+        {props.error ? <p class="notice-banner danger">{props.error}</p> : null}
 
         <section class="grid">
           <article class="card span-12">
             <div class="page-toolbar">
               <div>
-                <h2>Session Activity</h2>
+                <h2>{props.heading}</h2>
+                {props.pageData.workspaceFilterId
+                  ? (
+                    <p class="page-toolbar-summary muted mono">
+                      Workspace: {props.pageData.workspaceFilterId}
+                    </p>
+                  )
+                  : null}
                 <p class="page-toolbar-summary muted mono">
-                  Active: {pageData.activeSessionCount}, Idle:{" "}
-                  {pageData.staleSessionCount}, Off:{" "}
-                  {pageData.inactiveSessionCount}
-                  {pageData.workspaceFilter
-                    ? ` · Workspace: ${pageData.workspaceFilter}`
-                    : ""}
+                  {props.countSummary}
                 </p>
               </div>
               <div class="page-actions">
                 <a
-                  class={pageData.includeStale
+                  class={props.pageData.includeStale
                     ? "secondary-button current-filter"
                     : "secondary-button"}
-                  href={buildSessionsHref({
+                  href={buildSessionInventoryHref({
                     includeStale: true,
-                    workspaceFilter: pageData.workspaceFilter,
+                    workspaceFilter: props.pageData.workspaceFilter,
                   })}
                 >
                   All Sessions
                 </a>
                 <a
-                  class={!pageData.includeStale
+                  class={!props.pageData.includeStale
                     ? "secondary-button current-filter"
                     : "secondary-button"}
-                  href={buildSessionsHref({
+                  href={buildSessionInventoryHref({
                     includeStale: false,
-                    workspaceFilter: pageData.workspaceFilter,
+                    workspaceFilter: props.pageData.workspaceFilter,
                   })}
                 >
                   Active Only
                 </a>
-                {pageData.workspaceFilter
+                {props.pageData.workspaceFilter
                   ? (
-                    <a class="secondary-button" href="/sessions">
+                    <a
+                      class="secondary-button"
+                      href={buildSessionInventoryHref({
+                        includeStale: props.pageData.includeStale,
+                      })}
+                    >
                       Clear Workspace Filter
                     </a>
                   )
                   : null}
               </div>
             </div>
-            <ul class="session-activity-list">
-              {pageData.rows.length === 0
+
+            <ul class="session-list-rows">
+              {props.pageData.rows.length === 0
                 ? (
                   <li class="muted">
                     No sessions match the current filters.
                   </li>
                 )
-                : pageData.rows.map((row) => (
+                : props.pageData.rows.map((row) => (
                   <li
                     key={row.sessionKey}
-                    class="session-activity-row"
-                    id={`session-${row.sessionId}`}
+                    class={`session-list-row ${row.state}`}
                   >
-                    <div class="session-activity-top">
-                      <div class="session-activity-copy">
-                        <div class="mono session-activity-title">
-                          <span
-                            class={`activity-state-dot ${row.state}`}
-                            aria-hidden="true"
-                          >
-                            {activityStateDot(row.state)}
+                    <div class="session-list-action">
+                      <span
+                        class={`activity-state-dot session-list-dot ${row.state}`}
+                        aria-label={buildSessionListStateLabel(row)}
+                        title={buildSessionListStateLabel(row)}
+                      >
+                        {activityStateDot(row.state)}
+                      </span>
+                    </div>
+                    {!row.canOpenIngestView
+                      ? (
+                        <span class="session-list-copy">
+                          <span class="session-list-primary">
+                            <span class="mono">{row.provider}:</span>{" "}
+                            <strong>{row.snippet ?? "(no snippet)"}</strong>
+                            {" "}
+                            <span class="mono">({row.sessionShortId})</span>
                           </span>{" "}
-                          {row.provider}:{" "}
-                          <strong class="session-activity-snippet">
-                            {row.snippet ?? "(no snippet)"}
-                          </strong>{" "}
-                          ({row.sessionShortId})
-                        </div>
-                      </div>
-                      <div class="session-activity-meta">
-                        <div class={`mono activity-state-text ${row.state}`}>
-                          {activityStateLabel(row.state)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="muted session-activity-details">
-                      Updated {formatTimestamp(row.updatedAt)} · Last event{" "}
-                      {formatTimestamp(row.lastEventAt)}
-                    </div>
-
-                    <ul class="recording-list">
-                      {row.recordings.length === 0
+                          <span class="muted mono session-list-updated">
+                            Updated {formatTimestamp(row.updatedAt)}
+                          </span>
+                        </span>
+                      )
+                      : (
+                        <a
+                          class="session-list-link"
+                          href={buildIngestionSessionHref(row.sessionId, {
+                            includeStale: props.pageData.includeStale,
+                            workspaceFilter: props.pageData.workspaceFilter,
+                          })}
+                        >
+                          <span class="session-list-copy">
+                            <span class="session-list-primary">
+                              <span class="mono">{row.provider}:</span>{" "}
+                              <strong>{row.snippet ?? "(no snippet)"}</strong>
+                              {" "}
+                              <span class="mono">({row.sessionShortId})</span>
+                            </span>{" "}
+                            <span class="muted mono session-list-updated">
+                              Updated {formatTimestamp(row.updatedAt)}
+                            </span>
+                          </span>
+                        </a>
+                      )}
+                    <div class="session-list-right">
+                      {row.ingestionAction !== "none"
                         ? (
-                          <li class="muted">
-                            No recordings associated with this session.
-                          </li>
+                          <form
+                            method="post"
+                            class="session-list-action-form"
+                          >
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="start-ingestion"
+                            />
+                            <input
+                              type="hidden"
+                              name="csrfToken"
+                              value={props.csrfToken ?? ""}
+                            />
+                            <input
+                              type="hidden"
+                              name="sessionId"
+                              value={row.sessionId}
+                            />
+                            <input
+                              type="hidden"
+                              name="includeStale"
+                              value={String(props.pageData.includeStale)}
+                            />
+                            <input
+                              type="hidden"
+                              name="workspaceFilter"
+                              value={props.pageData.workspaceFilter ?? ""}
+                            />
+                            <button
+                              type="submit"
+                              class="mono session-inline-action"
+                            >
+                              {ingestionActionLabel(row.ingestionAction)}
+                            </button>
+                          </form>
                         )
-                        : row.recordings.map((recording) => {
-                          const uiState = recordingState(recording.state);
-                          return (
-                            <li key={recording.key} class="recording-row">
-                              <div class="recording-row-top">
-                                <div class="mono recording-state-line">
-                                  <span
-                                    class={`activity-state-dot ${uiState}`}
-                                    aria-hidden="true"
-                                  >
-                                    {activityStateDot(uiState)}
-                                  </span>
-                                  <span>
-                                    {recordingActivityStateLabel(uiState)}
-                                  </span>
-                                </div>
-                                <div class="muted mono">
-                                  workspace: {recording.workspaceAlias ??
-                                    recording.workspaceId ??
-                                    "unresolved"}
-                                </div>
-                              </div>
-                              <div class="mono recording-path">
-                                {recording.outputPath}
-                              </div>
-                              <div class="muted">
-                                Started {formatTimestamp(recording.startedAt)}
-                                {uiState === "inactive"
-                                  ? ` · Stopped ${
-                                    formatTimestamp(recording.stoppedAt)
-                                  }`
-                                  : ` · Last write ${
-                                    formatTimestamp(recording.lastWriteAt)
-                                  }`}
-                              </div>
-                            </li>
-                          );
-                        })}
-                    </ul>
+                        : null}
+                    </div>
                   </li>
                 ))}
             </ul>
@@ -214,4 +308,65 @@ export default define.page(async function SessionsPage(ctx) {
       </div>
     </>
   );
+}
+
+export const handler = define.handlers({
+  async POST(ctx) {
+    const form = await ctx.req.formData();
+    const action = String(form.get("action") ?? "");
+    const includeStale = String(form.get("includeStale") ?? "true") !== "false";
+    const workspaceFilter = String(form.get("workspaceFilter") ?? "").trim() ||
+      undefined;
+    const redirectUrl = new URL(
+      buildSessionInventoryHref({
+        includeStale,
+        workspaceFilter,
+      }),
+      ctx.req.url,
+    );
+    const { operationalLogger, auditLogger } = createWebLoggers();
+
+    try {
+      if (action !== "start-ingestion") {
+        return new Response("unsupported sessions action", { status: 400 });
+      }
+
+      const sessionId = String(form.get("sessionId") ?? "").trim();
+      if (sessionId.length === 0) {
+        throw new Error("Session id is required");
+      }
+
+      const result = await ingestPersistedSession({
+        sessionId,
+        operationalLogger,
+        auditLogger,
+      });
+      const notice = result.appendedTwinEvents > 0
+        ? `ingestion completed: ${result.provider} (${result.sessionShortId})`
+        : result.parsedEvents > 0
+        ? `ingestion already current: ${result.provider} (${result.sessionShortId})`
+        : `no ingestable events found: ${result.provider} (${result.sessionShortId})`;
+      redirectUrl.searchParams.set("notice", notice);
+      return Response.redirect(redirectUrl, 303);
+    } catch (error) {
+      await operationalLogger.error(
+        "web.sessions.mutation.failed",
+        "Session mutation failed",
+        {
+          action,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      redirectUrl.searchParams.set(
+        "error",
+        error instanceof Error ? error.message : String(error),
+      );
+      return Response.redirect(redirectUrl, 303);
+    }
+  },
+});
+
+export default define.page(async function SessionsPage(ctx) {
+  const viewData = await loadSessionsViewData(ctx.url);
+  return <SessionsView {...viewData} csrfToken={ctx.state.csrfToken} />;
 });

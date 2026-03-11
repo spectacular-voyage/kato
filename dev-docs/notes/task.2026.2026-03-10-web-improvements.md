@@ -2,7 +2,7 @@
 id: knni6qed989b0v7qnia1fcv
 title: 2026 03 10 Web Improvements
 desc: ''
-updated: 1773187255322
+updated: 1773188494256
 created: 1773183637761
 ---
 
@@ -17,8 +17,8 @@ created: 1773183637761
 ## Sessions page
 
 - Current "Session Activity" becomes "Session Ingest", only lists active or idle twin generation
-- Separate "Session List" pill lists all dicovered sessions, highlighting ones that are active in green and idle in yellow.
-- probably have to clarify links into this page, and elsewhere (summary) differentiate between session ingest and sesion.
+- Separate "Session List" pill lists all discovered sessions, highlighting ones that are active in green and idle in yellow.
+- probably have to clarify links into this page, and elsewhere (summary) differentiate between session ingest and sesions.
 
 ## Workspace Page 
 

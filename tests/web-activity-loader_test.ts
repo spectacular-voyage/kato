@@ -1,15 +1,19 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { basename, join } from "@std/path";
 import {
   createDefaultSharedBehaviorConfig,
+  createDefaultUserConfig,
   createDefaultWorkspaceWriterFeatureFlags,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   PersistentSessionStateStore,
   resolveDefaultSharedConfigPath,
+  resolveDefaultUserConfigPath,
   resolveDefaultWorkspaceRegistryPath,
   SharedBehaviorConfigFileStore,
+  UserConfigFileStore,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
+import { loadRecordingsPageData } from "../apps/web/src/loaders/recordings.ts";
 import { loadSessionsPageData } from "../apps/web/src/loaders/sessions.ts";
 import { loadWorkspacesPageData } from "../apps/web/src/loaders/workspaces.ts";
 import { withLockedEnvironment } from "./test_env.ts";
@@ -44,7 +48,7 @@ function makeWorkspaceOutput(options: {
     desiredState: options.desiredState,
     currentDestination: {
       kind: "workspace-relative" as const,
-      relativePathFromWorkspaceRoot: "notes/output.md",
+      relativePathFromWorkspaceRoot: `notes/${basename(options.resolvedPath)}`,
     },
     currentResolvedPath: options.resolvedPath,
     sourceConfigPath: options.configPath,
@@ -221,25 +225,58 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(data.staleSessionCount, 1);
         assertEquals(data.inactiveSessionCount, 0);
         assertEquals(data.activeRecordingCount, 1);
-        assertEquals(data.stoppedRecordingCount, 1);
         assertEquals(data.staleRecordingCount, 1);
+        assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.rows[0]?.sessionId, "sess-live");
         assertEquals(data.rows[0]?.state, "active");
         assertEquals(data.rows[0]?.recordings[0]?.state, "engaged-active");
+        assertEquals(
+          data.rows[0]?.recordings[0]?.displayOutputPath,
+          "notes/alpha.md",
+        );
         assertEquals(
           data.rows[0]?.recordings[0]?.lastWriteAt,
           "2026-03-07T15:59:30.000Z",
         );
         assertEquals(data.rows[1]?.sessionId, "sess-stale");
         assertEquals(data.rows[1]?.state, "stale");
+        assertEquals(data.rows[1]?.recordings.length, 1);
         assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-stale");
-        assertEquals(data.rows[1]?.recordings[1]?.state, "stopped");
+        assertEquals(
+          data.rows[1]?.recordings[0]?.displayOutputPath,
+          "notes/beta.md",
+        );
+        assertEquals(
+          data.rows[1]?.recordings[0]?.workspaceHref,
+          "/workspaces#workspace-ws-beta",
+        );
 
         const filtered = await loadSessionsPageData({
           workspaceFilter: "ws-beta",
         });
         assertEquals(filtered.sessionCount, 1);
         assertEquals(filtered.rows[0]?.sessionId, "sess-stale");
+
+        const recordings = await loadRecordingsPageData();
+        assertEquals(recordings.activeRecordingCount, 1);
+        assertEquals(recordings.staleRecordingCount, 1);
+        assertEquals(recordings.stoppedRecordingCount, 1);
+        assertEquals(recordings.rows.length, 3);
+        assertEquals(recordings.rows[2]?.state, "stopped");
+        assertEquals(recordings.rows[2]?.recordingCycleId, "cycle-old");
+        assertEquals(recordings.rows[2]?.displayOutputPath, "notes/beta.md");
+
+        const staleRecordings = await loadRecordingsPageData({
+          stateFilter: "engaged-stale",
+        });
+        assertEquals(staleRecordings.activeRecordingCount, 1);
+        assertEquals(staleRecordings.staleRecordingCount, 1);
+        assertEquals(staleRecordings.stoppedRecordingCount, 1);
+        assertEquals(staleRecordings.rows.length, 1);
+        assertEquals(
+          staleRecordings.rows[0]?.displayOutputPath,
+          "notes/beta.md",
+        );
       });
     } finally {
       restoreRuntimeEnv(env);
@@ -304,6 +341,16 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           allowedWriteRoots: [alphaRoot, betaRoot],
         });
         await sharedConfigStore.save(sharedConfig);
+        const userConfigStore = new UserConfigFileStore(
+          resolveDefaultUserConfigPath(),
+        );
+        await userConfigStore.save(
+          createDefaultUserConfig({
+            workspaceUsernames: {
+              "ws-beta": "beta-user",
+            },
+          }),
+        );
 
         const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
         const betaOutputPath = join(betaRoot, "notes", "beta.md");
@@ -403,16 +450,22 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         assertEquals(alphaRow.staleRecordingCount, 0);
         assertEquals(alphaRow.stoppedRecordingCount, 0);
         assertEquals(alphaRow.writePathCovered, true);
+        assertEquals(
+          alphaRow.recordings[0]?.displayOutputPath,
+          "notes/alpha.md",
+        );
         assertEquals(betaRow.activeRecordingCount, 1);
         assertEquals(betaRow.staleRecordingCount, 0);
-        assertEquals(betaRow.stoppedRecordingCount, 1);
+        assertEquals(betaRow.stoppedRecordingCount, 0);
         assertEquals(betaRow.writePathCovered, true);
+        assertEquals(betaRow.workspaceUsername, "beta-user");
         assertEquals(alphaRow.recordings[0]?.sessionId, "sess-mixed");
         assertEquals(betaRow.recordings[0]?.state, "engaged-active");
-        assertEquals(betaRow.recordings[1]?.state, "stopped");
+        assertEquals(betaRow.recordings.length, 1);
+        assertEquals(betaRow.recordings[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
           alphaRow.recordings[0]?.sessionLink,
-          "/sessions?workspace=ws-alpha#session-sess-mixed",
+          "/ingestion?workspace=ws-alpha#session-sess-mixed",
         );
       });
     } finally {

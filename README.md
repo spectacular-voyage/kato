@@ -247,12 +247,10 @@ Default paths:
 Session metadata is authoritative; `shared/daemon-control.json` is a rebuildable
 cache index. `kato-daemon-config.yaml` is daemon-only process config.
 `kato-shared-config.yaml` owns shared policy and plain export defaults.
-`kato-cli-config.yaml` is CLI-local settings (currently logging).
-`~/.kato` is runtime/config/session state, not a workspace output root.
+`kato-cli-config.yaml` is CLI-local settings (currently logging). `~/.kato` is
+runtime/config/session state, not a workspace output root.
 
-Captured/exported
-conversation files are written to registered workspace roots.
-
+Captured/exported conversation files are written to registered workspace roots.
 
 ## Runtime Config
 
@@ -348,9 +346,9 @@ markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true
   includeUpdatedInFrontmatter: false
   addParticipantUsernameToFrontmatter: false
-  includeSessionIds: true
-  includeWorkspaceIds: true
-  includeRecordingIds: true
+  includeSessionIds: false
+  includeWorkspaceIds: false
+  includeRecordingIds: false
   includeConversationEventKinds: false
 workspaceFeatureFlags:
   writerIncludeCommentary: true

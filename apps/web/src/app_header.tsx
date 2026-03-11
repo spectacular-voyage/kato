@@ -11,10 +11,11 @@ interface AppHeaderProps {
 
 const NAV_ITEMS = [
   { href: "/", label: "Summary" },
+  { href: "/ingestion", label: "Ingestion" },
   { href: "/sessions", label: "Sessions" },
+  { href: "/recordings", label: "Recordings" },
   { href: "/workspaces", label: "Workspaces" },
-  { href: "/operational", label: "Operational" },
-  { href: "/security", label: "Security" },
+  { href: "/logs", label: "Logs" },
   { href: "/settings", label: "Settings" },
   { href: "/maintenance", label: "Maintenance" },
 ];
@@ -27,10 +28,21 @@ export default function AppHeader(props: AppHeaderProps) {
   return (
     <section class="app-header">
       <div class="app-header-top">
-        <div class="app-header-copy">
-          <p class="mono muted app-eyebrow">kato operator console</p>
-          <h1>{props.title}</h1>
-          <p class="app-description">{props.description}</p>
+        <div class="app-header-identity">
+          <a class="brand-link" href="/" aria-label="Kato Web home">
+            <img
+              class="brand-logo"
+              src="/brand/logo"
+              alt="Kato logo"
+              width="56"
+              height="56"
+            />
+          </a>
+          <div class="app-header-copy">
+            <p class="mono muted app-eyebrow">kato operator console</p>
+            <h1>{props.title}</h1>
+            <p class="app-description">{props.description}</p>
+          </div>
         </div>
         {(props.appStatus || props.showLogout)
           ? (

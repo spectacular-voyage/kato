@@ -231,7 +231,7 @@ function summarizeSessionGenerationState(
   let inactive = 0;
 
   for (const row of sessionActivityRows) {
-    switch (deriveSessionGenerationState(row, runtimeConfig)) {
+    switch (row.state) {
       case "active":
         active += 1;
         break;

@@ -1,5 +1,6 @@
 import {
   isPathWithinRoots,
+  loadUserSettings,
   resolveDefaultKatoDir,
   resolveDefaultSharedConfigPath,
   SharedBehaviorConfigFileStore,
@@ -11,6 +12,7 @@ import {
   type WorkspaceSummaryRow,
 } from "./status.ts";
 import { loadSessionActivityRows } from "./sessions.ts";
+import { buildIngestionSessionHref } from "../session_routes.ts";
 
 export interface WorkspaceRecordingEntry {
   key: string;
@@ -20,6 +22,7 @@ export interface WorkspaceRecordingEntry {
   sessionShortId: string;
   snippet?: string;
   outputPath: string;
+  displayOutputPath: string;
   startedAt?: string;
   stoppedAt?: string;
   lastWriteAt?: string;
@@ -27,6 +30,7 @@ export interface WorkspaceRecordingEntry {
 }
 
 export interface WorkspaceManagementRow extends WorkspaceSummaryRow {
+  workspaceUsername?: string;
   writePathCovered?: boolean;
   activeRecordingCount: number;
   staleRecordingCount: number;
@@ -40,10 +44,6 @@ export interface WorkspacesPageData {
   rows: WorkspaceManagementRow[];
   allowedWriteRoots: string[];
   sharedConfigError?: string;
-}
-
-function toSessionAnchor(sessionId: string): string {
-  return `session-${sessionId}`;
 }
 
 function resolveRecordingActivityTimestamp(
@@ -66,10 +66,14 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
   const sharedConfigStore = new SharedBehaviorConfigFileStore(
     resolveDefaultSharedConfigPath(katoDir),
   );
-  const [workspaceSummary, sessionRows] = await Promise.all([
+  const [workspaceSummary, sessionRows, userSettings] = await Promise.all([
     loadWorkspaceSummary(),
     loadSessionActivityRows({ katoDir, includeStale: true }),
+    loadUserSettings({ katoDir }),
   ]);
+  const workspaceUsernames = new Map(
+    Object.entries(userSettings.config.participants.workspaceUsernames),
+  );
   const recordingsByWorkspace = new Map<string, WorkspaceRecordingEntry[]>();
 
   for (const session of sessionRows) {
@@ -85,12 +89,13 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
         sessionShortId: session.sessionShortId,
         snippet: session.snippet,
         outputPath: recording.outputPath,
+        displayOutputPath: recording.displayOutputPath,
         startedAt: recording.startedAt,
         stoppedAt: recording.stoppedAt,
         lastWriteAt: recording.lastWriteAt,
-        sessionLink: `/sessions?workspace=${
-          encodeURIComponent(recording.workspaceId)
-        }#${toSessionAnchor(session.sessionId)}`,
+        sessionLink: buildIngestionSessionHref(session.sessionId, {
+          workspaceFilter: recording.workspaceId,
+        }),
       };
       const existing = recordingsByWorkspace.get(recording.workspaceId) ?? [];
       existing.push(row);
@@ -122,6 +127,7 @@ export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
         recordings[0]?.startedAt;
       return {
         ...row,
+        workspaceUsername: workspaceUsernames.get(row.workspaceId),
         writePathCovered: allowedWriteRoots
           ? isPathWithinRoots(row.workspaceRoot, allowedWriteRoots)
           : undefined,
