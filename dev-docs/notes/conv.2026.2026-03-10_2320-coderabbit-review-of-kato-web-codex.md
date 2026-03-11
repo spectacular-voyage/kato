@@ -298,3 +298,362 @@ scoping correctly.
 Also tighten CLI web init/stop behavior, improve default config handling,
 and add regression coverage for the review issues.
 ```
+
+# djradon_2026-03-10_2352_32
+
+Did you evaluate all these:
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/runtime/src/web/mod.ts`:
+- Around line 289-313: The launchDetached method is marked async but doesn't use
+await; remove the async modifier from the launchDetached declaration so it
+returns the Promise<number> from launchDetachedViaPowerShell or
+launchDetachedViaShell directly; keep the signature return type Promise<number>
+and retain the existing calls to launchDetachedViaPowerShell(args, webAppRoot)
+and launchDetachedViaShell(args, webAppRoot).
+
+In `@apps/web/islands/IngestionLive.tsx`:
+- Around line 62-71: The header countSummary is computed from pageData totals
+while the rendered list uses rows (filtered by row.canOpenIngestView), so the
+toolbar can show counts that don't match the visible sessions; fix by deriving
+the active/stale counts from the filtered rows before calling buildCountSummary
+(e.g., compute filteredActive = rows.filter(r => r.isActive).length and
+filteredStale = rows.filter(r => r.isStale).length or otherwise compute based on
+the same predicates used for page totals), then call buildCountSummary with
+includeStale: pageData.includeStale, activeSessionCount: filteredActive,
+staleSessionCount: filteredStale so countSummary matches the rendered rows.
+
+In `@apps/web/islands/RecordingsLive.tsx`:
+- Around line 131-136: The Clear Workspace Filter link currently navigates to a
+hard reset "/recordings", dropping the user's Active/Idle/Stopped selection;
+update the anchor to preserve the current state filter (e.g. use
+pageData.stateFilter or pageData.statusFilter) by building the href to include
+that query param (for example "/recordings?state=...") or by merging current
+search params (encode the value and only append when present) so clicking the
+link clears workspaceFilter but keeps the state selection; change the link in
+RecordingsLive.tsx (the element referencing pageData.workspaceFilter)
+accordingly.
+
+In `@apps/web/islands/SummaryLive.tsx`:
+- Around line 23-31: The timestamp rendering is non-deterministic because
+formatTimestamp uses date.toLocaleString(), which varies between SSR and client;
+change formatTimestamp to return a deterministic representation (for example use
+date.toISOString() or date.toUTCString() or format with Intl.DateTimeFormat
+using a fixed locale/timeZone) instead of toLocaleString(), and apply the same
+change to the equivalent timestamp rendering functions/components in
+SessionsLive, RecordingsLive, IngestionLive, and WorkspacesLive so
+server-rendered HTML matches client hydration.
+
+In `@apps/web/routes/login.tsx`:
+- Around line 12-18: The login route currently returns the raw `error` from
+`loadWebConfigState()` to unauthenticated clients; instead, stop exposing
+internal error details: inside the block where `if (!config)` is handled (the
+Response creation in routes/login.tsx), log the `error` to the server logger
+(e.g., `console.error` or the app logger) including context, and replace the
+Response body sent to the client with a generic message like "Kato Web is
+unconfigured. Run `kato web init --username <username> --password <password>`."
+while keeping the 503 status; ensure `loadWebConfigState()` and the `error`
+variable are referenced so you only change that response path.
+
+In `@apps/web/src/loaders/sessions.ts`:
+- Around line 586-647: The session rows are computing activeRecordingCount,
+staleRecordingCount and stoppedRecordingCount from the full recordings array
+(built by buildRecordingRows) but only later filtering sessions by
+resolvedWorkspaceFilter; change the logic so you first apply the workspace
+filter to recordings (using resolvedWorkspaceFilter.workspaceId) to produce a
+filteredRecordings array, then compute activeRecordingCount, staleRecordingCount
+and stoppedRecordingCount from filteredRecordings and use filteredRecordings as
+the recordings field and in the final session inclusion predicate; keep the
+existing use of includeStale and resolveSessionIngestionUiState/state derivation
+but ensure counts and the recordings list are based on the workspace-filtered
+recordings.
+
+In `@apps/web/src/log_page.tsx`:
+- Around line 278-291: Update the level filter chip visibility to use the same
+constant as the rest of the code: replace the check props.pageData.level !==
+"all" with props.pageData.level !== DEFAULT_LOG_LEVEL_FILTER so the chip
+visibility aligns with hasResettableFilters and the earlier check at line 198;
+locate the conditional rendering around the filter chip that references
+props.pageData.level and use DEFAULT_LOG_LEVEL_FILTER instead.
+
+In `@tests/web-launcher_test.ts`:
+- Around line 42-44: The test currently calls
+Deno.realPathSync(resolve(expectedWebRoot, "node_modules", ".bin", "vite"))
+which binds it to a real local install; change the test to not require an actual
+binary: either (A) inject a stubbed vite path into the DenoDetachedWebLauncher
+test fixture (e.g., pass a fake vite path string and assert the command uses
+that string) or (B) avoid calling Deno.realPathSync and instead assert the
+constructed command/args structure (from the code that builds the launcher
+command) by comparing the path segments returned by resolve or by mocking
+Deno.realPathSync to return a controlled value; update references to
+expectedVitePath and any assertions to use the injected/mock value so the test
+is hermetic.
+
+---
+
+Duplicate comments:
+In `@apps/web/routes/workspaces.tsx`:
+- Around line 28-74: Validate the CSRF token at the start of the POST handler
+before performing either mutation: inside async POST(ctx) read the submitted
+token (e.g., const submitted = String(form.get("csrfToken") ?? "")) and compare
+it to ctx.state.csrfToken; if they do not match, stop and return an
+error/forbidden response so neither registerWorkspace nor unregisterWorkspace is
+called. Ensure this check runs before the branches that handle action ===
+"register" and action === "unregister" so both mutation calls are protected.
+
+In `@apps/web/src/session_ingestion.ts`:
+- Around line 75-79: The persisted byte-offset cursor (metadata.ingestCursor)
+must be clamped to the current file size before parsing to avoid starting past
+EOF and writing back a stale cursor; before calling resolveParser/starting
+parse, compute fileStat = await Deno.stat(metadata.sourceFilePath) (already
+present) and if the resolved fromPosition.offset (or equivalent property
+returned by resolveCursorPosition) is greater than fileStat.size, set
+fromPosition.offset (and latestCursor) to fileStat.size (or construct a new
+cursor at EOF) so the parser (resolveParser/parse logic) begins at EOF rather
+than a past-EOF offset and incomingEvents and latestCursor are updated with the
+clamped value.
+
+---
+
+Nitpick comments:
+In @.github/workflows/ci.yml:
+- Around line 24-27: The CI step titled "Install web app npm dependencies"
+currently runs "deno install" without caching; add a cache step using
+actions/cache@v3 (or equivalent) before that step to restore and save the npm
+cache (e.g., ~/.npm and/or apps/web/node_modules) keyed on OS plus a hash of
+apps/web/package-lock.json or apps/web/package.json, and ensure the install step
+uses the cached restore (use npm ci or npm install as appropriate) so
+dependencies are reused across runs and the cache is saved after installation.
+
+In `@apps/web/routes/login.tsx`:
+- Around line 57-71: The username and password inputs in the login form are
+missing autocomplete attributes needed for autofill; update the input with
+id/name "username" to include autocomplete="username" and update the input with
+id/name "password" to include autocomplete="current-password" (preserving
+required/type attributes and class names) so browsers and password managers can
+reliably fill the fields.
+
+In `@apps/web/src/log_results.tsx`:
+- Around line 9-15: The formatTimestamp function uses
+Date.prototype.toLocaleString which can differ between server and client and
+cause SSR hydration mismatches; update formatTimestamp to produce deterministic
+output by using Intl.DateTimeFormat with explicit locale and options (or a fixed
+ISO/UTC format) instead of toLocaleString, e.g. create an Intl.DateTimeFormat
+instance with chosen locale and options inside or outside the function and
+format parsed, and ensure the function still returns the original value when
+parsing fails; alternatively, if you prefer client-only formatting, leave a
+server-safe placeholder from formatTimestamp and perform final formatting in the
+client lifecycle.
+
+In `@tests/web-live-routes_test.ts`:
+- Around line 113-116: The fixture uses a mix of wall-clock-derived timestamps
+(now, nowIso, recentIso) and hard-coded March 7, 2026 timestamps for seeded
+sessions/logs which causes inconsistent freshness expectations; change
+setupLiveRouteFixture so all fixture timestamps (including the seeded session
+and log timestamps) are derived from a single base time variable (e.g., now or
+baseTime) and compute the March 7 equivalents relative to that base (or replace
+them with offsets like nowIso and recentIso) so status snapshot, session, and
+log timestamps are driven from the same source.
+- Around line 342-348: The test currently only checks counts
+(workspaceSummary.rows.length, workspacesData.rows.length,
+workspacesData.allowedWriteRoots.length) which won't catch wrong or duplicate
+rows; update the assertions to verify concrete workspace identities and
+allowedWriteRoots by asserting the expected workspaceId values and the exact
+allowedWriteRoots arrays from workspacesData.rows and
+summaryData.workspaceSummary.rows (e.g., check each row's workspaceId and
+allowedWriteRoots entries) instead of only lengths, using the existing variables
+chromeData, summaryData, workspacesData and their fields workspaceSummary.rows,
+workspacesData.rows, and allowedWriteRoots to locate where to add the stricter
+checks.
+- Around line 105-111: The helper assertNoStore should fail fast on non-OK or
+non-JSON responses: update assertNoStore to first assert the response.status is
+200 (or use Response.ok) and then assert the content-type header exists and
+matches a JSON media type (e.g., startsWith "application/json" or includes
+"application/json;"), keeping the existing check for cache-control equaling
+LIVE_JSON_CACHE_CONTROL; reference the helper function assertNoStore and the
+constant LIVE_JSON_CACHE_CONTROL when making these changes.
+
+In `@tests/web-session-ingestion_test.ts`:
+- Around line 42-77: The test duplicates temp-home setup, status.json creation,
+and runtime config initialization; extract this into a shared helper (e.g., a
+new async function bootstrapTestRuntime or setupRuntimeBootstrap) that performs:
+creating katoDir/runtimeDir/sharedDir, writing the status.json, and calling
+RuntimeConfigFileStore.ensureInitialized with createDefaultRuntimeConfig using
+the same options (runtimeDir, katoDir, globalAutoGenerateSnapshots,
+providerAutoGenerateSnapshots). Replace the inlined blocks in tests (the snippet
+using join(homeDir, ".kato") and the RuntimeConfigFileStore creation) with calls
+to that helper so both locations (lines ~42-77 and ~157-192) reuse the same
+setup.
+
+# gpt-5.4_2026-03-10_2352_38
+
+I’m verifying each review item against the current branch so I can give you an exact fixed/skipped answer rather than a hand-wave.
+
+# gpt-5.4_2026-03-10_2352_52
+
+I’ve got the branch-wide signal. I’m opening the few borderline items so I can separate “fixed”, “already covered elsewhere”, and “not changed” precisely.
+
+# gpt-5.4_2026-03-10_2352_56
+
+I’ve confirmed the changed items. I’m checking the two duplicate comments you called out so I can explain why I didn’t patch them directly in those files.
+
+# gpt-5.4_2026-03-10_2353_25
+
+Yes. I triaged every item in that pasted list against the current branch.
+
+Fixed:
+- `launchDetached` non-async cleanup in [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- Ingestion toolbar counts based on the same filtered rows that render in [IngestionLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/IngestionLive.tsx)
+- “Clear Workspace Filter” preserving the state filter in [RecordingsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx)
+- Deterministic timestamp formatting across the live islands and logs via [time.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/time.ts)
+- Generic unconfigured login error plus server-side logging in [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx)
+- Workspace-filtered session recording counts in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts)
+- Log level chip using `DEFAULT_LOG_LEVEL_FILTER` in [log_page.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_page.tsx)
+- Hermetic web launcher test in [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts)
+- Login form autocomplete attrs in [login.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/login.tsx)
+- Log timestamp determinism in [log_results.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/log_results.tsx)
+- `assertNoStore` stricter response checks plus stronger workspace identity assertions in [web-live-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-live-routes_test.ts)
+- Cursor clamping before parse in [session_ingestion.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_ingestion.ts)
+
+Evaluated but intentionally not changed:
+- Direct CSRF check inside [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx): skipped because authenticated non-`GET`/`HEAD` requests are already blocked centrally in [main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/main.ts) unless same-origin and CSRF-valid.
+- CI npm cache in [ci.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml): left as a nit, not a correctness issue.
+- Timestamp normalization refactor in [web-live-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-live-routes_test.ts): left alone because the strengthened assertions covered the real regression risk.
+- Test bootstrap helper extraction in [web-session-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-ingestion_test.ts): left alone as a refactor-only suggestion.
+
+So yes: nothing in that list was ignored. The only ones I didn’t patch were the ones I judged redundant or purely cleanup.
+
+# djradon_2026-03-10_2354_55
+
+And did you get the previous ones, like:
+
+Verify each finding against the current code and only fix it if needed.
+
+In `@apps/cli/src/commands/web.ts` around lines 172 - 182, After sending SIGTERM
+with Deno.kill(status.pid, "SIGTERM"), do not immediately call
+ctx.webStatusStore.save(... running: false ...); instead poll for the child to
+actually exit (e.g., loop using Deno.kill(status.pid, 0) to test liveness or
+attempt an OS-specific check), with a reasonable timeout and fallback (e.g.,
+escalate to SIGKILL or abort marking stopped). Only after the liveness check
+confirms the PID no longer exists (or the timeout/kill escalation completes)
+call ctx.webStatusStore.save to set running: false; keep references to Deno.kill
+and ctx.webStatusStore.save so you update the existing logic paths.
+
+and 
+
+Verify each finding against the current code and only fix it if needed.
+
+In `@apps/cli/src/router.ts` around lines 521 - 528, The code eagerly calls
+webConfig = await webConfigStore.load() in the top-level CLI router so any
+unreadable/missing web config can break unrelated commands; change this to lazy
+loading by removing the unconditional load and instead call
+webConfigStore.load() (handling Deno.errors.NotFound) only inside handlers that
+need webConfig (e.g., the commands that reference webConfig or call
+webConfigConsumer functions), or add a helper like getWebConfig() that performs
+the try/catch and returns undefined on NotFound and invoke that helper only
+where required; ensure references to webConfig in functions are updated to await
+getWebConfig() or accept webConfig as an optional parameter so unrelated
+commands no longer depend on the optional file.
+
+# gpt-5.4_2026-03-10_2354_58
+
+Yes.
+
+The `web stop` review item was fixed in [web.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/web.ts). It no longer marks the web process stopped immediately after `SIGTERM`; it waits for actual exit, with timeout/escalation behavior, and only then writes `running: false` to the status store.
+
+The eager web-config load item was also fixed in [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts). The router no longer unconditionally loads web config up front, so unrelated commands don’t fail just because web config is unreadable or absent. Only the commands that actually need web config load it.
+
+Those were both included in the verification pass and covered by the CLI test run I mentioned earlier.
+
+# djradon_2026-03-10_2356_32
+
+CI/quality gate is failing. Can you evaluate Copilot's suggested options:
+
+The job is failing because the test suite is running **without env permissions**, but multiple web-related tests read and set `KATO_WEB_PASSWORD` via `Deno.env.*`.
+
+The log shows the first failure clearly:
+
+- `NotCapable: Requires env access to "KATO_WEB_PASSWORD", run again with the --allow-env flag`
+- Stack points to `tests/web-cli_test.ts:90:10`, inside `withWebPasswordEnv()` where it calls `Deno.env.get("KATO_WEB_PASSWORD")`.
+
+## Fix: allow env access during CI tests
+
+Update the CI workflow to run tests with `--allow-env` (or `-E`) so `Deno.env.get/set/delete` works.
+
+**.github/workflows/ci.yml** (at `2761dee65cf90ff2ad1c2cc77df382b5669b083a`) currently runs:
+
+```yaml
+- name: Run tests with coverage
+  run: deno task test:coverage --frozen
+```
+
+### Option A (recommended): add env permission to the test task in `deno.json`
+If your `deno task test:coverage` ultimately calls `deno test`, add `--allow-env` (or `-E`) there so it works locally and in CI consistently.
+
+Example change (in `deno.json` / `deno.jsonc` task definition):
+```jsonc
+{
+  "tasks": {
+    "test:coverage": "deno test -E --coverage=coverage"
+  }
+}
+```
+
+### Option B: pass permissions from CI (minimal workflow-only change)
+If you don’t want to change task definitions, modify the CI command to include env permission in whatever underlying test invocation your task supports.
+
+For example, if `test:coverage` forwards args to `deno test`, you can do:
+```yaml
+- name: Run tests with coverage
+  run: deno task test:coverage --frozen -- -E
+```
+
+(If your task does *not* forward args, Option A is the reliable fix.)
+
+## Why this is the correct fix (based on the failing code)
+`tests/web-cli_test.ts` defines:
+
+- `withWebPasswordEnv()` which calls `Deno.env.get/set/delete` (see lines 86–103; the crash is at line 91).
+- Multiple tests wrap execution in `withWebPasswordEnv("secret-pass", ...)` (e.g. around lines 156+, 193+, 294+), so without `--allow-env` you’ll get exactly this failure.
+
+Once env access is allowed, these tests should proceed normally and the job should stop failing for the `NotCapable` env-permission reason.
+
+# gpt-5.4_2026-03-10_2356_38
+
+I’m checking the test task definitions and the failing web tests to see whether the env-permission diagnosis is actually correct and where the cleanest fix belongs.
+
+# gpt-5.4_2026-03-10_2356_47
+
+The diagnosis is close but not quite right: the test task already runs with `--allow-env`, just with a whitelist that does not include `KATO_WEB_PASSWORD`. I’m checking whether that is the only missing env var before I recommend a narrower fix.
+
+# gpt-5.4_2026-03-10_2356_50
+
+I reproduced the failure mode locally with the current coverage command and I’m waiting on the second run with `KATO_WEB_PASSWORD` added to confirm that the whitelist is the only break.
+
+# gpt-5.4_2026-03-10_2356_58
+
+The clean fix is in the task definition, not the workflow. I’m updating the env whitelist to include `KATO_WEB_PASSWORD` for both `test` and `test:coverage`, then I’ll rerun the failing coverage command shape.
+
+# gpt-5.4_2026-03-10_2357_05
+
+The permission scope is patched narrowly. I’m re-running the same coverage-style command that failed before to confirm the whitelist change fixes it without broadening CI permissions further.
+
+# gpt-5.4_2026-03-10_2357_19
+
+Copilot’s diagnosis was directionally right but imprecise.
+
+The suite is not running without env permissions. It already uses `--allow-env=...`; the actual failure is that `KATO_WEB_PASSWORD` was missing from that whitelist in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json).
+
+I fixed that by adding `KATO_WEB_PASSWORD` to both `test` and `test:coverage` in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json).
+
+Option evaluation:
+- Option A: correct place to fix it, but not by broadening to `-E`. The better change is to keep the explicit allowlist and add `KATO_WEB_PASSWORD`.
+- Option B: not ideal. It’s workflow-only, more permissive than needed, and may not reliably propagate through the existing task shape. It also leaves local `deno task test` inconsistent with CI.
+
+Verification:
+- I reproduced the failure with the old whitelist.
+- I reran the same coverage-style command with `KATO_WEB_PASSWORD` included, and `tests/web-cli_test.ts` passed `6/6`.
+
+So the right fix is the narrow `deno.json` update, not a CI workflow change.
