@@ -74,16 +74,16 @@ Current top-level web routes are:
   island, backed by `loadSummaryPageData()` and `/api/summary`.
 - `/ingestion`: operational ingest view for provider-session ingestion state
   and the latest recording per destination, backed by
-  `loadSessionsPageData()`.
+  `loadSessionsPageData()` and `/api/ingestion`.
 - `/sessions`: full discovered chat-session inventory, also backed by
-  `loadSessionsPageData()`, with manual `start ingestion` /
-  `continue ingestion` actions.
+  `loadSessionsPageData()` and `/api/sessions`, with manual
+  `start ingestion` / `continue ingestion` actions.
 - `/recordings`: flattened recording history across sessions and workspaces,
-  backed by `loadRecordingsPageData()`.
+  backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister plus workspace-level recording
-  rollups, backed by `loadWorkspacesPageData()`.
+  rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/logs`: combined daemon + web operational/security log view with shared
-  filter semantics, backed by `loadLogPageData()`.
+  filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.
 - `/maintenance`: guided cleanup workflows for logs and old derived session
   artifacts.
@@ -95,10 +95,13 @@ Supporting web files worth knowing:
   handlers.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/ingestion`, `/sessions`, and session anchor links.
-- `apps/web/routes/api/summary.ts`: currently the only shipped live JSON
-  endpoint.
-- `apps/web/src/summary_api.ts`: shared no-store response helper for the Summary
-  API.
+- `apps/web/src/live_routes.ts`: shared live JSON handlers for
+  `/api/chrome-status`, `/api/summary`, `/api/ingestion`, `/api/sessions`,
+  `/api/recordings`, `/api/workspaces`, and `/api/logs`.
+- `apps/web/routes/api/*`: thin route entrypoints that delegate to
+  `apps/web/src/live_routes.ts`.
+- `apps/web/src/api_response.ts`: shared no-store response helper for live JSON
+  endpoints.
 
 ## Default Filesystem Layout
 
@@ -217,7 +220,7 @@ graph TD
 | Area                | Primary responsibility                                                                             | Key modules                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status        | `apps/cli/src/*`                                       |
-| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows     | `apps/web/{routes,islands,src}/*`                      |
+| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows      | `apps/web/{routes,islands,src}/*`                      |
 | Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                | `apps/runtime/src/orchestrator/launcher.ts`            |
 | Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                            | `apps/daemon/src/main.ts`                              |
 | Control plane       | Persist/list/mark control requests, persist/load status snapshots                                  | `apps/runtime/src/orchestrator/control_plane.ts`       |

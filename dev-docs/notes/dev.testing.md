@@ -96,6 +96,9 @@ Current local timings from 2026-03-06:
 - `deno task test:coverage --frozen --quiet`: `492` passing tests, `80.9%` line
   coverage, `85.2%` branch coverage, `8.94s` real
 
+Treat those numbers as a dated baseline, not a contract. Refresh this block
+after material test-count or runtime changes land.
+
 Current coverage-report caveat:
 
 - `deno coverage --detailed .test-tmp/coverage/root` currently warns that some

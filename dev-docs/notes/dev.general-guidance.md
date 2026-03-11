@@ -31,7 +31,7 @@ see [[dev.testing]]
   change it.
 - Keep monorepo boundaries clear:
   - `apps/daemon` for local runtime behavior
-  - `apps/web` for read-only status surfaces
+  - `apps/web` for local operator surfaces, live status views, and bounded guided workflows
   - `apps/cloud` for centralized config/aggregation services
   - `shared/src` for contracts and types used by 2+ apps
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
@@ -133,4 +133,3 @@ deno task ci
   `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
   `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
   control commands, and must be ignored by LLMs.
-
