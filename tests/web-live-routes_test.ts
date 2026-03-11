@@ -555,6 +555,27 @@ Deno.test("session snippet API reconstructs a snippet from persisted source hist
   });
 });
 
+Deno.test("session snippet API rejects missing sessionId with a no-store error payload", async () => {
+  const response = await getSessionSnippetResponse(
+    new URL("http://kato.local/api/session-snippet?sessionId=%20%20"),
+  );
+
+  assertEquals(response.status, 400);
+  assertEquals(
+    response.headers.get("cache-control"),
+    "no-store, no-cache, must-revalidate",
+  );
+
+  const payload = await response.json() as {
+    sessionId: string;
+    status: string;
+    error?: string;
+  };
+  assertEquals(payload.sessionId, "");
+  assertEquals(payload.status, "unavailable");
+  assertEquals(payload.error, "sessionId is required");
+});
+
 Deno.test("logs API preserves channel, scope, level, event, and text filters", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();

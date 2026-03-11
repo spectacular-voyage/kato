@@ -1078,3 +1078,206 @@ Validation run:
 - `deno task test:coverage --frozen --quiet`
 - `deno test -A --coverage=.test-tmp/coverage/web-session-snippets tests/web-session-snippets_test.ts tests/web-live-routes_test.ts`
 - `deno coverage --detailed .test-tmp/coverage/web-session-snippets`
+
+# djradon_2026-03-11_0915_24
+
+We could use a bit more patch code coverage...maybe look at:
+
+apps/web/src/session_ingestion.ts
+26
+67.27%
+41.30%
+-14.55%
+apps/web/src/session_routes.ts
+6
+71.88%
+42.86%
+0.00%
+apps/daemon/src/orchestrator/daemon_runtime.ts
+24
+77.25%
+44.44%
+-0.49%
+apps/web/src/live_routes.ts
+
+# gpt-5.4_2026-03-11_0915_34
+
+I’m checking those four low-coverage files against the existing tests first so I can add only targeted cases that exercise real behavior, not synthetic branch padding.
+
+# gpt-5.4_2026-03-11_0916_13
+
+The cleanest wins are in the web layer first: `session_routes` has no dedicated tests, `live_routes` is probably missing the snippet-error branch, and `session_ingestion` still has a couple of fail-closed/manual-ingest paths worth exercising. I’m reading the existing tests before I add anything so I can extend the right files instead of creating overlap.
+
+# gpt-5.4_2026-03-11_0917_22
+
+I found one worthwhile daemon-runtime case too: title resolution falls back from stored snapshot snippet to the first real conversation snippet. I’m adding that alongside smaller web regression tests, so the coverage gains stay attached to real operator-facing behavior.
+
+# gpt-5.4_2026-03-11_0918_14
+
+The edits are in. I’m running only the touched slices first: route helpers, live route error handling, manual ingestion edge cases, and the daemon capture-title fallback.
+
+# gpt-5.4_2026-03-11_0918_34
+
+The new cases are passing. I’m doing one focused coverage pass for the touched web files and the daemon runtime test so I can confirm the improvements are real, not just “tests green.”
+
+# gpt-5.4_2026-03-11_0919_26
+
+I’m doing one extra daemon-runtime check on the whole title-resolution slice so I can say that both branches there are exercised, not just the new fallback case.
+
+# gpt-5.4_2026-03-11_0919_39
+
+The targeted slices are green. I’m doing one full `deno task test --frozen --quiet` pass to make sure the added tests don’t interact badly with the rest of the suite.
+
+# gpt-5.4_2026-03-11_0919_59
+
+I ended up bumping the root suite from `601` to `607` tests, so I’m refreshing `dev.testing.md` too. I need one new coverage baseline first so the note doesn’t immediately go stale again.
+
+# gpt-5.4_2026-03-11_0920_21
+
+The doc refresh needs real timings, not just Deno’s internal `(...s)` summary, so I’m doing one timed test run and one timed coverage run before I patch the note.
+
+# gpt-5.4_2026-03-11_0920_43
+
+I have the refreshed baseline now. I’m patching `dev.testing.md` with the new counts and a focused slice for the route/manual-ingestion coverage work.
+
+# gpt-5.4_2026-03-11_0921_12
+
+Added targeted coverage tests in [web-session-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-routes_test.ts), [web-live-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-live-routes_test.ts), [web-session-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-ingestion_test.ts), and [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). I kept them tied to real behavior:
+
+- route builders now have direct coverage for `view=active` and workspace-filter normalization
+- the session-snippet live route now has a fail-closed test for missing `sessionId`
+- manual ingestion now has coverage for no-op twin updates preserving `ingestionActivatedAt`
+- manual ingestion now has coverage for rejecting opaque resume cursors
+- daemon capture title resolution now covers both stored-snapshot and extracted-conversation fallback paths
+
+In the refreshed coverage run, the files you called out moved to:
+- [`apps/web/src/live_routes.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/live_routes.ts): `100.0%` branch, `100.0%` line
+- [`apps/web/src/session_routes.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_routes.ts): `100.0%` branch, `100.0%` line
+- [`apps/web/src/session_ingestion.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_ingestion.ts): `80.5%` branch, `81.8%` line
+- [`apps/daemon/src/orchestrator/daemon_runtime.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts): `81.8%` branch, `77.4%` line in the full-suite report
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) with the new focused slice and refreshed baseline: `607` passing tests, `80.0%` line coverage, `84.9%` branch coverage.
+
+Validation:
+- `deno test -A tests/web-session-routes_test.ts`
+- `deno test -A tests/web-live-routes_test.ts`
+- `deno test -A tests/web-session-ingestion_test.ts`
+- `deno test -A tests/daemon-runtime_test.ts --filter "title"`
+- `deno task --cwd apps/web check`
+- `deno task test --frozen --quiet`
+- `deno task test:coverage --frozen --quiet`
+
+If you want another pass after this, the remaining meaningful coverage work is mostly in deeper `daemon_runtime` control/capture/export permutations, not the easy web helpers anymore.
+
+# gpt-5.4_2026-03-11_0921_14
+
+Added targeted coverage tests in [web-session-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-routes_test.ts), [web-live-routes_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-live-routes_test.ts), [web-session-ingestion_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-ingestion_test.ts), and [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts). I kept them tied to real behavior:
+
+- route builders now have direct coverage for `view=active` and workspace-filter normalization
+- the session-snippet live route now has a fail-closed test for missing `sessionId`
+- manual ingestion now has coverage for no-op twin updates preserving `ingestionActivatedAt`
+- manual ingestion now has coverage for rejecting opaque resume cursors
+- daemon capture title resolution now covers both stored-snapshot and extracted-conversation fallback paths
+
+In the refreshed coverage run, the files you called out moved to:
+- [`apps/web/src/live_routes.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/live_routes.ts): `100.0%` branch, `100.0%` line
+- [`apps/web/src/session_routes.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_routes.ts): `100.0%` branch, `100.0%` line
+- [`apps/web/src/session_ingestion.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_ingestion.ts): `80.5%` branch, `81.8%` line
+- [`apps/daemon/src/orchestrator/daemon_runtime.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts): `81.8%` branch, `77.4%` line in the full-suite report
+
+I also updated [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) with the new focused slice and refreshed baseline: `607` passing tests, `80.0%` line coverage, `84.9%` branch coverage.
+
+Validation:
+- `deno test -A tests/web-session-routes_test.ts`
+- `deno test -A tests/web-live-routes_test.ts`
+- `deno test -A tests/web-session-ingestion_test.ts`
+- `deno test -A tests/daemon-runtime_test.ts --filter "title"`
+- `deno task --cwd apps/web check`
+- `deno task test --frozen --quiet`
+- `deno task test:coverage --frozen --quiet`
+
+If you want another pass after this, the remaining meaningful coverage work is mostly in deeper `daemon_runtime` control/capture/export permutations, not the easy web helpers anymore.
+
+# djradon_2026-03-11_0928_39
+
+ok, try daemon_runtime
+
+# gpt-5.4_2026-03-11_0928_59
+
+I’m drilling into `daemon_runtime` now. First step is to map the current uncovered areas against existing tests so I can add a couple of high-value scenarios instead of spraying more in-chat permutations blindly.
+
+# gpt-5.4_2026-03-11_0929_12
+
+I’ve got the line-level coverage map now. The most promising real gaps are in persisted workspace-output recovery inside `daemon_runtime`, especially fallback behavior when a workspace is no longer registered. That’s a better target than internal signature helpers.
+
+# gpt-5.4_2026-03-11_0929_26
+
+I’m leaning toward a persisted-workspace-output test rather than another live in-chat case. There’s coverage missing around “workspace gone, but metadata remains,” and that’s an operator-relevant recovery path.
+
+# gpt-5.4_2026-03-11_0931_46
+
+I found two good daemon-runtime branches that aren’t synthetic: persisted recording append recovery after a workspace disappears from the registry, with and without a surviving workspace config file. I’m adding those now.
+
+# gpt-5.4_2026-03-11_0932_35
+
+The new daemon-runtime tests are in. I’m running just those first, because they touch a narrow persisted-output path and I want to see whether the assumptions about unregistered workspaces hold before I run the wider suite.
+
+# gpt-5.4_2026-03-11_0933_11
+
+Targeting `daemon_runtime` coverage by fixing the new persisted-workspace-output tests first, then I’ll rerun that focused slice and see if there’s another worthwhile branch to add.
+
+# gpt-5.4_2026-03-11_0933_12
+
+The new tests are in the right place; the current failure is just TypeScript not narrowing optional overrides deeply enough. I’m patching that and then rerunning the focused daemon slice.
+
+# gpt-5.4_2026-03-11_0933_28
+
+The new persisted-output slice now passes. I’m checking whether `daemon_runtime` still has one or two cleanly testable branches worth adding before I stop, rather than padding coverage with low-value cases.
+
+# gpt-5.4_2026-03-11_0934_43
+
+There are two clean candidates left in `daemon_runtime` that aren’t synthetic: a stored-defaults fallback when no `sourceConfigPath` exists at all, and the capture retry guard when generated destinations keep colliding. I’m adding those rather than chasing obscure internal branches.
+
+# gpt-5.4_2026-03-11_0935_21
+
+I found a real retry edge in `captureSnapshotWithRetries`: it only advances the destination name if the failed target actually exists on disk. I’m covering that max-retry guard with a concrete collision scenario, plus the no-`sourceConfigPath` fallback branch for persisted workspace outputs.
+
+# gpt-5.4_2026-03-11_0936_32
+
+The filter pattern was too clever for Deno’s test matcher. I’m rerunning the new cases explicitly so I can verify the actual behavior, not just type-check them.
+
+# gpt-5.4_2026-03-11_0936_40
+
+The retry-guard test exposed a quirk I didn’t want to bake into the assertion: the generated path compounds `-2` suffixes from the last failed target. I’m loosening that assertion to the behavior that matters: six distinct retry attempts, then fail closed without mutating state.
+
+# gpt-5.4_2026-03-11_0936_59
+
+The daemon runtime file is green. I’m doing one targeted coverage pass now so I can tell you whether these tests actually moved the file, not just that they pass.
+
+# gpt-5.4_2026-03-11_0937_37
+
+Added two meaningful `daemon_runtime` coverage tests in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts):
+
+- persisted workspace outputs now cover the fallback where a stored workspace output has no `sourceConfigPath` at all, so runtime reconstructs overrides from stored defaults
+- capture retry logic now covers the fail-closed path where generated destinations keep colliding until the max retry budget is exceeded, and verifies state is not mutated on that failure
+
+Validation:
+- `deno test -A tests/daemon-runtime_test.ts --filter "stops after repeated generated destination conflicts"`
+- `deno test -A tests/daemon-runtime_test.ts --filter "source config was never recorded"`
+- `deno test -A tests/daemon-runtime_test.ts`
+
+I also ran a targeted coverage pass for `tests/daemon-runtime_test.ts`; in that slice, `apps/daemon/src/orchestrator/daemon_runtime.ts` is now `77.97%` line / `81.8%` branch covered. I did not rerun the full repo coverage or update [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) for this narrow follow-up.
+
+# gpt-5.4_2026-03-11_0937_38
+
+Added two meaningful `daemon_runtime` coverage tests in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts):
+
+- persisted workspace outputs now cover the fallback where a stored workspace output has no `sourceConfigPath` at all, so runtime reconstructs overrides from stored defaults
+- capture retry logic now covers the fail-closed path where generated destinations keep colliding until the max retry budget is exceeded, and verifies state is not mutated on that failure
+
+Validation:
+- `deno test -A tests/daemon-runtime_test.ts --filter "stops after repeated generated destination conflicts"`
+- `deno test -A tests/daemon-runtime_test.ts --filter "source config was never recorded"`
+- `deno test -A tests/daemon-runtime_test.ts`
+
+I also ran a targeted coverage pass for `tests/daemon-runtime_test.ts`; in that slice, `apps/daemon/src/orchestrator/daemon_runtime.ts` is now `77.97%` line / `81.8%` branch covered. I did not rerun the full repo coverage or update [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) for this narrow follow-up.

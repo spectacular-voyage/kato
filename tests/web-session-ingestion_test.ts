@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
@@ -410,6 +410,200 @@ Deno.test("ingestPersistedSession recreates a missing twin from source start ins
         const twinEvents = await store.readTwinEvents(reloaded, 1);
         assertEquals(twinEvents.length > 0, true);
         assertEquals(twinEvents[0]?.seq, 1);
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("ingestPersistedSession keeps existing activation when an up-to-date twin has no new events", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-session-ingestion-noop-update-", async (
+        homeDir,
+      ) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const runtimeDir = join(katoDir, "daemon");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(runtimeDir, { recursive: true });
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const configStore = new RuntimeConfigFileStore(
+          join(runtimeDir, "kato-daemon-config.yaml"),
+        );
+        await configStore.ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir,
+            katoDir,
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
+              claude: false,
+              codex: false,
+              gemini: false,
+            },
+          }),
+        );
+
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-kato-005",
+        });
+        const sessionFilePath = join(homeDir, "provider-session-noop.jsonl");
+        await copyFixtureWithMtime(
+          sessionFilePath,
+          "2026-03-11T10:00:00.000Z",
+        );
+        await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "provider-session-5",
+          sourceFilePath: sessionFilePath,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+
+        const firstResult = await ingestPersistedSession({
+          sessionId: "sess-kato-005",
+          katoDir,
+          now: () => new Date("2026-03-11T10:05:00.000Z"),
+        });
+        assertEquals(firstResult.twinAction, "create");
+        assertEquals(firstResult.appendedTwinEvents > 0, true);
+
+        const afterFirstIngest = (await store.listSessionMetadata())[0];
+        assertExists(afterFirstIngest);
+        const firstActivatedAt = afterFirstIngest.ingestionActivatedAt;
+        const firstNextTwinSeq = afterFirstIngest.nextTwinSeq;
+        const firstCursor = afterFirstIngest.ingestCursor;
+
+        const secondResult = await ingestPersistedSession({
+          sessionId: "sess-kato-005",
+          katoDir,
+          now: () => new Date("2026-03-11T10:06:00.000Z"),
+        });
+
+        assertEquals(secondResult.twinAction, "update");
+        assertEquals(secondResult.parsedEvents, 0);
+        assertEquals(secondResult.appendedTwinEvents, 0);
+        assertEquals(secondResult.droppedAsDuplicate, 0);
+
+        const reloaded = (await store.listSessionMetadata())[0];
+        assertExists(reloaded);
+        assertEquals(reloaded.ingestionActivatedAt, firstActivatedAt);
+        assertEquals(reloaded.nextTwinSeq, firstNextTwinSeq);
+        assertEquals(reloaded.ingestCursor, firstCursor);
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("ingestPersistedSession rejects opaque cursors when update twins would need resume", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-session-ingestion-opaque-", async (
+        homeDir,
+      ) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const runtimeDir = join(katoDir, "daemon");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(runtimeDir, { recursive: true });
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const configStore = new RuntimeConfigFileStore(
+          join(runtimeDir, "kato-daemon-config.yaml"),
+        );
+        await configStore.ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir,
+            katoDir,
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
+              claude: false,
+              codex: false,
+              gemini: false,
+            },
+          }),
+        );
+
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-kato-006",
+        });
+        const sessionFilePath = join(homeDir, "provider-session-opaque.jsonl");
+        await copyFixtureWithMtime(
+          sessionFilePath,
+          "2026-03-11T10:00:00.000Z",
+        );
+        const metadata = await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "provider-session-6",
+          sourceFilePath: sessionFilePath,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        metadata.ingestCursor = { kind: "opaque", value: "resume-token" };
+        metadata.nextTwinSeq = 2;
+        await store.saveSessionMetadata(metadata);
+        await Deno.writeTextFile(metadata.twinPath, "");
+
+        await assertRejects(
+          () =>
+            ingestPersistedSession({
+              sessionId: "sess-kato-006",
+              katoDir,
+              now: () => new Date("2026-03-11T10:05:00.000Z"),
+            }),
+          Error,
+          "Opaque ingestion cursors cannot be resumed manually",
+        );
       });
     } finally {
       restoreRuntimeEnv(env);

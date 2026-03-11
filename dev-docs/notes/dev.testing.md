@@ -121,6 +121,25 @@ If you want per-file coverage confirmation for that helper, run:
 That focused coverage run currently drives
 `apps/web/src/session_snippets.ts` to `100%` branch and `100%` line coverage.
 
+When working on session inventory/manual-ingestion route behavior, the most
+useful focused slice is:
+
+- `deno test -A tests/web-session-routes_test.ts`
+- `deno test -A tests/web-live-routes_test.ts`
+- `deno test -A tests/web-session-ingestion_test.ts`
+- `deno test -A tests/daemon-runtime_test.ts --filter "title"`
+- `deno task --cwd apps/web check`
+
+That slice now covers:
+
+- session and maintenance href builders normalizing `view=active` and trimmed
+  workspace filters
+- the session-snippet live route failing closed when `sessionId` is missing
+- manual ingestion preserving `ingestionActivatedAt` on no-op twin updates
+- manual ingestion rejecting opaque resume cursors instead of guessing
+- daemon capture title fallback from stored snapshot snippet to extracted
+  conversation snippet
+
 ## Coverage Workflow
 
 1. Generate a fresh raw coverage profile:
@@ -137,9 +156,9 @@ directory.
 
 Current local timings from 2026-03-11:
 
-- `deno task test --frozen --quiet`: `601` passing tests, `10.32s` real
-- `deno task test:coverage --frozen --quiet`: `601` passing tests, `79.8%` line
-  coverage, `84.7%` branch coverage, `11.84s` real
+- `deno task test --frozen --quiet`: `607` passing tests, `12.88s` real
+- `deno task test:coverage --frozen --quiet`: `607` passing tests, `80.0%` line
+  coverage, `84.9%` branch coverage, `14.17s` real
 
 Treat those numbers as a dated baseline, not a contract. Refresh this block
 after material test-count or runtime changes land.
