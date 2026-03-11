@@ -1371,3 +1371,47 @@ Validation:
 - `deno test -A tests/provider-ingestion_test.ts`
 - `deno test -A tests/daemon-runtime_test.ts`
 - `deno task check`
+
+# djradon_2026-03-11_1154_49
+
+Please draft a release note into release-notes.v0.2.3.md
+
+# gpt-5.4_2026-03-11_1154_56
+
+I’m reviewing the existing release-note format and the completed twins/session changes, then I’ll draft `v0.2.3` directly into the note.
+
+# gpt-5.4_2026-03-11_1155_08
+
+I’ve got the shape. I’m drafting `v0.2.3` as the follow-on release focused on the session/twin split, maintenance-driven twin management, on-demand snippets, and the cleanup/validation hardening that followed.
+
+# gpt-5.4_2026-03-11_1155_45
+
+Drafting `v0.2.3` from the recent twin/session changes and the follow-up hardening. I’m pulling the current release-note format and the two task notes so the new note stays aligned with what actually shipped.
+
+# gpt-5.4_2026-03-11_1155_52
+
+I have the release themes pinned down now. I’m updating the empty `v0.2.3` note to cover the twin/session split, the Maintenance move, the on-demand snippet model, and the cleanup/config upgrade notes that operators actually need.
+
+# gpt-5.4_2026-03-11_1155_55
+
+Editing `release-notes.v0.2.3.md` now. I’m also correcting the frontmatter title so the note isn’t still labeled `v0.2.2`.
+
+# gpt-5.4_2026-03-11_1156_15
+
+The draft is in place. I’m doing a quick readback for formatting and wording so the release note lands cleanly and matches the existing notes style.
+
+# gpt-5.4_2026-03-11_1156_16
+
+Drafted [`release-notes.v0.2.3.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.3.md) and corrected its frontmatter title to `Release Notes v0.2.3`.
+
+The note covers the main shipped themes: the session/twin split, moving twin management into `Maintenance`, on-demand snippet reveal, `clean --twins` plus `--delete-metadata`, and the config rename to `*AutoGenerateTwins` with no backward-compatibility.
+
+I didn’t run tests since this was a docs-only change.
+
+# gpt-5.4_2026-03-11_1156_18
+
+Drafted [`release-notes.v0.2.3.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.3.md) and corrected its frontmatter title to `Release Notes v0.2.3`.
+
+The note covers the main shipped themes: the session/twin split, moving twin management into `Maintenance`, on-demand snippet reveal, `clean --twins` plus `--delete-metadata`, and the config rename to `*AutoGenerateTwins` with no backward-compatibility.
+
+I didn’t run tests since this was a docs-only change.
