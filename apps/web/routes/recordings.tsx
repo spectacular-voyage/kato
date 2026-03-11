@@ -24,6 +24,7 @@ export default define.page(async function RecordingsPage(ctx) {
           description="Full recording history and live recording status across all discovered sessions."
           currentPath="/recordings"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
         <RecordingsLive

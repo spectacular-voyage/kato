@@ -7,18 +7,8 @@ import type {
   RecordingsPageData,
   RecordingStateFilter,
 } from "../src/loaders/recordings.ts";
+import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
-
-function formatTimestamp(value: string | undefined): string {
-  if (!value) {
-    return "n/a";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
-}
 
 function buildRecordingsHref(
   options: {
@@ -130,7 +120,12 @@ export default function RecordingsLive(
             </a>
             {pageData.workspaceFilter
               ? (
-                <a class="secondary-button" href="/recordings">
+                <a
+                  class="secondary-button"
+                  href={buildRecordingsHref({
+                    stateFilter: pageData.stateFilter,
+                  })}
+                >
                   Clear Workspace Filter
                 </a>
               )

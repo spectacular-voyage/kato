@@ -113,6 +113,17 @@ export async function createSessionCookieValue(
   return `${payload}.${signature}`;
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 export async function isAuthenticatedRequest(
   request: Request,
   config: WebConfig | undefined,
@@ -183,7 +194,7 @@ export async function verifyCsrfToken(
     return false;
   }
   const expected = await createCsrfToken(request, config);
-  return expected !== undefined && token === expected;
+  return expected !== undefined && timingSafeEqual(token, expected);
 }
 
 export async function readCsrfTokenFromRequest(
@@ -210,8 +221,10 @@ export async function readCsrfTokenFromRequest(
 
 export async function setSessionCookie(
   headers: Headers,
+  request: Request,
   config: WebConfig,
 ): Promise<void> {
+  const secure = new URL(request.url).protocol === "https:";
   setCookie(headers, {
     name: config.auth.cookieName,
     value: await createSessionCookieValue(config),
@@ -219,10 +232,16 @@ export async function setSessionCookie(
     httpOnly: true,
     sameSite: "Strict",
     maxAge: SESSION_TTL_SECONDS,
+    secure,
   });
 }
 
-export function clearSessionCookie(headers: Headers, config: WebConfig): void {
+export function clearSessionCookie(
+  headers: Headers,
+  request: Request,
+  config: WebConfig,
+): void {
+  const secure = new URL(request.url).protocol === "https:";
   setCookie(headers, {
     name: config.auth.cookieName,
     value: "",
@@ -230,5 +249,6 @@ export function clearSessionCookie(headers: Headers, config: WebConfig): void {
     httpOnly: true,
     sameSite: "Strict",
     maxAge: 0,
+    secure,
   });
 }

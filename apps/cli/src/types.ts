@@ -26,7 +26,7 @@ export type DaemonCliCommand =
     hostname?: string;
     port?: number;
     username: string;
-    password: string;
+    passwordFromStdin?: boolean;
   }
   | { name: "web-start" }
   | { name: "web-stop" }

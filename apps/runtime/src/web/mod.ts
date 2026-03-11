@@ -286,7 +286,7 @@ $proc = Start-Process -FilePath ${
     });
   }
 
-  async launchDetached(
+  launchDetached(
     options: { hostname: string; port: number },
   ): Promise<number> {
     const webAppRoot = resolveWebAppRoot(this.workspaceRoot);

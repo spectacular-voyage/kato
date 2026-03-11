@@ -7,14 +7,18 @@ import AppHeader from "../src/app_header.tsx";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { define } from "../utils.ts";
 
+const WEB_CONFIG_ERROR_MESSAGE =
+  "Kato Web is unconfigured. Run `kato web init --username <username>` with `KATO_WEB_PASSWORD` set or use `--password-stdin`.";
+
 export const handler = define.handlers({
   async POST(ctx) {
     const { config, error } = await loadWebConfigState();
     if (!config) {
+      if (error) {
+        console.error("Kato Web login config load failed", error);
+      }
       return new Response(
-        error
-          ? `Kato Web config is invalid: ${error}\nRe-run \`kato web init --username <username> --password <password>\` with a fresh config.`
-          : "Kato Web is unconfigured. Run `kato web init --username <username> --password <password>` first.",
+        WEB_CONFIG_ERROR_MESSAGE,
         { status: 503 },
       );
     }
@@ -28,7 +32,7 @@ export const handler = define.handlers({
     }
 
     const headers = new Headers();
-    await setSessionCookie(headers, config);
+    await setSessionCookie(headers, ctx.req, config);
     headers.set("location", "/");
     return new Response(null, { status: 302, headers });
   },
@@ -44,6 +48,7 @@ export default define.page(async function LoginPage(ctx) {
         title="Login"
         description="Authenticate to access conversation data and operator state."
         showLogout
+        csrfToken={ctx.state.csrfToken}
         liveAppStatus={false}
         appStatus={appStatus}
       />
@@ -59,6 +64,7 @@ export default define.page(async function LoginPage(ctx) {
               id="username"
               name="username"
               type="text"
+              autocomplete="username"
               required
             />
             <label class="form-label" for="password">Password</label>
@@ -67,6 +73,7 @@ export default define.page(async function LoginPage(ctx) {
               id="password"
               name="password"
               type="password"
+              autocomplete="current-password"
               required
             />
             <button class="form-button" type="submit">Sign In</button>

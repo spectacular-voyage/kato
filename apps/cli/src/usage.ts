@@ -73,7 +73,8 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   ].join("\n"),
   web: [
     "Usage:",
-    "  kato web init --username <username> --password <password> [--host <hostname>] [--port <port>]",
+    "  KATO_WEB_PASSWORD=<password> kato web init --username <username> [--host <hostname>] [--port <port>]",
+    "  secret-tool read kato/web | kato web init --username <username> --password-stdin [--host <hostname>] [--port <port>]",
     "  kato web start",
     "  kato web stop",
     "  kato web status [--json]",

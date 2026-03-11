@@ -6,6 +6,7 @@ interface AppHeaderProps {
   description: string;
   currentPath?: string;
   showLogout?: boolean;
+  csrfToken?: string;
   liveAppStatus?: boolean;
   appStatus?: {
     daemon: "running" | "stopped";
@@ -54,7 +55,20 @@ export default function AppHeader(props: AppHeaderProps) {
           ? (
             <div class="app-header-side">
               {props.showLogout
-                ? <a class="logout-link" href="/logout">Log Out</a>
+                ? props.csrfToken
+                  ? (
+                    <form method="post" action="/logout" class="inline-form">
+                      <input
+                        type="hidden"
+                        name="csrfToken"
+                        value={props.csrfToken}
+                      />
+                      <button class="logout-link" type="submit">
+                        Log Out
+                      </button>
+                    </form>
+                  )
+                  : null
                 : null}
               {props.appStatus
                 ? liveAppStatus

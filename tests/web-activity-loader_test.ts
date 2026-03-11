@@ -255,7 +255,20 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
           workspaceFilter: "ws-beta",
         });
         assertEquals(filtered.sessionCount, 1);
+        assertEquals(filtered.activeRecordingCount, 0);
+        assertEquals(filtered.staleRecordingCount, 1);
+        assertEquals(filtered.stoppedRecordingCount, 0);
         assertEquals(filtered.rows[0]?.sessionId, "sess-stale");
+        assertEquals(filtered.rows[0]?.activeRecordingCount, 0);
+        assertEquals(filtered.rows[0]?.staleRecordingCount, 1);
+        assertEquals(filtered.rows[0]?.stoppedRecordingCount, 0);
+        assertEquals(filtered.rows[0]?.recordings.length, 1);
+        assertEquals(
+          filtered.rows[0]?.recordings.map((recording) =>
+            recording.workspaceId
+          ),
+          ["ws-beta"],
+        );
 
         const recordings = await loadRecordingsPageData();
         assertEquals(recordings.activeRecordingCount, 1);

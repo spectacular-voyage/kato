@@ -186,6 +186,7 @@ export default define.page(async function MaintenancePage(ctx) {
           description="Run guided truncation for daemon, web, and exports logs on disk, plus cleanup for old derived session artifacts. Dry-run first, then execute with explicit confirmation."
           currentPath="/maintenance"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
 

@@ -595,10 +595,15 @@ export async function loadSessionActivityRows(
   ): Promise<SessionActivityRow> => {
     const live = liveBySessionId.get(metadata.sessionId);
     const recordings = buildRecordingRows(metadata, live, recordingsMode);
-    const activeRecordingCount = recordings.filter((row) =>
+    const filteredRecordings = resolvedWorkspaceFilter
+      ? recordings.filter((row) =>
+        row.workspaceId === resolvedWorkspaceFilter.workspaceId
+      )
+      : recordings;
+    const activeRecordingCount = filteredRecordings.filter((row) =>
       row.state === "engaged-active"
     ).length;
-    const staleRecordingCount = recordings.filter((row) =>
+    const staleRecordingCount = filteredRecordings.filter((row) =>
       row.state === "engaged-stale"
     ).length;
     const state = normalizePersistedSessionState(
@@ -637,14 +642,11 @@ export async function loadSessionActivityRows(
       activeRecordingCount,
       staleRecordingCount,
       stoppedRecordingCount:
-        recordings.filter((row) => row.state === "stopped").length,
-      recordings,
+        filteredRecordings.filter((row) => row.state === "stopped").length,
+      recordings: filteredRecordings,
     };
   }))).filter((row) => includeStale || !row.stale).filter((row) =>
-    !resolvedWorkspaceFilter ||
-    row.recordings.some((recording) =>
-      recording.workspaceId === resolvedWorkspaceFilter.workspaceId
-    )
+    !resolvedWorkspaceFilter || row.recordings.length > 0
   );
 
   rows.sort((a, b) => {

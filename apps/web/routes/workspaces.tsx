@@ -115,6 +115,7 @@ export default define.page(async function WorkspacesPage(ctx) {
           description="Register, review, and remove workspace aliases, then inspect the latest recording per destination writing into each workspace."
           currentPath="/workspaces"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
 

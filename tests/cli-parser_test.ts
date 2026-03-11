@@ -83,6 +83,17 @@ Deno.test("cli parser supports workspace register with optional alias", () => {
     name: "workspace-register",
     dirPath: "./notes",
   });
+
+  const aliasOnly = parseCommand([
+    "workspace",
+    "register",
+    "--alias",
+    "docs",
+  ]);
+  assertEquals(aliasOnly, {
+    name: "workspace-register",
+    alias: "docs",
+  });
 });
 
 Deno.test("cli parser validates workspace list and unregister usage", () => {

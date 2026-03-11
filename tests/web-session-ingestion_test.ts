@@ -228,3 +228,88 @@ Deno.test("loadSessionsPageData keeps background twin history inactive until ing
     }
   });
 });
+
+Deno.test("ingestPersistedSession clamps byte-offset cursors when the source file has shrunk", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-session-ingestion-clamp-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const runtimeDir = join(katoDir, "daemon");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(runtimeDir, { recursive: true });
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const configStore = new RuntimeConfigFileStore(
+          join(runtimeDir, "kato-daemon-config.yaml"),
+        );
+        await configStore.ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir,
+            katoDir,
+            globalAutoGenerateSnapshots: false,
+            providerAutoGenerateSnapshots: {
+              claude: false,
+              codex: false,
+              gemini: false,
+            },
+          }),
+        );
+
+        const sessionFilePath = join(homeDir, "provider-session-clamped.jsonl");
+        await Deno.writeTextFile(sessionFilePath, "");
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-kato-003",
+        });
+        const metadata = await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "provider-session-3",
+          sourceFilePath: sessionFilePath,
+          initialCursor: { kind: "byte-offset", value: 42 },
+        });
+        metadata.ingestCursor = { kind: "byte-offset", value: 42 };
+        await store.saveSessionMetadata(metadata);
+
+        const result = await ingestPersistedSession({
+          sessionId: "sess-kato-003",
+          katoDir,
+          now: () => new Date("2026-03-11T10:05:00.000Z"),
+        });
+
+        assertEquals(result.parsedEvents, 0);
+        const reloaded = (await store.listSessionMetadata())[0];
+        assertExists(reloaded);
+        assertEquals(reloaded.ingestCursor, {
+          kind: "byte-offset",
+          value: 0,
+        });
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});

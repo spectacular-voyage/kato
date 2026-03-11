@@ -6,18 +6,8 @@ import {
 } from "../src/loaders/activity_state.ts";
 import type { SessionsPageData } from "../src/loaders/sessions.ts";
 import { buildIngestionHref } from "../src/session_routes.ts";
+import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
-
-function formatTimestamp(value: string | undefined): string {
-  if (!value) {
-    return "n/a";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
-}
 
 function recordingState(
   state: "engaged-active" | "engaged-stale" | "stopped",
@@ -66,8 +56,8 @@ export default function IngestionLive(
   );
   const countSummary = buildCountSummary({
     includeStale: pageData.includeStale,
-    activeSessionCount: pageData.activeSessionCount,
-    staleSessionCount: pageData.staleSessionCount,
+    activeSessionCount: rows.filter((row) => row.state === "active").length,
+    staleSessionCount: rows.filter((row) => row.state === "stale").length,
   });
 
   return (

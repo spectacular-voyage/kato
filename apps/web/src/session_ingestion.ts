@@ -73,10 +73,14 @@ export async function ingestPersistedSession(
   }
 
   const parser = resolveParser(metadata.provider);
-  const fromPosition = resolveCursorPosition(metadata.ingestCursor);
   const fileStat = await Deno.stat(metadata.sourceFilePath);
+  const resumeCursor = metadata.ingestCursor.kind === "byte-offset" &&
+      metadata.ingestCursor.value > fileStat.size
+    ? { ...metadata.ingestCursor, value: fileStat.size }
+    : metadata.ingestCursor;
+  const fromPosition = resolveCursorPosition(resumeCursor);
   const incomingEvents: ConversationEvent[] = [];
-  let latestCursor = metadata.ingestCursor;
+  let latestCursor = resumeCursor;
 
   for await (
     const { event, cursor } of parser(

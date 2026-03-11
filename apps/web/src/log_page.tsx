@@ -41,7 +41,9 @@ function buildChipRemoveHref(options: {
     basePath: options.basePath,
     channel: options.kind === "channel" ? "all" : options.pageData.channel,
     scope: options.kind === "scope" ? "all" : options.pageData.scope,
-    level: options.kind === "level" ? "all" : options.pageData.level,
+    level: options.kind === "level"
+      ? DEFAULT_LOG_LEVEL_FILTER
+      : options.pageData.level,
     eventFilter: options.kind === "event"
       ? undefined
       : options.pageData.eventFilter,
@@ -68,6 +70,7 @@ export interface LogPageViewProps {
   description: string;
   currentPath: string;
   pageData: LogPageData;
+  csrfToken?: string;
   liveResultsEndpoint?: string;
   appStatus: {
     daemon: "running" | "stopped";
@@ -85,6 +88,7 @@ export default function LogPageView(props: LogPageViewProps) {
         description={props.description}
         currentPath={props.currentPath}
         showLogout
+        csrfToken={props.csrfToken}
         appStatus={props.appStatus}
       />
 
@@ -275,7 +279,7 @@ export default function LogPageView(props: LogPageViewProps) {
                   </a>
                 )
                 : null}
-              {props.pageData.level !== "all"
+              {props.pageData.level !== DEFAULT_LOG_LEVEL_FILTER
                 ? (
                   <a
                     class="filter-chip"

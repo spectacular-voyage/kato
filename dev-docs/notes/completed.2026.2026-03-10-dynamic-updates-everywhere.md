@@ -236,32 +236,32 @@ Implementation should add or validate all of the following:
 
 ## Implementation Plan
 
-- [ ] Refactor the shared header so the live `DAEMON` / `SNAPSHOT` stack becomes
+- [x] Refactor the shared header so the live `DAEMON` / `SNAPSHOT` stack becomes
       a reusable header-status island without hydrating the entire page chrome.
-- [ ] Add a shared client polling utility and a shared no-store JSON response
+- [x] Add a shared client polling utility and a shared no-store JSON response
       helper for all live endpoints.
-- [ ] Add `/api/chrome-status` and cover it with route/header-cache tests.
+- [x] Add `/api/chrome-status` and cover it with route/header-cache tests.
 - [x] Ship Summary body polling via `/api/summary` and `SummaryLive`.
-- [ ] Split the Summary page so the header status polls separately while the
+- [x] Split the Summary page so the header status polls separately while the
       existing Summary body island continues to own Daemon, Activity, Providers,
       Active Ingestion, Workspaces, and Recent Errors.
-- [ ] Add `/api/ingestion` and an `Ingestion` body island that preserves current
+- [x] Add `/api/ingestion` and an `Ingestion` body island that preserves current
       query filtering and updates the summary bar plus ingest rows.
-- [ ] Add `/api/sessions` and a `Sessions` body island that preserves current
+- [x] Add `/api/sessions` and a `Sessions` body island that preserves current
       query filtering and updates the summary bar plus inventory rows.
-- [ ] Add `/api/recordings` and a `Recordings` body island that preserves
+- [x] Add `/api/recordings` and a `Recordings` body island that preserves
       current query filtering and updates the summary bar plus recording rows.
-- [ ] Add `/api/workspaces` and a `Workspaces` body island that updates Write
+- [x] Add `/api/workspaces` and a `Workspaces` body island that updates Write
       Root Coverage plus Registered Workspaces while leaving forms and notices
       outside the live region.
-- [ ] Add `/api/logs` and a `Logs` body island that updates the filtered count
+- [x] Add `/api/logs` and a `Logs` body island that updates the filtered count
       and rows while keeping the filter shell stable.
-- [ ] Wire the shared live header-status island into all authenticated pages
+- [x] Wire the shared live header-status island into all authenticated pages
       that already show `appStatus`: `Ingestion`, `Sessions`, `Recordings`,
       `Workspaces`, `Logs`, `Settings`, and `Maintenance`.
-- [ ] Add focused route tests for the new live endpoints and keep existing
+- [x] Add focused route tests for the new live endpoints and keep existing
       loader tests as the source of truth for page-data correctness.
-- [ ] Run the targeted implementation validation for logic and contract changes,
+- [x] Run the targeted implementation validation for logic and contract changes,
       then do manual browser verification of Summary, Ingestion, Sessions,
       Recordings, Workspaces, Logs, and header-status behavior across
       authenticated pages.

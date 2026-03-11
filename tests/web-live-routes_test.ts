@@ -103,11 +103,14 @@ async function createSessionFixture(options: {
 }
 
 function assertNoStore(response: Response): void {
+  assertEquals(response.ok, true);
   assertEquals(
     response.headers.get("cache-control"),
     LIVE_JSON_CACHE_CONTROL,
   );
-  assertExists(response.headers.get("content-type"));
+  const contentType = response.headers.get("content-type");
+  assertExists(contentType);
+  assertEquals(contentType.startsWith("application/json"), true);
 }
 
 async function setupLiveRouteFixture(homeDir: string): Promise<void> {
@@ -343,9 +346,18 @@ Deno.test("live API routes disable caching and return expected page models", asy
         assertEquals(chromeData.snapshot, "current");
         assertEquals(summaryData.daemon, "running");
         assertEquals(summaryData.stale, false);
-        assertEquals(summaryData.workspaceSummary.rows.length, 2);
-        assertEquals(workspacesData.rows.length, 2);
-        assertEquals(workspacesData.allowedWriteRoots.length, 2);
+        assertEquals(
+          summaryData.workspaceSummary.rows.map((row) => row.workspaceId),
+          ["ws-alpha", "ws-beta"],
+        );
+        assertEquals(
+          workspacesData.rows.map((row) => row.workspaceId),
+          ["ws-alpha", "ws-beta"],
+        );
+        assertEquals(workspacesData.allowedWriteRoots, [
+          join(homeDir, "alpha"),
+          join(homeDir, "beta"),
+        ]);
       });
     } finally {
       restoreRuntimeEnv(env);

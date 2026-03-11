@@ -13,6 +13,9 @@ import { startWebServerStatusHeartbeat } from "./src/server_status.ts";
 
 export const app = new App<State>();
 
+const WEB_CONFIG_ERROR_MESSAGE =
+  "Kato Web is unconfigured. Run `kato web init --username <username>` with `KATO_WEB_PASSWORD` set or use `--password-stdin`.";
+
 startWebServerStatusHeartbeat();
 
 app.use(async (ctx) => {
@@ -44,9 +47,8 @@ app.use(async (ctx) => {
     pathname === "/login"
   ) {
     const { config } = await loadWebConfigState();
-    ctx.state.webConfig = config;
     ctx.state.authenticated = pathname === "/login"
-      ? await isAuthenticatedRequest(ctx.req, ctx.state.webConfig)
+      ? await isAuthenticatedRequest(ctx.req, config)
       : false;
     ctx.state.csrfToken = ctx.state.authenticated && config
       ? await createCsrfToken(ctx.req, config)
@@ -60,7 +62,6 @@ app.use(async (ctx) => {
   }
 
   const { config: webConfig, error } = await loadWebConfigState();
-  ctx.state.webConfig = webConfig;
   const authenticated = await isAuthenticatedRequest(ctx.req, webConfig);
   ctx.state.authenticated = authenticated;
   ctx.state.csrfToken = authenticated && webConfig
@@ -68,10 +69,11 @@ app.use(async (ctx) => {
     : undefined;
 
   if (!webConfig) {
+    if (error) {
+      console.error("Kato Web config load failed", error);
+    }
     return new Response(
-      error
-        ? `Kato Web config is invalid: ${error}\nRe-run \`kato web init --username <username> --password <password>\` with a fresh config.`
-        : "Kato Web is unconfigured. Run `kato web init --username <username> --password <password>` first.",
+      WEB_CONFIG_ERROR_MESSAGE,
       { status: 503 },
     );
   }

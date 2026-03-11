@@ -151,3 +151,58 @@ Deno.test("setExcludeMeFromParticipantList updates the boolean flag", async () =
     }
   });
 });
+
+Deno.test("loadUserSettings and workspace mapping honor an explicit katoDir", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir("user-settings-katodir-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, "custom-kato");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "workspace-registry.json"),
+          JSON.stringify({
+            schemaVersion: 1,
+            updatedAt: "2026-03-07T20:00:00.000Z",
+            workspaces: [{
+              workspaceId: "ws-explicit",
+              alias: "explicit",
+              workspaceRoot: join(homeDir, "explicit-workspace"),
+              configPath: join(
+                homeDir,
+                "explicit-workspace",
+                ".kato-workspace-config.yaml",
+              ),
+              registeredAt: "2026-03-07T20:00:00.000Z",
+            }],
+          }),
+        );
+
+        const initial = await loadUserSettings({ katoDir });
+        assertEquals(initial.config, createDefaultUserConfig());
+
+        await setWorkspaceUsernameMapping({
+          katoDir,
+          selector: "explicit",
+          username: "named-user",
+        });
+
+        const saved = await new UserConfigFileStore(
+          join(katoDir, "kato-user-config.yaml"),
+        ).load();
+        assertEquals(saved.participants.workspaceUsernames, {
+          "ws-explicit": "named-user",
+        });
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});

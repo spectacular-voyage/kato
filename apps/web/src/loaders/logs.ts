@@ -1,6 +1,6 @@
 import type { LogLevel, LogRecord } from "@kato/runtime";
 import { resolveDefaultKatoDir, resolveDefaultStatusPath } from "@kato/runtime";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 
 const DEFAULT_LOG_TAIL_BYTES = 4 * 1024 * 1024;
 const DEFAULT_LOG_PAGE_LIMIT = 200;
@@ -136,11 +136,22 @@ export function resolveRuntimeDirFromStatusPath(statusPath: string): string {
   return normalized;
 }
 
+export function resolveKatoDirFromStatusPath(statusPath: string): string {
+  const normalized = statusPath.replaceAll("\\", "/");
+  if (normalized.endsWith("/shared/status.json")) {
+    return normalized.slice(0, -"/shared/status.json".length);
+  }
+  return dirname(dirname(statusPath));
+}
+
 async function collectFilteredLogEntries(
   options: LoadLogEntriesOptions,
 ): Promise<LogEntry[]> {
-  const statusPath = options.statusPath ?? resolveDefaultStatusPath();
-  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const katoDir = options.katoDir ??
+    (options.statusPath
+      ? resolveKatoDirFromStatusPath(options.statusPath)
+      : resolveDefaultKatoDir());
+  const statusPath = options.statusPath ?? resolveDefaultStatusPath(katoDir);
   const channel = options.channel ?? "all";
   const scope = options.scope ?? "all";
   const level = options.level ?? "all";

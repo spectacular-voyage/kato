@@ -175,15 +175,20 @@ export function createDefaultWebConfig(
     auth?: Partial<WebAuthConfig>;
   } = {},
 ): WebConfig {
+  const passwordSalt = options.auth?.passwordSalt ??
+    encodeBase64(new Uint8Array(16));
+  const passwordHash = options.auth?.passwordHash ?? "00";
+  const sessionSecret = options.auth?.sessionSecret ??
+    encodeBase64(new Uint8Array(32));
   return {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
     hostname: options.hostname?.trim() || DEFAULT_KATO_WEB_HOSTNAME,
     port: options.port ?? DEFAULT_KATO_WEB_PORT,
     auth: {
       username: options.auth?.username?.trim() || "kato",
-      passwordSalt: options.auth?.passwordSalt || "placeholder-salt",
-      passwordHash: options.auth?.passwordHash || "placeholderhash",
-      sessionSecret: options.auth?.sessionSecret || "placeholder-secret",
+      passwordSalt,
+      passwordHash,
+      sessionSecret,
       cookieName: options.auth?.cookieName || DEFAULT_COOKIE_NAME,
     },
   };
@@ -283,6 +288,9 @@ export class WebConfigFileStore implements WebConfigStoreLike {
     }
 
     const clonedDefault = cloneConfig(defaultConfig);
+    if (!parseWebConfig(clonedDefault)) {
+      throw new Error("Default web config has unsupported schema");
+    }
     const serialized = stringifyYaml(clonedDefault).trimEnd() + "\n";
     await writeTextAtomically(this.configPath, serialized);
     return {

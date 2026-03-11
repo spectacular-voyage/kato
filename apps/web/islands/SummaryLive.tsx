@@ -1,5 +1,6 @@
 import type { SummaryPageData } from "../src/loaders/status.ts";
 import { buildIngestionSessionHref } from "../src/session_routes.ts";
+import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function formatBytes(bytes: number | undefined): string {
@@ -18,17 +19,6 @@ function formatBytes(bytes: number | undefined): string {
     unitIndex += 1;
   }
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function formatTimestamp(value: string | undefined): string {
-  if (!value) {
-    return "n/a";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
 }
 
 function relativeTimestamp(value: string | undefined): string {

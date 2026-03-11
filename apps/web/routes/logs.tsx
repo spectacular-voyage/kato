@@ -22,6 +22,7 @@ export default define.page(async function LogsPage(ctx) {
         description="Daemon and web logs across operational and security-audit channels with shared filtering for channel, scope, level, event, and text."
         currentPath="/logs"
         pageData={pageData}
+        csrfToken={ctx.state.csrfToken}
         appStatus={appStatus}
         liveResultsEndpoint={`/api/logs${ctx.url.search}`}
       />

@@ -11,18 +11,8 @@ import {
   buildIngestionSessionHref,
   buildSessionInventoryHref,
 } from "../src/session_routes.ts";
+import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
-
-function formatTimestamp(value: string | undefined): string {
-  if (!value) {
-    return "n/a";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
-}
 
 function buildSessionListStateLabel(row: SessionActivityRow): string {
   if (row.state !== "inactive") {

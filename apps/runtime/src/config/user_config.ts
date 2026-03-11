@@ -230,7 +230,10 @@ export function createDefaultUserConfig(
   };
 }
 
-export function resolveDefaultUserConfigPath(): string {
+export function resolveDefaultUserConfigPath(katoDir?: string): string {
+  if (katoDir) {
+    return join(katoDir, USER_CONFIG_FILENAME);
+  }
   const home = resolveHomeDir();
   if (!home) {
     throw new Error(

@@ -24,6 +24,7 @@ export default define.page(async function IngestionPage(ctx) {
           description="Operational state for provider-session ingestion, with the latest recording per destination."
           currentPath="/ingestion"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
         <IngestionLive

@@ -4,6 +4,7 @@ import {
 } from "../src/loaders/activity_state.ts";
 import type { WorkspacesPageData } from "../src/loaders/workspaces.ts";
 import { buildIngestionHref } from "../src/session_routes.ts";
+import { formatTimestamp } from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function recordingState(
@@ -141,7 +142,7 @@ export default function WorkspacesLive(
                       <div class="muted workspace-recording-note">
                         {row.latestRecordingAt
                           ? `Latest recording activity ${
-                            new Date(row.latestRecordingAt).toLocaleString()
+                            formatTimestamp(row.latestRecordingAt)
                           }`
                           : "No recordings associated with this workspace yet."}
                       </div>

@@ -4,6 +4,9 @@ import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
 
 const STARTUP_ACK_TIMEOUT_MS = 10_000;
 const STARTUP_ACK_POLL_INTERVAL_MS = 100;
+const WEB_STOP_TIMEOUT_MS = 5_000;
+const WEB_STOP_KILL_TIMEOUT_MS = 1_000;
+const WEB_PASSWORD_ENV_VAR = "KATO_WEB_PASSWORD";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -82,20 +85,104 @@ async function waitForWebStartupAck(
   );
 }
 
+async function readPasswordFromStdin(): Promise<string> {
+  if (Deno.stdin.isTerminal()) {
+    throw new Error(
+      "`kato web init --password-stdin` requires piped stdin input",
+    );
+  }
+
+  const decoder = new TextDecoder();
+  const buffer = new Uint8Array(1024);
+  let text = "";
+  while (true) {
+    const read = await Deno.stdin.read(buffer);
+    if (read === null) {
+      break;
+    }
+    text += decoder.decode(buffer.subarray(0, read), { stream: true });
+  }
+  text += decoder.decode();
+
+  const password = text.replace(/[\r\n]+$/, "");
+  if (password.length === 0) {
+    throw new Error("No password received on stdin");
+  }
+  return password;
+}
+
+function readPasswordFromEnv(): string | undefined {
+  try {
+    const value = Deno.env.get(WEB_PASSWORD_ENV_VAR);
+    return value && value.length > 0 ? value : undefined;
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function resolveWebInitPassword(options: {
+  passwordFromStdin?: boolean;
+}): Promise<string> {
+  if (options.passwordFromStdin) {
+    return await readPasswordFromStdin();
+  }
+  const password = readPasswordFromEnv();
+  if (password) {
+    return password;
+  }
+  throw new Error(
+    `Web init requires ${WEB_PASSWORD_ENV_VAR} to be set or --password-stdin.`,
+  );
+}
+
+function sendSignalIfRunning(
+  pid: number,
+  signal: Deno.Signal,
+): void {
+  try {
+    Deno.kill(pid, signal);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
+  }
+}
+
+async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return true;
+    }
+    await sleep(STARTUP_ACK_POLL_INTERVAL_MS);
+  }
+  return !isProcessAlive(pid);
+}
+
 export async function runWebInitCommand(
   ctx: DaemonCliCommandContext,
   options: {
     hostname?: string;
     port?: number;
     username: string;
-    password: string;
+    passwordFromStdin?: boolean;
   },
 ): Promise<void> {
+  const password = await resolveWebInitPassword(options);
   const defaultConfig = await createInitializedWebConfig({
     hostname: options.hostname,
     port: options.port,
     username: options.username,
-    password: options.password,
+    password,
   });
   const result = await ctx.webConfigStore.ensureInitialized(defaultConfig);
 
@@ -276,7 +363,15 @@ export async function runWebStopCommand(
   }
 
   if (status.pid !== undefined) {
-    Deno.kill(status.pid, "SIGTERM");
+    sendSignalIfRunning(status.pid, "SIGTERM");
+    if (!(await waitForProcessExit(status.pid, WEB_STOP_TIMEOUT_MS))) {
+      sendSignalIfRunning(status.pid, "SIGKILL");
+      if (!(await waitForProcessExit(status.pid, WEB_STOP_KILL_TIMEOUT_MS))) {
+        throw new Error(
+          `Timed out waiting for web server to stop (pid: ${status.pid})`,
+        );
+      }
+    }
   }
   await ctx.webStatusStore.save({
     schemaVersion: 1,

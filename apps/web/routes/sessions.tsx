@@ -96,6 +96,7 @@ export default define.page(async function SessionsPage(ctx) {
           description="Discovered chat-session inventory with current ingestion status and links into operational ingestion details."
           currentPath="/sessions"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
 

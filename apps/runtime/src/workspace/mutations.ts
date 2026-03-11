@@ -242,21 +242,22 @@ export async function registerWorkspace(
     nextEntries = [...entries, cloneEntry(finalEntry)];
     changed = true;
   } else {
-    const updated: RegisteredWorkspace = {
-      ...existingWorkspace,
-      alias: requestedAlias,
-      workspaceRoot: target.workspaceRoot,
-      configPath: target.configPath,
-      updatedAt: nowIso,
-    };
-    changed = updated.alias !== existingWorkspace.alias ||
-      updated.workspaceRoot !== existingWorkspace.workspaceRoot ||
-      updated.configPath !== existingWorkspace.configPath;
+    changed = requestedAlias !== existingWorkspace.alias ||
+      target.workspaceRoot !== existingWorkspace.workspaceRoot ||
+      target.configPath !== existingWorkspace.configPath;
     restartRequired = changed;
-    finalEntry = updated;
+    finalEntry = changed
+      ? {
+        ...existingWorkspace,
+        alias: requestedAlias,
+        workspaceRoot: target.workspaceRoot,
+        configPath: target.configPath,
+        updatedAt: nowIso,
+      }
+      : cloneEntry(existingWorkspace);
     nextEntries = entries.map((entry) =>
       entry.workspaceId === existingWorkspace.workspaceId
-        ? cloneEntry(updated)
+        ? cloneEntry(finalEntry)
         : cloneEntry(entry)
     );
   }

@@ -5,14 +5,7 @@ import type {
   LogPageData,
   LogScopeFilter,
 } from "./loaders/logs.ts";
-
-function formatTimestamp(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
-}
+import { formatTimestamp } from "./time.ts";
 
 function relativeTimestamp(value: string): string {
   const timestamp = Date.parse(value);

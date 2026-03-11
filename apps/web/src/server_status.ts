@@ -18,6 +18,7 @@ interface WebStatusRuntimeState {
   active: boolean;
   startedAt: string;
   intervalId: ReturnType<typeof setInterval>;
+  pendingWrite: Promise<void>;
 }
 
 function getGlobalRuntimeState(): WebStatusRuntimeState | undefined {
@@ -108,23 +109,32 @@ export function startWebServerStatusHeartbeat(): void {
 
   const startedAt = new Date().toISOString();
   const store = new WebServerStatusFileStore(resolveDefaultWebStatusPath());
-  const heartbeat = async (running: boolean) => {
-    try {
-      const listen = await resolveWebListenOptions();
-      await persistWebStatus(store, running, startedAt, listen);
-    } catch {
-      // Status heartbeat is best-effort and must not break the web server.
-    }
-  };
-
   const runtimeState: WebStatusRuntimeState = {
     active: true,
     startedAt,
+    pendingWrite: Promise.resolve(),
     intervalId: setInterval(() => {
       void heartbeat(true);
     }, HEARTBEAT_INTERVAL_MS),
   };
   setGlobalRuntimeState(runtimeState);
+
+  const heartbeat = (running: boolean): Promise<void> => {
+    runtimeState.pendingWrite = runtimeState.pendingWrite
+      .catch(() => {})
+      .then(async () => {
+        if (!runtimeState.active && running) {
+          return;
+        }
+        try {
+          const listen = await resolveWebListenOptions();
+          await persistWebStatus(store, running, startedAt, listen);
+        } catch {
+          // Status heartbeat is best-effort and must not break the web server.
+        }
+      });
+    return runtimeState.pendingWrite;
+  };
 
   const stop = () => {
     if (!runtimeState.active) {

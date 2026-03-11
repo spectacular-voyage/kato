@@ -230,8 +230,8 @@ function parseStatus(rest: string[]): DaemonCliIntent {
 
 function parseWebInit(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
-    boolean: ["help"],
-    string: ["host", "port", "username", "password"],
+    boolean: ["help", "password-stdin"],
+    string: ["host", "port", "username"],
     alias: { h: "help" },
   });
 
@@ -248,18 +248,9 @@ function parseWebInit(rest: string[]): DaemonCliIntent {
     typeof parsed.username === "string" && parsed.username.trim().length > 0
       ? parsed.username.trim()
       : "";
-  const password =
-    typeof parsed.password === "string" && parsed.password.length > 0
-      ? parsed.password
-      : "";
   if (username.length === 0) {
     throw new CliUsageError(
       "Command 'web init' requires --username <username>",
-    );
-  }
-  if (password.length === 0) {
-    throw new CliUsageError(
-      "Command 'web init' requires --password <password>",
     );
   }
   let port: number | undefined;
@@ -276,7 +267,7 @@ function parseWebInit(rest: string[]): DaemonCliIntent {
     command: {
       name: "web-init",
       username,
-      password,
+      ...(parsed["password-stdin"] === true ? { passwordFromStdin: true } : {}),
       ...(hostname ? { hostname } : {}),
       ...(port !== undefined ? { port } : {}),
     },

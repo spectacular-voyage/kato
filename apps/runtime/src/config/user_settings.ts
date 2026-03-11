@@ -116,9 +116,10 @@ async function findWorkspaceBySelector(
 
 function resolveUserConfigStore(
   userConfigStore: UserConfigStoreLike | undefined,
+  katoDir: string | undefined,
 ): UserConfigStoreLike {
   return userConfigStore ??
-    new UserConfigFileStore(resolveDefaultUserConfigPath());
+    new UserConfigFileStore(resolveDefaultUserConfigPath(katoDir));
 }
 
 function resolveWorkspaceRegistryStore(
@@ -147,7 +148,10 @@ export interface LoadUserSettingsResult {
 export async function loadUserSettings(
   options: LoadUserSettingsOptions = {},
 ): Promise<LoadUserSettingsResult> {
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    options.katoDir,
+  );
   const workspaceRegistryStore = resolveWorkspaceRegistryStore(
     options.workspaceRegistryStore,
     options.katoDir,
@@ -201,7 +205,10 @@ export async function setWorkspaceUsernameMapping(
     options.username,
     "username",
   );
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    options.katoDir,
+  );
   const { config } = await loadInitializedUserConfig(userConfigStore);
   const nextConfig = cloneUserConfig(config);
   nextConfig.participants.workspaceUsernames[workspace.workspaceId] =
@@ -214,7 +221,7 @@ export async function setWorkspaceUsernameMapping(
     {
       workspaceId: workspace.workspaceId,
       workspaceAlias: workspace.alias,
-      username: normalizedUsername,
+      usernamePresent: true,
     },
   );
   await options.auditLogger?.record(
@@ -223,7 +230,7 @@ export async function setWorkspaceUsernameMapping(
     {
       workspaceId: workspace.workspaceId,
       workspaceAlias: workspace.alias,
-      username: normalizedUsername,
+      usernamePresent: true,
     },
   );
 
@@ -271,7 +278,10 @@ export async function deleteWorkspaceUsernameMapping(
     workspaceAlias = workspace.alias;
   }
 
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    options.katoDir,
+  );
   const { config } = await loadInitializedUserConfig(userConfigStore);
   const nextConfig = cloneUserConfig(config);
   const deleted = Object.hasOwn(
@@ -331,7 +341,10 @@ export async function setDefaultUsername(
     options.username,
     "username",
   );
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    undefined,
+  );
   const { config } = await loadInitializedUserConfig(userConfigStore);
   const nextConfig = cloneUserConfig(config);
   nextConfig.participants.defaultUsername = normalizedUsername;
@@ -340,12 +353,12 @@ export async function setDefaultUsername(
   await options.operationalLogger?.info(
     "user.default.set",
     "Updated default participant username",
-    { username: normalizedUsername },
+    { usernamePresent: true },
   );
   await options.auditLogger?.record(
     "user.default.set",
     "Updated default participant username",
-    { username: normalizedUsername },
+    { usernamePresent: true },
   );
 
   return { username: normalizedUsername, config: nextConfig };
@@ -364,7 +377,10 @@ export interface ClearDefaultUsernameResult {
 export async function clearDefaultUsername(
   options: ClearDefaultUsernameOptions = {},
 ): Promise<ClearDefaultUsernameResult> {
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    undefined,
+  );
   const { config } = await loadInitializedUserConfig(userConfigStore);
   const nextConfig = cloneUserConfig(config);
   nextConfig.participants.defaultUsername = "";
@@ -397,7 +413,10 @@ export interface SetExcludeMeResult {
 export async function setExcludeMeFromParticipantList(
   options: SetExcludeMeOptions,
 ): Promise<SetExcludeMeResult> {
-  const userConfigStore = resolveUserConfigStore(options.userConfigStore);
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    undefined,
+  );
   const { config } = await loadInitializedUserConfig(userConfigStore);
   const nextConfig = cloneUserConfig(config);
   nextConfig.participants.excludeMeFromParticipantList = options.value;

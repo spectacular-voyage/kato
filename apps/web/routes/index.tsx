@@ -4,7 +4,7 @@ import AppHeader from "../src/app_header.tsx";
 import { loadSummaryPageData } from "../src/loaders/status.ts";
 import { define } from "../utils.ts";
 
-export default define.page(async function Home() {
+export default define.page(async function Home(ctx) {
   const summary = await loadSummaryPageData();
 
   return (
@@ -18,6 +18,7 @@ export default define.page(async function Home() {
           description="Browser access to the daemon status with live polling, workspace health, and recent operator-visible errors."
           currentPath="/"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={{
             daemon: summary.daemon,
             snapshot: summary.stale ? "stale" : "current",

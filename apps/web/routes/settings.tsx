@@ -168,6 +168,7 @@ export default define.page(async function SettingsPage(ctx) {
           description="Manage participant defaults, exclude-me behavior, and workspace username mappings."
           currentPath="/settings"
           showLogout
+          csrfToken={ctx.state.csrfToken}
           appStatus={appStatus}
         />
 
@@ -267,7 +268,7 @@ export default define.page(async function SettingsPage(ctx) {
                     key={workspace.workspaceId}
                     value={workspace.workspaceId}
                   >
-                    {workspace.alias} ({workspace.workspaceId})
+                    {workspace.alias ?? "<unaliased>"} ({workspace.workspaceId})
                   </option>
                 ))}
               </select>

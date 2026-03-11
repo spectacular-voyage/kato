@@ -518,13 +518,18 @@ export async function runDaemonCli(
     }
   }
 
-  try {
-    webConfig = await webConfigStore.load();
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
+  const commandShouldTryLoadingWebConfig = intent.command.name === "status" ||
+    intent.command.name === "web-start" ||
+    intent.command.name === "web-status";
+  if (commandShouldTryLoadingWebConfig) {
+    try {
+      webConfig = await webConfigStore.load();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+      webConfig = undefined;
     }
-    webConfig = undefined;
   }
 
   const effectiveKatoDir = runtimeKatoDir;
@@ -681,7 +686,7 @@ export async function runDaemonCli(
           hostname: intent.command.hostname,
           port: intent.command.port,
           username: intent.command.username,
-          password: intent.command.password,
+          passwordFromStdin: intent.command.passwordFromStdin,
         });
         return 0;
       case "web-start":

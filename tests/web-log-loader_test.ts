@@ -298,3 +298,74 @@ Deno.test("loadLogPageData treats warn as a minimum severity threshold", async (
     }
   });
 });
+
+Deno.test("loadLogPageData keeps daemon and web logs on the same instance when only statusPath is overridden", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-log-loader-status-path-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, "alternate-kato");
+        const statusPath = join(katoDir, "shared", "status.json");
+        await Deno.mkdir(join(katoDir, "daemon", "logs"), { recursive: true });
+        await Deno.mkdir(join(katoDir, "web", "logs"), { recursive: true });
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        await Deno.writeTextFile(
+          statusPath,
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-10T01:00:00.000Z",
+            heartbeatAt: "2026-03-10T01:00:00.000Z",
+            daemonRunning: true,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        await Deno.writeTextFile(
+          join(katoDir, "daemon", "logs", "operational.jsonl"),
+          JSON.stringify({
+            timestamp: "2026-03-10T00:59:00.000Z",
+            level: "warn",
+            channel: "operational",
+            event: "daemon.warn",
+            message: "daemon warning",
+          }) + "\n",
+        );
+        await Deno.writeTextFile(
+          join(katoDir, "web", "logs", "operational.jsonl"),
+          JSON.stringify({
+            timestamp: "2026-03-10T01:00:01.000Z",
+            level: "error",
+            channel: "operational",
+            event: "web.error",
+            message: "web failure",
+          }) + "\n",
+        );
+
+        const data = await loadLogPageData({
+          channel: "operational",
+          level: "warn",
+          statusPath,
+        });
+
+        assertEquals(data.rows.map((row) => row.event), [
+          "web.error",
+          "daemon.warn",
+        ]);
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
