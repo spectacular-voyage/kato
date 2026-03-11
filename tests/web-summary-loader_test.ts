@@ -446,7 +446,7 @@ Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stoppe
     now: () => new Date("2026-03-07T16:00:30.000Z"),
     statusPath: join(".test-tmp", "status.json"),
     statusStore: {
-      load: async () => ({
+      load: () => Promise.resolve({
         schemaVersion: 2,
         generatedAt: "2026-03-07T16:00:00.000Z",
         heartbeatAt: "2026-03-07T16:00:00.000Z",
@@ -458,7 +458,7 @@ Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stoppe
         },
         sessions: [],
       }),
-      save: async () => {},
+      save: () => Promise.resolve(),
     },
   });
   assertEquals(staleStatus.daemon, "running");
@@ -468,7 +468,7 @@ Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stoppe
     now: () => new Date("2026-03-07T16:00:30.000Z"),
     statusPath: join(".test-tmp", "status.json"),
     statusStore: {
-      load: async () => ({
+      load: () => Promise.resolve({
         schemaVersion: 2,
         generatedAt: "2026-03-07T16:00:00.000Z",
         heartbeatAt: "not-a-timestamp",
@@ -480,7 +480,7 @@ Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stoppe
         },
         sessions: [],
       }),
-      save: async () => {},
+      save: () => Promise.resolve(),
     },
   });
   assertEquals(stoppedStatus.daemon, "stopped");

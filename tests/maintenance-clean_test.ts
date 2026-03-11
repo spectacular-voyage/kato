@@ -37,36 +37,40 @@ function createLoggerSpies() {
   const operationalLogger = new StructuredLogger([new NoopSink()], {
     channel: "operational",
   });
-  operationalLogger.info = async (
+  operationalLogger.info = (
     event: string,
     message: string,
     attributes?: Record<string, unknown>,
   ) => {
     infoCalls.push({ event, message, attributes });
+    return Promise.resolve();
   };
-  operationalLogger.warn = async (
+  operationalLogger.warn = (
     event: string,
     message: string,
     attributes?: Record<string, unknown>,
   ) => {
     warnCalls.push({ event, message, attributes });
+    return Promise.resolve();
   };
 
   const auditLogger = new AuditLogger(
     new StructuredLogger([new NoopSink()], { channel: "security-audit" }),
   );
-  auditLogger.record = async (
+  auditLogger.record = (
     event: string,
     message: string,
     attributes?: Record<string, unknown>,
   ) => {
     auditCalls.push({ kind: "record", event, message, attributes });
+    return Promise.resolve();
   };
-  auditLogger.command = async (
+  auditLogger.command = (
     commandName: string,
     attributes?: Record<string, unknown>,
   ) => {
     auditCalls.push({ kind: "command", commandName, attributes });
+    return Promise.resolve();
   };
 
   return {
