@@ -14,7 +14,7 @@ import {
   PersistentSessionStateStore,
   StructuredLogger,
 } from "../apps/daemon/src/mod.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
 
 function makeEvent(id: string, timestamp: string): ConversationEvent {
   return {
@@ -1350,7 +1350,7 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
           payload: {
             id: "codex-session-1",
             source: "chat",
-            cwd: "/tmp/workspace",
+            cwd: resolveTestTempPath("provider-ingestion", "workspace"),
           },
         }),
         JSON.stringify({

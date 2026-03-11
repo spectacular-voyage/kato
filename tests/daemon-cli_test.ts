@@ -56,7 +56,16 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+
+const DAEMON_CLI_ACTIVE_OUTPUT_PATH = resolveTestTempPath(
+  "daemon-cli",
+  "active.md",
+);
+const DAEMON_CLI_STALE_OUTPUT_PATH = resolveTestTempPath(
+  "daemon-cli",
+  "stale.md",
+);
 
 type DaemonCliRuntimeConfigFixture = DaemonRuntimeConfig & {
   statusPath: string;
@@ -1322,7 +1331,7 @@ Deno.test(
             lastEventAt: "2026-02-22T09:59:00.000Z",
             stale: false,
             recordings: [{
-              outputPath: "/tmp/active.md",
+              outputPath: DAEMON_CLI_ACTIVE_OUTPUT_PATH,
               startedAt: "2026-02-22T09:30:00.000Z",
               lastWriteAt: "2026-02-22T09:59:00.000Z",
             }],
@@ -1336,7 +1345,7 @@ Deno.test(
             lastEventAt: "2026-02-20T10:00:00.000Z",
             stale: false,
             recordings: [{
-              outputPath: "/tmp/stale.md",
+              outputPath: DAEMON_CLI_STALE_OUTPUT_PATH,
               startedAt: "2026-02-20T09:30:00.000Z",
               lastWriteAt: "2026-02-20T10:00:00.000Z",
             }],

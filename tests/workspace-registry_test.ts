@@ -9,7 +9,7 @@ import {
   WorkspaceProfileResolver,
   type WorkspaceRegistryStoreLike,
 } from "../apps/daemon/src/mod.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
 
 function cloneWorkspace(entry: RegisteredWorkspace): RegisteredWorkspace {
   return {
@@ -30,9 +30,13 @@ function makeWorkspace(
   return {
     workspaceId: overrides.workspaceId,
     alias: overrides.alias ?? overrides.workspaceId,
-    workspaceRoot: overrides.workspaceRoot ?? `/tmp/${overrides.workspaceId}`,
+    workspaceRoot: overrides.workspaceRoot ??
+      resolveTestTempPath("workspaces", overrides.workspaceId),
     configPath: overrides.configPath ??
-      `/tmp/${overrides.workspaceId}/${DEFAULT_WORKSPACE_CONFIG_FILENAME}`,
+      join(
+        resolveTestTempPath("workspaces", overrides.workspaceId),
+        DEFAULT_WORKSPACE_CONFIG_FILENAME,
+      ),
     registeredAt: overrides.registeredAt ?? "2026-03-01T10:00:00.000Z",
     ...(overrides.updatedAt ? { updatedAt: overrides.updatedAt } : {}),
   };

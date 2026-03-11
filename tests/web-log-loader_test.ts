@@ -134,7 +134,7 @@ Deno.test("loadLogPageData returns security audit entries with attributes", asyn
             message: "Policy decision recorded",
             attributes: {
               decision: "deny",
-              targetPath: "/tmp/outside.md",
+              targetPath: join(homeDir, "outside.md"),
             },
           }) + "\n",
         );

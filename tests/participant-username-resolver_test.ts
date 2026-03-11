@@ -5,6 +5,9 @@ import {
   resolveFrontmatterParticipantUsername,
 } from "../apps/daemon/src/mod.ts";
 import { withLockedEnvironment } from "./test_env.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const PARTICIPANT_USERNAME_HOME = resolveTestTempPath("participant-home");
 
 Deno.test("resolveFrontmatterParticipantUsername respects exclude > workspace map > default > omit", () => {
   const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
@@ -128,7 +131,7 @@ Deno.test("resolveFrontmatterParticipantUsername has no env/home fallback path",
     const originalHome = Deno.env.get("HOME");
 
     try {
-      Deno.env.set("HOME", "/tmp/some-user-home");
+      Deno.env.set("HOME", PARTICIPANT_USERNAME_HOME);
       assertEquals(
         resolveFrontmatterParticipantUsername({
           markdownFrontmatter,

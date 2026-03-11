@@ -12,7 +12,16 @@ import {
   resolveWorkspaceCommandDestination,
   validateDestinationPathForCommand,
 } from "../apps/daemon/src/orchestrator/runtime_command_destination.ts";
-import { withTestTempDir } from "./test_temp.ts";
+import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+
+const COMMAND_DESTINATION_EXPLICIT_A = resolveTestTempPath(
+  "daemon-command-destination",
+  "a.md",
+);
+const COMMAND_DESTINATION_EXPLICIT_B = resolveTestTempPath(
+  "daemon-command-destination",
+  "b.md",
+);
 
 function makeProfile(workspaceRoot: string): ResolvedWorkspaceProfile {
   return {
@@ -248,10 +257,10 @@ Deno.test("validateDestinationPathForCommand supports passthrough and policy hoo
       passthroughPipeline,
       "codex",
       "session-1",
-      "/tmp/a.md",
+      COMMAND_DESTINATION_EXPLICIT_A,
       "record",
     ),
-    "/tmp/a.md",
+    COMMAND_DESTINATION_EXPLICIT_A,
   );
 
   let validateCall:
@@ -279,13 +288,13 @@ Deno.test("validateDestinationPathForCommand supports passthrough and policy hoo
     validatingPipeline,
     "codex",
     "session-2",
-    "/tmp/b.md",
+    COMMAND_DESTINATION_EXPLICIT_B,
     "capture",
   );
-  assertEquals(validated, "/tmp/b.md.validated");
+  assertEquals(validated, `${COMMAND_DESTINATION_EXPLICIT_B}.validated`);
   assert(validateCall !== undefined);
   assertEquals(validateCall?.provider, "codex");
   assertEquals(validateCall?.sessionId, "session-2");
-  assertEquals(validateCall?.targetPath, "/tmp/b.md");
+  assertEquals(validateCall?.targetPath, COMMAND_DESTINATION_EXPLICIT_B);
   assertEquals(validateCall?.commandName, "capture");
 });

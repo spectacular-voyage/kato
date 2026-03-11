@@ -71,53 +71,50 @@ async function listSessionCleanupCandidates(
   sessionsDir: string,
 ): Promise<SessionCleanupCandidate[]> {
   const byKey = new Map<string, SessionCleanupCandidate>();
-  let entries: AsyncIterable<Deno.DirEntry>;
   try {
-    entries = Deno.readDir(sessionsDir);
+    for await (const entry of Deno.readDir(sessionsDir)) {
+      if (!entry.isFile) {
+        continue;
+      }
+
+      const parsed = parseSessionStorageKey(entry.name);
+      if (!parsed) {
+        continue;
+      }
+
+      const path = join(sessionsDir, entry.name);
+      let stat: Deno.FileInfo;
+      try {
+        stat = await Deno.stat(path);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          continue;
+        }
+        throw error;
+      }
+      if (!stat.mtime) {
+        continue;
+      }
+      const mtimeMs = stat.mtime.getTime();
+      const existing = byKey.get(parsed.key);
+      if (!existing) {
+        byKey.set(parsed.key, {
+          key: parsed.key,
+          files: [{ path, mtimeMs }],
+          newestMtimeMs: mtimeMs,
+        });
+        continue;
+      }
+      existing.files.push({ path, mtimeMs });
+      if (mtimeMs > existing.newestMtimeMs) {
+        existing.newestMtimeMs = mtimeMs;
+      }
+    }
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       return [];
     }
     throw error;
-  }
-
-  for await (const entry of entries) {
-    if (!entry.isFile) {
-      continue;
-    }
-
-    const parsed = parseSessionStorageKey(entry.name);
-    if (!parsed) {
-      continue;
-    }
-
-    const path = join(sessionsDir, entry.name);
-    let stat: Deno.FileInfo;
-    try {
-      stat = await Deno.stat(path);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        continue;
-      }
-      throw error;
-    }
-    if (!stat.mtime) {
-      continue;
-    }
-    const mtimeMs = stat.mtime.getTime();
-    const existing = byKey.get(parsed.key);
-    if (!existing) {
-      byKey.set(parsed.key, {
-        key: parsed.key,
-        files: [{ path, mtimeMs }],
-        newestMtimeMs: mtimeMs,
-      });
-      continue;
-    }
-    existing.files.push({ path, mtimeMs });
-    if (mtimeMs > existing.newestMtimeMs) {
-      existing.newestMtimeMs = mtimeMs;
-    }
   }
 
   return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));

@@ -1,6 +1,8 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { detectInChatControlCommands } from "../apps/daemon/src/mod.ts";
 
+const INVALID_RECORD_PATH = ".test-tmp/should-fail.md";
+
 Deno.test("detectInChatControlCommands parses strict control commands", () => {
   const result = detectInChatControlCommands(`
 Intro text
@@ -77,7 +79,7 @@ Deno.test("detectInChatControlCommands fails closed on invalid command lines", (
   const result = detectInChatControlCommands(`
 ::start
 ::export
-::record-myproj /tmp/should-fail.md
+::record-myproj ${INVALID_RECORD_PATH}
 ::stop id:abc12345
 `);
 

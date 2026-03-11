@@ -7,6 +7,25 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const LAUNCHER_RUNTIME_DIR = resolveTestTempPath("launcher", "runtime");
+const LAUNCHER_CONFIG_PATH = resolveTestTempPath(
+  "launcher",
+  "config",
+  "kato-daemon-config.yaml",
+);
+const LAUNCHER_STATUS_PATH = resolveTestTempPath(
+  "launcher",
+  "status",
+  "status.json",
+);
+const LAUNCHER_CONTROL_PATH = resolveTestTempPath(
+  "launcher",
+  "control",
+  "control.json",
+);
+const LAUNCHER_HOME_DIR = resolveTestTempPath("launcher", "home");
 
 function decodeUtf16LeBase64(value: string): string {
   const raw = atob(value);
@@ -229,10 +248,10 @@ Deno.test("DenoDetachedDaemonLauncher omits user config dir when home is unavail
       });
 
       const runtime = {
-        runtimeDir: "/tmp/runtime",
-        configPath: "/tmp/config/kato-daemon-config.yaml",
-        statusPath: "/tmp/status/status.json",
-        controlPath: "/tmp/control/control.json",
+        runtimeDir: LAUNCHER_RUNTIME_DIR,
+        configPath: LAUNCHER_CONFIG_PATH,
+        statusPath: LAUNCHER_STATUS_PATH,
+        controlPath: LAUNCHER_CONTROL_PATH,
       };
 
       let capturedOptions:
@@ -295,15 +314,15 @@ Deno.test("DenoDetachedDaemonLauncher includes user config dir when home is avai
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
-        HOME: "/tmp/kato-home",
+        HOME: LAUNCHER_HOME_DIR,
         USERPROFILE: undefined,
       });
 
       const runtime = {
-        runtimeDir: "/tmp/runtime",
-        configPath: "/tmp/config/kato-daemon-config.yaml",
-        statusPath: "/tmp/status/status.json",
-        controlPath: "/tmp/control/control.json",
+        runtimeDir: LAUNCHER_RUNTIME_DIR,
+        configPath: LAUNCHER_CONFIG_PATH,
+        statusPath: LAUNCHER_STATUS_PATH,
+        controlPath: LAUNCHER_CONTROL_PATH,
       };
 
       let capturedOptions:
@@ -337,7 +356,7 @@ Deno.test("DenoDetachedDaemonLauncher includes user config dir when home is avai
         .split(",");
 
       assertEquals(
-        allowReadRoots.includes(join("/tmp/kato-home", ".kato")),
+        allowReadRoots.includes(join(LAUNCHER_HOME_DIR, ".kato")),
         true,
       );
     } finally {
@@ -354,10 +373,10 @@ Deno.test("DenoDetachedDaemonLauncher encodes PowerShell launch script and retur
 
   const launcher = new DenoDetachedDaemonLauncher(
     {
-      runtimeDir: "/tmp/runtime",
-      configPath: "/tmp/config/kato-daemon-config.yaml",
-      statusPath: "/tmp/status/status.json",
-      controlPath: "/tmp/control/control.json",
+      runtimeDir: LAUNCHER_RUNTIME_DIR,
+      configPath: LAUNCHER_CONFIG_PATH,
+      statusPath: LAUNCHER_STATUS_PATH,
+      controlPath: LAUNCHER_CONTROL_PATH,
     },
     "/deno's/bin/deno",
     "/repo/apps/daemon/src/main.ts",
@@ -390,7 +409,7 @@ Deno.test("DenoDetachedDaemonLauncher encodes PowerShell launch script and retur
   const pid = await powerShellLauncher.launchDetachedViaPowerShell(
     ["run", "--flag", "arg'withquote"],
     {
-      KATO_RUNTIME_DIR: "/tmp/runtime",
+      KATO_RUNTIME_DIR: LAUNCHER_RUNTIME_DIR,
       SPECIAL_VALUE: "O'Brien",
     },
   );
@@ -420,10 +439,10 @@ Deno.test("DenoDetachedDaemonLauncher encodes PowerShell launch script and retur
 Deno.test("DenoDetachedDaemonLauncher surfaces PowerShell launch failures", async () => {
   const launcher = new DenoDetachedDaemonLauncher(
     {
-      runtimeDir: "/tmp/runtime",
-      configPath: "/tmp/config/kato-daemon-config.yaml",
-      statusPath: "/tmp/status/status.json",
-      controlPath: "/tmp/control/control.json",
+      runtimeDir: LAUNCHER_RUNTIME_DIR,
+      configPath: LAUNCHER_CONFIG_PATH,
+      statusPath: LAUNCHER_STATUS_PATH,
+      controlPath: LAUNCHER_CONTROL_PATH,
     },
     "/deno",
     "/repo/apps/daemon/src/main.ts",
@@ -459,10 +478,10 @@ Deno.test("DenoDetachedDaemonLauncher surfaces PowerShell launch failures", asyn
 Deno.test("DenoDetachedDaemonLauncher rejects invalid PowerShell pid output", async () => {
   const launcher = new DenoDetachedDaemonLauncher(
     {
-      runtimeDir: "/tmp/runtime",
-      configPath: "/tmp/config/kato-daemon-config.yaml",
-      statusPath: "/tmp/status/status.json",
-      controlPath: "/tmp/control/control.json",
+      runtimeDir: LAUNCHER_RUNTIME_DIR,
+      configPath: LAUNCHER_CONFIG_PATH,
+      statusPath: LAUNCHER_STATUS_PATH,
+      controlPath: LAUNCHER_CONTROL_PATH,
     },
     "/deno",
     "/repo/apps/daemon/src/main.ts",

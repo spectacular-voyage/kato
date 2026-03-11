@@ -13,6 +13,16 @@ import {
 import type {
   SessionWorkspaceOutputStateV1,
 } from "../shared/src/contracts/session_state.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const STATUS_PROJECTION_WORKSPACE_ROOT = resolveTestTempPath(
+  "status-projection",
+  "workspace",
+);
+const STATUS_PROJECTION_OUTPUT_PATH = resolveTestTempPath(
+  "status-projection",
+  "out.md",
+);
 
 function makeSnapshotEntry(
   overrides: Partial<SessionSnapshotMetadataEntry> & {
@@ -42,11 +52,11 @@ function makeWorkspaceOutput(
     desiredState: "on",
     currentDestination: {
       kind: "absolute-explicit",
-      absolutePath: "/tmp/out.md",
+      absolutePath: STATUS_PROJECTION_OUTPUT_PATH,
     },
-    currentResolvedPath: "/tmp/out.md",
-    workspaceRootSnapshot: "/tmp/workspace",
-    resolvedDefaultOutputDir: "/tmp/workspace",
+    currentResolvedPath: STATUS_PROJECTION_OUTPUT_PATH,
+    workspaceRootSnapshot: STATUS_PROJECTION_WORKSPACE_ROOT,
+    resolvedDefaultOutputDir: STATUS_PROJECTION_WORKSPACE_ROOT,
     filenameTemplate: "{provider}.md",
     writerFeatureFlags: {
       writerIncludeCommentary: true,
@@ -87,9 +97,12 @@ function makeSessionMetadata(
     sessionId,
     createdAt: updatedAt,
     updatedAt,
-    sourceFilePath: `/tmp/${providerSessionId}.jsonl`,
+    sourceFilePath: resolveTestTempPath(
+      "status-projection",
+      `${providerSessionId}.jsonl`,
+    ),
     ingestCursor: { kind: "byte-offset", value: 0 },
-    twinPath: `/tmp/${sessionId}.jsonl`,
+    twinPath: resolveTestTempPath("status-projection", `${sessionId}.jsonl`),
     nextTwinSeq: 1,
     recentFingerprints: [],
     ...rest,
@@ -168,7 +181,10 @@ Deno.test(
       updatedAt: "2026-02-22T10:00:00.000Z",
       workspaceOutputs: [
         makeWorkspaceOutput({
-          currentResolvedPath: "/tmp/active.md",
+          currentResolvedPath: resolveTestTempPath(
+            "status-projection",
+            "active.md",
+          ),
           activeRecordingCycleId: "recording-active-1",
           recordingCycles: [
             {
@@ -192,7 +208,10 @@ Deno.test(
       updatedAt: "2026-02-22T08:00:00.000Z",
       workspaceOutputs: [
         makeWorkspaceOutput({
-          currentResolvedPath: "/tmp/stale.md",
+          currentResolvedPath: resolveTestTempPath(
+            "status-projection",
+            "stale.md",
+          ),
           activeRecordingCycleId: "recording-stale-1",
           recordingCycles: [{
             recordingCycleId: "recording-stale-1",
@@ -202,7 +221,10 @@ Deno.test(
         }),
         makeWorkspaceOutput({
           desiredState: "off",
-          currentResolvedPath: "/tmp/off.md",
+          currentResolvedPath: resolveTestTempPath(
+            "status-projection",
+            "off.md",
+          ),
         }),
       ],
     });
@@ -253,7 +275,7 @@ Deno.test(
       provider: "codex",
       sessionId: "provider-codex",
       workspaceAlias: "Docs",
-      outputPath: "/tmp/codex.md",
+      outputPath: resolveTestTempPath("status-projection", "codex.md"),
       startedAt: "2026-02-22T09:58:00.000Z",
       lastWriteAt: "2026-02-22T10:00:00.000Z",
     }];

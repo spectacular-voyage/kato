@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import { expandHomePath, readOptionalEnv, resolveHomeDir } from "@kato/runtime";
 import {
   restoreRuntimeEnv,
@@ -6,6 +7,9 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
+import { resolveTestTempPath } from "./test_temp.ts";
+
+const RUNTIME_ENV_HOME = resolveTestTempPath("runtime-home");
 
 async function withRuntimeEnvTest(
   run: () => Promise<void> | void,
@@ -36,19 +40,19 @@ Deno.test("readOptionalEnv returns undefined for empty values", async () => {
 
 Deno.test("readOptionalEnv returns non-empty values", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
-    assertEquals(readOptionalEnv("HOME"), "/tmp/runtime-home");
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
+    assertEquals(readOptionalEnv("HOME"), RUNTIME_ENV_HOME);
   });
 });
 
 Deno.test("resolveHomeDir prefers HOME over USERPROFILE", async () => {
   await withRuntimeEnvTest(() => {
     setRuntimeEnv({
-      HOME: "/tmp/runtime-home",
+      HOME: RUNTIME_ENV_HOME,
       USERPROFILE: "C:\\Users\\runtime",
     });
 
-    assertEquals(resolveHomeDir(), "/tmp/runtime-home");
+    assertEquals(resolveHomeDir(), RUNTIME_ENV_HOME);
   });
 });
 
@@ -76,44 +80,44 @@ Deno.test("resolveHomeDir returns undefined when neither home variable is availa
 
 Deno.test("expandHomePath leaves non-home-prefixed paths unchanged", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
     assertEquals(
-      expandHomePath("/tmp/runtime-home/projects"),
-      "/tmp/runtime-home/projects",
+      expandHomePath(join(RUNTIME_ENV_HOME, "projects")),
+      join(RUNTIME_ENV_HOME, "projects"),
     );
   });
 });
 
 Deno.test("expandHomePath expands a bare tilde to the resolved home directory", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
-    assertEquals(expandHomePath("~"), "/tmp/runtime-home");
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
+    assertEquals(expandHomePath("~"), RUNTIME_ENV_HOME);
   });
 });
 
 Deno.test("expandHomePath expands forward-slash child paths", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
     assertEquals(
       expandHomePath("~/projects/current"),
-      "/tmp/runtime-home/projects/current",
+      join(RUNTIME_ENV_HOME, "projects/current"),
     );
   });
 });
 
 Deno.test("expandHomePath expands backslash child paths", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
     assertEquals(
       expandHomePath("~\\projects\\current"),
-      "/tmp/runtime-home/projects\\current",
+      join(RUNTIME_ENV_HOME, "projects\\current"),
     );
   });
 });
 
 Deno.test("expandHomePath leaves named-user tildes unchanged", async () => {
   await withRuntimeEnvTest(() => {
-    setRuntimeEnv({ HOME: "/tmp/runtime-home" });
+    setRuntimeEnv({ HOME: RUNTIME_ENV_HOME });
     assertEquals(expandHomePath("~another/projects"), "~another/projects");
   });
 });

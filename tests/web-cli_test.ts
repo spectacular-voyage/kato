@@ -6,6 +6,7 @@ import { runDaemonCli } from "../apps/cli/src/router.ts";
 import type { DaemonCliRuntime } from "../apps/cli/src/types.ts";
 import type { RuntimeConfig, SharedBehaviorConfig } from "@kato/shared";
 import {
+  createInitializedWebConfig,
   WebConfigFileStore,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
@@ -102,6 +103,24 @@ async function withWebPasswordEnv<T>(
   });
 }
 
+async function withWebPasswordUnset<T>(
+  run: () => Promise<T>,
+): Promise<T> {
+  return await withLockedEnvironment(async () => {
+    const previous = Deno.env.get("KATO_WEB_PASSWORD");
+    try {
+      Deno.env.delete("KATO_WEB_PASSWORD");
+      return await run();
+    } finally {
+      if (previous === undefined) {
+        Deno.env.delete("KATO_WEB_PASSWORD");
+      } else {
+        Deno.env.set("KATO_WEB_PASSWORD", previous);
+      }
+    }
+  });
+}
+
 Deno.test("cli parser parses web subcommands", () => {
   const init = parseDaemonCliArgs([
     "web",
@@ -153,6 +172,31 @@ Deno.test("runDaemonCli web start fails closed until web init runs", async () =>
   });
 });
 
+Deno.test("runDaemonCli web init fails closed when no password source is configured", async () => {
+  await withWebPasswordUnset(async () => {
+    await withTestTempDir("web-cli-missing-password-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const harness = makeRuntimeHarness(runtimeDir);
+
+      const code = await runDaemonCli(
+        ["web", "init", "--username", "dj"],
+        {
+          runtime: harness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+        },
+      );
+
+      assertEquals(code, 1);
+      assertStringIncludes(
+        harness.stderr.join(""),
+        "Web init requires KATO_WEB_PASSWORD to be set or --password-stdin.",
+      );
+    });
+  });
+});
+
 Deno.test("runDaemonCli web init defaults to the standard web port", async () => {
   await withWebPasswordEnv("secret-pass", async () => {
     await withTestTempDir("web-cli-default-port-", async (rootDir) => {
@@ -186,6 +230,56 @@ Deno.test("runDaemonCli web init defaults to the standard web port", async () =>
       assertEquals(code, 0);
       const savedConfig = await webConfigStore.load();
       assertEquals(savedConfig.port, DEFAULT_KATO_WEB_PORT);
+    });
+  });
+});
+
+Deno.test("runDaemonCli web status reports stale plain-text status when the stored process is gone", async () => {
+  await withWebPasswordEnv("secret-pass", async () => {
+    await withTestTempDir("web-cli-status-stale-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      const webStatusStore = new WebServerStatusFileStore(
+        join(rootDir, "web", "kato-web-status.json"),
+        () => new Date("2026-03-07T20:00:00.000Z"),
+      );
+      await webConfigStore.ensureInitialized(
+        await createInitializedWebConfig({
+          hostname: "127.0.0.1",
+          port: 3187,
+          username: "dj",
+          password: "secret-pass",
+        }),
+      );
+      await webStatusStore.save({
+        schemaVersion: 1,
+        running: true,
+        hostname: "127.0.0.1",
+        port: 3187,
+        pid: 999999,
+        startedAt: "2026-03-07T20:00:00.000Z",
+        heartbeatAt: "2026-03-07T20:00:05.000Z",
+        url: "http://127.0.0.1:3187/",
+        version: "test-build",
+      });
+
+      const harness = makeRuntimeHarness(runtimeDir);
+      const code = await runDaemonCli(["web", "status"], {
+        runtime: harness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+      });
+
+      assertEquals(code, 0);
+      assertStringIncludes(
+        harness.stdout.join(""),
+        "kato web: stale status",
+      );
     });
   });
 });
@@ -351,6 +445,59 @@ Deno.test(
     });
   },
 );
+
+Deno.test("runDaemonCli web status prints the unconfigured message in text mode", async () => {
+  await withTestTempDir("web-cli-status-unconfigured-", async (rootDir) => {
+    const runtimeDir = join(rootDir, "daemon");
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const harness = makeRuntimeHarness(runtimeDir);
+
+    const code = await runDaemonCli(["web", "status"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+      defaultSharedConfig: makeDefaultSharedConfig(),
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "kato web: unconfigured");
+  });
+});
+
+Deno.test("runDaemonCli web stop clears stale stored status when the process is already gone", async () => {
+  await withTestTempDir("web-cli-stop-stale-", async (rootDir) => {
+    const runtimeDir = join(rootDir, "daemon");
+    await Deno.mkdir(runtimeDir, { recursive: true });
+    const webStatusStore = new WebServerStatusFileStore(
+      join(rootDir, "web", "kato-web-status.json"),
+      () => new Date("2026-03-07T20:00:00.000Z"),
+    );
+    await webStatusStore.save({
+      schemaVersion: 1,
+      running: true,
+      hostname: "127.0.0.1",
+      port: 3187,
+      pid: 999999,
+      startedAt: "2026-03-07T20:00:00.000Z",
+      heartbeatAt: "2026-03-07T20:00:05.000Z",
+      url: "http://127.0.0.1:3187/",
+      version: "test-build",
+    });
+
+    const harness = makeRuntimeHarness(runtimeDir);
+    const code = await runDaemonCli(["web", "stop"], {
+      runtime: harness.runtime,
+      defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+      defaultSharedConfig: makeDefaultSharedConfig(),
+      webStatusStore,
+    });
+
+    assertEquals(code, 0);
+    assertStringIncludes(harness.stdout.join(""), "kato web already stopped.");
+    const savedStatus = await webStatusStore.load();
+    assertEquals(savedStatus.running, false);
+    assertEquals(savedStatus.pid, undefined);
+  });
+});
 
 Deno.test("runDaemonCli ignores a broken web config for unrelated commands", async () => {
   await withTestTempDir("web-cli-broken-config-", async (rootDir) => {

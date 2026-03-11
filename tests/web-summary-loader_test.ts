@@ -3,10 +3,16 @@ import { join } from "@std/path";
 import {
   createDefaultRuntimeConfig,
   createDefaultWorkspaceWriterFeatureFlags,
+  DEFAULT_WORKSPACE_CONFIG_FILENAME,
   PersistentSessionStateStore,
+  resolveDefaultWorkspaceRegistryPath,
   RuntimeConfigFileStore,
+  WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
-import { loadSummaryPageData } from "../apps/web/src/loaders/status.ts";
+import {
+  loadAppChromeStatus,
+  loadSummaryPageData,
+} from "../apps/web/src/loaders/status.ts";
 import { withTestTempDir } from "./test_temp.ts";
 import {
   restoreRuntimeEnv,
@@ -96,6 +102,8 @@ Deno.test("loadSummaryPageData reads the default shared status snapshot", async 
         });
 
         const statusPath = join(homeDir, ".kato", "shared", "status.json");
+        const activeOutputAPath = join(homeDir, "outputs", "active-a.md");
+        const activeOutputBPath = join(homeDir, "outputs", "active-b.md");
         await Deno.mkdir(join(homeDir, ".kato", "shared"), { recursive: true });
         await Deno.writeTextFile(
           statusPath,
@@ -122,11 +130,11 @@ Deno.test("loadSummaryPageData reads the default shared status snapshot", async 
               stale: false,
               snippet: "status summary",
               recordings: [{
-                outputPath: "/tmp/active-a.md",
+                outputPath: activeOutputAPath,
                 startedAt: "2026-03-07T15:30:00.000Z",
                 lastWriteAt: "2026-03-07T15:59:00.000Z",
               }, {
-                outputPath: "/tmp/active-b.md",
+                outputPath: activeOutputBPath,
                 startedAt: "2026-03-07T15:35:00.000Z",
                 lastWriteAt: "2026-03-07T15:59:00.000Z",
               }],
@@ -175,6 +183,9 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
 
         const katoDir = join(homeDir, ".kato");
         const statusPath = join(katoDir, "shared", "status.json");
+        const sessionFixturesDir = join(homeDir, "session-fixtures");
+        const staleOutputAPath = join(homeDir, "outputs", "stale-a.md");
+        const staleOutputBPath = join(homeDir, "outputs", "stale-b.md");
         await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
         await createSessionFixture({
           katoDir,
@@ -182,12 +193,12 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
           providerSessionId: "provider-stale",
           snippet: "stale session",
           updatedAt: "2026-03-07T15:00:00.000Z",
-          sourceFilePath: "/tmp/provider-stale.jsonl",
+          sourceFilePath: join(sessionFixturesDir, "provider-stale.jsonl"),
           workspaceOutputs: [{
             workspaceId: "ws-stale",
             workspaceAliasSnapshot: "stale",
             desiredState: "on",
-            currentResolvedPath: "/tmp/stale-a.md",
+            currentResolvedPath: staleOutputAPath,
             activeRecordingCycleId: "cycle-stale",
             recordingCycles: [{
               recordingCycleId: "cycle-old",
@@ -235,11 +246,11 @@ Deno.test("loadSummaryPageData counts stale sessions from the full snapshot", as
                 stale: true,
                 snippet: "stale session",
                 recordings: [{
-                  outputPath: "/tmp/stale-a.md",
+                  outputPath: staleOutputAPath,
                   startedAt: "2026-03-07T14:00:00.000Z",
                   lastWriteAt: "2026-03-07T15:00:00.000Z",
                 }, {
-                  outputPath: "/tmp/stale-b.md",
+                  outputPath: staleOutputBPath,
                   startedAt: "2026-03-07T14:15:00.000Z",
                   lastWriteAt: "2026-03-07T15:00:00.000Z",
                 }],
@@ -424,6 +435,278 @@ Deno.test("loadSummaryPageData counts non-generating sessions as inactive", asyn
         assertEquals(data.summarySessions[0]?.sessionId, "sess-inactive");
         assertEquals(data.summarySessions[0]?.state, "inactive");
       });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stopped daemons", async () => {
+  const staleStatus = await loadAppChromeStatus({
+    now: () => new Date("2026-03-07T16:00:30.000Z"),
+    statusPath: join(".test-tmp", "status.json"),
+    statusStore: {
+      load: async () => ({
+        schemaVersion: 2,
+        generatedAt: "2026-03-07T16:00:00.000Z",
+        heartbeatAt: "2026-03-07T16:00:00.000Z",
+        daemonRunning: true,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      }),
+      save: async () => {},
+    },
+  });
+  assertEquals(staleStatus.daemon, "running");
+  assertEquals(staleStatus.snapshot, "stale");
+
+  const stoppedStatus = await loadAppChromeStatus({
+    now: () => new Date("2026-03-07T16:00:30.000Z"),
+    statusPath: join(".test-tmp", "status.json"),
+    statusStore: {
+      load: async () => ({
+        schemaVersion: 2,
+        generatedAt: "2026-03-07T16:00:00.000Z",
+        heartbeatAt: "not-a-timestamp",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      }),
+      save: async () => {},
+    },
+  });
+  assertEquals(stoppedStatus.daemon, "stopped");
+  assertEquals(stoppedStatus.snapshot, "current");
+});
+
+Deno.test("loadSummaryPageData reports workspace validation failures alongside active workspaces", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir(
+        "web-summary-loader-workspaces-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const katoDir = join(homeDir, ".kato");
+          const statusPath = join(katoDir, "shared", "status.json");
+          const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+          const activeRoot = join(homeDir, "alpha");
+          const mismatchRoot = join(homeDir, "beta");
+          const missingRoot = join(homeDir, "ghost");
+          const activeConfigPath = join(
+            activeRoot,
+            DEFAULT_WORKSPACE_CONFIG_FILENAME,
+          );
+          const mismatchConfigPath = join(
+            mismatchRoot,
+            DEFAULT_WORKSPACE_CONFIG_FILENAME,
+          );
+          const missingConfigPath = join(
+            missingRoot,
+            DEFAULT_WORKSPACE_CONFIG_FILENAME,
+          );
+          const activeOutputPath = join(activeRoot, "notes", "active.md");
+          const sessionFixturesDir = join(homeDir, "session-fixtures");
+          await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+          await Deno.mkdir(join(activeRoot, "notes"), { recursive: true });
+          await Deno.mkdir(mismatchRoot, { recursive: true });
+          await Deno.writeTextFile(
+            activeConfigPath,
+            "workspaceId: ws-active\n",
+          );
+          await Deno.writeTextFile(
+            mismatchConfigPath,
+            "workspaceId: ws-other\n",
+          );
+
+          const registry = new WorkspaceRegistryFileStore(registryPath);
+          await registry.save([
+            {
+              workspaceId: "ws-active",
+              alias: "alpha",
+              workspaceRoot: activeRoot,
+              configPath: activeConfigPath,
+              registeredAt: "2026-03-07T15:00:00.000Z",
+            },
+            {
+              workspaceId: "ws-mismatch",
+              alias: "beta",
+              workspaceRoot: mismatchRoot,
+              configPath: mismatchConfigPath,
+              registeredAt: "2026-03-07T15:05:00.000Z",
+            },
+            {
+              workspaceId: "ws-missing",
+              alias: "ghost",
+              workspaceRoot: missingRoot,
+              configPath: missingConfigPath,
+              registeredAt: "2026-03-07T15:10:00.000Z",
+            },
+          ]);
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-active",
+            providerSessionId: "provider-active",
+            snippet: "workspace activity",
+            updatedAt: "2026-03-07T15:59:00.000Z",
+            sourceFilePath: join(sessionFixturesDir, "provider-active.jsonl"),
+            workspaceOutputs: [{
+              workspaceId: "ws-active",
+              workspaceAliasSnapshot: "alpha",
+              desiredState: "on",
+              currentResolvedPath: activeOutputPath,
+              activeRecordingCycleId: "cycle-live",
+              recordingCycles: [{
+                recordingCycleId: "cycle-live",
+                startedCursor: 1,
+                startedAt: "2026-03-07T15:30:00.000Z",
+                startedBySeq: 1,
+              }],
+            }],
+          });
+
+          await Deno.writeTextFile(
+            statusPath,
+            JSON.stringify({
+              schemaVersion: 2,
+              generatedAt: "2026-03-07T16:00:00.000Z",
+              heartbeatAt: "2026-03-07T16:00:00.000Z",
+              daemonRunning: true,
+              providers: [],
+              recordings: {
+                activeRecordings: 1,
+                destinations: 1,
+              },
+              sessions: [{
+                provider: "codex",
+                sessionId: "sess-active",
+                updatedAt: "2026-03-07T15:59:30.000Z",
+                lastEventAt: "2026-03-07T15:59:30.000Z",
+                stale: false,
+                snippet: "workspace activity",
+                recordings: [{
+                  outputPath: activeOutputPath,
+                  startedAt: "2026-03-07T15:30:00.000Z",
+                  lastWriteAt: "2026-03-07T15:59:30.000Z",
+                }],
+              }],
+            }),
+          );
+
+          const data = await loadSummaryPageData({
+            now: () => new Date("2026-03-07T16:00:02.000Z"),
+          });
+
+          assertEquals(data.workspaceSummary.activeCount, 1);
+          assertEquals(data.workspaceSummary.staleCount, 0);
+          assertEquals(data.workspaceSummary.inactiveCount, 0);
+          assertEquals(data.workspaceSummary.invalidCount, 2);
+          assertEquals(
+            data.workspaceSummary.rows.map((row) => row.alias),
+            ["alpha", "beta", "ghost"],
+          );
+          assertEquals(
+            data.workspaceSummary.rows.find((row) =>
+              row.workspaceId === "ws-active"
+            )
+              ?.valid,
+            true,
+          );
+          assertEquals(
+            data.workspaceSummary.rows.find((row) =>
+              row.workspaceId === "ws-mismatch"
+            )?.invalidReason,
+            "workspaceId mismatch (registry=ws-mismatch, config=ws-other)",
+          );
+          assertEquals(
+            data.workspaceSummary.rows.find((row) =>
+              row.workspaceId === "ws-missing"
+            )
+              ?.invalidReason,
+            "config file not found",
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("loadSummaryPageData reports an invalid workspace registry as unavailable", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir(
+        "web-summary-loader-registry-invalid-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const katoDir = join(homeDir, ".kato");
+          const statusPath = join(katoDir, "shared", "status.json");
+          const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+          await Deno.mkdir(join(homeDir, ".kato", "shared"), {
+            recursive: true,
+          });
+          await Deno.writeTextFile(
+            statusPath,
+            JSON.stringify({
+              schemaVersion: 2,
+              generatedAt: "2026-03-07T16:00:00.000Z",
+              heartbeatAt: "2026-03-07T16:00:00.000Z",
+              daemonRunning: true,
+              providers: [],
+              recordings: {
+                activeRecordings: 0,
+                destinations: 0,
+              },
+              sessions: [],
+            }),
+          );
+          await Deno.writeTextFile(
+            registryPath,
+            JSON.stringify({
+              schemaVersion: 999,
+              updatedAt: "2026-03-07T16:00:00.000Z",
+              workspaces: [],
+            }),
+          );
+
+          const data = await loadSummaryPageData({
+            now: () => new Date("2026-03-07T16:00:02.000Z"),
+          });
+
+          assertEquals(
+            data.workspaceSummary.unavailableReason,
+            "Workspace registry has unsupported schema",
+          );
+          assertEquals(data.workspaceSummary.rows.length, 0);
+          assertEquals(data.workspaceSummary.activeCount, 0);
+          assertEquals(data.workspaceSummary.staleCount, 0);
+          assertEquals(data.workspaceSummary.inactiveCount, 0);
+          assertEquals(data.workspaceSummary.invalidCount, 0);
+        },
+      );
     } finally {
       restoreRuntimeEnv(env);
     }
