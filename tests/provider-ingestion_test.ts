@@ -892,6 +892,73 @@ Deno.test("FileProviderIngestionRunner bootstraps twin on-demand when twin file 
   );
 });
 
+Deno.test(
+  "FileProviderIngestionRunner does not mark a missing twin as available when bootstrap finds no events",
+  async () => {
+    await withTempDir(
+      "provider-ingestion-empty-bootstrap-",
+      async (dir) => {
+        const sessionFile = join(dir, "session-empty-bootstrap.jsonl");
+        await Deno.writeTextFile(sessionFile, "placeholder\n");
+        const stateRoot = join(dir, ".kato");
+        const sessionStateStore = makeSessionStateStore(
+          stateRoot,
+          "session-uuid-empty-bootstrap-1",
+        );
+        const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-empty-bootstrap",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        metadata.nextTwinSeq = 2;
+        metadata.recentFingerprints = ["fingerprint-empty-bootstrap"];
+        await sessionStateStore.saveSessionMetadata(metadata);
+
+        const snapshotStore = new InMemorySessionSnapshotStore();
+        const runner = makeFileProviderTestRunner({
+          dir,
+          provider: "test-provider",
+          sessionSnapshotStore: snapshotStore,
+          sessionStateStore,
+          autoGenerateTwins: true,
+          discoverSessions() {
+            return Promise.resolve([{
+              sessionId: "session-empty-bootstrap",
+              filePath: sessionFile,
+              modifiedAtMs: Date.now(),
+            }]);
+          },
+          parseEvents() {
+            return (async function* () {})();
+          },
+        });
+
+        await runner.start();
+        const result = await runner.poll();
+        await runner.stop();
+
+        assertEquals(result.sessionsUpdated, 0);
+        assertEquals(result.eventsObserved, 0);
+        assertEquals(
+          snapshotStore.get("session-empty-bootstrap"),
+          undefined,
+        );
+
+        const reloaded = await sessionStateStore.getOrCreateSessionMetadata({
+          provider: "test-provider",
+          providerSessionId: "session-empty-bootstrap",
+          sourceFilePath: sessionFile,
+          initialCursor: { kind: "byte-offset", value: 0 },
+        });
+        assertEquals(reloaded.nextTwinSeq, 1);
+        assertEquals(reloaded.recentFingerprints, []);
+        assertEquals(await sessionStateStore.readTwinEvents(reloaded, 1), []);
+      },
+    );
+  },
+);
+
 Deno.test("FileProviderIngestionRunner fails closed for session with unsupported metadata schema", async () => {
   await withTempDir("provider-ingestion-fail-closed-schema-", async (dir) => {
     const sessionFile = join(dir, "session-fail-closed.jsonl");

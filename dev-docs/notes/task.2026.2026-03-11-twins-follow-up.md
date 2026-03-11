@@ -1,8 +1,8 @@
 ---
 id: ynkw822oqlroa4f5xdmyh5i
 title: 2026 03 11 Twins Follow Up
-desc: ''
-updated: 1773238204946
+desc: ""
+updated: 1773254078714
 created: 1773238204946
 ---
 
@@ -84,16 +84,16 @@ The better model is:
 
 ## Scenario Table
 
-| Scenario | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes |
-| --- | --- | --- | --- | --- |
-| Twin file exists and source mtime is not newer | Yes | n/a | Yes | Maintenance should show `current` and no `create twin` action |
-| Twin file exists and source mtime is newer | Yes | n/a | Yes | Maintenance should show `behind source` and offer `update twin` |
-| Twin file is missing but metadata still has old twin counters | Yes | n/a | Yes | Treat as `no twin`; offer `create twin`; optionally heal/reset metadata |
-| Session has no live snapshot but twin file has history | Yes | n/a | Yes | Row should offer `show snippet`; recovery derives from twin history on demand |
-| Session has no twin and no live snapshot | n/a | Yes | Yes | Row may still end at `snippet unavailable` unless an explicit source-replay path is allowed there |
-| Recordings row has no live snippet but underlying session has recoverable history | Mixed | Mixed | Yes | Recordings should show snippet area and offer `show snippet` instead of permanently blank placeholder |
-| User wants to remove persisted twin history | Yes | n/a | n/a | Maintenance row should offer trash/delete; metadata twin state resets without touching provider source files |
-| User is browsing sessions for routine activity | Mixed | Mixed | No | Sessions should focus on live activity / recording state, not top-level twin management |
+| Scenario                                                                          | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes                                                                                 |
+| --------------------------------------------------------------------------------- | ------------------ | ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
+| Twin file exists and source mtime is not newer                                    | Yes                | n/a                    | Yes            | Maintenance should show `current` and no `create twin` action                                                |
+| Twin file exists and source mtime is newer                                        | Yes                | n/a                    | Yes            | Maintenance should show `behind source` and offer `update twin`                                              |
+| Twin file is missing but metadata still has old twin counters                     | Yes                | n/a                    | Yes            | Treat as `no twin`; offer `create twin`; optionally heal/reset metadata                                      |
+| Session has no live snapshot but twin file has history                            | Yes                | n/a                    | Yes            | Row should offer `show snippet`; recovery derives from twin history on demand                                |
+| Session has no twin and no live snapshot                                          | n/a                | Yes                    | Yes            | Row may still end at `snippet unavailable` unless an explicit source-replay path is allowed there            |
+| Recordings row has no live snippet but underlying session has recoverable history | Mixed              | Mixed                  | Yes            | Recordings should show snippet area and offer `show snippet` instead of permanently blank placeholder        |
+| User wants to remove persisted twin history                                       | Yes                | n/a                    | n/a            | Maintenance row should offer trash/delete; metadata twin state resets without touching provider source files |
+| User is browsing sessions for routine activity                                    | Mixed              | Mixed                  | No             | Sessions should focus on live activity / recording state, not top-level twin management                      |
 
 # Open Issues
 
@@ -219,20 +219,20 @@ The better model is:
 ## 1. Untangle Twin State Semantics
 
 - [x] introduce a dedicated twin-maintenance row model instead of reusing
-  Sessions-page action state
+      Sessions-page action state
 - [x] remove or rename misleading helpers such as
-  `hasVisibleTwinHistory(...)` where they are no longer the right abstraction
+      `hasVisibleTwinHistory(...)` where they are no longer the right abstraction
 - [x] derive maintenance twin state from actual persisted twin condition:
   - twin file presence
   - metadata twin counters
   - source-file freshness
 - [x] treat missing twin files with stale metadata as `no twin` rather than as
-  a separately visible pseudo-state unless debugging proves otherwise
+      a separately visible pseudo-state unless debugging proves otherwise
 
 ## 2. Snippet Reconstitution
 
 - [x] add a shared snippet-reveal helper that resolves a session snippet in
-  this order:
+      this order:
   - live snapshot snippet
   - twin-derived snippet
   - explicit source-replay snippet only where the route intentionally opts in
@@ -242,9 +242,9 @@ The better model is:
   - maintenance twin rows
   - `Recordings`
 - [x] use that helper for the maintenance twin surface so existing twins no
-  longer stay at `(no snippet)` when the operator explicitly asks to reveal them
+      longer stay at `(no snippet)` when the operator explicitly asks to reveal them
 - [x] add snippet display support to `Recordings` rows, using the same
-  on-demand reveal path rather than a separate snippet model
+      on-demand reveal path rather than a separate snippet model
 - [x] keep startup behavior lazy:
   - no eager full-session replay pass
   - no background snippet-only hydration job
@@ -252,7 +252,7 @@ The better model is:
 ## 3. Twin Delete / Reset Flow
 
 - [x] add a runtime/session-state helper for clearing twin persistence state
-  from metadata while preserving non-twin session continuity
+      from metadata while preserving non-twin session continuity
 - [x] implement a maintenance POST action to delete a single twin
 - [x] implement direct inline delete with no extra confirmation flow
 - [x] ensure delete-twin removes:
@@ -278,25 +278,25 @@ The better model is:
   - state (`current`, `behind source`, `no twin`)
   - action (`create twin`, `update twin`)
 - [x] place a trash-can delete affordance on the right side of each row, below
-  the status text
+      the status text
 - [x] use direct inline delete with no confirmation dialog or second-step form
 - [x] remove the top-level `Twins` nav item, route, and route-specific loader
-  once the Maintenance section fully replaces it
+      once the Maintenance section fully replaces it
 
 ## 5. Simplify Sessions
 
 - [x] remove twin-management-specific presentation from `Sessions` if it is no
-  longer needed after the Maintenance move
+      longer needed after the Maintenance move
 - [x] keep Sessions anchored around:
   - live activity
   - recording engagement
   - session inventory
 - [x] keep snippet display privacy-preserving by showing recovered snippets only
-  after an explicit row-level reveal action, then allow the revealed snippet to
-  appear elsewhere for that operator
+      after an explicit row-level reveal action, then allow the revealed snippet to
+      appear elsewhere for that operator
 - [x] update Summary / Workspaces / Recordings backlinks so they point to
-  `Sessions` for routine session navigation and to `Maintenance` only for
-  explicit twin troubleshooting/cleanup flows
+      `Sessions` for routine session navigation and to `Maintenance` only for
+      explicit twin troubleshooting/cleanup flows
 
 ## 6. Documentation
 
@@ -304,3 +304,51 @@ The better model is:
 - [x] update `dev.codebase-overview`
 - [x] update `dev.decision-log`
 - [x] update `dev.general-guidance` if the route/navigation guidance changes
+
+## Coderabbit review
+
+Worth keeping from PR #23 review:
+
+- [x] wrap persisted-history loading inside daemon-runtime snapshot fallback so
+  `loadSessionSnapshot(...)` degrades to the live snapshot instead of failing
+  export/control flows when replay loading throws
+  ([CodeRabbit](https://github.com/spectacular-voyage/kato/pull/23#discussion_r2919465340))
+- [x] stop forcing `twinExists = true` after provider bootstrap when no twin
+  events were actually appended; derive hydration eligibility from real twin
+  evidence instead
+  ([CodeRabbit](https://github.com/spectacular-voyage/kato/pull/23#discussion_r2919465376))
+- [x] tighten provider-ingestion hydration gating so `!currentSnapshot` alone
+  does not trigger hydration unless there is at least one real source to
+  hydrate from
+  ([CodeRabbit review summary](https://github.com/spectacular-voyage/kato/pull/23#pullrequestreview-3930820676))
+- [x] reject negative cleanup retention values in runtime cleanup entrypoints
+  (`twinsDays`, and likely `recordingsDays` for symmetry) before any
+  destructive older-than computation runs
+  ([CodeRabbit](https://github.com/spectacular-voyage/kato/pull/23#discussion_r2919465406))
+- [x] treat empty `twinsDays` form/query values as invalid/default in the web
+  maintenance surface rather than coercing them to `0`
+  ([CodeRabbit](https://github.com/spectacular-voyage/kato/pull/23#discussion_r2919465418))
+- [x] degrade snippet resolution to `status: "unavailable"` when twin reads or
+  persisted-history replay throws, instead of bubbling an API error to the web
+  client
+  ([CodeRabbit](https://github.com/spectacular-voyage/kato/pull/23#discussion_r2919465429))
+- [x] fix Summary wording so live-but-not-generating sessions are described as
+  `not generating` / `not persisting`, not `inactive`, and avoid saying
+  `No provider sessions are currently active.` when sessions are live but not
+  generating twins
+  ([CodeRabbit review summary](https://github.com/spectacular-voyage/kato/pull/23#pullrequestreview-3930820676))
+- [x] preserve `includeStale` and `workspaceFilter` when posting Maintenance log
+  actions so log truncation does not reset the current twin-view filters
+  ([CodeRabbit review summary](https://github.com/spectacular-voyage/kato/pull/23#pullrequestreview-3930820676))
+- [x] move `session_snippets.ts` off direct `apps/daemon/src/...` imports by
+  exposing the needed replay/twin mapping helpers through `@kato/runtime` (or
+  another shared boundary)
+  ([CodeRabbit review summary](https://github.com/spectacular-voyage/kato/pull/23#pullrequestreview-3930820676))
+
+Intentionally not tracked here:
+
+- backwards-compatibility / migration suggestions for legacy snapshot config
+  keys, because this task explicitly prefers clean breaks over compatibility
+  aliases
+- delete-confirmation suggestions for twin removal, because this task
+  explicitly chose direct inline delete with no confirmation step

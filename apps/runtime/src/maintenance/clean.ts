@@ -398,6 +398,12 @@ export async function runMaintenanceClean(
   ) {
     throw new Error("At least one cleanup scope is required");
   }
+  if (options.recordingsDays !== undefined && options.recordingsDays < 0) {
+    throw new Error("recordingsDays must be greater than or equal to 0");
+  }
+  if (options.twinsDays !== undefined && options.twinsDays < 0) {
+    throw new Error("twinsDays must be greater than or equal to 0");
+  }
 
   const stats = createEmptyStats();
 

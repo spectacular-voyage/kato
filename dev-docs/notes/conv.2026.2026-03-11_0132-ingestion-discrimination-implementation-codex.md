@@ -1281,3 +1281,93 @@ Validation:
 - `deno test -A tests/daemon-runtime_test.ts`
 
 I also ran a targeted coverage pass for `tests/daemon-runtime_test.ts`; in that slice, `apps/daemon/src/orchestrator/daemon_runtime.ts` is now `77.97%` line / `81.8%` branch covered. I did not rerun the full repo coverage or update [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md) for this narrow follow-up.
+
+# djradon_2026-03-11_1136_43
+
+Could you access coderabbit's review comments from https://github.com/spectacular-voyage/kato/pull/23 and any that are worth doing, please write into the task note under ## Coderabbit review, with markdown checkboxes that we can check off.
+
+# gpt-5.4_2026-03-11_1136_51
+
+I’m pulling the PR review comments from GitHub first, then I’ll distill only the worthwhile items into the task note under a dedicated `Coderabbit review` section.
+
+# gpt-5.4_2026-03-11_1137_13
+
+The PR page itself isn’t exposing the line comments cleanly in the browser scrape, so I’m pulling the public GitHub review-comment API directly and then I’ll write only the actionable items into the note.
+
+# gpt-5.4_2026-03-11_1137_28
+
+I have the review set. I’m filtering it against the actual decisions in this task so the note only gets credible follow-ups, not CodeRabbit boilerplate or suggestions that conflict with your explicit choices.
+
+# gpt-5.4_2026-03-11_1137_59
+
+I’ve narrowed it to the comments that look materially worthwhile and consistent with the decisions already in this note. I’m adding those as actionable checkboxes and leaving out the ones that conflict with explicit choices like “no backwards compatibility” and “no delete confirmation.”
+
+# gpt-5.4_2026-03-11_1138_15
+
+Added a `## Coderabbit review` checklist to [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-twins-follow-up.md) with the review items that look worth doing.
+
+I included the actionable ones around daemon runtime fallback, provider-ingestion twin/hydration correctness, cleanup input validation, snippet error degradation, Summary wording, maintenance filter preservation, and the `session_snippets.ts` dependency boundary. I explicitly left out the suggestions that conflict with prior decisions here: backwards-compatibility for legacy config keys, and delete confirmations for twin removal.
+
+No tests were run; this was a task-note update only.
+
+# djradon_2026-03-11_1142_29
+
+Great, please implement your selections.
+
+# gpt-5.4_2026-03-11_1142_39
+
+Implementing the selected CodeRabbit follow-ups now. I’m checking the current implementations in the daemon, cleanup, maintenance, summary, and snippet paths first so I can patch the concrete gaps and update the task note checkboxes as those slices land.
+
+# gpt-5.4_2026-03-11_1142_51
+
+I’ve got the concrete deltas. The two trickiest ones are `provider_ingestion` hydration semantics and moving snippet helpers off direct daemon imports; I’m reading those modules now so I can patch them cleanly instead of papering over the boundaries.
+
+# gpt-5.4_2026-03-11_1145_01
+
+I’m at the test-design pass now. The daemon/runtime pieces have straightforward regression tests; the Maintenance/Summary UI checks will probably be easiest by rendering the route/component output once with a temp env rather than exporting new internals just for tests.
+
+# gpt-5.4_2026-03-11_1146_47
+
+I’ve settled on one small cleanup refactor while patching the web pieces: a shared maintenance-parameter/helper module. It lets me fix the `twinsDays` parsing bug and the missing preserved-filter fields without exporting route internals just for tests.
+
+# gpt-5.4_2026-03-11_1148_09
+
+The code patches are in. I’m adding focused regressions now: one each for the daemon runtime fallback, provider-ingestion bootstrap/hydration edge, maintenance cleanup validation, snippet error degradation, and the new maintenance helper behavior.
+
+# gpt-5.4_2026-03-11_1149_13
+
+I’m formatting the touched files before running the targeted test slice. After that I’ll update the task note checkboxes for the CodeRabbit items that actually landed.
+
+# gpt-5.4_2026-03-11_1149_28
+
+The first failure is just a test harness mismatch: `parseTwinsDays()` throws synchronously, and I used `assertRejects`. I’m fixing that and then polling the still-running test jobs.
+
+# gpt-5.4_2026-03-11_1149_47
+
+The focused regressions are green. I’m doing one more verification pass now on the full `daemon-runtime` and `provider-ingestion` files plus the repo check task, because the changes touched shared runtime/web surfaces and I want to make sure there isn’t a hidden type break outside the small slices.
+
+# gpt-5.4_2026-03-11_1149_59
+
+The implementation is complete; I’m just updating the task note checkboxes now so the CodeRabbit section matches the code that landed.
+
+# gpt-5.4_2026-03-11_1150_22
+
+I spotted one accidental side effect from a quick local check: `deno.lock` got touched by an npm eval I used while probing web rendering. I’m inspecting that diff now and will drop it, since it isn’t part of the feature work.
+
+# gpt-5.4_2026-03-11_1150_52
+
+Implemented the selected CodeRabbit follow-ups.
+
+In the daemon/runtime path, [`daemon_runtime.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts) now falls back to the live snapshot if persisted-history loading throws, and [`provider_ingestion.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/provider_ingestion.ts) no longer treats an empty bootstrap as a real twin or hydrates just because a snapshot is missing. Cleanup validation in [`clean.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/maintenance/clean.ts) now rejects negative retention windows.
+
+On the web side, I added [`maintenance_state.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/maintenance_state.ts) so `twinsDays` parsing/defaulting is explicit and log forms preserve `includeStale`/`workspaceFilter`. [`maintenance.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/maintenance.tsx) uses that helper, [`session_snippets.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_snippets.ts) now degrades to `unavailable` on twin/source replay failures and imports replay helpers through [`@kato/runtime` via `session_history.ts`](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/session_history.ts), and [`SummaryLive.tsx`](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) now uses generation-focused wording (`generating`, `not generating`, `No provider sessions are currently generating twins.`).
+
+I added regression coverage in [`daemon-runtime_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts), [`provider-ingestion_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/provider-ingestion_test.ts), [`maintenance-clean_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/maintenance-clean_test.ts), [`web-session-snippets_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-snippets_test.ts), and [`web-maintenance-state_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/web-maintenance-state_test.ts). The CodeRabbit checklist in [task.2026.2026-03-11-twins-follow-up.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-twins-follow-up.md) is updated to checked.
+
+Validation:
+- `deno test -A tests/web-maintenance-state_test.ts`
+- `deno test -A tests/maintenance-clean_test.ts`
+- `deno test -A tests/web-session-snippets_test.ts`
+- `deno test -A tests/provider-ingestion_test.ts`
+- `deno test -A tests/daemon-runtime_test.ts`
+- `deno task check`

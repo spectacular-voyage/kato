@@ -190,6 +190,12 @@ export type {
   MaintenanceCleanStats,
 } from "./maintenance/mod.ts";
 export { runMaintenanceClean } from "./maintenance/mod.ts";
+export type { TwinToConversationOptions } from "./session_history.ts";
+export {
+  loadPersistedSessionHistoryEvents,
+  mapTwinEventsToConversation,
+  replayProviderSourceEvents,
+} from "./session_history.ts";
 export type {
   WebProcessLauncherLike,
   WebServerStatus,

@@ -2,12 +2,12 @@ import { extractSnippet, type SessionMetadataV1 } from "@kato/shared";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
+  loadPersistedSessionHistoryEvents,
+  mapTwinEventsToConversation,
   PersistentSessionStateStore,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
 } from "@kato/runtime";
-import { loadPersistedSessionHistoryEvents } from "../../daemon/src/orchestrator/provider_source_replay.ts";
-import { mapTwinEventsToConversation } from "../../daemon/src/orchestrator/session_twin_mapper.ts";
 
 export interface ResolveSessionSnippetOptions {
   sessionId: string;
@@ -40,13 +40,17 @@ async function loadTwinSnippet(
   metadata: SessionMetadataV1,
   sessionStore: PersistentSessionStateStore,
 ): Promise<string | undefined> {
-  const twinEvents = await sessionStore.readTwinEvents(metadata, 1);
-  if (twinEvents.length === 0) {
+  try {
+    const twinEvents = await sessionStore.readTwinEvents(metadata, 1);
+    if (twinEvents.length === 0) {
+      return undefined;
+    }
+    return normalizeSnippet(
+      extractSnippet(mapTwinEventsToConversation(twinEvents)),
+    );
+  } catch {
     return undefined;
   }
-  return normalizeSnippet(
-    extractSnippet(mapTwinEventsToConversation(twinEvents)),
-  );
 }
 
 export async function resolveSessionSnippet(
@@ -100,10 +104,18 @@ export async function resolveSessionSnippet(
       };
   }
 
-  const history = await loadPersistedSessionHistoryEvents(
-    metadata,
-    sessionStore,
-  );
+  let history;
+  try {
+    history = await loadPersistedSessionHistoryEvents(
+      metadata,
+      sessionStore,
+    );
+  } catch {
+    return {
+      sessionId: options.sessionId,
+      status: "unavailable",
+    };
+  }
   const snippet = normalizeSnippet(extractSnippet(history.events));
   if (!snippet) {
     return {

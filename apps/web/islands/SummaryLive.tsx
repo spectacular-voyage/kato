@@ -100,13 +100,13 @@ export default function SummaryLive(
               <span class="metric-primary-count mono">
                 {data.generatingSessionCount}
               </span>
-              <span class="metric-primary-label">active</span>
+              <span class="metric-primary-label">generating</span>
             </span>
             <span class="metric-note mono activity-stale">
               {data.staleGeneratingSessionCount} idle
             </span>
             <span class="metric-note mono">
-              {data.inactiveSessionCount} inactive
+              {data.inactiveSessionCount} not generating
             </span>
           </div>
           <div class="metric">
@@ -188,12 +188,12 @@ export default function SummaryLive(
       </article>
 
       <article class="card span-8">
-        <h3>Active Sessions</h3>
+        <h3>Generating Sessions</h3>
         <ul class="session-list">
           {activeSessionRows.length === 0
             ? (
               <li class="muted">
-                No provider sessions are currently active.
+                No provider sessions are currently generating twins.
               </li>
             )
             : activeSessionRows.map((session) => (

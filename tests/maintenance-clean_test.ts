@@ -422,3 +422,37 @@ Deno.test("runMaintenanceClean requires at least one cleanup scope", async () =>
     "At least one cleanup scope is required",
   );
 });
+
+Deno.test("runMaintenanceClean rejects negative twin cleanup windows", async () => {
+  await assertRejects(
+    () =>
+      runMaintenanceClean({
+        all: false,
+        dryRun: true,
+        twinsDays: -1,
+        runtimeDir:
+          `${Deno.cwd()}/.test-tmp/maintenance-clean-negative-twins-runtime`,
+        katoDir:
+          `${Deno.cwd()}/.test-tmp/maintenance-clean-negative-twins-kato`,
+      }),
+    Error,
+    "twinsDays must be greater than or equal to 0",
+  );
+});
+
+Deno.test("runMaintenanceClean rejects negative recordings cleanup windows", async () => {
+  await assertRejects(
+    () =>
+      runMaintenanceClean({
+        all: false,
+        dryRun: true,
+        recordingsDays: -1,
+        runtimeDir:
+          `${Deno.cwd()}/.test-tmp/maintenance-clean-negative-recordings-runtime`,
+        katoDir:
+          `${Deno.cwd()}/.test-tmp/maintenance-clean-negative-recordings-kato`,
+      }),
+    Error,
+    "recordingsDays must be greater than or equal to 0",
+  );
+});

@@ -4,6 +4,11 @@ import AppHeader from "../src/app_header.tsx";
 import { loadMaintenanceTwinsData } from "../src/loaders/maintenance_twins.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { createWebLoggers } from "../src/logging.ts";
+import {
+  buildMaintenanceHiddenFields,
+  parseTwinsDays,
+  resolveTwinsDaysParam,
+} from "../src/maintenance_state.ts";
 import { parseSessionPageQuery } from "../src/page_queries.ts";
 import { buildMaintenanceHref } from "../src/session_routes.ts";
 import { ingestPersistedSession } from "../src/session_ingestion.ts";
@@ -14,8 +19,6 @@ import {
   resolveDefaultKatoDir,
 } from "@kato/runtime";
 
-const DEFAULT_TWINS_DAYS = 30;
-
 function decodeMessage(value: string | null): string | undefined {
   if (!value) {
     return undefined;
@@ -25,25 +28,6 @@ function decodeMessage(value: string | null): string | undefined {
   } catch {
     return value;
   }
-}
-
-function parseTwinsDays(value: FormDataEntryValue | null): number {
-  const raw = String(value ?? "").trim();
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(
-      "Twin cleanup days must be a whole number greater than or equal to 0",
-    );
-  }
-  return parsed;
-}
-
-function resolveTwinsDaysParam(raw: string | null): number {
-  const parsed = Number(raw ?? "");
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    return DEFAULT_TWINS_DAYS;
-  }
-  return parsed;
 }
 
 function parseDeleteTwinMetadata(value: FormDataEntryValue | null): boolean {
@@ -360,16 +344,19 @@ export default define.page(async function MaintenancePage(ctx) {
                 name="csrfToken"
                 value={ctx.state.csrfToken ?? ""}
               />
-              <input type="hidden" name="twinsDays" value={twinsDays} />
-              {deleteTwinMetadata
-                ? (
-                  <input
-                    type="hidden"
-                    name="deleteTwinMetadata"
-                    value="on"
-                  />
-                )
-                : null}
+              {buildMaintenanceHiddenFields({
+                includeStale: query.includeStale,
+                workspaceFilter: query.workspaceFilter,
+                twinsDays,
+                deleteTwinMetadata,
+              }).map((field) => (
+                <input
+                  key={`logs-dry-run-${field.name}`}
+                  type="hidden"
+                  name={field.name}
+                  value={field.value}
+                />
+              ))}
               <button class="secondary-button" type="submit">
                 Dry-Run Log Truncation
               </button>
@@ -382,16 +369,19 @@ export default define.page(async function MaintenancePage(ctx) {
                 name="csrfToken"
                 value={ctx.state.csrfToken ?? ""}
               />
-              <input type="hidden" name="twinsDays" value={twinsDays} />
-              {deleteTwinMetadata
-                ? (
-                  <input
-                    type="hidden"
-                    name="deleteTwinMetadata"
-                    value="on"
-                  />
-                )
-                : null}
+              {buildMaintenanceHiddenFields({
+                includeStale: query.includeStale,
+                workspaceFilter: query.workspaceFilter,
+                twinsDays,
+                deleteTwinMetadata,
+              }).map((field) => (
+                <input
+                  key={`logs-execute-${field.name}`}
+                  type="hidden"
+                  name={field.name}
+                  value={field.value}
+                />
+              ))}
               <label class="checkbox-line">
                 <input type="checkbox" name="confirmLogs" required />
                 <span class="mono">

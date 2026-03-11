@@ -3342,6 +3342,198 @@ Deno.test("runDaemonRuntimeLoop replays provider source for export requests when
   }
 });
 
+Deno.test("runDaemonRuntimeLoop falls back to the live snapshot when persisted history loading fails", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-export-live-fallback-",
+  );
+
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const providerSessionId = "session-export-live-fallback";
+    const brokenSourcePath = join(stateDir, "broken-source");
+    await Deno.mkdir(brokenSourcePath, { recursive: true });
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    sessionSnapshotStore.upsert({
+      provider: "codex",
+      sessionId: providerSessionId,
+      cursor: { kind: "byte-offset", value: 1 },
+      events: [
+        makeEventForSession(
+          providerSessionId,
+          "m-live-fallback",
+          "message.assistant",
+          "live snapshot fallback",
+          "2026-02-22T10:00:00.000Z",
+        ),
+      ],
+    });
+
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-export-live-fallback-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "codex",
+      providerSessionId,
+      sourceFilePath: brokenSourcePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const requests = [
+      {
+        requestId: "req-export-live-fallback",
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: providerSessionId,
+          resolvedOutputPath: ".kato/test-runtime/live-fallback-export.md",
+        },
+      },
+      {
+        requestId: "req-stop-live-fallback",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "stop" as const,
+      },
+    ];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let exported:
+      | {
+        provider: string;
+        sessionId: string;
+        targetPath: string;
+        contents: Array<string | undefined>;
+      }
+      | undefined;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot(input) {
+        exported = {
+          provider: input.provider,
+          sessionId: input.sessionId,
+          targetPath: input.targetPath,
+          contents: input.events.map((event) => {
+            if (
+              event.kind === "message.user" ||
+              event.kind === "message.assistant" ||
+              event.kind === "message.system" ||
+              event.kind === "thinking" ||
+              event.kind === "provider.info"
+            ) {
+              return event.content;
+            }
+            return undefined;
+          }),
+        };
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertExists(exported);
+    assertEquals(exported.provider, "codex");
+    assertEquals(exported.sessionId, providerSessionId);
+    assertEquals(
+      exported.targetPath,
+      ".kato/test-runtime/live-fallback-export.md",
+    );
+    assertEquals(exported.contents, ["live snapshot fallback"]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
 Deno.test("runDaemonRuntimeLoop starts, polls, and stops ingestion runners", async () => {
   const statusStore: DaemonStatusSnapshotStoreLike = {
     load() {
@@ -5231,7 +5423,9 @@ Deno.test(
       });
 
       let appendInput:
-        | Parameters<NonNullable<RecordingPipelineLike["appendToDestination"]>>[0]
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
         | undefined;
       const recordingPipeline: RecordingPipelineLike = {
         activateRecording() {
@@ -5309,7 +5503,10 @@ Deno.test(
       });
 
       assertExists(appendInput);
-      assertEquals(appendInput.targetPath, join(stateDir, "persisted-output-config.md"));
+      assertEquals(
+        appendInput.targetPath,
+        join(stateDir, "persisted-output-config.md"),
+      );
       assertEquals(appendInput.workspaceIds, [workspace.profile.workspaceId]);
       assertEquals(appendInput.recordingCycleIds, ["cycle-persisted-config"]);
       const outputOverrides = appendInput.outputOverrides;
@@ -5412,7 +5609,9 @@ Deno.test(
       });
 
       let appendInput:
-        | Parameters<NonNullable<RecordingPipelineLike["appendToDestination"]>>[0]
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
         | undefined;
       const recordingPipeline: RecordingPipelineLike = {
         activateRecording() {
@@ -5588,7 +5787,9 @@ Deno.test(
       });
 
       let appendInput:
-        | Parameters<NonNullable<RecordingPipelineLike["appendToDestination"]>>[0]
+        | Parameters<
+          NonNullable<RecordingPipelineLike["appendToDestination"]>
+        >[0]
         | undefined;
       const recordingPipeline: RecordingPipelineLike = {
         activateRecording() {

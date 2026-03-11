@@ -1313,6 +1313,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           throw error;
         }
 
+        let bootstrappedTwinCount = 0;
         if (bootstrapEvents.length > 0) {
           const twinDrafts = mapConversationEventsToTwin({
             provider: this.provider,
@@ -1331,6 +1332,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             twinDrafts,
             { touchUpdatedAt: false },
           );
+          bootstrappedTwinCount = appendResult.appended.length;
           if (appendResult.droppedAsDuplicate > 0) {
             await this.operationalLogger.debug(
               "provider.ingestion.events_dropped",
@@ -1356,7 +1358,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           },
         );
 
-        twinExists = true;
+        twinExists = twinExists || bootstrappedTwinCount > 0;
         fromOffset = resolveCursorPosition(bootstrapCursor);
         existingCursor = bootstrapCursor;
         stateMetadata.ingestCursor = bootstrapCursor;
@@ -1522,7 +1524,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
 
       const shouldHydrateSnapshot = appendedTwinCount > 0 ||
-        !currentSnapshot ||
+        (!currentSnapshot && twinAvailableForHydration) ||
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||

@@ -2118,21 +2118,25 @@ export async function runDaemonRuntimeLoop(
           const liveSnapshot = sessionSnapshotStore?.get(
             metadata.providerSessionId,
           );
-          const history = await loadPersistedSessionHistoryEvents(
-            metadata,
-            sessionStateStore,
-          );
-          if (history.source === "twin" && liveSnapshot) {
-            return {
-              provider: liveSnapshot.provider,
-              events: liveSnapshot.events,
-            };
-          }
-          if (history.events.length > 0) {
-            return {
-              provider: metadata.provider,
-              events: history.events,
-            };
+          try {
+            const history = await loadPersistedSessionHistoryEvents(
+              metadata,
+              sessionStateStore,
+            );
+            if (history.source === "twin" && liveSnapshot) {
+              return {
+                provider: liveSnapshot.provider,
+                events: liveSnapshot.events,
+              };
+            }
+            if (history.events.length > 0) {
+              return {
+                provider: metadata.provider,
+                events: history.events,
+              };
+            }
+          } catch {
+            // Fall back to the live snapshot when persisted history cannot load.
           }
           if (liveSnapshot) {
             return {

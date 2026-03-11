@@ -220,6 +220,34 @@ Deno.test("resolveSessionSnippet returns unavailable when replay is disabled and
   });
 });
 
+Deno.test("resolveSessionSnippet degrades to unavailable when twin reads fail", async () => {
+  await withTestTempDir(
+    "web-session-snippets-twin-read-error-",
+    async (rootDir) => {
+      const katoDir = `${rootDir}/.kato`;
+      const { metadata } = await createSnippetSessionFixture({
+        katoDir,
+        sessionId: "sess-twin-read-error",
+        providerSessionId: "provider-twin-read-error",
+        sourceName: "twin-read-error",
+      });
+      await Deno.mkdir(metadata.twinPath, { recursive: true });
+
+      const result = await resolveSessionSnippet({
+        sessionId: metadata.sessionId,
+        katoDir,
+        allowSourceReplay: false,
+        statusStore: makeStatusStore([]),
+      });
+
+      assertEquals(result, {
+        sessionId: metadata.sessionId,
+        status: "unavailable",
+      });
+    },
+  );
+});
+
 Deno.test("resolveSessionSnippet returns unavailable when source replay finds no snippet", async () => {
   await withTestTempDir(
     "web-session-snippets-empty-source-",
@@ -232,6 +260,34 @@ Deno.test("resolveSessionSnippet returns unavailable when source replay finds no
         sourceName: "empty-source",
         sourceContents: "",
       });
+
+      const result = await resolveSessionSnippet({
+        sessionId: metadata.sessionId,
+        katoDir,
+        statusStore: makeStatusStore([]),
+      });
+
+      assertEquals(result, {
+        sessionId: metadata.sessionId,
+        status: "unavailable",
+      });
+    },
+  );
+});
+
+Deno.test("resolveSessionSnippet degrades to unavailable when source replay fails", async () => {
+  await withTestTempDir(
+    "web-session-snippets-source-replay-error-",
+    async (rootDir) => {
+      const katoDir = `${rootDir}/.kato`;
+      const { metadata } = await createSnippetSessionFixture({
+        katoDir,
+        sessionId: "sess-source-replay-error",
+        providerSessionId: "provider-source-replay-error",
+        sourceName: "source-replay-error",
+      });
+      await Deno.remove(metadata.sourceFilePath);
+      await Deno.mkdir(metadata.sourceFilePath, { recursive: true });
 
       const result = await resolveSessionSnippet({
         sessionId: metadata.sessionId,
