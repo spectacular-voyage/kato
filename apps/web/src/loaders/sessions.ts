@@ -17,7 +17,7 @@ import {
   type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
-  providerAutoGeneratesSnapshots,
+  providerAutoGeneratesTwins,
 } from "./activity_state.ts";
 import { buildIngestionSessionHref } from "../session_routes.ts";
 
@@ -209,9 +209,13 @@ function hasLegacyManualIngestionHistory(metadata: SessionMetadataV1): boolean {
     (metadata.commandCursor ?? 0) === 0;
 }
 
-function hasExplicitIngestionHistory(metadata: SessionMetadataV1): boolean {
+function hasExplicitTwinHistory(metadata: SessionMetadataV1): boolean {
   return metadata.ingestionActivatedAt !== undefined ||
-    hasLegacyManualIngestionHistory(metadata) ||
+    hasLegacyManualIngestionHistory(metadata);
+}
+
+function hasExplicitIngestionHistory(metadata: SessionMetadataV1): boolean {
+  return hasExplicitTwinHistory(metadata) ||
     (metadata.workspaceOutputs?.length ?? 0) > 0;
 }
 
@@ -220,7 +224,7 @@ function hasVisibleIngestionHistory(
   runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
 ): boolean {
   return hasExplicitIngestionHistory(metadata) ||
-    providerAutoGeneratesSnapshots(metadata.provider, runtimeConfig);
+    providerAutoGeneratesTwins(metadata.provider, runtimeConfig);
 }
 
 function normalizePersistedSessionState(
@@ -235,6 +239,17 @@ function normalizePersistedSessionState(
     return "stale";
   }
   return state;
+}
+
+function hasVisibleTwinHistory(
+  metadata: SessionMetadataV1,
+  runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
+): boolean {
+  return hasTwinHistory(metadata) &&
+    (
+      hasExplicitTwinHistory(metadata) ||
+      providerAutoGeneratesTwins(metadata.provider, runtimeConfig)
+    );
 }
 
 async function needsIngestionContinuation(
@@ -260,23 +275,16 @@ async function needsIngestionContinuation(
 
 async function resolveSessionIngestionUiState(
   metadata: SessionMetadataV1,
-  state: ActivityState,
+  _state: ActivityState,
   runtimeConfig: Awaited<ReturnType<typeof loadRuntimeConfigOrDefault>>,
 ): Promise<{
   canOpenIngestView: boolean;
   ingestionAction: SessionIngestionAction;
 }> {
-  if (!hasVisibleIngestionHistory(metadata, runtimeConfig)) {
+  if (!hasVisibleTwinHistory(metadata, runtimeConfig)) {
     return {
       canOpenIngestView: false,
       ingestionAction: "start",
-    };
-  }
-
-  if (state === "active") {
-    return {
-      canOpenIngestView: true,
-      ingestionAction: "none",
     };
   }
 
@@ -630,7 +638,7 @@ export async function loadSessionActivityRows(
       sessionId: metadata.sessionId,
       sessionShortId: deriveSessionShortId(metadata, live),
       providerSessionId: metadata.providerSessionId,
-      snippet: live?.snippet ?? metadata.snippet,
+      snippet: live?.snippet,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
       stale: live?.stale ?? true,

@@ -1,7 +1,7 @@
 {
   "tasks": {
     "dev": "deno task dev:daemon",
-    "dev:daemon": "deno run --watch=apps/daemon/src,shared/src apps/daemon/src/main.ts __daemon-run",
+    "dev:daemon": "deno run --allow-read --allow-write --allow-env --watch=apps/daemon/src,shared/src apps/daemon/src/main.ts __daemon-run",
     "dev:web": "deno task --cwd apps/web dev",
     "dev:cloud": "deno run --watch=apps/cloud/src,shared/src apps/cloud/src/main.ts",
     "dev:root": "deno run --watch main.ts",

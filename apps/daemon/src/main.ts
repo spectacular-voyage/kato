@@ -375,8 +375,8 @@ export async function runDaemonSubprocess(
   const ingestionRunners = createDefaultProviderIngestionRunners({
     sessionSnapshotStore,
     sessionStateStore,
-    globalAutoGenerateSnapshots: runtimeConfig.globalAutoGenerateSnapshots,
-    providerAutoGenerateSnapshots: runtimeConfig.providerAutoGenerateSnapshots,
+    globalAutoGenerateTwins: runtimeConfig.globalAutoGenerateTwins,
+    providerAutoGenerateTwins: runtimeConfig.providerAutoGenerateTwins,
     claudeSessionRoots: runtimeConfig.providerSessionRoots.claude,
     codexSessionRoots: runtimeConfig.providerSessionRoots.codex,
     geminiSessionRoots: runtimeConfig.providerSessionRoots.gemini,

@@ -22,7 +22,7 @@ export type {
   DaemonFeatureFlags,
   ExportFeatureFlags,
   MarkdownFrontmatterConfig,
-  ProviderAutoGenerateSnapshots,
+  ProviderAutoGenerateTwins,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeConfigMetadata,

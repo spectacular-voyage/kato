@@ -89,14 +89,14 @@ Deno.test("RuntimeConfigFileStore initializes missing daemon config", async () =
       loaded.providerSessionRoots,
       defaultConfig.providerSessionRoots,
     );
-    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
+    assertEquals(loaded.providerAutoGenerateTwins, { codex: true });
     assertEquals(loaded.daemonFeatureFlags, defaultConfig.daemonFeatureFlags);
   } finally {
     await removePathIfPresent(root);
   }
 });
 
-Deno.test("RuntimeConfigFileStore defaults missing providerAutoGenerateSnapshots to codex", async () => {
+Deno.test("RuntimeConfigFileStore defaults missing providerAutoGenerateTwins to codex", async () => {
   const root = makeSandboxRoot();
   const runtimeDir = join(root, "daemon");
   const configPath = join(runtimeDir, "kato-daemon-config.yaml");
@@ -114,7 +114,7 @@ Deno.test("RuntimeConfigFileStore defaults missing providerAutoGenerateSnapshots
           codex: [],
           gemini: [],
         },
-        globalAutoGenerateSnapshots: false,
+        globalAutoGenerateTwins: false,
         cleanSessionStatesOnShutdown: false,
         daemonFeatureFlags: {
           daemonExportEnabled: true,
@@ -129,13 +129,13 @@ Deno.test("RuntimeConfigFileStore defaults missing providerAutoGenerateSnapshots
     );
 
     const loaded = await store.load();
-    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
+    assertEquals(loaded.providerAutoGenerateTwins, { codex: true });
   } finally {
     await removePathIfPresent(root);
   }
 });
 
-Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateSnapshots is empty", async () => {
+Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateTwins is empty", async () => {
   const root = makeSandboxRoot();
   const runtimeDir = join(root, "daemon");
   const configPath = join(runtimeDir, "kato-daemon-config.yaml");
@@ -153,8 +153,8 @@ Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateSnapsh
           codex: [],
           gemini: [],
         },
-        globalAutoGenerateSnapshots: false,
-        providerAutoGenerateSnapshots: {},
+        globalAutoGenerateTwins: false,
+        providerAutoGenerateTwins: {},
         cleanSessionStatesOnShutdown: false,
         daemonFeatureFlags: {
           daemonExportEnabled: true,
@@ -169,7 +169,7 @@ Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateSnapsh
     );
 
     const loaded = await store.load();
-    assertEquals(loaded.providerAutoGenerateSnapshots, { codex: true });
+    assertEquals(loaded.providerAutoGenerateTwins, { codex: true });
   } finally {
     await removePathIfPresent(root);
   }
@@ -284,7 +284,7 @@ Deno.test("createDefaultRuntimeConfig applies env defaults and home shorthand", 
         auditLevel: "debug",
       });
       assertEquals(config.daemonMaxMemoryMb, 768);
-      assertEquals(config.providerAutoGenerateSnapshots, { codex: true });
+      assertEquals(config.providerAutoGenerateTwins, { codex: true });
     } finally {
       restoreConfigEnv(snapshot);
       await removePathIfPresent(root);
@@ -351,6 +351,50 @@ Deno.test("RuntimeConfigFileStore rejects legacy mixed fields", async () => {
   }
 });
 
+Deno.test("RuntimeConfigFileStore rejects deprecated auto-twin snapshot keys with rename guidance", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "kato-daemon-config.yaml");
+  const store = new RuntimeConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(root, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        runtimeDir: join(root, "daemon"),
+        providerSessionRoots: {
+          claude: [],
+          codex: [],
+          gemini: [],
+        },
+        globalAutoGenerateSnapshots: false,
+        providerAutoGenerateSnapshots: {
+          codex: true,
+        },
+        cleanSessionStatesOnShutdown: false,
+        daemonFeatureFlags: {
+          daemonExportEnabled: true,
+          captureIncludeSystemEvents: false,
+        },
+        logging: {
+          operationalLevel: "info",
+          auditLevel: "info",
+        },
+        daemonMaxMemoryMb: 500,
+      }),
+    );
+
+    await assertRejects(
+      () => store.load(),
+      Error,
+      "Rename them to globalAutoGenerateTwins/providerAutoGenerateTwins",
+    );
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
 Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config values", async () => {
   await withLockedEnvironment(async () => {
     const root = makeSandboxRoot();
@@ -375,8 +419,8 @@ Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config v
           providerSessionRoots: {
             codex: ["~/captures/codex"],
           },
-          globalAutoGenerateSnapshots: true,
-          providerAutoGenerateSnapshots: {
+          globalAutoGenerateTwins: true,
+          providerAutoGenerateTwins: {
             claude: false,
             gemini: true,
           },
@@ -400,7 +444,7 @@ Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config v
         codex: [join(homeDir, "captures", "codex")],
         gemini: [join(homeDir, ".gemini", "tmp")],
       });
-      assertEquals(loaded.providerAutoGenerateSnapshots, {
+      assertEquals(loaded.providerAutoGenerateTwins, {
         claude: false,
         codex: true,
         gemini: true,
@@ -413,7 +457,7 @@ Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config v
         operationalLevel: "warn",
         auditLevel: "error",
       });
-      assertEquals(loaded.globalAutoGenerateSnapshots, true);
+      assertEquals(loaded.globalAutoGenerateTwins, true);
       assertEquals(loaded.cleanSessionStatesOnShutdown, true);
       assertEquals(loaded.daemonMaxMemoryMb, 1024);
     } finally {

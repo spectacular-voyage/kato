@@ -52,10 +52,10 @@ export const handler = define.handlers({
         auditLogger,
       });
       const notice = result.appendedTwinEvents > 0
-        ? `ingestion completed: ${result.provider} (${result.sessionShortId})`
+        ? `${result.twinAction} twin completed: ${result.provider} (${result.sessionShortId})`
         : result.parsedEvents > 0
-        ? `ingestion already current: ${result.provider} (${result.sessionShortId})`
-        : `no ingestable events found: ${result.provider} (${result.sessionShortId})`;
+        ? `${result.twinAction} twin already current: ${result.provider} (${result.sessionShortId})`
+        : `no twin events found: ${result.provider} (${result.sessionShortId})`;
       redirectUrl.searchParams.set("notice", notice);
       return Response.redirect(redirectUrl, 303);
     } catch (error) {
@@ -93,7 +93,7 @@ export default define.page(async function SessionsPage(ctx) {
       <div class="shell">
         <AppHeader
           title="Sessions"
-          description="Discovered chat-session inventory with current ingestion status and links into operational ingestion details."
+          description="Discovered chat-session inventory with live activity, recording state, and manual twin actions."
           currentPath="/sessions"
           showLogout
           csrfToken={ctx.state.csrfToken}

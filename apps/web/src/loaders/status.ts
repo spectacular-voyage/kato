@@ -13,7 +13,7 @@ import {
   type ActivityState,
   deriveSessionGenerationState,
   loadRuntimeConfigOrDefault,
-  providerAutoGeneratesSnapshots,
+  providerAutoGeneratesTwins,
 } from "./activity_state.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -61,7 +61,7 @@ export interface AppChromeStatus {
 
 export interface ConfiguredProvider {
   provider: string;
-  autoGenerateSnapshots: boolean;
+  autoGenerateTwins: boolean;
 }
 
 export interface SummarySessionRow {
@@ -188,7 +188,7 @@ export async function loadSummaryPageData(
     .filter((p) => (runtimeConfig.providerSessionRoots[p] ?? []).length > 0)
     .map((p) => ({
       provider: p,
-      autoGenerateSnapshots: providerAutoGeneratesSnapshots(p, runtimeConfig),
+      autoGenerateTwins: providerAutoGeneratesTwins(p, runtimeConfig),
     }));
   const sessionGenerationCounts = summarizeSessionGenerationState(
     sessionActivityRows,

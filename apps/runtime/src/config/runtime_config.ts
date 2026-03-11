@@ -1,6 +1,6 @@
 import type {
   DaemonFeatureFlags,
-  ProviderAutoGenerateSnapshots,
+  ProviderAutoGenerateTwins,
   ProviderSessionRoots,
   RuntimeConfig,
   RuntimeLoggingConfig,
@@ -41,8 +41,8 @@ const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
   "runtimeDir",
   "katoDir",
   "providerSessionRoots",
-  "globalAutoGenerateSnapshots",
-  "providerAutoGenerateSnapshots",
+  "globalAutoGenerateTwins",
+  "providerAutoGenerateTwins",
   "cleanSessionStatesOnShutdown",
   "daemonFeatureFlags",
   "logging",
@@ -71,15 +71,18 @@ const PROVIDER_SESSION_ROOT_KEYS: Array<keyof ProviderSessionRoots> = [
   "codex",
   "gemini",
 ];
-const PROVIDER_AUTO_SNAPSHOT_KEYS: Array<keyof ProviderAutoGenerateSnapshots> =
-  [
-    "claude",
-    "codex",
-    "gemini",
-  ];
-const DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS: Readonly<
-  ProviderAutoGenerateSnapshots
+const PROVIDER_AUTO_TWIN_KEYS: Array<keyof ProviderAutoGenerateTwins> = [
+  "claude",
+  "codex",
+  "gemini",
+];
+const DEFAULT_PROVIDER_AUTO_GENERATE_TWINS: Readonly<
+  ProviderAutoGenerateTwins
 > = { codex: true };
+const LEGACY_AUTO_GENERATE_SNAPSHOT_KEYS = [
+  "globalAutoGenerateSnapshots",
+  "providerAutoGenerateSnapshots",
+] as const;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -311,11 +314,11 @@ function parseProviderSessionRoots(
   return mergeProviderSessionRoots(overrides);
 }
 
-function parseProviderAutoGenerateSnapshots(
+function parseProviderAutoGenerateTwins(
   value: unknown,
-): ProviderAutoGenerateSnapshots | undefined {
+): ProviderAutoGenerateTwins | undefined {
   if (value === undefined) {
-    return { ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS };
+    return { ...DEFAULT_PROVIDER_AUTO_GENERATE_TWINS };
   }
   if (!isRecord(value)) {
     return undefined;
@@ -323,18 +326,18 @@ function parseProviderAutoGenerateSnapshots(
 
   for (const key of Object.keys(value)) {
     if (
-      !PROVIDER_AUTO_SNAPSHOT_KEYS.includes(
-        key as keyof ProviderAutoGenerateSnapshots,
+      !PROVIDER_AUTO_TWIN_KEYS.includes(
+        key as keyof ProviderAutoGenerateTwins,
       )
     ) {
       return undefined;
     }
   }
 
-  const parsed: ProviderAutoGenerateSnapshots = {
-    ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS,
+  const parsed: ProviderAutoGenerateTwins = {
+    ...DEFAULT_PROVIDER_AUTO_GENERATE_TWINS,
   };
-  for (const key of PROVIDER_AUTO_SNAPSHOT_KEYS) {
+  for (const key of PROVIDER_AUTO_TWIN_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
       continue;
@@ -345,6 +348,14 @@ function parseProviderAutoGenerateSnapshots(
     parsed[key] = candidate;
   }
   return parsed;
+}
+
+function findLegacyAutoGenerateSnapshotKeys(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return LEGACY_AUTO_GENERATE_SNAPSHOT_KEYS.filter((key) => key in value);
 }
 
 function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
@@ -394,17 +405,17 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   if (!providerSessionRoots) {
     return undefined;
   }
-  const providerAutoGenerateSnapshots = parseProviderAutoGenerateSnapshots(
-    value["providerAutoGenerateSnapshots"],
+  const providerAutoGenerateTwins = parseProviderAutoGenerateTwins(
+    value["providerAutoGenerateTwins"],
   );
-  if (!providerAutoGenerateSnapshots) {
+  if (!providerAutoGenerateTwins) {
     return undefined;
   }
-  const globalAutoGenerateSnapshots = value["globalAutoGenerateSnapshots"] ===
+  const globalAutoGenerateTwins = value["globalAutoGenerateTwins"] ===
       undefined
     ? false
-    : value["globalAutoGenerateSnapshots"];
-  if (typeof globalAutoGenerateSnapshots !== "boolean") {
+    : value["globalAutoGenerateTwins"];
+  if (typeof globalAutoGenerateTwins !== "boolean") {
     return undefined;
   }
   const cleanSessionStatesOnShutdown = value["cleanSessionStatesOnShutdown"] ===
@@ -429,8 +440,8 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
     runtimeDir,
     katoDir,
     providerSessionRoots,
-    globalAutoGenerateSnapshots,
-    providerAutoGenerateSnapshots,
+    globalAutoGenerateTwins,
+    providerAutoGenerateTwins,
     cleanSessionStatesOnShutdown,
     daemonFeatureFlags,
     logging,
@@ -446,9 +457,9 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     providerSessionRoots: cloneProviderSessionRoots(
       config.providerSessionRoots,
     ),
-    globalAutoGenerateSnapshots: config.globalAutoGenerateSnapshots ?? false,
-    providerAutoGenerateSnapshots: {
-      ...(config.providerAutoGenerateSnapshots ?? {}),
+    globalAutoGenerateTwins: config.globalAutoGenerateTwins ?? false,
+    providerAutoGenerateTwins: {
+      ...(config.providerAutoGenerateTwins ?? {}),
     },
     cleanSessionStatesOnShutdown: config.cleanSessionStatesOnShutdown ?? false,
     daemonFeatureFlags: mergeDaemonFeatureFlags(config.daemonFeatureFlags),
@@ -466,8 +477,8 @@ export function createDefaultRuntimeConfig(options: {
   runtimeDir: string;
   katoDir?: string;
   providerSessionRoots?: Partial<ProviderSessionRoots>;
-  globalAutoGenerateSnapshots?: boolean;
-  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
+  globalAutoGenerateTwins?: boolean;
+  providerAutoGenerateTwins?: ProviderAutoGenerateTwins;
   cleanSessionStatesOnShutdown?: boolean;
   daemonFeatureFlags?: Partial<DaemonFeatureFlags>;
   logging?: Partial<RuntimeLoggingConfig>;
@@ -542,10 +553,10 @@ export function createDefaultRuntimeConfig(options: {
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),
       gemini: providerSessionRoots.gemini.map((root) => serializePath(root)),
     },
-    globalAutoGenerateSnapshots: options.globalAutoGenerateSnapshots ?? false,
-    providerAutoGenerateSnapshots: {
-      ...DEFAULT_PROVIDER_AUTO_GENERATE_SNAPSHOTS,
-      ...(options.providerAutoGenerateSnapshots ?? {}),
+    globalAutoGenerateTwins: options.globalAutoGenerateTwins ?? false,
+    providerAutoGenerateTwins: {
+      ...DEFAULT_PROVIDER_AUTO_GENERATE_TWINS,
+      ...(options.providerAutoGenerateTwins ?? {}),
     },
     cleanSessionStatesOnShutdown: options.cleanSessionStatesOnShutdown ?? false,
     daemonFeatureFlags: mergeDaemonFeatureFlags(options.daemonFeatureFlags),
@@ -568,6 +579,15 @@ export class RuntimeConfigFileStore implements RuntimeConfigStoreLike {
       parsed = parseYaml(raw);
     } catch {
       throw new Error("Runtime config file contains invalid YAML");
+    }
+
+    const legacyKeys = findLegacyAutoGenerateSnapshotKeys(parsed);
+    if (legacyKeys.length > 0) {
+      throw new Error(
+        `Runtime config uses deprecated key(s): ${
+          legacyKeys.join(", ")
+        }. Rename them to globalAutoGenerateTwins/providerAutoGenerateTwins.`,
+      );
     }
 
     const config = parseRuntimeConfig(parsed);

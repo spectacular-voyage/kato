@@ -180,7 +180,7 @@ export default function SummaryLive(
                 </div>
                 <div class="muted">
                   Automatic Twin Generation:{" "}
-                  {provider.autoGenerateSnapshots ? "on" : "off"}
+                  {provider.autoGenerateTwins ? "on" : "off"}
                 </div>
               </li>
             ))}

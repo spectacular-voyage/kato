@@ -20,20 +20,20 @@ function buildSessionListStateLabel(row: SessionActivityRow): string {
   }
   switch (row.ingestionAction) {
     case "start":
-      return "not ingested";
+      return "no twin";
     case "continue":
-      return "continue ingestion";
+      return "update twin";
     case "none":
-      return row.canOpenIngestView ? "idle" : "not ingested";
+      return row.canOpenIngestView ? "idle" : "no twin";
   }
 }
 
 function ingestionActionLabel(action: SessionIngestionAction): string {
   switch (action) {
     case "start":
-      return "start ingestion";
+      return "create twin";
     case "continue":
-      return "continue ingestion";
+      return "update twin";
     case "none":
       return "";
   }
@@ -56,7 +56,7 @@ function buildCountSummary(options: {
   if (!options.includeStale) {
     return `Active: ${options.activeSessionCount}`;
   }
-  return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Not ingested: ${options.inactiveSessionCount}`;
+  return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, No twin: ${options.inactiveSessionCount}`;
 }
 
 export default function SessionsLive(

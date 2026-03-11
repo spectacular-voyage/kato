@@ -1,6 +1,6 @@
 import type {
   ConversationEvent,
-  ProviderAutoGenerateSnapshots,
+  ProviderAutoGenerateTwins,
   ProviderCursor,
   SessionIngestAnchorV1,
   SessionMetadataV1,
@@ -84,7 +84,7 @@ export interface FileProviderIngestionRunnerOptions {
   ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
   sessionSnapshotStore: SessionSnapshotStore;
   sessionStateStore?: PersistentSessionStateStore;
-  autoGenerateSnapshots?: boolean;
+  autoGenerateTwins?: boolean;
   discoveryIntervalMs?: number;
   watchDebounceMs?: number;
   now?: () => Date;
@@ -100,8 +100,8 @@ export interface FileProviderIngestionRunnerOptions {
 export interface ProviderIngestionFactoryOptions {
   sessionSnapshotStore: SessionSnapshotStore;
   sessionStateStore?: PersistentSessionStateStore;
-  globalAutoGenerateSnapshots?: boolean;
-  providerAutoGenerateSnapshots?: ProviderAutoGenerateSnapshots;
+  globalAutoGenerateTwins?: boolean;
+  providerAutoGenerateTwins?: ProviderAutoGenerateTwins;
   now?: () => Date;
   watchDebounceMs?: number;
   discoveryIntervalMs?: number;
@@ -120,7 +120,7 @@ export interface ProviderIngestionFactoryOptions {
 export interface CreateProviderIngestionRunnerOptions {
   sessionSnapshotStore: SessionSnapshotStore;
   sessionStateStore?: PersistentSessionStateStore;
-  autoGenerateSnapshots?: boolean;
+  autoGenerateTwins?: boolean;
   sessionRoots?: string[];
   now?: () => Date;
   watchDebounceMs?: number;
@@ -649,12 +649,6 @@ async function readGeminiMessages(
   );
 }
 
-function hasActiveRecordings(stateMetadata: SessionMetadataV1): boolean {
-  return (stateMetadata.workspaceOutputs ?? []).some((output) =>
-    output.desiredState === "on"
-  );
-}
-
 export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   readonly provider: string;
   private readonly now: () => Date;
@@ -669,7 +663,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly auditLogger: AuditLogger;
   private readonly sessionSnapshotStore: SessionSnapshotStore;
   private readonly sessionStateStore: PersistentSessionStateStore | undefined;
-  private readonly autoGenerateSnapshots: boolean;
+  private readonly autoGenerateTwins: boolean;
   private readonly discoverSessions: () => Promise<ProviderSessionFile[]>;
   private readonly parseEvents: (
     filePath: string,
@@ -699,7 +693,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.parseEvents = options.parseEvents;
     this.sessionSnapshotStore = options.sessionSnapshotStore;
     this.sessionStateStore = options.sessionStateStore;
-    this.autoGenerateSnapshots = options.autoGenerateSnapshots ?? false;
+    this.autoGenerateTwins = options.autoGenerateTwins ?? false;
     this.now = options.now ?? (() => new Date());
     this.discoveryIntervalMs = options.discoveryIntervalMs ??
       DEFAULT_DISCOVERY_INTERVAL_MS;
@@ -1242,139 +1236,137 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
     }
 
+    let twinAvailableForHydration = false;
     if (stateMetadata && this.sessionStateStore) {
-      // Persist session twin history unconditionally when session state is
-      // enabled so missing twins are always rebuilt from source and stay
-      // capture-complete for command-time replay.
-      const shouldAppendTwin = true;
-      if (shouldAppendTwin) {
-        let twinExists = true;
-        try {
-          await Deno.stat(stateMetadata.twinPath);
-        } catch (error) {
-          if (error instanceof Deno.errors.NotFound) {
-            twinExists = false;
-          } else if (
-            await this.handleReadDenied(error, "stat", stateMetadata.twinPath)
-          ) {
-            return { updated: false, eventsObserved: 0 };
-          } else {
-            throw error;
-          }
-        }
-
-        const needsBootstrap = !twinExists &&
-          (
-            fromOffset > 0 ||
-            stateMetadata.nextTwinSeq > 1 ||
-            stateMetadata.recentFingerprints.length > 0
-          );
-        if (needsBootstrap) {
-          await this.operationalLogger.info(
-            "provider.ingestion.twin.bootstrap",
-            "Session twin missing; rebuilding twin from source",
-            {
-              provider: this.provider,
-              sessionId,
-              filePath: session.filePath,
-              twinPath: stateMetadata.twinPath,
-            },
-          );
-
-          // Twin rebuild should be a fresh replay from source.
-          // Persist reset state before append so dedupe does not suppress
-          // historical events based on stale fingerprint history.
-          stateMetadata.nextTwinSeq = 1;
-          stateMetadata.recentFingerprints = [];
-          await this.sessionStateStore.saveSessionMetadata(stateMetadata);
-
-          const bootstrapEvents: ConversationEvent[] = [];
-          let bootstrapCursor: ProviderCursor = this.provider === "gemini"
-            ? makeItemIndexCursor(0)
-            : makeByteOffsetCursor(0);
-          try {
-            for await (
-              const { event, cursor } of this.parseEvents(
-                session.filePath,
-                0,
-                { provider: this.provider, sessionId },
-              )
-            ) {
-              bootstrapEvents.push(event);
-              if (
-                cursor.kind === "byte-offset" || cursor.kind === "item-index"
-              ) {
-                const current = resolveCursorPosition(bootstrapCursor);
-                const incoming = resolveCursorPosition(cursor);
-                if (
-                  cursor.kind !== bootstrapCursor.kind || incoming > current
-                ) {
-                  bootstrapCursor = cursor;
-                }
-              } else {
-                bootstrapCursor = cursor;
-              }
-            }
-          } catch (error) {
-            if (await this.handleReadDenied(error, "open", session.filePath)) {
-              return { updated: false, eventsObserved: 0 };
-            }
-            throw error;
-          }
-
-          if (bootstrapEvents.length > 0) {
-            const twinDrafts = mapConversationEventsToTwin({
-              provider: this.provider,
-              providerSessionId: sessionId,
-              sessionId: stateMetadata.sessionId,
-              events: bootstrapEvents,
-              mode: "backfill",
-              // Codex backfill cannot infer reliable event time from source.
-              // Leave capturedAt unset so it surfaces as unknown downstream.
-              ...(this.provider === "codex"
-                ? {}
-                : { capturedAt: this.now().toISOString() }),
-            });
-            const appendResult = await this.sessionStateStore.appendTwinEvents(
-              stateMetadata,
-              twinDrafts,
-              { touchUpdatedAt: false },
-            );
-            if (appendResult.droppedAsDuplicate > 0) {
-              await this.operationalLogger.debug(
-                "provider.ingestion.events_dropped",
-                "Provider ingestion dropped duplicate events during twin bootstrap",
-                {
-                  provider: this.provider,
-                  sessionId,
-                  droppedEvents: appendResult.droppedAsDuplicate,
-                  reason: "duplicate-session-twin-bootstrap",
-                },
-              );
-            }
-          }
-
-          // appendTwinEvents persists authoritative sequence/fingerprint state;
-          // reload metadata so cursor/mtime saves below do not clobber it.
-          stateMetadata = await this.sessionStateStore
-            .getOrCreateSessionMetadata(
-              {
-                provider: this.provider,
-                providerSessionId: sessionId,
-                sourceFilePath: session.filePath,
-                initialCursor: stateMetadata.ingestCursor,
-              },
-            );
-
-          fromOffset = resolveCursorPosition(bootstrapCursor);
-          existingCursor = bootstrapCursor;
-          stateMetadata.ingestCursor = bootstrapCursor;
-          stateMetadata.lastObservedMtimeMs = fileStat.mtime?.getTime();
-          stateMetadata.sourceFilePath = session.filePath;
-          await this.sessionStateStore.saveSessionMetadata(stateMetadata);
-          this.setCursor(sessionId, bootstrapCursor, session.filePath);
+      let twinExists = true;
+      try {
+        await Deno.stat(stateMetadata.twinPath);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          twinExists = false;
+        } else if (
+          await this.handleReadDenied(error, "stat", stateMetadata.twinPath)
+        ) {
+          return { updated: false, eventsObserved: 0 };
+        } else {
+          throw error;
         }
       }
+
+      const needsBootstrap = this.autoGenerateTwins &&
+        !twinExists &&
+        (
+          fromOffset > 0 ||
+          stateMetadata.nextTwinSeq > 1 ||
+          stateMetadata.recentFingerprints.length > 0
+        );
+      if (needsBootstrap) {
+        await this.operationalLogger.info(
+          "provider.ingestion.twin.bootstrap",
+          "Session twin missing; rebuilding twin from source",
+          {
+            provider: this.provider,
+            sessionId,
+            filePath: session.filePath,
+            twinPath: stateMetadata.twinPath,
+          },
+        );
+
+        // Twin rebuild should be a fresh replay from source.
+        // Persist reset state before append so dedupe does not suppress
+        // historical events based on stale fingerprint history.
+        stateMetadata.nextTwinSeq = 1;
+        stateMetadata.recentFingerprints = [];
+        await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+
+        const bootstrapEvents: ConversationEvent[] = [];
+        let bootstrapCursor: ProviderCursor = this.provider === "gemini"
+          ? makeItemIndexCursor(0)
+          : makeByteOffsetCursor(0);
+        try {
+          for await (
+            const { event, cursor } of this.parseEvents(
+              session.filePath,
+              0,
+              { provider: this.provider, sessionId },
+            )
+          ) {
+            bootstrapEvents.push(event);
+            if (
+              cursor.kind === "byte-offset" || cursor.kind === "item-index"
+            ) {
+              const current = resolveCursorPosition(bootstrapCursor);
+              const incoming = resolveCursorPosition(cursor);
+              if (
+                cursor.kind !== bootstrapCursor.kind || incoming > current
+              ) {
+                bootstrapCursor = cursor;
+              }
+            } else {
+              bootstrapCursor = cursor;
+            }
+          }
+        } catch (error) {
+          if (await this.handleReadDenied(error, "open", session.filePath)) {
+            return { updated: false, eventsObserved: 0 };
+          }
+          throw error;
+        }
+
+        if (bootstrapEvents.length > 0) {
+          const twinDrafts = mapConversationEventsToTwin({
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sessionId: stateMetadata.sessionId,
+            events: bootstrapEvents,
+            mode: "backfill",
+            // Codex backfill cannot infer reliable event time from source.
+            // Leave capturedAt unset so it surfaces as unknown downstream.
+            ...(this.provider === "codex"
+              ? {}
+              : { capturedAt: this.now().toISOString() }),
+          });
+          const appendResult = await this.sessionStateStore.appendTwinEvents(
+            stateMetadata,
+            twinDrafts,
+            { touchUpdatedAt: false },
+          );
+          if (appendResult.droppedAsDuplicate > 0) {
+            await this.operationalLogger.debug(
+              "provider.ingestion.events_dropped",
+              "Provider ingestion dropped duplicate events during twin bootstrap",
+              {
+                provider: this.provider,
+                sessionId,
+                droppedEvents: appendResult.droppedAsDuplicate,
+                reason: "duplicate-session-twin-bootstrap",
+              },
+            );
+          }
+        }
+
+        // appendTwinEvents persists authoritative sequence/fingerprint state;
+        // reload metadata so cursor/mtime saves below do not clobber it.
+        stateMetadata = await this.sessionStateStore.getOrCreateSessionMetadata(
+          {
+            provider: this.provider,
+            providerSessionId: sessionId,
+            sourceFilePath: session.filePath,
+            initialCursor: stateMetadata.ingestCursor,
+          },
+        );
+
+        twinExists = true;
+        fromOffset = resolveCursorPosition(bootstrapCursor);
+        existingCursor = bootstrapCursor;
+        stateMetadata.ingestCursor = bootstrapCursor;
+        stateMetadata.lastObservedMtimeMs = fileStat.mtime?.getTime();
+        stateMetadata.sourceFilePath = session.filePath;
+        await this.sessionStateStore.saveSessionMetadata(stateMetadata);
+        this.setCursor(sessionId, bootstrapCursor, session.filePath);
+      }
+
+      twinAvailableForHydration = twinExists;
     }
 
     const incomingEvents: ConversationEvent[] = [];
@@ -1420,30 +1412,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
-    let snippetOverride = stateMetadata?.snippet;
-    if (
-      !snippetOverride && isNonEmptyString(currentSnapshot?.metadata.snippet)
-    ) {
-      snippetOverride = currentSnapshot.metadata.snippet;
-    }
+    let snippetOverride = isNonEmptyString(currentSnapshot?.metadata.snippet)
+      ? currentSnapshot.metadata.snippet
+      : undefined;
     if (!snippetOverride && fromOffset === 0) {
       snippetOverride = extractSnippet(incomingEvents);
     }
-    let snippetChanged = Boolean(
-      stateMetadata &&
-        snippetOverride &&
-        stateMetadata.snippet !== snippetOverride,
-    );
-    if (snippetChanged && stateMetadata) {
-      stateMetadata.snippet = snippetOverride;
-    }
 
     if (stateMetadata && this.sessionStateStore) {
-      const legacyTwinHydrationEnabled = this.autoGenerateSnapshots ||
-        hasActiveRecordings(stateMetadata);
-      // Persist session twin history unconditionally when session state is
-      // enabled so command-time capture can resolve from twin start.
-      const shouldAppendTwin = true;
+      const shouldAppendTwin = this.autoGenerateTwins;
       let appendedTwinCount = 0;
       let appendedTwinEvents: ReturnType<typeof mapConversationEventsToTwin> =
         [];
@@ -1495,13 +1472,6 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             initialCursor: latestCursor,
           },
         );
-        if (
-          snippetOverride &&
-          stateMetadata.snippet !== snippetOverride
-        ) {
-          stateMetadata.snippet = snippetOverride;
-          snippetChanged = true;
-        }
       }
 
       let anchorChanged = false;
@@ -1543,8 +1513,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
-        anchorChanged ||
-        snippetChanged
+        anchorChanged
       ) {
         stateMetadata.ingestCursor = latestCursor;
         stateMetadata.lastObservedMtimeMs = fileModifiedAtMs;
@@ -1552,79 +1521,82 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         await this.sessionStateStore.saveSessionMetadata(stateMetadata);
       }
 
-      const snapshotSnippetMismatch = snippetOverride !== undefined &&
-        currentSnapshot?.metadata.snippet !== snippetOverride;
       const shouldHydrateSnapshot = appendedTwinCount > 0 ||
         !currentSnapshot ||
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
-        anchorChanged ||
-        snapshotSnippetMismatch;
-      const shouldHydrateFromTwin = legacyTwinHydrationEnabled ||
+        anchorChanged;
+      const shouldHydrateFromTwin = twinAvailableForHydration &&
         !currentSnapshot;
 
       if (shouldHydrateSnapshot) {
         if (shouldHydrateFromTwin) {
-          const existingSnapshotEvents =
-            currentSnapshot?.provider === this.provider
-              ? currentSnapshot.events
-              : undefined;
-
-          if (!existingSnapshotEvents) {
-            const twinEvents = await this.sessionStateStore.readTwinEvents(
-              stateMetadata,
-              1,
+          const twinEvents = await this.sessionStateStore.readTwinEvents(
+            stateMetadata,
+            1,
+          );
+          const rebuiltSnapshotEvents = mapTwinEventsToConversation(
+            twinEvents,
+          );
+          const rebuiltMerged = mergeEvents(
+            rebuiltSnapshotEvents,
+            incomingEvents,
+            codexCompactionMergeOptions,
+          );
+          if (rebuiltMerged.droppedEvents > 0) {
+            await this.operationalLogger.debug(
+              "provider.ingestion.events_dropped",
+              "Provider ingestion dropped duplicate events while rebuilding snapshot from twin history",
+              {
+                provider: this.provider,
+                sessionId,
+                droppedEvents: rebuiltMerged.droppedEvents,
+                reason: "duplicate-session-twin-snapshot-rebuild",
+              },
             );
-            const rebuiltSnapshotEvents = mapTwinEventsToConversation(
-              twinEvents,
-            );
+          }
+          if (rebuiltMerged.mergedEvents.length > 0) {
             this.sessionSnapshotStore.upsert({
               provider: this.provider,
               sessionId,
               cursor: latestCursor,
-              events: rebuiltSnapshotEvents,
-              fileModifiedAtMs,
-              ...(snippetOverride ? { snippetOverride } : {}),
-            });
-          } else if (appendedTwinEvents.length > 0) {
-            const appendedSnapshotEvents = mapTwinEventsToConversation(
-              appendedTwinEvents,
-            );
-            const merged = mergeEvents(
-              existingSnapshotEvents,
-              appendedSnapshotEvents,
-            );
-            if (merged.droppedEvents > 0) {
-              await this.operationalLogger.debug(
-                "provider.ingestion.events_dropped",
-                "Provider ingestion dropped duplicate events while merging appended twin events",
-                {
-                  provider: this.provider,
-                  sessionId,
-                  droppedEvents: merged.droppedEvents,
-                  reason: "duplicate-session-twin-snapshot",
-                },
-              );
-            }
-            this.sessionSnapshotStore.upsert({
-              provider: this.provider,
-              sessionId,
-              cursor: latestCursor,
-              events: merged.mergedEvents,
-              fileModifiedAtMs,
-              ...(snippetOverride ? { snippetOverride } : {}),
-            });
-          } else {
-            this.sessionSnapshotStore.upsert({
-              provider: this.provider,
-              sessionId,
-              cursor: latestCursor,
-              events: existingSnapshotEvents,
+              events: rebuiltMerged.mergedEvents,
               fileModifiedAtMs,
               ...(snippetOverride ? { snippetOverride } : {}),
             });
           }
+        } else if (
+          appendedTwinEvents.length > 0 &&
+          currentSnapshot?.provider === this.provider
+        ) {
+          const appendedSnapshotEvents = mapTwinEventsToConversation(
+            appendedTwinEvents,
+          );
+          const merged = mergeEvents(
+            currentSnapshot.events,
+            appendedSnapshotEvents,
+          );
+          if (merged.droppedEvents > 0) {
+            await this.operationalLogger.debug(
+              "provider.ingestion.events_dropped",
+              "Provider ingestion dropped duplicate events while merging appended twin events",
+              {
+                provider: this.provider,
+                sessionId,
+                droppedEvents: merged.droppedEvents,
+                reason: "duplicate-session-twin-snapshot",
+              },
+            );
+          }
+          this.sessionSnapshotStore.upsert({
+            provider: this.provider,
+            sessionId,
+            cursor: latestCursor,
+            events: merged.mergedEvents,
+            fileModifiedAtMs,
+            ...(snippetOverride ? { snippetOverride } : {}),
+          });
         } else if (incomingEvents.length > 0 || currentSnapshot) {
           const merged = mergeEvents(
             currentSnapshot?.provider === this.provider
@@ -1720,7 +1692,7 @@ export function createClaudeIngestionRunner(
       parseClaudeEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,
-    autoGenerateSnapshots: options.autoGenerateSnapshots,
+    autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -1742,7 +1714,7 @@ export function createCodexIngestionRunner(
       parseCodexEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,
-    autoGenerateSnapshots: options.autoGenerateSnapshots,
+    autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -1764,7 +1736,7 @@ export function createGeminiIngestionRunner(
       parseGeminiEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,
-    autoGenerateSnapshots: options.autoGenerateSnapshots,
+    autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
     watchDebounceMs: options.watchDebounceMs,
@@ -1777,16 +1749,18 @@ export function createGeminiIngestionRunner(
 export function createDefaultProviderIngestionRunners(
   options: ProviderIngestionFactoryOptions,
 ): ProviderIngestionRunner[] {
-  const resolveAutoGenerate = (provider: "claude" | "codex" | "gemini") =>
-    options.providerAutoGenerateSnapshots?.[provider] ??
-      options.globalAutoGenerateSnapshots ??
+  const resolveAutoGenerateTwins = (
+    provider: "claude" | "codex" | "gemini",
+  ) =>
+    options.providerAutoGenerateTwins?.[provider] ??
+      options.globalAutoGenerateTwins ??
       false;
 
   return [
     createClaudeIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
       sessionStateStore: options.sessionStateStore,
-      autoGenerateSnapshots: resolveAutoGenerate("claude"),
+      autoGenerateTwins: resolveAutoGenerateTwins("claude"),
       sessionRoots: options.claudeSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
@@ -1798,7 +1772,7 @@ export function createDefaultProviderIngestionRunners(
     createCodexIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
       sessionStateStore: options.sessionStateStore,
-      autoGenerateSnapshots: resolveAutoGenerate("codex"),
+      autoGenerateTwins: resolveAutoGenerateTwins("codex"),
       sessionRoots: options.codexSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
@@ -1810,7 +1784,7 @@ export function createDefaultProviderIngestionRunners(
     createGeminiIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
       sessionStateStore: options.sessionStateStore,
-      autoGenerateSnapshots: resolveAutoGenerate("gemini"),
+      autoGenerateTwins: resolveAutoGenerateTwins("gemini"),
       sessionRoots: options.geminiSessionRoots,
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,

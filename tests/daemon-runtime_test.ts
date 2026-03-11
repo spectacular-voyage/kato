@@ -84,6 +84,94 @@ function makeEventForSession(
   } as unknown as ConversationEvent;
 }
 
+function makeClaudeReplayEvent(
+  sessionId: string,
+  entryUuid: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+  timestamp: string,
+): ConversationEvent {
+  return {
+    eventId: `${entryUuid}:${kind}`,
+    provider: "claude",
+    sessionId,
+    timestamp,
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    turnId: entryUuid,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: entryUuid,
+      rawCursor: { kind: "byte-offset", value: 0 },
+    },
+  } as unknown as ConversationEvent;
+}
+
+async function writeClaudeReplayFixture(options: {
+  filePath: string;
+  sessionId: string;
+  firstUserContent: string;
+  assistantContent: string;
+  tailUserContent: string;
+}): Promise<void> {
+  await Deno.writeTextFile(
+    options.filePath,
+    [
+      JSON.stringify({
+        type: "user",
+        uuid: "msg-u-history",
+        parentUuid: null,
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:00.000Z",
+        cwd: "/tmp/project",
+        version: "2.1.39",
+        message: {
+          role: "user",
+          content: [{
+            type: "text",
+            text: options.firstUserContent,
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        uuid: "msg-a-history",
+        parentUuid: "msg-u-history",
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:01.000Z",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-6",
+          content: [{
+            type: "text",
+            text: options.assistantContent,
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        uuid: "msg-u-tail",
+        parentUuid: "msg-a-history",
+        isSidechain: false,
+        sessionId: options.sessionId,
+        timestamp: "2026-02-22T10:00:02.000Z",
+        cwd: "/tmp/project",
+        version: "2.1.39",
+        message: {
+          role: "user",
+          content: [{
+            type: "text",
+            text: options.tailUserContent,
+          }],
+        },
+      }),
+    ].join("\n") + "\n",
+  );
+}
+
 class CaptureSink {
   records: LogRecord[] = [];
 
@@ -2872,6 +2960,189 @@ Deno.test("runDaemonRuntimeLoop routes export requests through recording pipelin
   assertEquals(last?.daemonRunning, false);
 });
 
+Deno.test("runDaemonRuntimeLoop replays provider source for export requests when a session has no twin history", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-export-source-replay-",
+  );
+
+  try {
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const providerSessionId = "session-export-source-replay";
+    const sourceFilePath = join(stateDir, "export-source-replay-claude.jsonl");
+    await writeClaudeReplayFixture({
+      filePath: sourceFilePath,
+      sessionId: providerSessionId,
+      firstUserContent: "export source replay context",
+      assistantContent: "export source replay reply",
+      tailUserContent: "export source replay tail",
+    });
+
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-export-source-start-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider: "claude",
+      providerSessionId,
+      sourceFilePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const requests = [
+      {
+        requestId: "req-export-source-replay",
+        requestedAt: "2026-02-22T10:00:00.000Z",
+        command: "export" as const,
+        payload: {
+          sessionId: providerSessionId,
+          resolvedOutputPath: ".kato/test-runtime/source-replay-export.md",
+        },
+      },
+      {
+        requestId: "req-stop-source-replay",
+        requestedAt: "2026-02-22T10:00:01.000Z",
+        command: "stop" as const,
+      },
+    ];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let exported:
+      | {
+        provider: string;
+        sessionId: string;
+        targetPath: string;
+        contents: Array<string | undefined>;
+      }
+      | undefined;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot() {
+        throw new Error("not used");
+      },
+      exportSnapshot(input) {
+        exported = {
+          provider: input.provider,
+          sessionId: input.sessionId,
+          targetPath: input.targetPath,
+          contents: input.events.map((event) => {
+            if (
+              event.kind === "message.user" ||
+              event.kind === "message.assistant" ||
+              event.kind === "message.system" ||
+              event.kind === "thinking" ||
+              event.kind === "provider.info"
+            ) {
+              return event.content;
+            }
+            return undefined;
+          }),
+        };
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      appendToActiveRecording() {
+        throw new Error("not used");
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: 0,
+          destinations: 0,
+        };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    assertExists(exported);
+    assertEquals(exported.provider, "claude");
+    assertEquals(exported.sessionId, providerSessionId);
+    assertEquals(
+      exported.targetPath,
+      ".kato/test-runtime/source-replay-export.md",
+    );
+    assertEquals(exported.contents, [
+      "export source replay context",
+      "export source replay reply",
+      "export source replay tail",
+    ]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
 Deno.test("runDaemonRuntimeLoop starts, polls, and stops ingestion runners", async () => {
   const statusStore: DaemonStatusSnapshotStoreLike = {
     load() {
@@ -4896,6 +5167,209 @@ Deno.test("runDaemonRuntimeLoop captures from twin start when snapshot is trunca
     assertEquals(capturedSummary, [
       { kind: "message.user", content: "early context" },
       { kind: "message.assistant", content: "early reply" },
+      {
+        kind: "message.user",
+        content:
+          `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+      },
+    ]);
+  } finally {
+    await Deno.remove(stateDir, { recursive: true });
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop captures from provider source when no twin exists and snapshot is truncated", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-capture-source-start-",
+  );
+
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const provider = "claude";
+    const providerSessionId = "session-capture-source-start";
+    const sourceFilePath = join(stateDir, "source-replay-claude.jsonl");
+    await writeClaudeReplayFixture({
+      filePath: sourceFilePath,
+      sessionId: providerSessionId,
+      firstUserContent: "source replay early context",
+      assistantContent: "source replay early reply",
+      tailUserContent:
+        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+    });
+
+    const fullConversation = [
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-u-history",
+        "message.user",
+        "source replay early context",
+        "2026-02-22T10:00:00.000Z",
+      ),
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-a-history",
+        "message.assistant",
+        "source replay early reply",
+        "2026-02-22T10:00:01.000Z",
+      ),
+      makeClaudeReplayEvent(
+        providerSessionId,
+        "msg-u-tail",
+        "message.user",
+        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH}`,
+        "2026-02-22T10:00:02.000Z",
+      ),
+    ];
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      retention: {
+        maxSessions: 200,
+        maxEventsPerSession: 1,
+      },
+    });
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(stateDir, ".kato"),
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      makeSessionId: () => "kato-session-capture-source-start-1234",
+    });
+    await sessionStateStore.getOrCreateSessionMetadata({
+      provider,
+      providerSessionId,
+      sourceFilePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    sessionSnapshotStore.upsert({
+      provider,
+      sessionId: providerSessionId,
+      cursor: { kind: "byte-offset", value: 3 },
+      events: fullConversation,
+    });
+
+    const requests = [{
+      requestId: "req-stop-capture-from-source-start",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(requests.map((request) => ({ ...request })));
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    let capturedSummary: Array<{ kind: string; content?: string }> = [];
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording() {
+        throw new Error("not used");
+      },
+      captureSnapshot(input) {
+        capturedSummary = input.events.map((event) => {
+          if (
+            event.kind === "message.user" ||
+            event.kind === "message.assistant" ||
+            event.kind === "message.system" ||
+            event.kind === "thinking" ||
+            event.kind === "provider.info"
+          ) {
+            return { kind: event.kind, content: event.content };
+          }
+          return { kind: event.kind };
+        });
+        return Promise.resolve({
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording() {
+        return Promise.resolve({ appended: false, deduped: false });
+      },
+      appendToDestination() {
+        return Promise.resolve({
+          mode: "append",
+          outputPath: DAEMON_RUNTIME_CAPTURE_FROM_TWIN_PATH,
+          wrote: true,
+          deduped: false,
+        });
+      },
+      stopRecording() {
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return { activeRecordings: 0, destinations: 0 };
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      sessionSnapshotStore,
+      sessionStateStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+      workspaceCatalog: workspace.workspaceCatalog,
+      workspaceProfileResolver: workspace.workspaceProfileResolver,
+    });
+
+    assertEquals(capturedSummary, [
+      { kind: "message.user", content: "source replay early context" },
+      { kind: "message.assistant", content: "source replay early reply" },
       {
         kind: "message.user",
         content:

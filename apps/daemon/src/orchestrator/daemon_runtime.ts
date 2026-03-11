@@ -42,7 +42,7 @@ import {
   makeDefaultSessionCursor,
   type PersistentSessionStateStore,
 } from "./session_state_store.ts";
-import { mapTwinEventsToConversation } from "./session_twin_mapper.ts";
+import { loadPersistedSessionHistoryEvents } from "./provider_source_replay.ts";
 import {
   summarizeRecordingStatus,
   toActiveRecordingsFromMetadata,
@@ -620,33 +620,30 @@ function matchesCaptureBoundaryEvent(
   return true;
 }
 
-async function resolveBoundaryEventsFromTwinStart(
+async function resolveBoundaryEventsFromSessionStart(
   metadata: SessionMetadataV1,
   fallbackBoundaryEvents: ConversationEvent[],
   commandEvent: ConversationEvent & { kind: "message.user" },
   boundaryLine: number,
   sessionStateStore: PersistentSessionStateStore,
 ): Promise<ConversationEvent[]> {
-  let twinEvents: Awaited<
-    ReturnType<PersistentSessionStateStore["readTwinEvents"]>
-  >;
+  let historyEvents: ConversationEvent[];
   try {
-    twinEvents = await sessionStateStore.readTwinEvents(metadata, 1);
+    const history = await loadPersistedSessionHistoryEvents(
+      metadata,
+      sessionStateStore,
+    );
+    historyEvents = history.events;
   } catch {
     return fallbackBoundaryEvents;
   }
-  if (twinEvents.length === 0) {
-    return fallbackBoundaryEvents;
-  }
-
-  const twinConversation = mapTwinEventsToConversation(twinEvents);
-  if (twinConversation.length === 0) {
+  if (historyEvents.length === 0) {
     return fallbackBoundaryEvents;
   }
 
   let boundaryIndex = -1;
-  for (let i = 0; i < twinConversation.length; i += 1) {
-    const candidate = twinConversation[i];
+  for (let i = 0; i < historyEvents.length; i += 1) {
+    const candidate = historyEvents[i];
     if (!candidate) continue;
     if (matchesCaptureBoundaryEvent(candidate, commandEvent)) {
       boundaryIndex = i;
@@ -654,16 +651,16 @@ async function resolveBoundaryEventsFromTwinStart(
   }
 
   if (boundaryIndex >= 0) {
-    const boundaryEvent = twinConversation[boundaryIndex];
+    const boundaryEvent = historyEvents[boundaryIndex];
     if (boundaryEvent?.kind === "message.user") {
       return buildBoundarySnapshotEvents(
-        twinConversation,
+        historyEvents,
         boundaryIndex,
         boundaryEvent,
         boundaryLine,
       );
     }
-    return twinConversation.slice(0, boundaryIndex + 1);
+    return historyEvents.slice(0, boundaryIndex + 1);
   }
   return fallbackBoundaryEvents;
 }
@@ -968,7 +965,7 @@ async function applyPersistentControlCommandsForEvent(
             resolved.resolvedPath,
             "capture",
           );
-          const captureEvents = await resolveBoundaryEventsFromTwinStart(
+          const captureEvents = await resolveBoundaryEventsFromSessionStart(
             metadata,
             boundarySnapshot,
             event,
@@ -1098,7 +1095,7 @@ async function applyPersistentControlCommandsForEvent(
             "export",
           );
           loggedTargetPath = targetPath;
-          const exportEvents = await resolveBoundaryEventsFromTwinStart(
+          const exportEvents = await resolveBoundaryEventsFromSessionStart(
             metadata,
             boundarySnapshot,
             event,
@@ -2109,14 +2106,51 @@ export async function runDaemonRuntimeLoop(
   const workspaceProfileResolver = options.workspaceProfileResolver ??
     new WorkspaceProfileResolver();
   const loadSessionSnapshot = options.loadSessionSnapshot ??
-    (sessionSnapshotStore
-      ? (sessionId: string) => {
-        const snapshot = sessionSnapshotStore.get(sessionId);
-        if (!snapshot) return Promise.resolve(undefined);
-        return Promise.resolve({
+    ((sessionSnapshotStore || sessionStateStore)
+      ? async (sessionId: string) => {
+        const metadata = sessionStateStore
+          ? (await sessionStateStore.listSessionMetadata()).find((entry) =>
+            entry.providerSessionId === sessionId ||
+            entry.sessionId === sessionId
+          )
+          : undefined;
+        if (metadata && sessionStateStore) {
+          const liveSnapshot = sessionSnapshotStore?.get(
+            metadata.providerSessionId,
+          );
+          const history = await loadPersistedSessionHistoryEvents(
+            metadata,
+            sessionStateStore,
+          );
+          if (history.source === "twin" && liveSnapshot) {
+            return {
+              provider: liveSnapshot.provider,
+              events: liveSnapshot.events,
+            };
+          }
+          if (history.events.length > 0) {
+            return {
+              provider: metadata.provider,
+              events: history.events,
+            };
+          }
+          if (liveSnapshot) {
+            return {
+              provider: liveSnapshot.provider,
+              events: liveSnapshot.events,
+            };
+          }
+          return undefined;
+        }
+
+        const snapshot = sessionSnapshotStore?.get(sessionId);
+        if (!snapshot) {
+          return undefined;
+        }
+        return {
           provider: snapshot.provider,
           events: snapshot.events,
-        });
+        };
       }
       : undefined);
 

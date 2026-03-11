@@ -67,8 +67,8 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
           createDefaultRuntimeConfig({
             runtimeDir,
             katoDir,
-            globalAutoGenerateSnapshots: false,
-            providerAutoGenerateSnapshots: {
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
               claude: false,
               codex: false,
               gemini: false,
@@ -182,8 +182,8 @@ Deno.test("loadSessionsPageData keeps background twin history inactive until ing
             createDefaultRuntimeConfig({
               runtimeDir,
               katoDir,
-              globalAutoGenerateSnapshots: false,
-              providerAutoGenerateSnapshots: {
+              globalAutoGenerateTwins: false,
+              providerAutoGenerateTwins: {
                 claude: false,
                 codex: false,
                 gemini: false,
@@ -269,8 +269,8 @@ Deno.test("ingestPersistedSession clamps byte-offset cursors when the source fil
           createDefaultRuntimeConfig({
             runtimeDir,
             katoDir,
-            globalAutoGenerateSnapshots: false,
-            providerAutoGenerateSnapshots: {
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
               claude: false,
               codex: false,
               gemini: false,
@@ -307,6 +307,102 @@ Deno.test("ingestPersistedSession clamps byte-offset cursors when the source fil
           kind: "byte-offset",
           value: 0,
         });
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("ingestPersistedSession recreates a missing twin from source start instead of resuming from ingestCursor", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-session-twin-recreate-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const runtimeDir = join(katoDir, "daemon");
+        const sharedDir = join(katoDir, "shared");
+        await Deno.mkdir(runtimeDir, { recursive: true });
+        await Deno.mkdir(sharedDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(sharedDir, "status.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-11T10:00:00.000Z",
+            heartbeatAt: "2026-03-11T10:00:00.000Z",
+            daemonRunning: false,
+            providers: [],
+            recordings: {
+              activeRecordings: 0,
+              destinations: 0,
+            },
+            sessions: [],
+          }),
+        );
+
+        const configStore = new RuntimeConfigFileStore(
+          join(runtimeDir, "kato-daemon-config.yaml"),
+        );
+        await configStore.ensureInitialized(
+          createDefaultRuntimeConfig({
+            runtimeDir,
+            katoDir,
+            globalAutoGenerateTwins: false,
+            providerAutoGenerateTwins: {
+              claude: false,
+              codex: false,
+              gemini: false,
+            },
+          }),
+        );
+
+        const sessionFilePath = join(
+          homeDir,
+          "provider-session-recreate.jsonl",
+        );
+        await copyFixtureWithMtime(
+          sessionFilePath,
+          "2026-03-11T10:00:00.000Z",
+        );
+        const fileSize = (await Deno.stat(sessionFilePath)).size;
+        const store = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-11T10:00:00.000Z"),
+          makeSessionId: () => "sess-kato-004",
+        });
+        const metadata = await store.getOrCreateSessionMetadata({
+          provider: "claude",
+          providerSessionId: "provider-session-4",
+          sourceFilePath: sessionFilePath,
+          initialCursor: { kind: "byte-offset", value: fileSize },
+        });
+        metadata.ingestCursor = { kind: "byte-offset", value: fileSize };
+        metadata.nextTwinSeq = 5;
+        metadata.recentFingerprints = ["stale-fingerprint"];
+        await store.saveSessionMetadata(metadata);
+
+        const result = await ingestPersistedSession({
+          sessionId: "sess-kato-004",
+          katoDir,
+          now: () => new Date("2026-03-11T10:05:00.000Z"),
+        });
+
+        assertEquals(result.twinAction, "create");
+        assertEquals(result.parsedEvents > 0, true);
+        assertEquals(result.appendedTwinEvents > 0, true);
+
+        const reloaded = (await store.listSessionMetadata())[0];
+        assertExists(reloaded);
+        const twinEvents = await store.readTwinEvents(reloaded, 1);
+        assertEquals(twinEvents.length > 0, true);
+        assertEquals(twinEvents[0]?.seq, 1);
       });
     } finally {
       restoreRuntimeEnv(env);

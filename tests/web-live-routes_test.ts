@@ -96,7 +96,6 @@ async function createSessionFixture(options: {
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
-  metadata.snippet = options.snippet;
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs;
   await store.saveSessionMetadata(metadata);
@@ -147,8 +146,8 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
     createDefaultRuntimeConfig({
       runtimeDir,
       katoDir,
-      globalAutoGenerateSnapshots: false,
-      providerAutoGenerateSnapshots: {
+      globalAutoGenerateTwins: false,
+      providerAutoGenerateTwins: {
         claude: false,
         codex: false,
         gemini: false,

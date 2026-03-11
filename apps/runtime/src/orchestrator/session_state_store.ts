@@ -123,7 +123,6 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     createdAt: metadata.createdAt,
     updatedAt: metadata.updatedAt,
     sourceFilePath: metadata.sourceFilePath,
-    ...(metadata.snippet !== undefined ? { snippet: metadata.snippet } : {}),
     ...(metadata.lastObservedMtimeMs !== undefined
       ? { lastObservedMtimeMs: metadata.lastObservedMtimeMs }
       : {}),

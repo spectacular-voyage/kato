@@ -90,7 +90,6 @@ async function createSessionFixture(options: {
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
-  metadata.snippet = options.snippet;
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs;
   metadata.lastObservedMtimeMs = options.lastObservedMtimeMs;
@@ -501,7 +500,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
   });
 });
 
-Deno.test("loadSessionsPageData handles ingestion continuation and recording fallbacks", async () => {
+Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();
 
@@ -640,7 +639,7 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
           row.sessionId === "sess-continue"
         );
         assertExists(continuationRow);
-        assertEquals(continuationRow.ingestionAction, "continue");
+        assertEquals(continuationRow.ingestionAction, "start");
         assertEquals(continuationRow.recordings.length, 1);
         assertEquals(continuationRow.recordings[0]?.state, "engaged-stale");
         assertEquals(
@@ -652,7 +651,7 @@ Deno.test("loadSessionsPageData handles ingestion continuation and recording fal
           row.sessionId === "sess-stopped"
         );
         assertExists(stoppedRow);
-        assertEquals(stoppedRow.ingestionAction, "none");
+        assertEquals(stoppedRow.ingestionAction, "start");
         assertEquals(stoppedRow.recordings[0]?.state, "stopped");
         assertEquals(
           stoppedRow.recordings[0]?.recordingCycleId,
