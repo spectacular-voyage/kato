@@ -72,8 +72,9 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/ingestion`: operational ingest view for active/idle twin state and the
-  latest recording per destination, backed by `loadSessionsPageData()`.
+- `/ingestion`: operational ingest view for provider-session ingestion state
+  and the latest recording per destination, backed by
+  `loadSessionsPageData()`.
 - `/sessions`: full discovered chat-session inventory, also backed by
   `loadSessionsPageData()`, with manual `start ingestion` /
   `continue ingestion` actions.

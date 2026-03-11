@@ -201,7 +201,11 @@ export default function SummaryLive(
         <h3>Active Ingestion</h3>
         <ul class="session-list">
           {activeIngestionRows.length === 0
-            ? <li class="muted">No active ingestion sessions.</li>
+            ? (
+              <li class="muted">
+                No provider sessions are actively being ingested.
+              </li>
+            )
             : activeIngestionRows.map((session) => (
               <li key={`${session.provider}:${session.sessionId}`}>
                 <a

@@ -45,6 +45,11 @@ The privacy goal is that Kato should not automatically persist every conversatio
 - transient in-memory provider ingestion remains enabled for command detection regardless of twin persistence settings
 - when no twin exists, full-history capture/export must use on-demand provider source replay instead of relying on persisted twin history
 - degraded Codex timestamp fidelity during on-demand source replay is acceptable for non-auto-twin sessions
+- `Sessions` remains the primary user-facing inventory of provider sessions
+- the current top-level `Ingestion` page/tab is replaced by a `Twins` page focused on what conversation twins are actually persisted on disk
+- the `Sessions` page should surface live activity / recording / twin state separately instead of collapsing them into a single "ingestion" concept
+- manual user actions should use twin-specific language such as `create twin` / `update twin`, not `start ingestion` / `continue ingestion`
+- raw ingestion state, if still exposed in the web app, belongs in a secondary debug/detail surface rather than top-level navigation
 
 # Target Behavior
 
@@ -78,6 +83,21 @@ The privacy goal is that Kato should not automatically persist every conversatio
 - twins become the persisted conversation log, not the default side effect of discovery
 - Codex remains auto-twin by default via the new config defaults
 - non-auto-twin providers only persist twins when explicitly activated by user intent
+
+## Web UI
+
+- `Sessions` remains the main inventory page for provider sessions discovered from provider source files
+- `Sessions` should show separate signals for:
+  - current live activity / snapshot presence
+  - recording state
+  - twin persistence state
+- do not use `not ingested` as a catch-all label when the real state is "no twin", "not currently active", or "no persisted history"
+- the current top-level `Ingestion` page should be replaced by a `Twins` page that answers:
+  - which sessions currently have twins
+  - where those twin files live
+  - whether the twin is current or behind the provider source
+  - what explicit user action is available (`create twin` / `update twin`)
+- any remaining ingestion-specific diagnostics should move to a secondary debug/detail view rather than being a top-level user concept
 
 ## Restart / Replay
 
@@ -121,9 +141,19 @@ The privacy goal is that Kato should not automatically persist every conversatio
   - still remove twin files
   - do not rely on shutdown cleanup for snippet privacy because snippets should no longer be persisted at all
 
-## 5. Web / Status Semantics
+## 5. Web / Status / Navigation Semantics
 
 - update web loaders so "ingested" / "idle" state is no longer inferred from raw twin existence alone
+- make `Sessions` the primary inventory of provider sessions
+- add explicit session-level UI signals for live activity, recording engagement, and twin persistence instead of collapsing them into one status label
+- replace the current top-level `Ingestion` page/tab with a `Twins` page
+- the `Twins` page should show, per session:
+  - twin present / absent
+  - twin file path
+  - whether the persisted twin is current or behind the provider source
+  - a twin-focused action (`create twin` or `update twin`) when applicable
+- rename manual web actions from `start ingestion` / `continue ingestion` to `create twin` / `update twin`
+- if raw ingestion diagnostics remain useful, move them to a secondary debug/detail view rather than top-level navigation
 - session pages should continue to use live snapshot state for active ingestion
 - inventory pages should not assume a persisted snippet exists
 - where snippet is absent and there is no live/twin/source-derived fallback, render a neutral placeholder rather than fabricating one
@@ -136,7 +166,9 @@ The privacy goal is that Kato should not automatically persist every conversatio
 - after daemon restart, a non-twin session can still execute full-history `capture` / `export` by reparsing provider source
 - workspace-bound recording continuation across restart still works without requiring automatic twin creation
 - persisted session metadata files do not contain `snippet`
-- web Sessions / Ingestion / Recordings / Workspaces continue to function when persisted metadata lacks snippets
+- the `Sessions` page remains the primary provider-session inventory and does not use `not ingested` as a synonym for `no twin`
+- the top-level `Twins` page shows persisted twin presence/state/path and twin-focused actions
+- web Sessions / Twins / Recordings / Workspaces continue to function when persisted metadata lacks snippets
 
 # Tests
 
@@ -156,6 +188,8 @@ The privacy goal is that Kato should not automatically persist every conversatio
   - no persisted snippet
   - legacy snippet ignored/scrubbed
   - UI behavior without metadata snippets
+  - `Sessions` page state/badge behavior when live activity and twin presence diverge
+  - `Twins` page presence/currentness/action behavior
 
 # Non-Goals
 

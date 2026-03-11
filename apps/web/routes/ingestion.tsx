@@ -21,7 +21,7 @@ export default define.page(async function IngestionPage(ctx) {
       <div class="shell">
         <AppHeader
           title="Ingestion"
-          description="Operational ingestion state for active and idle session twins, with the latest recording per destination."
+          description="Operational state for provider-session ingestion, with the latest recording per destination."
           currentPath="/ingestion"
           showLogout
           appStatus={appStatus}
