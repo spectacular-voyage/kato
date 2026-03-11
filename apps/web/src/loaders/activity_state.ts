@@ -27,6 +27,17 @@ export function activityStateLabel(state: ActivityState): string {
   }
 }
 
+export function recordingActivityStateLabel(state: ActivityState): string {
+  switch (state) {
+    case "active":
+      return "active";
+    case "stale":
+      return "idle";
+    case "inactive":
+      return "stopped";
+  }
+}
+
 export function activityStateDot(state: ActivityState): string {
   return state === "inactive" ? "○" : "●";
 }

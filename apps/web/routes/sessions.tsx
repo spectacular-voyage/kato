@@ -4,6 +4,7 @@ import {
   type ActivityState,
   activityStateDot,
   activityStateLabel,
+  recordingActivityStateLabel,
 } from "../src/loaders/activity_state.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSessionsPageData } from "../src/loaders/sessions.ts";
@@ -179,7 +180,7 @@ export default define.page(async function SessionsPage(ctx) {
                                     {activityStateDot(uiState)}
                                   </span>
                                   <span>
-                                    {activityStateLabel(uiState)}
+                                    {recordingActivityStateLabel(uiState)}
                                   </span>
                                 </div>
                                 <div class="muted mono">

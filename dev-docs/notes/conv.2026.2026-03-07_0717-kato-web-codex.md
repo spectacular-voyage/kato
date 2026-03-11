@@ -4092,3 +4092,39 @@ I intentionally left these unchecked in the task note:
 - the broad tests checkbox
 
 No tests run; this was a docs-only pass.
+
+# User_2026-03-10_1605_48
+
+On the workspaces page, in the "Registered Workspaces" tile, it lists... "0 active · 4 idle · 1 off" -- is that recordings? For recording that have been stopped, I think we should use "stopped", and reserve "off" for sessions that have never been captured.
+
+# gpt-5.4_2026-03-10_1605_55
+
+I’m checking the workspace rollup code now. The likely issue is that the workspace tile is reusing the shared recording state labels too literally, and `off` is reading like a recording state when it should stay reserved for sessions.
+
+# gpt-5.4_2026-03-10_1606_04
+
+I found it. That `0 active · 4 idle · 1 off` line is a recording rollup per workspace, not a workspace-state rollup, so `off` is the wrong word there. I’m updating the recording-specific labels to use `stopped`, while keeping `off` available for session state only.
+
+# gpt-5.4_2026-03-10_1606_10
+
+I’ve confirmed the session page recording rows are also reusing the generic session label helper, so if we only patch the workspace tile the wording will stay inconsistent. I’m making the recording vocabulary explicit in one place and then applying it to both Sessions and Workspaces.
+
+# gpt-5.4_2026-03-10_1606_24
+
+I’m making this explicit in the UI instead of just changing one word. The workspace rollup line will say `recordings:` so it’s obvious those counts are recording states, and recording rows will use `stopped` rather than `off`.
+
+# gpt-5.4_2026-03-10_1606_28
+
+The wording change is in. I’m running a quick web typecheck now to make sure the new helper import is clean and there aren’t any stale references left to the old generic recording label path.
+
+# gpt-5.4_2026-03-10_1606_34
+
+The change is fine; lint just caught one leftover import in `workspaces.tsx`. I’m removing that and rerunning the web check.
+
+# gpt-5.4_2026-03-10_1606_40
+
+Yes. That line in `Registered Workspaces` was counting recordings, not workspaces, and the wording was too ambiguous.
+
+I changed it so [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx) now shows `recordings: N active · N idle · N stopped`, and recording rows on both [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx) and [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx) now use `stopped` instead of `off`. I added a recording-specific label helper in [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts) so `off` stays reserved for session state. I also updated the Summary recordings tile in [SummaryLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SummaryLive.tsx) to say `stopped` for consistency.
+
+Verified with `deno task --cwd apps/web check`.

@@ -154,7 +154,7 @@ export default function SummaryLive(
                 {data.staleGeneratingSessionCount} idle
               </span>
               <span class="metric-note mono">
-                {data.inactiveSessionCount} off
+                {data.inactiveSessionCount} not captured
               </span>
             </div>
             <div class="metric">
@@ -169,7 +169,7 @@ export default function SummaryLive(
                 {data.staleRecordingCount} idle
               </span>
               <span class="metric-note mono">
-                {data.stoppedRecordingCount} off
+                {data.stoppedRecordingCount} stopped
               </span>
             </div>
             <div class="metric">
@@ -186,11 +186,6 @@ export default function SummaryLive(
                 {data.workspaceSummary.unavailableReason
                   ? "unavailable"
                   : `${data.workspaceSummary.staleCount} idle`}
-              </span>
-              <span class="metric-note mono">
-                {data.workspaceSummary.unavailableReason
-                  ? data.workspaceSummary.unavailableReason
-                  : `${data.workspaceSummary.inactiveCount} off`}
               </span>
               {data.workspaceSummary.unavailableReason
                 ? null

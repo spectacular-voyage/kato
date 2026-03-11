@@ -4,7 +4,7 @@ import AppHeader from "../src/app_header.tsx";
 import {
   type ActivityState,
   activityStateDot,
-  activityStateLabel,
+  recordingActivityStateLabel,
 } from "../src/loaders/activity_state.ts";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadWorkspacesPageData } from "../src/loaders/workspaces.ts";
@@ -214,9 +214,9 @@ export default define.page(async function WorkspacesPage(ctx) {
                           <div class="muted">{row.workspaceRoot}</div>
                           <div class="muted">{row.configPath}</div>
                           <div class="workspace-recording-summary mono">
-                            {row.activeRecordingCount} active ·{" "}
+                            recordings: {row.activeRecordingCount} active ·{" "}
                             {row.staleRecordingCount} idle ·{" "}
-                            {row.stoppedRecordingCount} off
+                            {row.stoppedRecordingCount} stopped
                           </div>
                           <div class="muted">
                             {row.latestRecordingAt
@@ -248,7 +248,9 @@ export default define.page(async function WorkspacesPage(ctx) {
                                             {activityStateDot(uiState)}
                                           </span>
                                           <span>
-                                            {activityStateLabel(uiState)}
+                                            {recordingActivityStateLabel(
+                                              uiState,
+                                            )}
                                           </span>
                                         </div>
                                         <a
