@@ -56,6 +56,60 @@ export function publicationOrder(
   ];
 }
 
+async function resolveDownloadedPath(
+  inputDir: string,
+  preferredPath: string,
+  fallbackPath?: string,
+): Promise<string> {
+  const candidates = [
+    preferredPath,
+    join(inputDir, preferredPath.split(/[\\/]/).at(-1) ?? preferredPath),
+    ...(fallbackPath ? [fallbackPath] : []),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const stat = await Deno.stat(candidate);
+      if (stat.isDirectory) {
+        return candidate;
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(
+    `Could not resolve downloaded npm package path for ${preferredPath} under ${inputDir}`,
+  );
+}
+
+export async function resolvedPublicationOrder(
+  metadata: NpmPackagesMetadata,
+  inputDir: string,
+): Promise<NpmPublishTarget[]> {
+  const ordered = publicationOrder(metadata);
+  const resolvedTargets = await Promise.all(
+    ordered.map(async (target, index) => {
+      const fallbackPath = index === ordered.length - 1
+        ? join(inputDir, "wrapper")
+        : join(
+          inputDir,
+          "platforms",
+          target.packageDir.split(/[\\/]/).at(-1) ?? target.packageName,
+        );
+      return {
+        packageName: target.packageName,
+        packageDir: await resolveDownloadedPath(
+          inputDir,
+          target.packageDir,
+          fallbackPath,
+        ),
+      };
+    }),
+  );
+  return resolvedTargets;
+}
+
 async function runCommand(
   command: string,
   args: string[],
@@ -135,7 +189,7 @@ if (import.meta.main) {
   }
   baseEnv.PATH = `${dirname(npmBin)}${baseEnv.PATH ? `:${baseEnv.PATH}` : ""}`;
 
-  for (const target of publicationOrder(metadata)) {
+  for (const target of await resolvedPublicationOrder(metadata, inputDir)) {
     const args = ["publish", "--tag", tag];
     if (parsed["dry-run"]) {
       args.push("--dry-run");

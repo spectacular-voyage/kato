@@ -2927,3 +2927,120 @@ The dry-run publish succeeded locally for both:
 - `kato@0.2.4`
 
 So the next operational step is simple: run `Release Manual` once with `npm_publish_mode=dry-run`, then again with `npm_publish_mode=publish` when you’re ready. I set the workflow up for npm trusted publishing, with `NPM_TOKEN` fallback if you need it; the implementation followed npm/GitHub’s current docs: https://docs.npmjs.com/trusted-publishers , https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-nodejs-packages , https://github.com/actions/setup-node .
+
+# djradon_2026-03-12_0059_52
+
+For "npm dist-tag to use for npm publish or dry-run" I assume that subsequent runs will replace the latest tag?
+
+# gpt-5.4_2026-03-12_0100_00
+
+Yes, with two important nuances:
+
+- `--dry-run` does not change any tag at all.
+- A real `npm publish --tag latest` will move the `latest` dist-tag for that specific package to the newly published version.
+
+So in your workflow:
+
+- publishing `kato@0.2.5 --tag latest` would make `kato@latest` point to `0.2.5`
+- publishing `@spectacular-voyage/kato-linux-x64-gnu@0.2.5 --tag latest` would separately move `latest` for that package too
+
+Dist-tags are per package, not global across the whole release family.
+
+One more constraint: npm versions are immutable. You cannot republish the same version to “replace” it. You can only:
+- publish a new version with the same tag, which moves the tag
+- or manually retag existing versions with `npm dist-tag`
+
+So the safe pattern is:
+1. run `dry-run`
+2. publish prerelease with a non-`latest` tag if needed, like `next`
+3. publish the final version with `latest` when ready
+
+# djradon_2026-03-12_0103_50
+
+I have an npmjs "spectacular-voyage" organization. If I publish to "kato", will it be unassociated with the organization?
+
+# gpt-5.4_2026-03-12_0103_56
+
+I’m checking npm’s current org/package-ownership rules before answering, because the distinction between unscoped `kato` and an org-scoped package matters for your publish plan.
+
+# gpt-5.4_2026-03-12_0104_18
+
+Not necessarily.
+
+Current npm docs distinguish two things:
+
+- scope: `kato` is unscoped, so it is not in the `@spectacular-voyage` namespace
+- governance: npm says organizations can still manage “public unscoped packages governed by your organization” and can use organizations to manage unscoped packages  
+  Sources: https://docs.npmjs.com/about-organization-scopes-and-packages/ , https://docs.npmjs.com/adding-members-to-your-organization/
+
+So if you publish `kato`:
+
+- it will be installed as `npm install -g kato`
+- it will be public and unscoped
+- it will not appear as `@spectacular-voyage/kato`
+- but it can still be governed/managed through your `spectacular-voyage` npm organization
+
+So the right mental model is:
+
+- `kato` = public unscoped wrapper package
+- `@spectacular-voyage/kato-*` = scoped internal platform packages
+
+That split is valid. The only thing you give up with unscoped `kato` is the visible org namespace in the package name, not necessarily org management.
+
+# djradon_2026-03-12_0105_41
+
+OK, so governed/managed through the org happens automatically? I'd guess based on the internal platform packages?
+
+# gpt-5.4_2026-03-12_0105_46
+
+I’m checking npm’s org ownership behavior directly in the docs, because the important question here is whether unscoped `kato` becomes org-governed automatically or whether you need an explicit ownership/transfer step.
+
+# gpt-5.4_2026-03-12_0106_15
+
+No. I would not assume that happens automatically.
+
+The scoped internal packages and the unscoped wrapper are separate npm packages. Publishing `@spectacular-voyage/kato-linux-x64-gnu` does not automatically make unscoped `kato` org-governed. npm’s docs say organizations can manage unscoped packages, but team/package access is an explicit thing you add to a package, not something inferred from related scoped packages. Sources:
+- https://docs.npmjs.com/about-organization-scopes-and-packages/
+- https://docs.npmjs.com/managing-team-access-to-organization-packages/
+- https://docs.npmjs.com/cli/v11/commands/npm-access/
+
+So the practical model is:
+
+- initial publish of `kato`:
+  - owned by the publishing account
+- to make it org-managed/governed:
+  - explicitly grant org team access, for example:
+  - `npm access grant read-write spectacular-voyage:developers kato`
+
+That is the step that ties the unscoped package into org team management. It is not derived automatically from the `@spectacular-voyage/kato-*` packages.
+
+If you want, I can add a short note to the runbook/npm task saying: “after first publish of unscoped `kato`, grant org team access explicitly.”
+
+# djradon_2026-03-12_0106_55
+
+$ (cd /home/runner/work/kato/kato/.test-tmp/npm-packages/release/platforms/darwin-arm64 && npm publish --tag latest --dry-run)
+error: Uncaught (in promise) NotFound: Failed to spawn '/opt/hostedtoolcache/node/24.14.0/x64/bin/npm': No such cwd '/home/runner/work/kato/kato/.test-tmp/npm-packages/release/platforms/darwin-arm64'
+  }).spawn();
+     ^
+    at spawnChildInner (ext:deno_process/40_process.js:188:17)
+    at spawnChild (ext:deno_process/40_process.js:213:10)
+    at Command.spawn (ext:deno_process/40_process.js:543:12)
+    at runCommand (file:///home/runner/work/kato/kato/scripts/publish-npm-packages.ts:73:6)
+    at file:///home/runner/work/kato/kato/scripts/publish-npm-packages.ts:145:11
+Error: Process completed with exit code 1.
+
+# gpt-5.4_2026-03-12_0107_22
+
+The publish job is failing for the same class of reason we already hit with bundle metadata: `npm-packages-metadata.json` is carrying absolute package directories from the assembly job, but the publish job downloads the artifact into a different path. I’m fixing the publish script to resolve downloaded package paths locally instead of trusting stale absolute paths.
+
+# gpt-5.4_2026-03-12_0107_36
+
+I’ve confirmed the failure mode: publish is reading stale absolute paths out of `npm-packages-metadata.json`. I’m patching the publish script the same way we hardened bundle assembly earlier, then I’ll verify it against a copied assembly tree whose metadata points somewhere nonexistent.
+
+# gpt-5.4_2026-03-12_0107_58
+
+The path-resolution patch is in. I’m running both the targeted tests and a local dry-run publish against a copied package assembly whose metadata has intentionally stale absolute paths, which matches the GitHub publish-job layout.
+
+# gpt-5.4_2026-03-12_0108_17
+
+The regression test passed. The stale-metadata dry-run is still packing the Linux platform tarball, which is slow but expected because the package is large; I’m waiting for the wrapper publish to complete too so we know the path fallback works end to end.
