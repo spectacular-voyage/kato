@@ -2740,3 +2740,27 @@ So this one should be safe to rerun in GitHub now.
 # djradon_2026-03-12_0012_27
 
 ok, what's next?
+
+# gpt-5.4_2026-03-12_0012_40
+
+Immediate next step is to rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). The binary matrix already proved out once, but the new npm assembly/smoke job has not been exercised in GitHub yet, and the `compiled_main.ts` fix was specifically for that CI path.
+
+After that, I’d do this in order:
+
+- Make npm publishing real. The assembly path exists now, so the next implementation slice is a publish workflow/manual publish runbook for `kato` plus the `@spectacular-voyage/kato-*` platform packages.
+- Fix first-run web UX. [`task.2026.2026-03-11-interactive-web-password.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-interactive-web-password.md) is the best next product-facing improvement, because npm install is much less compelling if users still have to hand-manage `KATO_WEB_PASSWORD`.
+- Expand release smoke from “`--version` and `/login`” to full lifecycle: `kato init`, daemon start/status/stop, and web init/start/status/stop. That closes the remaining confidence gap in the binary plan note at [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+If you want me to drive the next code change, I’d take the npm publish path first, then interactive web password.
+
+# gpt-5.4_2026-03-12_0012_43
+
+Immediate next step is to rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). The binary matrix already proved out once, but the new npm assembly/smoke job has not been exercised in GitHub yet, and the `compiled_main.ts` fix was specifically for that CI path.
+
+After that, I’d do this in order:
+
+- Make npm publishing real. The assembly path exists now, so the next implementation slice is a publish workflow/manual publish runbook for `kato` plus the `@spectacular-voyage/kato-*` platform packages.
+- Fix first-run web UX. [`task.2026.2026-03-11-interactive-web-password.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-interactive-web-password.md) is the best next product-facing improvement, because npm install is much less compelling if users still have to hand-manage `KATO_WEB_PASSWORD`.
+- Expand release smoke from “`--version` and `/login`” to full lifecycle: `kato init`, daemon start/status/stop, and web init/start/status/stop. That closes the remaining confidence gap in the binary plan note at [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+If you want me to drive the next code change, I’d take the npm publish path first, then interactive web password.

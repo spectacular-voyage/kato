@@ -73,6 +73,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
   ].join("\n"),
   web: [
     "Usage:",
+    "  kato web init --username <username> [--host <hostname>] [--port <port>]",
     "  KATO_WEB_PASSWORD=<password> kato web init --username <username> [--host <hostname>] [--port <port>]",
     "  secret-tool read kato/web | kato web init --username <username> --password-stdin [--host <hostname>] [--port <port>]",
     "  kato web start",
@@ -80,6 +81,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "  kato web status [--json]",
     "",
     "Initializes explicit web config, hashed credentials, and the local web server lifecycle.",
+    "Prompts for the password on an interactive terminal unless an explicit password source is provided.",
     "`kato web start` refuses to run until `kato web init` has created config.",
   ].join("\n"),
   "workspace-init": [

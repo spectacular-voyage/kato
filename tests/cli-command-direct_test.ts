@@ -206,6 +206,9 @@ function makeCommandContext(root: string, options: {
     defaultSharedConfig: sharedConfig,
     defaultCliConfig: cliConfig,
     webConfigStore: {
+      getPath() {
+        return join(katoDir, "web", "kato-web-config.yaml");
+      },
       load() {
         return Promise.resolve(createDefaultWebConfig());
       },

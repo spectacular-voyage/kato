@@ -279,6 +279,13 @@ deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path
    - HTTP probe of `/login` on the configured host/port
    - `kato web status`
    - `kato web stop`
+
+Manual local note:
+
+- `kato web init --username <username>` now prompts for the password on an
+  interactive terminal.
+- Keep release/CI smoke on `KATO_WEB_PASSWORD` or `--password-stdin`; do not
+  rely on an interactive prompt in workflow automation.
 12. Upload versioned and stable-name release assets.
 13. Publish GitHub release and any installer/channel metadata.
 

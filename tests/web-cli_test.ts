@@ -1,6 +1,13 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import { join } from "@std/path";
 import { DEFAULT_KATO_WEB_PORT } from "@kato/shared";
+import { resolveWebInitPassword } from "../apps/cli/src/commands/web.ts";
 import { parseDaemonCliArgs } from "../apps/cli/src/parser.ts";
 import { runDaemonCli } from "../apps/cli/src/router.ts";
 import type { DaemonCliRuntime } from "../apps/cli/src/types.ts";
@@ -152,6 +159,98 @@ Deno.test("cli parser parses web subcommands", () => {
   assertThrows(() => parseDaemonCliArgs(["web", "init", "--port", "0"]));
 });
 
+Deno.test("resolveWebInitPassword prefers --password-stdin over env or prompt", async () => {
+  const calls: string[] = [];
+  const password = await resolveWebInitPassword(
+    { passwordFromStdin: true },
+    {
+      readPasswordFromStdin: async () => {
+        calls.push("stdin");
+        return "stdin-pass";
+      },
+      readPasswordFromEnv: () => {
+        calls.push("env");
+        return "env-pass";
+      },
+      isInteractiveTerminal: () => {
+        calls.push("tty");
+        return true;
+      },
+      promptForPassword: async () => {
+        calls.push("prompt");
+        return "prompt-pass";
+      },
+    },
+  );
+
+  assertEquals(password, "stdin-pass");
+  assertEquals(calls, ["stdin"]);
+});
+
+Deno.test("resolveWebInitPassword prefers env before interactive prompt", async () => {
+  const calls: string[] = [];
+  const password = await resolveWebInitPassword(
+    {},
+    {
+      readPasswordFromEnv: () => {
+        calls.push("env");
+        return "env-pass";
+      },
+      isInteractiveTerminal: () => {
+        calls.push("tty");
+        return true;
+      },
+      promptForPassword: async () => {
+        calls.push("prompt");
+        return "prompt-pass";
+      },
+    },
+  );
+
+  assertEquals(password, "env-pass");
+  assertEquals(calls, ["env"]);
+});
+
+Deno.test("resolveWebInitPassword falls back to interactive prompt on a TTY", async () => {
+  const calls: string[] = [];
+  const password = await resolveWebInitPassword(
+    {},
+    {
+      readPasswordFromEnv: () => {
+        calls.push("env");
+        return undefined;
+      },
+      isInteractiveTerminal: () => {
+        calls.push("tty");
+        return true;
+      },
+      promptForPassword: async () => {
+        calls.push("prompt");
+        return "prompt-pass";
+      },
+    },
+  );
+
+  assertEquals(password, "prompt-pass");
+  assertEquals(calls, ["env", "tty", "prompt"]);
+});
+
+Deno.test("resolveWebInitPassword fails closed without a password source or TTY", async () => {
+  await assertRejects(
+    () =>
+      resolveWebInitPassword(
+        {},
+        {
+          readPasswordFromEnv: () => undefined,
+          isInteractiveTerminal: () => false,
+          promptForPassword: async () => "prompt-pass",
+        },
+      ),
+    Error,
+    "Web init requires KATO_WEB_PASSWORD, --password-stdin, or an interactive terminal prompt.",
+  );
+});
+
 Deno.test("runDaemonCli web start fails closed until web init runs", async () => {
   await withTestTempDir("web-cli-unconfigured-", async (rootDir) => {
     const runtimeDir = join(rootDir, "daemon");
@@ -191,7 +290,7 @@ Deno.test("runDaemonCli web init fails closed when no password source is configu
       assertEquals(code, 1);
       assertStringIncludes(
         harness.stderr.join(""),
-        "Web init requires KATO_WEB_PASSWORD to be set or --password-stdin.",
+        "Web init requires KATO_WEB_PASSWORD, --password-stdin, or an interactive terminal prompt.",
       );
     });
   });
@@ -230,6 +329,82 @@ Deno.test("runDaemonCli web init defaults to the standard web port", async () =>
       assertEquals(code, 0);
       const savedConfig = await webConfigStore.load();
       assertEquals(savedConfig.port, DEFAULT_KATO_WEB_PORT);
+      assertNotEquals(savedConfig.auth.passwordHash, "secret-pass");
+      assertEquals(
+        (harness.stdout.join("") + harness.stderr.join("")).includes(
+          "secret-pass",
+        ),
+        false,
+      );
+    });
+  });
+});
+
+Deno.test("runDaemonCli web init short-circuits existing config before requiring a password source", async () => {
+  await withWebPasswordUnset(async () => {
+    await withTestTempDir("web-cli-existing-config-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      await webConfigStore.ensureInitialized(
+        await createInitializedWebConfig({
+          hostname: "127.0.0.1",
+          port: 3187,
+          username: "existing-user",
+          password: "existing-pass",
+        }),
+      );
+      const harness = makeRuntimeHarness(runtimeDir);
+
+      const code = await runDaemonCli(
+        ["web", "init", "--username", "new-user"],
+        {
+          runtime: harness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+          webConfigStore,
+        },
+      );
+
+      assertEquals(code, 0);
+      assertStringIncludes(
+        harness.stdout.join(""),
+        "web config already exists at",
+      );
+      const savedConfig = await webConfigStore.load();
+      assertEquals(savedConfig.auth.username, "existing-user");
+    });
+  });
+});
+
+Deno.test("runDaemonCli web init reports invalid existing config before reading password input", async () => {
+  await withWebPasswordUnset(async () => {
+    await withTestTempDir("web-cli-invalid-config-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      await Deno.mkdir(join(rootDir, "web"), { recursive: true });
+      await Deno.writeTextFile(
+        join(rootDir, "web", "kato-web-config.yaml"),
+        "auth: [broken",
+      );
+      const harness = makeRuntimeHarness(runtimeDir);
+
+      const code = await runDaemonCli(
+        ["web", "init", "--username", "dj"],
+        {
+          runtime: harness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+        },
+      );
+
+      assertEquals(code, 1);
+      assertStringIncludes(
+        harness.stderr.join(""),
+        "Web config file contains invalid YAML",
+      );
     });
   });
 });

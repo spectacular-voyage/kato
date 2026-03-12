@@ -180,6 +180,23 @@ Supported commands:
   - Show daemon status.
   - Text mode includes a `Recent Errors` section sourced from runtime
     operational/security-audit WARN and ERROR log entries.
+- `web init --username <username> [--host <hostname>] [--port <port>]`
+  - Initialize explicit web config and hashed credentials for the local web
+    operator console.
+  - Prompts for the password on an interactive terminal by default.
+  - Non-interactive alternatives remain supported:
+    `KATO_WEB_PASSWORD=<password> kato web init --username <username>` or
+    `... --password-stdin`.
+  - If a valid web config already exists, Kato reports the existing path
+    without overwriting it or requesting a new password.
+- `web start`
+  - Start the local web operator console in detached background mode.
+  - Refuses to start until `kato web init` has created config.
+- `web stop`
+  - Stop the local web operator console (or clear stale status if the stored
+    process is gone).
+- `web status [--json]`
+  - Show the local web operator console state.
 - `workspace init [<dir>]`
   - Create `<dir>/.kato-workspace-config.yaml`.
   - If `<dir>` is omitted, uses the current working directory.
@@ -232,6 +249,8 @@ Default paths:
 
 - Daemon config: `~/.kato/daemon/kato-daemon-config.yaml`
 - CLI config: `~/.kato/cli/kato-cli-config.yaml`
+- Web config: `~/.kato/web/kato-web-config.yaml`
+- Web status: `~/.kato/web/kato-web-status.json`
 - Shared config: `~/.kato/shared/kato-shared-config.yaml`
 - User config: `~/.kato/kato-user-config.yaml`
 - Default workspace template:

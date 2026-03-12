@@ -1,4 +1,8 @@
 import type { DaemonCliCommandContext } from "./context.ts";
+import {
+  createDefaultWebPasswordPromptIO,
+  promptForWebPassword,
+} from "./web_password_prompt.ts";
 import { DEFAULT_KATO_WEB_HOSTNAME, DEFAULT_KATO_WEB_PORT } from "@kato/shared";
 import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
 
@@ -126,18 +130,47 @@ function readPasswordFromEnv(): string | undefined {
   }
 }
 
-async function resolveWebInitPassword(options: {
-  passwordFromStdin?: boolean;
-}): Promise<string> {
+export interface WebInitPasswordResolverDeps {
+  readPasswordFromStdin?: () => Promise<string>;
+  readPasswordFromEnv?: () => string | undefined;
+  isInteractiveTerminal?: () => boolean;
+  promptForPassword?: () => Promise<string>;
+}
+
+function writeToStderr(text: string): void {
+  const encoder = new TextEncoder();
+  Deno.stderr.writeSync(encoder.encode(text));
+}
+
+export async function resolveWebInitPassword(
+  options: {
+    passwordFromStdin?: boolean;
+  },
+  deps: WebInitPasswordResolverDeps = {},
+): Promise<string> {
+  const readFromStdin = deps.readPasswordFromStdin ?? readPasswordFromStdin;
+  const readFromEnv = deps.readPasswordFromEnv ?? readPasswordFromEnv;
+  const isInteractiveTerminal = deps.isInteractiveTerminal ??
+    (() => Deno.stdin.isTerminal());
+  const promptForPassword = deps.promptForPassword ??
+    (() =>
+      promptForWebPassword(createDefaultWebPasswordPromptIO(writeToStderr)));
+
   if (options.passwordFromStdin) {
-    return await readPasswordFromStdin();
+    return await readFromStdin();
   }
-  const password = readPasswordFromEnv();
+
+  const password = readFromEnv();
   if (password) {
     return password;
   }
+
+  if (isInteractiveTerminal()) {
+    return await promptForPassword();
+  }
+
   throw new Error(
-    `Web init requires ${WEB_PASSWORD_ENV_VAR} to be set or --password-stdin.`,
+    `Web init requires ${WEB_PASSWORD_ENV_VAR}, --password-stdin, or an interactive terminal prompt.`,
   );
 }
 
@@ -177,7 +210,43 @@ export async function runWebInitCommand(
     passwordFromStdin?: boolean;
   },
 ): Promise<void> {
-  const password = await resolveWebInitPassword(options);
+  const webConfigPath = ctx.webConfigStore.getPath();
+  try {
+    const existingConfig = await ctx.webConfigStore.load();
+
+    await ctx.operationalLogger.info(
+      "web.init",
+      "Web config already present",
+      {
+        webConfigPath,
+        webConfigCreated: false,
+        hostname: existingConfig.hostname,
+        port: existingConfig.port,
+        username: existingConfig.auth.username,
+      },
+    );
+    await ctx.auditLogger.command("web.init", {
+      webConfigPath,
+      webConfigCreated: false,
+      hostname: existingConfig.hostname,
+      port: existingConfig.port,
+      username: existingConfig.auth.username,
+    });
+
+    ctx.runtime.writeStdout(`web config already exists at ${webConfigPath}\n`);
+    return;
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
+  }
+
+  const password = await resolveWebInitPassword(options, {
+    promptForPassword: () =>
+      promptForWebPassword(
+        createDefaultWebPasswordPromptIO(ctx.runtime.writeStderr),
+      ),
+  });
   const defaultConfig = await createInitializedWebConfig({
     hostname: options.hostname,
     port: options.port,
@@ -206,9 +275,9 @@ export async function runWebInitCommand(
   });
 
   ctx.runtime.writeStdout(
-    `${
-      result.created ? "created" : "web config already exists at"
-    } web config at ${result.path}\n`,
+    result.created
+      ? `created web config at ${result.path}\n`
+      : `web config already exists at ${result.path}\n`,
   );
 }
 

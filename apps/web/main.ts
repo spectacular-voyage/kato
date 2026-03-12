@@ -14,7 +14,7 @@ import { startWebServerStatusHeartbeat } from "./src/server_status.ts";
 export const app = new App<State>();
 
 const WEB_CONFIG_ERROR_MESSAGE =
-  "Kato Web is unconfigured. Run `kato web init --username <username>` with `KATO_WEB_PASSWORD` set or use `--password-stdin`.";
+  "Kato Web is unconfigured. Run `kato web init --username <username>` in an interactive terminal, or provide `KATO_WEB_PASSWORD` / `--password-stdin`.";
 
 startWebServerStatusHeartbeat();
 

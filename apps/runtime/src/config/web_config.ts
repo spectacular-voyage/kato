@@ -25,6 +25,7 @@ export interface EnsureWebConfigResult {
 }
 
 export interface WebConfigStoreLike {
+  getPath(): string;
   load(): Promise<WebConfig>;
   ensureInitialized(defaultConfig: WebConfig): Promise<EnsureWebConfigResult>;
 }
@@ -248,6 +249,10 @@ export async function createInitializedWebConfig(
 
 export class WebConfigFileStore implements WebConfigStoreLike {
   constructor(private readonly configPath: string) {}
+
+  getPath(): string {
+    return this.configPath;
+  }
 
   async load(): Promise<WebConfig> {
     if (!isYamlConfigPath(this.configPath)) {
