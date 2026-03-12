@@ -934,3 +934,956 @@ Staged just these 9 files:
 - [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts)
 
 Unrelated worktree changes were left unstaged.
+
+# djradon_2026-03-11_2209_52
+
+ok, proceed
+
+ok, proceed
+
+# gpt-5.4_2026-03-11_2210_03
+
+I’m moving to the first real binary proof-of-concept now. I’ll verify the actual compile entrypoints and then try focused `deno compile` runs for `kato`, `kato-daemon`, and `kato-web` before deciding whether code or docs need the next adjustment.
+
+# gpt-5.4_2026-03-11_2210_14
+
+I have the entrypoints. Next I’m attempting local compile proofs for CLI and daemon directly, and then I’ll probe the web path from built output rather than guessing whether Fresh wants `main.ts` or `_fresh/server.js` as the compile input.
+
+# gpt-5.4_2026-03-11_2211_32
+
+I’m checking the exact entrypoints and the current note language before I run compile attempts, so the next edits reflect real results rather than assumptions.
+
+The entrypoints are straightforward. Next I’m checking current task definitions and whether there is already any compile-related wiring before I generate artifacts under a temp directory.
+
+The repo split is slightly different than the note assumes: the user-facing CLI entry is still the top-level `main.ts`, not `apps/cli/src/main.ts`. I’m validating that before compiling the wrong binary.
+
+The top-level `main.ts` is not the CLI. I’m locating the actual `kato` entrypoint so the compile smoke test targets the same command users already run.
+
+I found the actual CLI entry in `apps/cli/src/main.ts`; the top-level `main.ts` is just an old workspace stub. I’m pulling the CLI package config too, because compile will need the right cwd/import map context.
+
+Proceeding with the first binary proof-of-concept. I’m going to validate `deno compile` for the CLI and daemon first, then test the web build/start path to see whether a `kato-web` binary is viable or whether we need a temporary packaged-runtime fallback.
+
+I’m checking the exact entrypoints and the current note language before I run compile attempts, so the next edits reflect real results rather than assumptions.
+
+The entrypoints are straightforward. Next I’m checking current task definitions and whether there is already any compile-related wiring before I generate artifacts under a temp directory.
+
+The repo split is slightly different than the note assumes: the user-facing CLI entry is still the top-level `main.ts`, not `apps/cli/src/main.ts`. I’m validating that before compiling the wrong binary.
+
+The top-level `main.ts` is not the CLI. I’m locating the actual `kato` entrypoint so the compile smoke test targets the same command users already run.
+
+I found the actual CLI entry in `apps/cli/src/main.ts`; the top-level `main.ts` is just an old workspace stub. I’m pulling the CLI package config too, because compile will need the right cwd/import map context.
+
+# gpt-5.4_2026-03-11_2211_52
+
+I’m isolating the compile experiments in a temp copy of the repo so the Fresh build output doesn’t churn your working tree. After that I’ll compile CLI and daemon, then build and compile the web app inside that copy.
+
+# gpt-5.4_2026-03-11_2212_01
+
+I have a clean temp copy. Next I’m doing focused compile smokes for `kato` and `kato-daemon` in parallel, with enough baked permissions to make the compiled artifacts runnable for basic checks.
+
+# gpt-5.4_2026-03-11_2212_04
+
+The CLI compile had to fetch `denort`; the daemon compile is still resolving/checking. I’m polling both before I move to the web build.
+
+# gpt-5.4_2026-03-11_2212_10
+
+Both CLI and daemon compiled cleanly. I’m doing one minimal execution check on each now to confirm the artifacts actually start as binaries, not just compile.
+
+# gpt-5.4_2026-03-11_2212_13
+
+CLI and daemon look viable as binaries. I’m moving to the web path now: build production output in the temp copy, inspect what Fresh emits, then compile the smallest plausible `kato-web` target from that built output.
+
+# gpt-5.4_2026-03-11_2212_18
+
+The Fresh/Vite production build is running. Once that finishes I’ll inspect the emitted server entry and asset layout before choosing the compile target.
+
+# gpt-5.4_2026-03-11_2212_35
+
+The build emits both `_fresh/server.js` and `_fresh/compiled-entry.js`, which is promising. I’m checking the compiled entry next because that is the likely target if Fresh intends binary packaging.
+
+# gpt-5.4_2026-03-11_2213_00
+
+Fresh’s own current docs confirm the intended binary target is `_fresh/compiled-entry.js` with `--include _fresh`. I’m using that exact path for the web smoke test instead of inventing a custom wrapper.
+
+# gpt-5.4_2026-03-11_2213_08
+
+The first `kato-web` attempt failed at compile time, and the failure is concrete: the generated client asset `main-BtUZReaM.ts` contains broken file-relative imports under `_fresh/client/assets/...`. I’m inspecting that emitted file before deciding whether the blocker is “compile only” or “build output itself.”
+
+# gpt-5.4_2026-03-11_2213_13
+
+That emitted `main-*.ts` is clearly wrong: it’s bundling daemon code into the client asset path. I’m checking the Fresh/Vite config and the app entry selection now, because this may be a pre-existing web build misconfiguration rather than a binary-only blocker.
+
+# gpt-5.4_2026-03-11_2213_30
+
+This looks like a Fresh/Vite artifact quirk rather than an immediate runtime blocker. The first failure is purely at compile-time type checking, so I’m retrying `kato-web` with `--no-check` to see whether the binary itself still works.
+
+# gpt-5.4_2026-03-11_2213_45
+
+I’m tracing whether that bad client asset is coming from a real app import path or from the Fresh build tooling. If it’s an actual app import leak into the client bundle, we need to fix the web app before any web binary will be stable.
+
+# gpt-5.4_2026-03-11_2213_58
+
+I found a real app-level leak, not just a compile quirk: several islands import `apps/web/src/loaders/activity_state.ts`, and that module also imports runtime filesystem config code. That explains why server-side runtime code is getting dragged into the built client asset graph.
+
+# gpt-5.4_2026-03-11_2214_13
+
+I have a clean fix shape: move the client-safe activity helpers out of the loader module, keep the filesystem-backed runtime-config loader server-only, then rerun the Fresh build/compile. I’m making that split now.
+
+# gpt-5.4_2026-03-11_2214_43
+
+The split is in. I’m sanity-checking the import cleanup before rerunning the web build, because that change touched the loader graph in a few places.
+
+# gpt-5.4_2026-03-11_2214_54
+
+The import split is cleaned up. I’m running a local web check on the real tree first, then I’ll refresh the temp copy and retry the Fresh build plus `kato-web` compile.
+
+# gpt-5.4_2026-03-11_2214_56
+
+The web check is clean semantically; it only failed on formatting. I’m formatting the touched web files and then rerunning the check before going back to the compile proof.
+
+# gpt-5.4_2026-03-11_2215_09
+
+There’s one remaining server module still importing `ActivityState` from the old loader path. I’m fixing that last reference and then rerunning the web check.
+
+# gpt-5.4_2026-03-11_2215_23
+
+The web import graph is now clean. I’ve synced the patched `apps/web` tree into the temp repo and I’m rebuilding Fresh there before the second `kato-web` compile attempt.
+
+# gpt-5.4_2026-03-11_2215_51
+
+The client graph is fixed, but the build still emits one extra manifest entry for `../daemon/src/main.ts`. That’s now the specific blocker I’m tracing, because it’s what keeps the Fresh compile path from closing.
+
+# gpt-5.4_2026-03-11_2216_05
+
+I found the second blocker. It’s not in Fresh itself: Vite is treating `new URL("../../../daemon/src/main.ts", import.meta.url)` in the runtime launcher as an asset reference and copying the daemon source into `_fresh/client/assets`. That stray asset is what keeps `deno compile` from succeeding on the built web app.
+
+# gpt-5.4_2026-03-11_2216_45
+
+The stray daemon asset is gone from the client manifest. I’m retrying the actual `kato-web` compile now against the rebuilt `_fresh/compiled-entry.js`.
+
+# gpt-5.4_2026-03-11_2216_53
+
+The web binary now compiles. I’m doing one live execution check with a localhost bind and an HTTP probe to confirm it behaves as a real standalone server, not just a compilable artifact.
+
+# gpt-5.4_2026-03-11_2217_40
+
+I have enough evidence now to update the binary plan note with facts instead of guesses: CLI/daemon compile cleanly, `kato-web` compile is viable on Linux, and the real web blockers were an island import leak plus a Vite asset transform on the daemon launcher path.
+
+# gpt-5.4_2026-03-11_2218_01
+
+I’ve updated the note. Before I wrap this slice, I’m rerunning the launcher regression tests because the web-binary work required one real code change in `apps/runtime/src/orchestrator/launcher.ts`.
+
+# gpt-5.4_2026-03-11_2218_12
+
+I’m checking the worktree state one last time so I can tell you exactly what this slice changed versus what was already dirty.
+
+# gpt-5.4_2026-03-11_2218_39
+
+One important gap remains: the compiled Fresh entry expects `HOSTNAME`/`PORT` env vars, while the existing installed-binary launcher contract already expects a `kato-web` binary that accepts `--host` and `--port`. I’m closing that gap with a tiny web-binary wrapper so the binary target matches the launcher contract instead of requiring a special case.
+
+# gpt-5.4_2026-03-11_2219_05
+
+I’m switching the web compile target from Fresh’s env-only `compiled-entry.js` to a Kato wrapper under `apps/web/src` that parses `--host` and `--port` and then serves the built `_fresh/server.js`. That keeps the installed-binary contract aligned with the launcher.
+
+# gpt-5.4_2026-03-11_2219_21
+
+The wrapper and parser test are in. I’m running the web check plus the new parser test, then I’ll recompile `kato-web` from the wrapper entry to confirm the launcher-compatible contract.
+
+# gpt-5.4_2026-03-11_2219_28
+
+The new parser test is running; the web check only wants a formatting pass on `binary_entry.ts`. I’m fixing that and then rerunning the check.
+
+# gpt-5.4_2026-03-11_2219_40
+
+The wrapper type-check failure is narrow: Fresh’s generated `server.fetch` signature doesn’t line up cleanly with `Deno.serve`’s overloads. I’m fixing that with an explicit TCP-options type and handler cast so the wrapper stays minimal.
+
+# gpt-5.4_2026-03-11_2220_10
+
+I’ve switched the source tree over to the wrapper entrypoint. I’m rebuilding the temp Fresh output one more time, then compiling `kato-web` from `src/compiled_main.ts` and probing it with the same `--host/--port` contract the launcher already uses.
+
+# gpt-5.4_2026-03-11_2220_34
+
+The wrapper-based binary compiled cleanly. I’m doing one final live probe using the real launcher-style arguments so we can say `kato-web` works with `--host`/`--port`, not just env vars.
+
+# gpt-5.4_2026-03-11_2220_51
+
+I’ve closed the last contract mismatch. The web binary now compiles and runs behind a Kato wrapper that accepts the same `--host`/`--port` args the launcher already uses, so I’m updating the task note to reflect the final proof path instead of the intermediate Fresh-only entrypoint.
+
+# gpt-5.4_2026-03-11_2220_59
+
+One data point worth preserving for distribution planning: the compiled Linux `kato-web` binary is large because Deno embeds the built `_fresh` output plus npm-derived `node_modules`. I’m adding that size implication to the task note so it doesn’t get rediscovered later.
+
+# gpt-5.4_2026-03-11_2221_23
+
+I caught one doc accuracy issue: the verified web compile command is cwd-sensitive because of `--include _fresh`. I’m correcting the note so it matches the command that actually passed, instead of implying a repo-root invocation.
+
+# gpt-5.4_2026-03-11_2221_51
+
+**Progress**
+
+`kato-web` is now proven viable as a real Linux binary, not just a planning assumption. I fixed the two blockers that were preventing that:
+
+- I split client-safe activity helpers into [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts) and left runtime-config loading server-only in [loaders/activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), so islands no longer drag filesystem/runtime code into the client bundle.
+- I changed [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) to stop using the static `new URL(..., import.meta.url)` pattern that Vite was turning into a stray client asset.
+- I added a wrapper entrypoint at [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts) with arg parsing in [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts), so the compiled `kato-web` binary accepts `--host` and `--port`, matching the existing launcher contract.
+- I updated the binary plan note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) with the real Linux proof and remaining cross-platform work.
+
+**Verification**
+
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts`
+- In a temp repo copy:
+  - `deno compile` succeeded for `kato`
+  - `deno compile` succeeded for `kato-daemon`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - the compiled `kato-web --host 127.0.0.1 --port 45176` served `/login` with HTTP 200
+
+One important data point: the current Linux `kato-web` binary is large, about 69 MB, because Deno embeds `_fresh` plus npm-derived web dependencies. I did not update [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) yet; the next step should be turning these verified compile commands into repeatable scripts/CI and then documenting the release flow. These new changes are currently unstaged.
+
+# gpt-5.4_2026-03-11_2221_52
+
+**Progress**
+
+`kato-web` is now proven viable as a real Linux binary, not just a planning assumption. I fixed the two blockers that were preventing that:
+
+- I split client-safe activity helpers into [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts) and left runtime-config loading server-only in [loaders/activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), so islands no longer drag filesystem/runtime code into the client bundle.
+- I changed [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) to stop using the static `new URL(..., import.meta.url)` pattern that Vite was turning into a stray client asset.
+- I added a wrapper entrypoint at [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts) with arg parsing in [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts), so the compiled `kato-web` binary accepts `--host` and `--port`, matching the existing launcher contract.
+- I updated the binary plan note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) with the real Linux proof and remaining cross-platform work.
+
+**Verification**
+
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts`
+- In a temp repo copy:
+  - `deno compile` succeeded for `kato`
+  - `deno compile` succeeded for `kato-daemon`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - the compiled `kato-web --host 127.0.0.1 --port 45176` served `/login` with HTTP 200
+
+One important data point: the current Linux `kato-web` binary is large, about 69 MB, because Deno embeds `_fresh` plus npm-derived web dependencies. I did not update [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) yet; the next step should be turning these verified compile commands into repeatable scripts/CI and then documenting the release flow. These new changes are currently unstaged.
+
+# djradon_2026-03-11_2221_52
+
+Should we remove the top-level main.ts and its test?
+
+# gpt-5.4_2026-03-11_2222_02
+
+I’m checking what still references the top-level `main.ts` and whether `main_test.ts` protects anything meaningful, so the recommendation is based on the current repo rather than on the old layout assumption.
+
+# gpt-5.4_2026-03-11_2222_06
+
+The root file pair looks isolated. I’m checking the repo-level task wiring and README references so I can say whether removing them has any collateral beyond cleanup.
+
+# gpt-5.4_2026-03-11_2222_18
+
+Yes, I would remove them.
+
+[main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) is not the product entrypoint anymore. It just prints a daemon-description string, while the real CLI entry is [apps/cli/src/main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/main.ts). That mismatch already caused confusion during the binary work.
+
+[main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts) is only testing two string-returning helpers in that stub. It is not protecting real behavior.
+
+The only real fallout is cleanup in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json):
+- remove `dev:root`
+- stop listing `main.ts` / `main_test.ts` in `fmt`, `lint`, `check`, `test`, and `test:coverage`
+
+If you want a repo-root convenience entry later, it should be a real shim to the CLI, not the current placeholder. But as it stands, the root `main.ts` and its test are dead weight. If you want, I can remove them and update `deno.json` in one pass.
+
+# djradon_2026-03-11_2222_49
+
+yes please.
+
+# gpt-5.4_2026-03-11_2223_04
+
+I’m removing the root stub entrypoint and its test, then tightening the repo task config so it no longer references dead files. After that I’ll run a light validation pass on the updated `deno.json`.
+
+# gpt-5.4_2026-03-11_2223_29
+
+The stub and test are gone. I’m running a small validation pass on the updated repo tasks and test glob so we don’t leave `deno.json` inconsistent.
+
+`deno.json` is fine; the only failure is the new parser test file needing formatting. I’m fixing that and rerunning the same light validation.
+
+# gpt-5.4_2026-03-11_2223_38
+
+Removed the root stub entrypoint and test: [main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) and [main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts). I also cleaned [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) so repo tasks no longer reference them, and dropped the unused `dev:root` task.
+
+Validated with:
+- `deno task fmt:check`
+- `deno test --parallel --allow-read --allow-write=.test-tmp --allow-env=... tests/web-binary-entry_test.ts`
+
+I did not run the full repo `check` or full test suite.
+
+# gpt-5.4_2026-03-11_2223_40
+
+Removed the root stub entrypoint and test: [main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) and [main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts). I also cleaned [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) so repo tasks no longer reference them, and dropped the unused `dev:root` task.
+
+Validated with:
+- `deno task fmt:check`
+- `deno test --parallel --allow-read --allow-write=.test-tmp --allow-env=... tests/web-binary-entry_test.ts`
+
+I did not run the full repo `check` or full test suite.
+
+# djradon_2026-03-11_2224_51
+
+ok, so the binaries built? Just the linux ones? Should I test them?
+
+# gpt-5.4_2026-03-11_2225_02
+
+I’m checking whether the proof-of-concept binaries are still present on disk and exactly which ones were built, so I can tell you whether there’s anything useful to test right now.
+
+# gpt-5.4_2026-03-11_2225_08
+
+The CLI and daemon binaries are still there. I’m checking the temp web build path too, because that one was compiled from inside `apps/web` and may have landed under a different temp subdirectory.
+
+# gpt-5.4_2026-03-11_2225_13
+
+I found the web binary too. I’m grabbing its size and checking whether these are clearly Linux executables, then I’ll tell you what is worth testing versus what is still just a smoke artifact.
+
+# gpt-5.4_2026-03-11_2225_28
+
+Yes, but only as local Linux proof-of-concept artifacts.
+
+Built and still present:
+- [kato](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato)
+- [kato-daemon](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato-daemon)
+- [kato-web](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/apps/.test-tmp/bin/kato-web)
+
+They are Linux `x86_64` ELF binaries. I have not built macOS or Windows binaries yet, and these are not packaged release artifacts yet.
+
+I already smoke-tested:
+- `kato --version`
+- `kato-daemon bogus`
+- `kato-web --host 127.0.0.1 --port 45176`
+- HTTP probe of `/login`
+
+Yes, you can test them, but I’d treat them as disposable smoke artifacts. The safest tests are:
+- run [kato](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato) with `--version`
+- run [kato-web](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/apps/.test-tmp/bin/kato-web) with `--host 127.0.0.1 --port <free-port>` and hit `/login`
+
+I would avoid serious `kato-daemon` testing against your real `~/.kato` state until we wire these into a cleaner test/install flow.
+
+# gpt-5.4_2026-03-11_2225_29
+
+Yes, but only as local Linux proof-of-concept artifacts.
+
+Built and still present:
+- [kato](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato)
+- [kato-daemon](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato-daemon)
+- [kato-web](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/apps/.test-tmp/bin/kato-web)
+
+They are Linux `x86_64` ELF binaries. I have not built macOS or Windows binaries yet, and these are not packaged release artifacts yet.
+
+I already smoke-tested:
+- `kato --version`
+- `kato-daemon bogus`
+- `kato-web --host 127.0.0.1 --port 45176`
+- HTTP probe of `/login`
+
+Yes, you can test them, but I’d treat them as disposable smoke artifacts. The safest tests are:
+- run [kato](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/.test-tmp/bin/kato) with `--version`
+- run [kato-web](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/compile-repo.ovnJ4O/apps/.test-tmp/bin/kato-web) with `--host 127.0.0.1 --port <free-port>` and hit `/login`
+
+I would avoid serious `kato-daemon` testing against your real `~/.kato` state until we wire these into a cleaner test/install flow.
+
+# djradon_2026-03-11_2229_59
+
+ok, let's continue
+
+# gpt-5.4_2026-03-11_2230_09
+
+I’m moving from proof-of-concept binaries to repeatable build plumbing. First I’m checking the current release docs and workflow layout so the next change is a real compile task or script, not another ad hoc command sequence.
+
+# gpt-5.4_2026-03-11_2230_16
+
+There’s no existing binary build plumbing yet. The highest-value next step is a repeatable local build script plus repo tasks for `kato`, `kato-daemon`, and `kato-web`, then I can fold those exact commands into the release runbook.
+
+# gpt-5.4_2026-03-11_2230_25
+
+There’s already a `scripts/` directory, so I’m going to put the first binary builder there instead of hiding it in docs. I’m checking what’s already in `scripts/` before I add anything new.
+
+# gpt-5.4_2026-03-11_2230_57
+
+I’m choosing initial compile permissions now. I’d rather bake them into the script once than add another ad hoc layer on top, so I’m checking actual `fetch` and `Deno.Command` usage in the launcher/runtime surface first.
+
+# gpt-5.4_2026-03-11_2231_29
+
+I’m using a Deno script for the builder so it stays cross-platform and can evolve into CI later. I’m checking the existing script style first, then I’ll add `build-binaries.ts` and wire root tasks to it.
+
+# gpt-5.4_2026-03-11_2232_03
+
+I’m editing the build plumbing now: a cross-platform Deno builder under `scripts/`, root tasks to invoke it, and task/runbook updates once it’s verified locally.
+
+# gpt-5.4_2026-03-11_2232_29
+
+The builder task is in. I’m doing a local host rebuild through the script now so we know the task really works end-to-end and not just on paper.
+
+# gpt-5.4_2026-03-11_2232_47
+
+The first scripted run exposed a real UX issue: `deno task ... -- ...` is passing a literal `--` through, so the builder ignored `--skip-web-install`. I’m letting the current run finish, then I’ll normalize that in the script so the task behaves the way you’d expect.
+
+# gpt-5.4_2026-03-11_2233_13
+
+The scripted build itself worked, but it proved one bug in the task wrapper: extra args after `deno task build:binaries -- ...` were being ignored. I’m fixing that now and then rerunning with an explicit custom output dir to confirm the wrapper is usable.
+
+# gpt-5.4_2026-03-11_2233_32
+
+The builder now honors output-dir and skip flags. I’m doing one last smoke pass against the scripted output paths and then I’ll update the docs to point at the task instead of the one-off commands.
+
+# gpt-5.4_2026-03-11_2233_50
+
+The builder surfaced one more useful fact: it writes a machine-readable `build-metadata.json`, and it also showed the current version split is still `cli/daemon 0.2.4` vs `web 0.2.3`. I’m formatting the script and updating the binary note/runbook to reflect the scripted flow and the current permission profile.
+
+# gpt-5.4_2026-03-11_2234_31
+
+The scripted builder and docs are in sync now. I’m doing one final fast check on formatting and a launcher-style `kato-web` run from the scripted output so this slice closes with a real binary smoke, not just successful compilation.
+
+# gpt-5.4_2026-03-11_2234_47
+
+I have the build task working. Before I close, I’m checking the lockfile diff because the scripted `deno install` may have dirtied `apps/web/deno.lock`, and I don’t want to leave an accidental dependency change mixed into the binary work.
+
+# gpt-5.4_2026-03-11_2235_20
+
+I’m tightening one more thing while this is fresh: the builder should not silently rewrite the web lockfile on every run. I’m switching both the builder and CI’s web dependency install to `--frozen`, which means the current lockfile update becomes an intentional part of the change instead of an accidental side effect.
+
+# gpt-5.4_2026-03-11_2235_29
+
+The lockfile move only pays off if `--frozen` actually works. I’m verifying that on `apps/web` directly, then I’ll stop and summarize the next logical step.
+
+# gpt-5.4_2026-03-11_2235_39
+
+`--frozen` passes cleanly now, so the web lockfile is part of a reproducible build path instead of a transient side effect. I’m making one small doc wording update to reflect that and then I’ll stop.
+
+# gpt-5.4_2026-03-11_2235_59
+
+Implemented the first repeatable binary build path.
+
+The new builder is [scripts/build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts), wired through [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) as `deno task build:binaries`. It builds `kato`, `kato-daemon`, and `kato-web`, writes a `build-metadata.json` manifest, supports `--output-dir`, `--target`, `--skip-web-install`, and `--skip-web-build`, and defaults output under `.test-tmp/binaries/<host>`. I also updated [ci.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml) to use `deno install --frozen` for `apps/web`, and updated the binary note/runbook in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md).
+
+Verified with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+- `./.test-tmp/binaries/host-smoke/kato --version`
+- `./.test-tmp/binaries/host-smoke/kato-web --host 127.0.0.1 --port 45177`
+- HTTP probe of `/login` returning `200`
+- `deno install --frozen` in `apps/web`
+- `deno task fmt:check`
+- `deno check scripts/build-binaries.ts`
+
+Two important follow-ups remain. The current build metadata shows `cli` / `daemon` at `0.2.4` while `web` is still `0.2.3`, so release version alignment is still open. And the next implementation step should be a native-runner GitHub Actions workflow that calls the new build task and then assembles per-platform bundles.
+
+I left unrelated existing worktree changes alone, including [apps/cli/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/cli/deno.json), [apps/daemon/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/deno.json), and [release-notes.v0.2.4.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.4.md).
+
+# gpt-5.4_2026-03-11_2236_01
+
+Implemented the first repeatable binary build path.
+
+The new builder is [scripts/build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts), wired through [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) as `deno task build:binaries`. It builds `kato`, `kato-daemon`, and `kato-web`, writes a `build-metadata.json` manifest, supports `--output-dir`, `--target`, `--skip-web-install`, and `--skip-web-build`, and defaults output under `.test-tmp/binaries/<host>`. I also updated [ci.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml) to use `deno install --frozen` for `apps/web`, and updated the binary note/runbook in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md).
+
+Verified with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+- `./.test-tmp/binaries/host-smoke/kato --version`
+- `./.test-tmp/binaries/host-smoke/kato-web --host 127.0.0.1 --port 45177`
+- HTTP probe of `/login` returning `200`
+- `deno install --frozen` in `apps/web`
+- `deno task fmt:check`
+- `deno check scripts/build-binaries.ts`
+
+Two important follow-ups remain. The current build metadata shows `cli` / `daemon` at `0.2.4` while `web` is still `0.2.3`, so release version alignment is still open. And the next implementation step should be a native-runner GitHub Actions workflow that calls the new build task and then assembles per-platform bundles.
+
+I left unrelated existing worktree changes alone, including [apps/cli/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/cli/deno.json), [apps/daemon/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/deno.json), and [release-notes.v0.2.4.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.4.md).
+
+# djradon_2026-03-11_2237_13
+
+Coincidence... I was update the version numbers there, hence the weird split.
+
+# gpt-5.4_2026-03-11_2237_19
+
+That makes sense. The builder just surfaced the split because it records versions from each app’s `deno.json`; it wasn’t indicating a deeper problem.
+
+Once you finish aligning [apps/web/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json), [apps/cli/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/cli/deno.json), and [apps/daemon/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/deno.json), the next `deno task build:binaries` run will reflect that automatically in `build-metadata.json`.
+
+I haven’t changed any version files myself.
+
+# gpt-5.4_2026-03-11_2237_20
+
+That makes sense. The builder just surfaced the split because it records versions from each app’s `deno.json`; it wasn’t indicating a deeper problem.
+
+Once you finish aligning [apps/web/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.json), [apps/cli/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/cli/deno.json), and [apps/daemon/deno.json](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/deno.json), the next `deno task build:binaries` run will reflect that automatically in `build-metadata.json`.
+
+I haven’t changed any version files myself.
+
+# djradon_2026-03-11_2238_00
+
+OK, proceed... I guess with the github action? I'm so curious to see how this turns out.
+
+# gpt-5.4_2026-03-11_2238_11
+
+I’m moving to the first binary GitHub Action now. I’ll wire a native-runner matrix that uses the new build task, uploads the three binaries plus `build-metadata.json`, and avoids mixing release publishing logic in this first pass.
+
+# gpt-5.4_2026-03-11_2238_23
+
+I’m checking the current workflow conventions and the exact runner matrix I should target before I edit anything, because the main choice here is “manual artifact-build workflow” versus “release workflow,” and I want the lighter one first.
+
+# gpt-5.4_2026-03-11_2239_06
+
+I’m adding the workflow now. It will be `workflow_dispatch` only, build on the four native runners we already chose, run a minimal smoke on `kato` and `kato-web`, and upload the per-platform bundle contents as artifacts.
+
+# gpt-5.4_2026-03-11_2239_21
+
+The workflow file is in. I’m validating the YAML syntax locally and then I’ll update the notes to mark the workflow as implemented but not yet exercised in GitHub.
+
+# gpt-5.4_2026-03-11_2239_35
+
+I’ve marked the task note. I’m adding one small runbook reference to the manual workflow name so you can find it directly from the docs, then I’ll stop.
+
+# gpt-5.4_2026-03-11_2239_38
+
+I have the workflow and docs in place. I’m doing one final status check so I can tell you exactly what changed in this slice and whether anything unintended got pulled in.
+
+# gpt-5.4_2026-03-11_2240_03
+
+Added the first manual binary workflow in [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). It is `workflow_dispatch` only, builds on:
+- Linux x64
+- Windows x64
+- macOS x64
+- macOS arm64
+
+Each runner now:
+- verifies native OS/arch
+- runs `deno task build:binaries`
+- smoke-checks `kato --version`
+- smoke-checks `kato-web --host 127.0.0.1 --port 45177` plus `/login`
+- uploads the built binaries and `build-metadata.json` as an artifact bundle
+
+I also wired the local builder in [build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts), exposed it in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json), tightened CI to use frozen web installs in [ci.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml), and updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) and [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+Verified locally:
+- `deno eval ... parse(".github/workflows/release-manual.yml")`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+- `./.test-tmp/binaries/host-smoke/kato --version`
+- `./.test-tmp/binaries/host-smoke/kato-web --host 127.0.0.1 --port 45177`
+- HTTP `200` from `/login`
+- `deno install --frozen` in `apps/web`
+- `deno task fmt:check`
+
+I have not run the workflow in GitHub yet. If you want to see it live now, trigger `Release Manual` from the Actions tab and it should produce four artifact bundles.
+
+One note on the worktree: your version-file edits are still present, and I left them alone. I also have intentional lockfile changes in [apps/web/deno.lock](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.lock) and [deno.lock](/home/djradon/hub/spectacular-voyage/kato/deno.lock) so the frozen install/build path is reproducible.
+
+# gpt-5.4_2026-03-11_2240_05
+
+Added the first manual binary workflow in [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). It is `workflow_dispatch` only, builds on:
+- Linux x64
+- Windows x64
+- macOS x64
+- macOS arm64
+
+Each runner now:
+- verifies native OS/arch
+- runs `deno task build:binaries`
+- smoke-checks `kato --version`
+- smoke-checks `kato-web --host 127.0.0.1 --port 45177` plus `/login`
+- uploads the built binaries and `build-metadata.json` as an artifact bundle
+
+I also wired the local builder in [build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts), exposed it in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json), tightened CI to use frozen web installs in [ci.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml), and updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) and [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+Verified locally:
+- `deno eval ... parse(".github/workflows/release-manual.yml")`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+- `./.test-tmp/binaries/host-smoke/kato --version`
+- `./.test-tmp/binaries/host-smoke/kato-web --host 127.0.0.1 --port 45177`
+- HTTP `200` from `/login`
+- `deno install --frozen` in `apps/web`
+- `deno task fmt:check`
+
+I have not run the workflow in GitHub yet. If you want to see it live now, trigger `Release Manual` from the Actions tab and it should produce four artifact bundles.
+
+One note on the worktree: your version-file edits are still present, and I left them alone. I also have intentional lockfile changes in [apps/web/deno.lock](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.lock) and [deno.lock](/home/djradon/hub/spectacular-voyage/kato/deno.lock) so the frozen install/build path is reproducible.
+
+# djradon_2026-03-11_2243_07
+
+We're on a branch, so I guess we won't see the action until we merge.
+
+# gpt-5.4_2026-03-11_2243_12
+
+Correct. GitHub won’t show a new workflow in the default Actions UI until the workflow file exists on the remote branch you’re viewing, and many teams only notice/use it once it’s on `main`.
+
+You still have a few ways to exercise it before merge:
+- push the branch and open that branch in GitHub; the workflow file should be visible there
+- if your repo allows it, trigger `workflow_dispatch` from that branch in the Actions UI
+- or merge first and run it from `main`
+
+So the workflow is ready in-tree, but whether you can click-run it pre-merge depends on your repo’s GitHub settings and branch visibility.
+
+# gpt-5.4_2026-03-11_2243_13
+
+Correct. GitHub won’t show a new workflow in the default Actions UI until the workflow file exists on the remote branch you’re viewing, and many teams only notice/use it once it’s on `main`.
+
+You still have a few ways to exercise it before merge:
+- push the branch and open that branch in GitHub; the workflow file should be visible there
+- if your repo allows it, trigger `workflow_dispatch` from that branch in the Actions UI
+- or merge first and run it from `main`
+
+So the workflow is ready in-tree, but whether you can click-run it pre-merge depends on your repo’s GitHub settings and branch visibility.
+
+# djradon_2026-03-11_2244_27
+
+proceed
+
+# gpt-5.4_2026-03-11_2244_40
+
+I’m taking the next concrete step after the build workflow: bundle assembly. I’ll add a repeatable packager that turns the built binaries plus metadata into a per-platform release directory/archive shape, then wire the manual workflow to upload that bundle instead of loose binaries.
+
+# gpt-5.4_2026-03-11_2244_48
+
+I’m checking the existing binary builder and any bundle-naming guidance in the notes so the first bundle format matches what we’ve already decided instead of inventing another temporary shape.
+
+# gpt-5.4_2026-03-11_2244_54
+
+I have enough guidance to pick a bundle format. I’m going with a simple per-platform release directory plus archive, using the naming already documented in the distribution notes, and I’ll keep installer/update metadata out of this first pass.
+
+# gpt-5.4_2026-03-11_2245_09
+
+I’m checking the current version values before I bake archive naming into the packager. If they’re aligned now, I’ll use the shared version directly; if not, I’ll make the script fail fast instead of producing misleading asset names.
+
+# gpt-5.4_2026-03-11_2245_45
+
+I’m editing the packager now. It will create a versioned bundle directory, a versioned archive, and a checksum sidecar from a built binary set, and then I’ll switch the manual workflow smoke test to run from that bundle directory instead of from the raw compile output.
+
+# gpt-5.4_2026-03-11_2246_15
+
+The packager is in. I’m wiring the workflow to use it now so the smoke test and uploaded artifact both go through the bundle layout instead of bypassing it.
+
+# gpt-5.4_2026-03-11_2246_28
+
+I’m removing the one hardcoded version string from the workflow before I validate it. The bundle path should be discovered from the packaged output, not baked to `0.2.4`.
+
+# gpt-5.4_2026-03-11_2246_38
+
+I’m validating the packager locally now against the scripted Linux build output, then I’ll smoke the bundled `kato-web` path and refresh the docs to match the new archive step.
+
+# gpt-5.4_2026-03-11_2248_07
+
+I’m continuing with the binary release path by validating the new bundle packaging locally and then tightening the workflow/docs around that result. After that I’ll either leave you with a packageable branch or surface the specific blocker.
+
+# gpt-5.4_2026-03-11_2248_15
+
+I’ve got the package assembler and workflow wiring in place; the next check is whether the end-to-end bundle flow works now that your app versions are aligned. If that passes, I’ll update the note/runbook to match the actual package output rather than the earlier raw-binary phase.
+
+# gpt-5.4_2026-03-11_2248_28
+
+I’ve confirmed the repo versions are aligned at `0.2.4`, so the earlier package failure was stale metadata rather than a real release mismatch. I’m rerunning the full build/package path now against a fresh staging dir so we know whether the current workflow definition is actually sound.
+
+# gpt-5.4_2026-03-11_2249_21
+
+The full rebuild succeeded and the packaged metadata is now clean at `0.2.4` across CLI, daemon, and web. I’m waiting on the archive step now; if it stalls, that likely means the packager needs a small fix rather than the binary outputs themselves being wrong.
+
+# gpt-5.4_2026-03-11_2249_43
+
+The package flow is now working end to end locally: fresh rebuild, archive creation, checksum emission, and a smoke run from the bundled `kato`/`kato-web` directory. I’m tightening the docs next and removing the stale version-mismatch note so the plan matches the actual state.
+
+# gpt-5.4_2026-03-11_2249_52
+
+I’ve narrowed the remaining work: the local package path is solid, but the docs are still describing the pre-package state. I’m patching just those notes now so the implementation plan, runbook, and current workflow all refer to the same artifact shape.
+
+# gpt-5.4_2026-03-11_2250_26
+
+The package path is validated; I’m just running a final quality pass on the script surface and checking the diff shape before I hand it back.
+
+# gpt-5.4_2026-03-11_2250_34
+
+`fmt:check` found one real issue: `scripts/package-binaries.ts` hadn’t been run through `deno fmt` yet. I’m fixing that and rerunning the short checks so the packaging slice closes cleanly.
+
+# gpt-5.4_2026-03-11_2251_06
+
+Binary packaging is now wired end to end.
+
+[`scripts/package-binaries.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts) now turns a `build:binaries` staging dir into a versioned bundle directory plus platform archive, checksum, and `bundle-metadata.json`. [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) exposes it as `deno task package:binaries`, and [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) now builds, packages, smoke-tests from the packaged bundle, and uploads the packaged outputs instead of raw binaries. I also updated [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [`dev.release-runbook.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so they match the real artifact shape.
+
+Local validation passed with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+- `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+- bundled `kato --version`
+- bundled `kato-web --host 127.0.0.1 --port 45179` with HTTP `200` on `/login`
+- `deno task fmt:check`
+- `deno check scripts/package-binaries.ts scripts/build-binaries.ts`
+
+That produced a working local bundle at `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64` plus `kato-v0.2.4-linux-x64.tar.gz` and its `.sha256`. I have not run the GitHub workflow itself yet; to see that live, the branch needs to be pushed where `workflow_dispatch` is available. Unrelated existing worktree changes are still present and untouched.
+
+# gpt-5.4_2026-03-11_2251_07
+
+Binary packaging is now wired end to end.
+
+[`scripts/package-binaries.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts) now turns a `build:binaries` staging dir into a versioned bundle directory plus platform archive, checksum, and `bundle-metadata.json`. [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) exposes it as `deno task package:binaries`, and [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) now builds, packages, smoke-tests from the packaged bundle, and uploads the packaged outputs instead of raw binaries. I also updated [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [`dev.release-runbook.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so they match the real artifact shape.
+
+Local validation passed with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+- `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+- bundled `kato --version`
+- bundled `kato-web --host 127.0.0.1 --port 45179` with HTTP `200` on `/login`
+- `deno task fmt:check`
+- `deno check scripts/package-binaries.ts scripts/build-binaries.ts`
+
+That produced a working local bundle at `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64` plus `kato-v0.2.4-linux-x64.tar.gz` and its `.sha256`. I have not run the GitHub workflow itself yet; to see that live, the branch needs to be pushed where `workflow_dispatch` is available. Unrelated existing worktree changes are still present and untouched.
+
+# djradon_2026-03-11_2254_53
+
+what's next?
+
+# gpt-5.4_2026-03-11_2255_02
+
+I’m checking the current binary plan and open issues so I can give you the shortest credible next-step sequence rather than a generic list.
+
+# gpt-5.4_2026-03-11_2255_09
+
+I’ve got the plan headings. I’m checking the interactive web password note too, because if the packaged bundle still needs `KATO_WEB_PASSWORD`, that may be the next UX blocker rather than more build plumbing.
+
+# gpt-5.4_2026-03-11_2255_25
+
+The next real unknown is cross-platform reality, not more local build plumbing.
+
+I’d do it in this order:
+
+1. Push the branch and run [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml).
+This is the first test that matters now. Linux is proven locally; Windows/macOS are still assumptions.
+
+2. After the first workflow run, fix whatever breaks on native runners.
+Most likely candidates are `kato-web` compile/start behavior, Windows zip packaging, or path assumptions in the smoke steps.
+
+3. Expand the workflow smoke checks from “binary exists and `/login` responds” to actual product lifecycle:
+`kato start`, `kato status`, `kato stop`, `kato web init`, `kato web start`, `kato web status`, `kato web stop`.
+That closes the gap still called out in [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+4. Make web password setup usable without env gymnastics.
+Your new note in [`task.2026.2026-03-11-interactive-web-password.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-interactive-web-password.md) is probably the next UX slice after platform validation. A packaged binary flow still feels rough if `KATO_WEB_PASSWORD` is mandatory.
+
+After that, the remaining big items are signing/notarization and installer/distribution shape. I would not spend time on Permission Broker yet.
+
+If you want the next code change rather than just the plan, I’d take step 3 next: add packaged-bundle lifecycle smoke tests.
+
+# djradon_2026-03-11_2301_21
+
+I'd love to get distribution via npmjs going soon too. Can you fill out [task.2026.2026-03-11-npmjs-install.md](dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) for that?
+
+# gpt-5.4_2026-03-11_2301_28
+
+I’m drafting the npmjs distribution note against your existing task-note template, using the binary work as the baseline rather than starting from scratch. I’ll inspect the empty note and the guidance doc first, then patch the note directly.
+
+# gpt-5.4_2026-03-11_2301_38
+
+The note is empty, so I’m pulling a little repo context first. I want the npmjs plan to be concrete about what gets published, how installers pick the right binary, and where it intersects with the binary work already underway.
+
+# gpt-5.4_2026-03-11_2302_18
+
+I’ve got the structure. I’m patching the note with a concrete npm wrapper-plus-platform-packages plan that reuses the binary pipeline you already have, instead of inventing a separate npm-specific build path.
+
+# gpt-5.4_2026-03-11_2303_07
+
+The note is filled. I’m doing one read-through now to make sure the plan is internally consistent with the binary note, especially around package names, three-binary payload, and keeping npm as a wrapper channel instead of a separate build path.
+
+# gpt-5.4_2026-03-11_2303_12
+
+Filled out [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) using the same template as your other task notes.
+
+The note now makes the npm channel concrete:
+- npm is a secondary convenience channel on top of the binary pipeline
+- use a thin top-level wrapper package plus platform packages
+- each platform package carries `kato`, `kato-daemon`, and `kato-web`
+- no `postinstall` downloads, no local compile, no Deno requirement
+- release flow builds native bundles first, then assembles/publishes npm packages
+
+It also calls out the main open questions: final package names, `npx` support, Linux musl, publish auth model, and how public the platform packages should be. I didn’t run tests because this was a doc-only change.
+
+# gpt-5.4_2026-03-11_2303_14
+
+Filled out [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) using the same template as your other task notes.
+
+The note now makes the npm channel concrete:
+- npm is a secondary convenience channel on top of the binary pipeline
+- use a thin top-level wrapper package plus platform packages
+- each platform package carries `kato`, `kato-daemon`, and `kato-web`
+- no `postinstall` downloads, no local compile, no Deno requirement
+- release flow builds native bundles first, then assembles/publishes npm packages
+
+It also calls out the main open questions: final package names, `npx` support, Linux musl, publish auth model, and how public the platform packages should be. I didn’t run tests because this was a doc-only change.
+
+# djradon_2026-03-11_2306_12
+
+I expect npm to be the primary install method, it's more convenient than downloading an archive and putting it in a good location. Maybe it can automate the init too. 
+
+Here's coderabbit feedback. Anything you think worth addressing, put it as checkbox to-do items under ## Coderabbit Review. Then let me know sequencing of review-driven fixes ot continuing with implementation plan.
+
+# gpt-5.4_2026-03-11_2306_25
+
+I’m reading the binary task note around the `## Coderabbit Review` section so I can turn the worthwhile comments into concrete checkboxes instead of hand-waving them. After that I’ll tell you whether those fixes should come before or after the main implementation plan.
+
+# gpt-5.4_2026-03-11_2306_37
+
+I don’t actually have the CodeRabbit comment text in this chat, so I’m doing the next best thing: a quick review of the new binary-packaging slice and turning the issues I’d genuinely prioritize into `## Coderabbit Review` checkboxes. Then I’ll tell you whether those should preempt the main plan.
+
+# gpt-5.4_2026-03-11_2306_52
+
+I found at least one concrete hygiene issue in the new package script surface, so I’m sanity-checking lint as well before I write the review to-dos. If lint is red, that should absolutely be in the review-driven queue.
+
+# gpt-5.4_2026-03-11_2307_21
+
+I have a short list of review-driven items that are actually worth carrying. I’m adding them under `## Coderabbit Review` now, keeping them scoped to things that tighten correctness or release confidence rather than expanding scope.
+
+# djradon_2026-03-11_2307_25
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.github/workflows/release-manual.yml:
+- Around line 70-71: The smoke-test log files are being written into $bin_dir
+(e.g. log_path="$bin_dir/kato-web.log" and the "$bin_dir/kato-web" invocations
+redirecting stdout/stderr), which lets kato* globs pick them up into the release
+bundle; change those log paths so they are written outside the release upload
+directory (for example use $RUNNER_TEMP or /tmp:
+log_path="$RUNNER_TEMP/kato-web.log" and redirect stdout/stderr there) and apply
+the same change to the other similar invocations that create kato-web.stdout.log
+/ kato-web.stderr.log so the artifact globs no longer match these transient
+smoke-test logs.
+- Around line 24-25: The workflow matrix uses an outdated runner label
+"macos-13" for the "macos-x64" job; update the runs_on value for the macos-x64
+matrix leg by replacing "macos-13" with the current Intel runner label
+"macos-26-intel" (or "macos-15-intel" if you need a specific macOS 15
+environment) so the macos-x64 job runs on a supported macOS runner.
+
+In `@apps/web/src/activity_state.ts`:
+- Around line 54-64: The function providerAutoGeneratesTwins assumes
+runtimeConfig.providerAutoGenerateTwins exists and will throw if it's undefined;
+update the perProvider assignment in providerAutoGeneratesTwins to safely handle
+undefined (e.g., use optional chaining or default to an empty object for
+runtimeConfig.providerAutoGenerateTwins) so that accessing perProvider[provider]
+is safe, then return perProvider[provider] ??
+runtimeConfig.globalAutoGenerateTwins ?? false.
+
+In `@apps/web/src/binary_entry.ts`:
+- Around line 28-29: The code reads the ambient env.HOSTNAME to set hostname
+(via resolveHostname) which is unsafe; change the lookup to a namespaced
+variable like env.KATO_WEB_HOSTNAME instead so default bind address is not
+pulled from shell/CI/container HOSTNAME. Update the hostname assignment that
+uses resolveHostname(env.HOSTNAME) ?? DEFAULT_KATO_WEB_HOSTNAME to call
+resolveHostname(env.KATO_WEB_HOSTNAME) ?? DEFAULT_KATO_WEB_HOSTNAME (leave
+parsePort/DEFAULT_KATO_WEB_PORT and the variable name hostname unchanged).
+
+In `@apps/web/src/compiled_main.ts`:
+- Line 6: parseWebBinaryServeOptions is being given the whole environment
+(Deno.env.toObject()), which allows ambient HOSTNAME to override bind address;
+instead construct a sanitized env object before calling
+parseWebBinaryServeOptions by copying Deno.env.toObject() and removing HOSTNAME
+(or by explicitly building an env with only the web-related vars you intend to
+honor) and pass that sanitized object to parseWebBinaryServeOptions; update the
+call site where Deno.args and Deno.env.toObject() are used so it uses the
+filteredEnv (e.g., delete filteredEnv.HOSTNAME or pick only allowed keys) to
+prevent ambient HOSTNAME from changing the bind address.
+
+In `@scripts/build-binaries.ts`:
+- Around line 174-175: The deno compile invocations and the release task are not
+using --frozen which lets deps be re-resolved; update all invocations that call
+runCommand("deno", ["compile", ...]) in this script to include the "--frozen"
+flag (matching the existing runCommand("deno", ["install","--frozen"], ...)
+call) and ensure the parsed["skip-web-install"] branch remains unchanged; also
+update the corresponding task in deno.json to add "--frozen" to its deno
+install/compile arguments so the entire release pipeline uses locked
+dependencies for reproducible binaries.
+
+---
+
+Nitpick comments:
+In `@dev-docs/notes/release-notes.v0.2.4.md`:
+- Around line 1-8: The release notes file titled 'Release Notes v0.2.4'
+currently has only YAML front matter with an empty desc and no body; update the
+file by populating the desc field and adding a brief body summary that lists the
+primary v0.2.4 changes (e.g., binary build infrastructure, multi-platform
+workflow, notable bug fixes or improvements), mention any important upgrade or
+migration notes, and include a short contributors or acknowledgements line;
+locate the file by the title and the YAML fields (desc, id) and ensure the new
+content follows the existing front matter format.
+
+# gpt-5.4_2026-03-11_2307_35
+
+I’m verifying each CodeRabbit point against the current files before touching anything. I’ll only patch the findings that still reproduce in the repo as it stands, and I’ll call out the ones that are stale or not worth taking.
+
+# gpt-5.4_2026-03-11_2307_56
+
+Most of the findings still reproduce. The only one I’m verifying externally is the macOS runner label, because that has changed over time; the current GitHub docs do confirm `macos-13` is retired and current Intel labels are `macos-15-intel` and `macos-26-intel`. I’m patching the real issues now.
+
+# gpt-5.4_2026-03-11_2308_35
+
+The `compiled_main` point turns into a dependency question: once `parseWebBinaryServeOptions` stops reading ambient `HOSTNAME`, passing the full env stops being a bind-address problem. I’m checking the existing web-binary tests now so I can update only the behavior that actually changes and avoid redundant churn.
+
+# djradon_2026-03-11_2308_35
+
+Yes, lint failed, I had to patch the failure in another converstaion (async -> sync)
+
+# gpt-5.4_2026-03-11_2308_47
+
+I saw that. The current lint failure I found is separate from the async→sync patch: `scripts/package-binaries.ts` still has an unused `extname` import in the current tree. I’m rechecking the touched files before I patch anything else so I don’t trample work from the other conversation.
+
+# gpt-5.4_2026-03-11_2309_10
+
+I’ve isolated the fixes I’m actually taking: workflow log contamination, runner label refresh, the unsafe web-binary hostname env lookup, the `providerAutoGenerateTwins` null-safety issue, `--frozen` in compile/build task plumbing, the empty release notes file, and the current `package-binaries.ts` lint issue. I’m leaving `compiled_main.ts` alone unless it still matters after the hostname fix, because that one is likely subsumed.
+
+# gpt-5.4_2026-03-11_2309_38
+
+The review fixes are in. I’m validating the touched files now, including a fresh `build:binaries` smoke with the new `--frozen` path, so we know these aren’t just cosmetically correct.
+
+# gpt-5.4_2026-03-11_2309_46
+
+The focused checks are clean so far. I’m waiting on the frozen compile smoke now, because that’s the one behavior-changing review fix that needs a real end-to-end confirmation.
+
+# gpt-5.4_2026-03-11_2310_17
+
+The review fixes validated cleanly, including a successful frozen binary rebuild. I’m doing one last search pass for the old `HOSTNAME`-based web-binary contract so I can tell you precisely which review point I left untouched and why.
+
+# gpt-5.4_2026-03-11_2310_51
+
+I verified the review points against the current tree and fixed the ones that still reproduced.
+
+Applied fixes:
+- [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml): moved smoke-test logs out of the bundle directory and updated the retired `macos-13` runner to `macos-15-intel`. I verified the runner change against GitHub’s hosted-runner docs and the macOS 13 retirement note: https://docs.github.com/actions/reference/runners/github-hosted-runners and https://github.blog/changelog/2025-09-19-github-actions-macos-13-hosted-runner-image-is-closing-down/
+- [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts): `providerAutoGeneratesTwins()` now safely handles missing `providerAutoGenerateTwins`.
+- [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts) and [web-binary-entry_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-binary-entry_test.ts): web binary hostname now comes from `KATO_WEB_HOSTNAME`, and there’s a regression test proving ambient `HOSTNAME` is ignored.
+- [build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts) and [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json): compile/build task now runs with `--frozen`.
+- [package-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts): removed the current lint failure.
+- [release-notes.v0.2.4.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.4.md): filled in the empty release notes stub.
+
+Not separately changed:
+- [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts): once `parseWebBinaryServeOptions()` stopped reading ambient `HOSTNAME`, the specific bind-address problem there stopped reproducing. I left it alone to avoid redundant churn.
+
+Validation passed:
+- `deno task fmt:check`
+- `deno lint scripts/build-binaries.ts scripts/package-binaries.ts apps/web/src/activity_state.ts apps/web/src/binary_entry.ts apps/web/src/compiled_main.ts tests/web-binary-entry_test.ts`
+- `deno check scripts/build-binaries.ts scripts/package-binaries.ts tests/web-binary-entry_test.ts`
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/review-smoke --skip-web-install --skip-web-build`
+- workflow YAML parse check
+
+On sequencing: the review-driven fixes are now small enough that I would go back to the implementation plan, not keep looping on review. The next priority should be:
+1. run the native GitHub workflow for real
+2. expand packaged-bundle smoke to full daemon/web lifecycle
+3. then build the npm wrapper channel on top of that proven binary pipeline
+
+That order fits your goal of making npm the primary user-facing install method without making npm hide unresolved binary/runtime problems.
+
+# djradon_2026-03-11_2311_39
+
+commit message please.
+
+# gpt-5.4_2026-03-11_2311_43
+
+`build: harden binary packaging and web runtime defaults`
+
+- move workflow smoke-test logs out of packaged artifact directories
+- refresh macOS Intel runner label in manual release workflow
+- ignore ambient `HOSTNAME` for `kato-web` and use `KATO_WEB_HOSTNAME`
+- make `providerAutoGenerateTwins` lookup null-safe
+- enforce `--frozen` in binary build task and root launcher task
+- fix `package-binaries.ts` lint drift
+- fill in `v0.2.4` release notes stub

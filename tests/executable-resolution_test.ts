@@ -8,7 +8,7 @@ import {
 } from "./test_env.ts";
 
 Deno.test("resolveInstalledExecutablePath prefers env override", async () => {
-  await withLockedEnvironment(async () => {
+  await withLockedEnvironment(() => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({

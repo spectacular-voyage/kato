@@ -1,7 +1,4 @@
-import {
-  type ActivityState,
-  activityStateDot,
-} from "../src/loaders/activity_state.ts";
+import { type ActivityState, activityStateDot } from "../src/activity_state.ts";
 import type { WorkspacesPageData } from "../src/loaders/workspaces.ts";
 import { buildSessionInventoryHref } from "../src/session_routes.ts";
 import { formatTimestamp } from "../src/time.ts";

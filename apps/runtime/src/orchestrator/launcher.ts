@@ -16,7 +16,15 @@ export interface DaemonLauncherRuntime {
 }
 
 function resolveDaemonMainPath(): string {
-  return fromFileUrl(new URL("../../../daemon/src/main.ts", import.meta.url));
+  return join(
+    dirname(fromFileUrl(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "daemon",
+    "src",
+    "main.ts",
+  );
 }
 
 function resolveWorkspaceSourceRoot(daemonMainPath: string): string {

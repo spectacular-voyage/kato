@@ -2,7 +2,7 @@ import {
   type ActivityState,
   activityStateDot,
   recordingActivityStateLabel,
-} from "../src/loaders/activity_state.ts";
+} from "../src/activity_state.ts";
 import type {
   RecordingsPageData,
   RecordingStateFilter,

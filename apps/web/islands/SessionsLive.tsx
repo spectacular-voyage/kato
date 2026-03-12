@@ -1,7 +1,4 @@
-import {
-  activityStateDot,
-  activityStateLabel,
-} from "../src/loaders/activity_state.ts";
+import { activityStateDot, activityStateLabel } from "../src/activity_state.ts";
 import type {
   SessionActivityRow,
   SessionsPageData,

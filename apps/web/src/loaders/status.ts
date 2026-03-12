@@ -12,9 +12,9 @@ import {
 import {
   type ActivityState,
   deriveSessionGenerationState,
-  loadRuntimeConfigOrDefault,
   providerAutoGeneratesTwins,
-} from "./activity_state.ts";
+} from "../activity_state.ts";
+import { loadRuntimeConfigOrDefault } from "./activity_state.ts";
 import {
   loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,

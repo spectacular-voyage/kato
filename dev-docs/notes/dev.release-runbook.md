@@ -124,14 +124,70 @@ Each platform release bundle should contain:
 
 - `kato`
 - `kato-daemon`
-- the packaged web runtime/artifacts required by `kato web start`
+- preferably `kato-web`
+
+Temporary fallback only if another platform blocks `kato-web` compile:
+
+- packaged web runtime/artifacts required by `kato web start`
 
 Planning note:
 
-- the exact shipped web runtime shape can stay open for now (`kato-web`,
-  hidden compiled mode, or equivalent)
+- Linux proof now supports the three-binary shape directly
 - the release contract should still be fixed now: end users do not build web
   assets locally and do not need Vite for `kato web start`
+
+### Current Local Build Task
+
+The current repeatable local build entrypoint is:
+
+```bash
+deno task build:binaries -- --output-dir .test-tmp/binaries/release-smoke
+```
+
+Useful flags for faster local reruns after a successful web build:
+
+```bash
+deno task build:binaries -- --output-dir .test-tmp/binaries/release-smoke --skip-web-install --skip-web-build
+```
+
+Current builder behavior:
+
+- compiles `kato`, `kato-daemon`, and `kato-web`
+- runs `deno install --frozen` in `apps/web` before the web build unless
+  skipped for local reruns
+- writes `build-metadata.json` beside the binaries
+- uses the current bootstrap permission profile from `scripts/build-binaries.ts`
+
+Current local packaging entrypoint:
+
+```bash
+deno task package:binaries -- --input-dir .test-tmp/binaries/release-smoke --label <platform-label>
+```
+
+Current packaging behavior:
+
+- assembles a versioned bundle directory containing `kato`, `kato-daemon`,
+  `kato-web`, `README.md`, `LICENSE`, and `build-metadata.json`
+- writes `bundle-metadata.json` beside the bundle
+- emits a platform archive (`.tar.gz` on Unix, `.zip` on Windows)
+- emits a `.sha256` checksum for the archive
+- rejects packaging if CLI/daemon/web versions are not aligned in
+  `build-metadata.json`
+
+Current limitation:
+
+- `scripts/build-binaries.ts` does not yet narrow launcher `--allow-run` to
+  sibling executables only; that remains follow-up hardening
+
+Current manual CI entrypoint:
+
+- `.github/workflows/release-manual.yml`
+- trigger via GitHub Actions `workflow_dispatch`
+- current workflow behavior:
+  - build binaries on native runners
+  - package platform bundles with `deno task package:binaries`
+  - smoke-test `kato --version` and bundled `kato-web` from the packaged bundle
+  - upload bundle directory, archive, checksum, and bundle metadata
 
 ### Planned Release Steps
 
@@ -142,19 +198,29 @@ Planning note:
 deno task ci
 ```
 
-3. Build production web artifacts:
+3. Build platform binaries on the native runner with the scripted builder:
 
 ```bash
-deno task --cwd apps/web build
+deno task build:binaries -- --output-dir <staging-dir>
 ```
 
-4. Build/package platform release artifacts on native runners:
-   - `kato`
-   - `kato-daemon`
-   - packaged web runtime/artifacts
-5. Assemble per-platform release archives/installers so the web runtime is
+4. Verify staged build metadata and version alignment before packaging:
+   - inspect `<staging-dir>/build-metadata.json`
+   - confirm CLI/daemon/web versions are aligned for the release cut
+5. Package the staged binaries into release bundles:
+
+```bash
+deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>
+```
+
+6. Verify packaged bundle outputs:
+   - versioned bundle directory exists
+   - platform archive exists
+   - archive checksum exists
+   - `bundle-metadata.json` exists
+7. Assemble per-platform release archives/installers so the web runtime is
    colocated with the CLI bundle.
-6. Run per-platform smoke checks against the packaged runtime, not the Vite dev
+8. Run per-platform smoke checks against the packaged runtime, not the Vite dev
    server:
    - `kato --version`
    - `kato status`
@@ -163,14 +229,22 @@ deno task --cwd apps/web build
    - HTTP probe of `/login` on the configured host/port
    - `kato web status`
    - `kato web stop`
-7. Upload versioned and stable-name release assets.
-8. Publish GitHub release and any installer/channel metadata.
+9. Upload versioned and stable-name release assets.
+10. Publish GitHub release and any installer/channel metadata.
 
 ### Planned Verification Checklist
 
 - [ ] `deno task ci` passed for the release commit.
-- [ ] `deno task --cwd apps/web build` passed before packaging.
-- [ ] Each platform artifact bundle includes the packaged web runtime/assets.
+- [ ] `deno task build:binaries -- --output-dir <staging-dir>` passed on each
+      native runner.
+- [ ] `<staging-dir>/build-metadata.json` exists and shows aligned release
+      versions.
+- [ ] `deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>`
+      passed on each native runner.
+- [ ] Packaged output includes bundle directory, archive, checksum, and
+      `bundle-metadata.json`.
+- [ ] Each platform artifact bundle includes `kato`, `kato-daemon`, and
+      `kato-web` unless an explicit fallback exception is documented.
 - [ ] `kato web start` works from the packaged release output without invoking
       the Vite dev server.
 - [ ] `/login` responds on the configured host/port after `kato web start`.

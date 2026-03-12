@@ -1,5 +1,5 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "nodeModulesDir": "manual",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts routes/**/*.tsx src/**/*.ts",

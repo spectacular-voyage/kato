@@ -2,7 +2,7 @@
 id: lwoblwa43m6z5ign6ukghbs
 title: 2026 03 11 Binary Distributions
 desc: ""
-updated: 1773290313000
+updated: 1773295520734
 created: 1773290214027
 ---
 
@@ -90,10 +90,91 @@ That means:
 - release packaging builds production web output first
 - `kato web start` launches the installed production runtime, not the dev server
 
+### Linux proof of concept
+
+The first Linux smoke pass is now real, not speculative:
+
+- `kato` compiles from `apps/cli/src/main.ts`
+- `kato-daemon` compiles from `apps/daemon/src/main.ts`
+- `kato-web` compiles from Fresh production output plus a small Kato wrapper
+  entrypoint using:
+  `deno task --cwd apps/web build`
+  then
+  from `apps/web`:
+  `deno compile --include _fresh -A src/compiled_main.ts`
+- the compiled `kato-web` binary starts and serves `/login` successfully on
+  Linux
+- the wrapper keeps the installed-binary contract aligned with the launcher by
+  accepting `--host` and `--port`
+- current Linux `kato-web` output is large because Deno embeds `_fresh` plus
+  npm-derived web dependencies; bundle size needs explicit packaging review
+
+The two concrete web blockers were both local code issues, not a Fresh compile
+dead end:
+
+- islands were importing mixed client/server helpers from
+  `apps/web/src/loaders/activity_state.ts`, which pulled runtime filesystem code
+  into the client bundle
+- `apps/runtime/src/orchestrator/launcher.ts` used
+  `new URL("../../../daemon/src/main.ts", import.meta.url)`, which Vite treated
+  as a client asset reference and copied into `_fresh/client`
+
+### Repeatable local build task
+
+The proof-of-concept compile flow is now scripted in `scripts/build-binaries.ts`
+and exposed as:
+
+- `deno task build:binaries`
+
+Current behavior:
+
+- default output goes to `.test-tmp/binaries/<host-os>-<host-arch>`
+- `build-metadata.json` is written alongside the binaries
+- frozen `apps/web` install/build is run before `kato-web` compile unless
+  explicitly skipped
+- ad hoc local smoke rebuilds can skip repeated web setup, for example:
+  `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+
+Current bootstrap permission profile in the scripted build:
+
+- `kato`: `--allow-read --allow-write --allow-env --allow-net --allow-run`
+- `kato-daemon`: `--allow-read --allow-write --allow-env`
+- `kato-web`: `--allow-read --allow-write --allow-env --allow-net`
+
+This is good enough for repeatable local builds, but launcher `--allow-run`
+scoping is still an open hardening item.
+
+### Bundle packaging and manual workflow
+
+The build output is now followed by a packaging step in `scripts/package-binaries.ts`
+and exposed as:
+
+- `deno task package:binaries -- --input-dir <build-dir> --label <platform-label>`
+
+Current packaging behavior:
+
+- copies `kato`, `kato-daemon`, `kato-web`, `README.md`, `LICENSE`, and
+  `build-metadata.json` into a versioned bundle directory
+- writes `bundle-metadata.json` beside the packaged output
+- creates a `.tar.gz` bundle on Unix platforms and a `.zip` bundle on Windows
+- emits a `.sha256` checksum for the archive
+- rejects packaging if CLI/daemon/web versions are not aligned in
+  `build-metadata.json`
+
+`.github/workflows/release-manual.yml` now runs this packaged path on the native
+runner matrix:
+
+- build binaries
+- package the bundle
+- smoke-test `kato --version` and `kato-web` from the packaged bundle directory
+- upload the packaged directory, archive, checksum, and bundle metadata as the
+  workflow artifact
+
 ## Open Issues
 
-- Can `apps/web` be compiled cleanly into a standalone `kato-web` binary with
-  stable asset inclusion and startup behavior across Windows, macOS, and Linux?
+- `apps/web` now compiles into a standalone `kato-web` binary on Linux. The
+  remaining issue is validating stable asset inclusion and startup behavior on
+  Windows and macOS.
 - What is the narrowest practical `--allow-run` policy for the launcher when
   sibling executables live in an installed bundle with platform-specific paths?
 - Should `kato-web` be a documented user-visible executable, or a private
@@ -147,6 +228,23 @@ That means:
   precedence.
 - Add compile smoke coverage for `kato`, `kato-daemon`, and the initial
   `kato-web` target.
+- Current Linux smoke result:
+  - `deno compile --config apps/cli/deno.json ... apps/cli/src/main.ts`
+  - `deno compile --config apps/daemon/deno.json ... apps/daemon/src/main.ts`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - HTTP probe of compiled `kato-web` at `/login`
+- Current scripted host build result:
+  - `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+  - `./.test-tmp/binaries/host-smoke/kato --version`
+  - `build-metadata.json` emitted beside the binaries
+- Current packaged host build result:
+  - `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+  - `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+  - `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64.tar.gz`
+  - `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64.tar.gz.sha256`
+  - `./.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64/kato --version`
+  - HTTP probe of bundled `kato-web` at `/login`
 - Add packaged-runtime smoke checks for:
   - `kato --version`
   - `kato start`
@@ -176,29 +274,76 @@ That means:
 
 ## Implementation Plan
 
-- [ ] Add a binary-resolution abstraction for daemon launch with precedence:
+- [x] Add a binary-resolution abstraction for daemon launch with precedence:
       `KATO_DAEMON_BIN` -> sibling binary -> developer fallback.
-- [ ] Add a binary-resolution abstraction for web launch with precedence:
+- [x] Add a binary-resolution abstraction for web launch with precedence:
       `KATO_WEB_BIN` -> sibling binary -> developer fallback.
-- [ ] Refactor `kato start` / `kato restart` launcher paths to target installed
+- [x] Refactor `kato start` / `kato restart` launcher paths to target installed
       daemon binaries instead of repo source by default.
-- [ ] Refactor `kato web start` to target installed web binaries instead of the
+- [x] Refactor `kato web start` to target installed web binaries instead of the
       current source/dev path by default.
-- [ ] Build a minimal `deno compile` proof of concept for `kato`.
-- [ ] Build a minimal `deno compile` proof of concept for `kato-daemon`.
-- [ ] Build a minimal `deno compile` proof of concept for `kato-web`.
+- [x] Build a minimal `deno compile` proof of concept for `kato`.
+- [x] Build a minimal `deno compile` proof of concept for `kato-daemon`.
+- [x] Build a minimal `deno compile` proof of concept for `kato-web`.
+- [x] Add a repeatable local binary build task and metadata manifest.
 - [ ] Verify whether `kato-web` can include the required production assets and
       start cleanly on all target platforms.
 - [ ] If `kato-web` compile is blocked, document the exact blocker and add the
       temporary fallback plan as packaged prebuilt web runtime artifacts.
 - [ ] Define Phase 1 compile permissions for each executable, with launcher-only
       spawning power where possible.
-- [ ] Add focused tests for installed binary discovery and lifecycle behavior.
-- [ ] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
+- [x] Add focused tests for installed binary discovery and lifecycle behavior.
+- [x] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
       executables for the initial platform matrix.
-- [ ] Add bundle assembly steps so each platform artifact includes the required
+- [x] Add bundle assembly steps so each platform artifact includes the required
       sibling executables and metadata.
 - [ ] Add signing/notarization steps required for documented default installs.
 - [ ] Add packaged-bundle smoke checks for daemon lifecycle and web lifecycle.
-- [ ] Update [[dev.release-runbook]] once the implementation shape is proven by
+- [x] Update [[dev.release-runbook]] once the implementation shape is proven by
       a real binary build and smoke pass.
+
+Current implementation note:
+
+- `.github/workflows/release-manual.yml` now builds, packages, smoke-tests, and
+  uploads manual per-platform bundle artifacts on the native runner matrix for:
+  - Windows x64
+  - macOS arm64
+  - macOS x64
+  - Linux x64
+- each runner now packages:
+  - a versioned bundle directory
+  - platform archive (`.tar.gz` or `.zip`)
+  - archive checksum
+  - `bundle-metadata.json`
+- it also runs a lightweight packaged-bundle smoke slice on each runner:
+  - `kato --version`
+  - `kato-web --host 127.0.0.1 --port 45177`
+  - HTTP probe of `/login`
+- the workflow file is implemented and YAML-validated locally, but it has not
+  yet been exercised in GitHub in this task
+
+
+## Coderabbit Review
+
+- [ ] Fix binary-packaging quality-gate drift and rerun the full scripted quality
+      path for this slice:
+      - remove the current `scripts/package-binaries.ts` lint failure
+      - run `deno task lint`
+      - run the matching binary-build/package checks again after cleanup
+- [ ] Add automated tests for `scripts/package-binaries.ts` covering:
+      - version-mismatch rejection from `build-metadata.json`
+      - expected bundled file set
+      - emitted `bundle-metadata.json`
+      - archive/checksum creation
+- [ ] Add a smoke check that validates the downloadable archive itself, not just
+      the pre-archive bundle directory:
+      - extract `.tar.gz` / `.zip`
+      - run bundled `kato --version`
+      - run bundled `kato-web`
+      - HTTP probe `/login`
+- [ ] Exercise `.github/workflows/release-manual.yml` on real native GitHub
+      runners and capture any Windows/macOS-specific failures before treating
+      the workflow as release-ready.
+- [ ] Decide whether the first documented user-facing install should be direct
+      archive download or npm wrapper install, then align the binary docs and
+      release runbook with that channel priority.
