@@ -58,17 +58,24 @@ jobs:
       - name: Build Binaries
         run: deno task build:binaries -- --output-dir .test-tmp/binaries/${{ matrix.label }}
 
+      - name: Package Bundle
+        run: deno task package:binaries -- --input-dir .test-tmp/binaries/${{ matrix.label }} --output-dir .test-tmp/bundles/${{ matrix.label }} --label ${{ matrix.label }}
+
       - name: Smoke Test (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          bin_dir=".test-tmp/binaries/${{ matrix.label }}"
-          "$bin_dir/kato" --version
+          bundle_dir=$(find ".test-tmp/bundles/${{ matrix.label }}" -maxdepth 1 -type d -name 'kato-v*-${{ matrix.label }}' | head -n 1)
+          if [ -z "${bundle_dir:-}" ] || [ ! -d "$bundle_dir" ]; then
+            echo "Bundle directory not found"
+            exit 1
+          fi
+          "$bundle_dir/kato" --version
 
           port=45177
-          log_path="$bin_dir/kato-web.log"
-          "$bin_dir/kato-web" --host 127.0.0.1 --port "$port" >"$log_path" 2>&1 &
+          log_path="$bundle_dir/kato-web.log"
+          "$bundle_dir/kato-web" --host 127.0.0.1 --port "$port" >"$log_path" 2>&1 &
           web_pid=$!
 
           cleanup() {
@@ -90,14 +97,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $binDir = ".test-tmp/binaries/${{ matrix.label }}"
-          & "$binDir/kato.exe" --version
+          $bundleDir = Get-ChildItem ".test-tmp/bundles/${{ matrix.label }}" -Directory | Where-Object { $_.Name -like "kato-v*-${{ matrix.label }}" } | Select-Object -First 1
+          if (-not $bundleDir) {
+            throw "Bundle directory not found"
+          }
+          $bundlePath = $bundleDir.FullName
+          & "$bundlePath/kato.exe" --version
 
           $port = 45177
-          $stdoutLog = Join-Path $binDir "kato-web.stdout.log"
-          $stderrLog = Join-Path $binDir "kato-web.stderr.log"
+          $stdoutLog = Join-Path $bundlePath "kato-web.stdout.log"
+          $stderrLog = Join-Path $bundlePath "kato-web.stderr.log"
           $proc = Start-Process `
-            -FilePath "$binDir/kato-web.exe" `
+            -FilePath "$bundlePath/kato-web.exe" `
             -ArgumentList @("--host", "127.0.0.1", "--port", "$port") `
             -RedirectStandardOutput $stdoutLog `
             -RedirectStandardError $stderrLog `
@@ -133,9 +144,6 @@ jobs:
         with:
           name: kato-${{ matrix.label }}
           path: |
-            .test-tmp/binaries/${{ matrix.label }}/kato*
-            .test-tmp/binaries/${{ matrix.label }}/kato-daemon*
-            .test-tmp/binaries/${{ matrix.label }}/kato-web*
-            .test-tmp/binaries/${{ matrix.label }}/build-metadata.json
+            .test-tmp/bundles/${{ matrix.label }}/**
           if-no-files-found: error
           compression-level: 0

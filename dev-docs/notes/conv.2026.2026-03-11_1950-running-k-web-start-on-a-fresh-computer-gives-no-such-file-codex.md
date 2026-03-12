@@ -1502,3 +1502,141 @@ Verified locally:
 I have not run the workflow in GitHub yet. If you want to see it live now, trigger `Release Manual` from the Actions tab and it should produce four artifact bundles.
 
 One note on the worktree: your version-file edits are still present, and I left them alone. I also have intentional lockfile changes in [apps/web/deno.lock](/home/djradon/hub/spectacular-voyage/kato/apps/web/deno.lock) and [deno.lock](/home/djradon/hub/spectacular-voyage/kato/deno.lock) so the frozen install/build path is reproducible.
+
+# djradon_2026-03-11_2243_07
+
+We're on a branch, so I guess we won't see the action until we merge.
+
+# gpt-5.4_2026-03-11_2243_12
+
+Correct. GitHub won’t show a new workflow in the default Actions UI until the workflow file exists on the remote branch you’re viewing, and many teams only notice/use it once it’s on `main`.
+
+You still have a few ways to exercise it before merge:
+- push the branch and open that branch in GitHub; the workflow file should be visible there
+- if your repo allows it, trigger `workflow_dispatch` from that branch in the Actions UI
+- or merge first and run it from `main`
+
+So the workflow is ready in-tree, but whether you can click-run it pre-merge depends on your repo’s GitHub settings and branch visibility.
+
+# gpt-5.4_2026-03-11_2243_13
+
+Correct. GitHub won’t show a new workflow in the default Actions UI until the workflow file exists on the remote branch you’re viewing, and many teams only notice/use it once it’s on `main`.
+
+You still have a few ways to exercise it before merge:
+- push the branch and open that branch in GitHub; the workflow file should be visible there
+- if your repo allows it, trigger `workflow_dispatch` from that branch in the Actions UI
+- or merge first and run it from `main`
+
+So the workflow is ready in-tree, but whether you can click-run it pre-merge depends on your repo’s GitHub settings and branch visibility.
+
+# djradon_2026-03-11_2244_27
+
+proceed
+
+# gpt-5.4_2026-03-11_2244_40
+
+I’m taking the next concrete step after the build workflow: bundle assembly. I’ll add a repeatable packager that turns the built binaries plus metadata into a per-platform release directory/archive shape, then wire the manual workflow to upload that bundle instead of loose binaries.
+
+# gpt-5.4_2026-03-11_2244_48
+
+I’m checking the existing binary builder and any bundle-naming guidance in the notes so the first bundle format matches what we’ve already decided instead of inventing another temporary shape.
+
+# gpt-5.4_2026-03-11_2244_54
+
+I have enough guidance to pick a bundle format. I’m going with a simple per-platform release directory plus archive, using the naming already documented in the distribution notes, and I’ll keep installer/update metadata out of this first pass.
+
+# gpt-5.4_2026-03-11_2245_09
+
+I’m checking the current version values before I bake archive naming into the packager. If they’re aligned now, I’ll use the shared version directly; if not, I’ll make the script fail fast instead of producing misleading asset names.
+
+# gpt-5.4_2026-03-11_2245_45
+
+I’m editing the packager now. It will create a versioned bundle directory, a versioned archive, and a checksum sidecar from a built binary set, and then I’ll switch the manual workflow smoke test to run from that bundle directory instead of from the raw compile output.
+
+# gpt-5.4_2026-03-11_2246_15
+
+The packager is in. I’m wiring the workflow to use it now so the smoke test and uploaded artifact both go through the bundle layout instead of bypassing it.
+
+# gpt-5.4_2026-03-11_2246_28
+
+I’m removing the one hardcoded version string from the workflow before I validate it. The bundle path should be discovered from the packaged output, not baked to `0.2.4`.
+
+# gpt-5.4_2026-03-11_2246_38
+
+I’m validating the packager locally now against the scripted Linux build output, then I’ll smoke the bundled `kato-web` path and refresh the docs to match the new archive step.
+
+# gpt-5.4_2026-03-11_2248_07
+
+I’m continuing with the binary release path by validating the new bundle packaging locally and then tightening the workflow/docs around that result. After that I’ll either leave you with a packageable branch or surface the specific blocker.
+
+# gpt-5.4_2026-03-11_2248_15
+
+I’ve got the package assembler and workflow wiring in place; the next check is whether the end-to-end bundle flow works now that your app versions are aligned. If that passes, I’ll update the note/runbook to match the actual package output rather than the earlier raw-binary phase.
+
+# gpt-5.4_2026-03-11_2248_28
+
+I’ve confirmed the repo versions are aligned at `0.2.4`, so the earlier package failure was stale metadata rather than a real release mismatch. I’m rerunning the full build/package path now against a fresh staging dir so we know whether the current workflow definition is actually sound.
+
+# gpt-5.4_2026-03-11_2249_21
+
+The full rebuild succeeded and the packaged metadata is now clean at `0.2.4` across CLI, daemon, and web. I’m waiting on the archive step now; if it stalls, that likely means the packager needs a small fix rather than the binary outputs themselves being wrong.
+
+# gpt-5.4_2026-03-11_2249_43
+
+The package flow is now working end to end locally: fresh rebuild, archive creation, checksum emission, and a smoke run from the bundled `kato`/`kato-web` directory. I’m tightening the docs next and removing the stale version-mismatch note so the plan matches the actual state.
+
+# gpt-5.4_2026-03-11_2249_52
+
+I’ve narrowed the remaining work: the local package path is solid, but the docs are still describing the pre-package state. I’m patching just those notes now so the implementation plan, runbook, and current workflow all refer to the same artifact shape.
+
+# gpt-5.4_2026-03-11_2250_26
+
+The package path is validated; I’m just running a final quality pass on the script surface and checking the diff shape before I hand it back.
+
+# gpt-5.4_2026-03-11_2250_34
+
+`fmt:check` found one real issue: `scripts/package-binaries.ts` hadn’t been run through `deno fmt` yet. I’m fixing that and rerunning the short checks so the packaging slice closes cleanly.
+
+# gpt-5.4_2026-03-11_2251_06
+
+Binary packaging is now wired end to end.
+
+[`scripts/package-binaries.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts) now turns a `build:binaries` staging dir into a versioned bundle directory plus platform archive, checksum, and `bundle-metadata.json`. [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) exposes it as `deno task package:binaries`, and [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) now builds, packages, smoke-tests from the packaged bundle, and uploads the packaged outputs instead of raw binaries. I also updated [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [`dev.release-runbook.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so they match the real artifact shape.
+
+Local validation passed with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+- `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+- bundled `kato --version`
+- bundled `kato-web --host 127.0.0.1 --port 45179` with HTTP `200` on `/login`
+- `deno task fmt:check`
+- `deno check scripts/package-binaries.ts scripts/build-binaries.ts`
+
+That produced a working local bundle at `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64` plus `kato-v0.2.4-linux-x64.tar.gz` and its `.sha256`. I have not run the GitHub workflow itself yet; to see that live, the branch needs to be pushed where `workflow_dispatch` is available. Unrelated existing worktree changes are still present and untouched.
+
+# gpt-5.4_2026-03-11_2251_07
+
+Binary packaging is now wired end to end.
+
+[`scripts/package-binaries.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts) now turns a `build:binaries` staging dir into a versioned bundle directory plus platform archive, checksum, and `bundle-metadata.json`. [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) exposes it as `deno task package:binaries`, and [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) now builds, packages, smoke-tests from the packaged bundle, and uploads the packaged outputs instead of raw binaries. I also updated [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and [`dev.release-runbook.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so they match the real artifact shape.
+
+Local validation passed with:
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+- `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+- bundled `kato --version`
+- bundled `kato-web --host 127.0.0.1 --port 45179` with HTTP `200` on `/login`
+- `deno task fmt:check`
+- `deno check scripts/package-binaries.ts scripts/build-binaries.ts`
+
+That produced a working local bundle at `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64` plus `kato-v0.2.4-linux-x64.tar.gz` and its `.sha256`. I have not run the GitHub workflow itself yet; to see that live, the branch needs to be pushed where `workflow_dispatch` is available. Unrelated existing worktree changes are still present and untouched.
+
+# djradon_2026-03-11_2254_53
+
+what's next?
+
+# gpt-5.4_2026-03-11_2255_02
+
+I’m checking the current binary plan and open issues so I can give you the shortest credible next-step sequence rather than a generic list.
+
+# gpt-5.4_2026-03-11_2255_09
+
+I’ve got the plan headings. I’m checking the interactive web password note too, because if the packaged bundle still needs `KATO_WEB_PASSWORD`, that may be the next UX blocker rather than more build plumbing.

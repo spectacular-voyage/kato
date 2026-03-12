@@ -144,6 +144,32 @@ Current bootstrap permission profile in the scripted build:
 This is good enough for repeatable local builds, but launcher `--allow-run`
 scoping is still an open hardening item.
 
+### Bundle packaging and manual workflow
+
+The build output is now followed by a packaging step in `scripts/package-binaries.ts`
+and exposed as:
+
+- `deno task package:binaries -- --input-dir <build-dir> --label <platform-label>`
+
+Current packaging behavior:
+
+- copies `kato`, `kato-daemon`, `kato-web`, `README.md`, `LICENSE`, and
+  `build-metadata.json` into a versioned bundle directory
+- writes `bundle-metadata.json` beside the packaged output
+- creates a `.tar.gz` bundle on Unix platforms and a `.zip` bundle on Windows
+- emits a `.sha256` checksum for the archive
+- rejects packaging if CLI/daemon/web versions are not aligned in
+  `build-metadata.json`
+
+`.github/workflows/release-manual.yml` now runs this packaged path on the native
+runner matrix:
+
+- build binaries
+- package the bundle
+- smoke-test `kato --version` and `kato-web` from the packaged bundle directory
+- upload the packaged directory, archive, checksum, and bundle metadata as the
+  workflow artifact
+
 ## Open Issues
 
 - `apps/web` now compiles into a standalone `kato-web` binary on Linux. The
@@ -151,9 +177,6 @@ scoping is still an open hardening item.
   Windows and macOS.
 - What is the narrowest practical `--allow-run` policy for the launcher when
   sibling executables live in an installed bundle with platform-specific paths?
-- The current scripted build metadata shows `cli` / `daemon` at `0.2.4` while
-  `apps/web/deno.json` is still `0.2.3`; release version alignment still needs
-  to be enforced before packaging.
 - Should `kato-web` be a documented user-visible executable, or a private
   sibling binary launched only through `kato web ...`?
 - How should release bundles lay out executables and auxiliary files so CLI
@@ -215,6 +238,13 @@ scoping is still an open hardening item.
   - `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
   - `./.test-tmp/binaries/host-smoke/kato --version`
   - `build-metadata.json` emitted beside the binaries
+- Current packaged host build result:
+  - `deno task build:binaries -- --output-dir .test-tmp/binaries/package-smoke`
+  - `deno task package:binaries -- --input-dir .test-tmp/binaries/package-smoke --output-dir .test-tmp/bundles/package-smoke --label linux-x64`
+  - `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64.tar.gz`
+  - `.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64.tar.gz.sha256`
+  - `./.test-tmp/bundles/package-smoke/kato-v0.2.4-linux-x64/kato --version`
+  - HTTP probe of bundled `kato-web` at `/login`
 - Add packaged-runtime smoke checks for:
   - `kato --version`
   - `kato start`
@@ -265,22 +295,27 @@ scoping is still an open hardening item.
 - [x] Add focused tests for installed binary discovery and lifecycle behavior.
 - [x] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
       executables for the initial platform matrix.
-- [ ] Add bundle assembly steps so each platform artifact includes the required
+- [x] Add bundle assembly steps so each platform artifact includes the required
       sibling executables and metadata.
 - [ ] Add signing/notarization steps required for documented default installs.
 - [ ] Add packaged-bundle smoke checks for daemon lifecycle and web lifecycle.
-- [ ] Update [[dev.release-runbook]] once the implementation shape is proven by
+- [x] Update [[dev.release-runbook]] once the implementation shape is proven by
       a real binary build and smoke pass.
 
 Current implementation note:
 
-- `.github/workflows/release-manual.yml` now builds and uploads manual
-  per-platform binary artifacts on the native runner matrix for:
+- `.github/workflows/release-manual.yml` now builds, packages, smoke-tests, and
+  uploads manual per-platform bundle artifacts on the native runner matrix for:
   - Windows x64
   - macOS arm64
   - macOS x64
   - Linux x64
-- it also runs a lightweight smoke slice on each runner:
+- each runner now packages:
+  - a versioned bundle directory
+  - platform archive (`.tar.gz` or `.zip`)
+  - archive checksum
+  - `bundle-metadata.json`
+- it also runs a lightweight packaged-bundle smoke slice on each runner:
   - `kato --version`
   - `kato-web --host 127.0.0.1 --port 45177`
   - HTTP probe of `/login`
