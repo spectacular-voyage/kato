@@ -8,9 +8,13 @@ import {
   isSessionStale,
   summarizeRecordingActivity,
 } from "@kato/shared";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
-import { isProcessAlive, isStatusSnapshotStale } from "@kato/runtime";
+import {
+  isProcessAlive,
+  isStatusSnapshotStale,
+  PersistentSessionStateStore,
+} from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
 import {
   loadWorkspaceConfigOverrides,
@@ -86,6 +90,13 @@ export interface StatusWebState {
   version?: string;
 }
 
+export interface StatusTwinSummary {
+  currentCount: number;
+  behindCount: number;
+  absentCount: number;
+  unavailableReason?: string;
+}
+
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
 function formatRelativeTime(isoString: string | undefined, now: Date): string {
@@ -125,6 +136,65 @@ function formatBytes(bytes: number): string {
 
 function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function stripAnsiSequences(text: string): string {
+  return text.replace(ANSI_OSC_PATTERN, "").replace(ANSI_CSI_PATTERN, "");
+}
+
+function visibleLength(text: string): number {
+  return stripAnsiSequences(text).length;
+}
+
+function matchAnsiSequence(text: string, index: number): string | undefined {
+  if (text[index] !== ANSI_ESCAPE) {
+    return undefined;
+  }
+  const remainder = text.slice(index);
+  const oscMatch = remainder.match(
+    /^\x1B\][^\u0007]*(?:\u0007|\x1B\\)/,
+  );
+  if (oscMatch) {
+    return oscMatch[0];
+  }
+  const csiMatch = remainder.match(/^\x1B\[[0-?]*[ -/]*[@-~]/);
+  if (csiMatch) {
+    return csiMatch[0];
+  }
+  return undefined;
+}
+
+function sliceVisibleText(text: string, width: number): string {
+  if (width <= 0) {
+    return "";
+  }
+
+  let result = "";
+  let consumed = 0;
+
+  for (let i = 0; i < text.length && consumed < width;) {
+    const ansi = matchAnsiSequence(text, i);
+    if (ansi) {
+      result += ansi;
+      i += ansi.length;
+      continue;
+    }
+
+    const codePoint = text.codePointAt(i);
+    if (codePoint === undefined) {
+      break;
+    }
+    const char = String.fromCodePoint(codePoint);
+    result += char;
+    consumed += 1;
+    i += char.length;
+  }
+
+  if (result.includes(ANSI_ESCAPE) && !result.endsWith(ANSI_RESET)) {
+    result += ANSI_RESET;
+  }
+
+  return result;
 }
 
 function colorizeText(
@@ -173,9 +243,7 @@ function formatStatusToken(
 
 function sanitizeWorkspaceAlias(alias: string | undefined): string | undefined {
   if (!alias) return undefined;
-  const withoutAnsi = alias
-    .replace(ANSI_OSC_PATTERN, "")
-    .replace(ANSI_CSI_PATTERN, "");
+  const withoutAnsi = stripAnsiSequences(alias);
   let withoutControl = "";
   for (const char of withoutAnsi) {
     const code = char.charCodeAt(0);
@@ -193,14 +261,15 @@ function resolveDisplayWorkspaceAlias(alias: string | undefined): string {
 
 function truncate(text: string, width: number): string {
   if (width <= 0) return "";
-  if (text.length <= width) return text;
+  if (visibleLength(text) <= width) return text;
   if (width <= 3) return ".".repeat(width);
-  return `${text.slice(0, width - 3)}...`;
+  return `${sliceVisibleText(text, width - 3)}...`;
 }
 
 function padRight(text: string, width: number): string {
-  if (text.length >= width) return text;
-  return `${text}${" ".repeat(width - text.length)}`;
+  const textLength = visibleLength(text);
+  if (textLength >= width) return text;
+  return `${text}${" ".repeat(width - textLength)}`;
 }
 
 function formatPrefixedLine(
@@ -209,7 +278,7 @@ function formatPrefixedLine(
   width: number,
 ): string {
   const lineWidth = Math.max(width, MIN_TERMINAL_WIDTH);
-  const maxContentWidth = Math.max(0, lineWidth - prefix.length);
+  const maxContentWidth = Math.max(0, lineWidth - visibleLength(prefix));
   return `${prefix}${truncate(content, maxContentWidth)}`;
 }
 
@@ -432,6 +501,92 @@ async function loadStatusWebState(
     url,
     version: stored.version,
   };
+}
+
+async function twinFileExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function needsTwinUpdate(
+  sourceFilePath: string,
+  lastObservedMtimeMs: number | undefined,
+): Promise<boolean> {
+  if (
+    lastObservedMtimeMs === undefined || !Number.isFinite(lastObservedMtimeMs)
+  ) {
+    return false;
+  }
+
+  try {
+    const sourceFileMtimeMs = (await Deno.stat(sourceFilePath)).mtime
+      ?.getTime();
+    return sourceFileMtimeMs !== undefined &&
+      Number.isFinite(sourceFileMtimeMs) &&
+      sourceFileMtimeMs > lastObservedMtimeMs;
+  } catch {
+    return false;
+  }
+}
+
+async function loadStatusTwinSummary(
+  ctx: DaemonCliCommandContext,
+): Promise<StatusTwinSummary> {
+  const katoDir = ctx.runtimeConfig.katoDir ?? dirname(ctx.runtime.runtimeDir);
+  const sessionStore = new PersistentSessionStateStore({
+    katoDir,
+    now: ctx.runtime.now,
+  });
+
+  try {
+    const metadataList = await sessionStore.listSessionMetadata();
+    let currentCount = 0;
+    let behindCount = 0;
+    let absentCount = 0;
+
+    for (const metadata of metadataList) {
+      const twinPresent = metadata.nextTwinSeq > 1 &&
+        await twinFileExists(metadata.twinPath);
+      if (!twinPresent) {
+        absentCount += 1;
+        continue;
+      }
+      if (
+        await needsTwinUpdate(
+          metadata.sourceFilePath,
+          metadata.lastObservedMtimeMs,
+        )
+      ) {
+        behindCount += 1;
+        continue;
+      }
+      currentCount += 1;
+    }
+
+    return {
+      currentCount,
+      behindCount,
+      absentCount,
+    };
+  } catch (error) {
+    const unavailableReason = error instanceof Error &&
+        error.message.trim().length > 0
+      ? sanitizeInlineText(error.message)
+      : "unknown error";
+    return {
+      currentCount: 0,
+      behindCount: 0,
+      absentCount: 0,
+      unavailableReason,
+    };
+  }
 }
 
 function renderWebStatusText(
@@ -667,6 +822,21 @@ function buildMemoryLines(snapshot: DaemonStatusSnapshot): string[] {
   return [line1, line2, line3];
 }
 
+function formatTwinCount(
+  count: number,
+  label: "current" | "behind" | "absent",
+  colorize: boolean,
+): string {
+  switch (label) {
+    case "current":
+      return colorizeText(`${count} current`, "green", colorize);
+    case "behind":
+      return colorizeText(`${count} behind`, "amber", colorize);
+    case "absent":
+      return `${count} no twin`;
+  }
+}
+
 function normalizeSnapshotForStatusDisplay(
   snapshot: DaemonStatusSnapshot,
   now: Date,
@@ -701,6 +871,7 @@ function renderTopSummarySection(
     staleCount: number;
     width: number;
     recordingActivity: RecordingActivitySummary;
+    twinSummary?: StatusTwinSummary;
     colorize?: boolean;
   },
 ): string[] {
@@ -716,26 +887,36 @@ function renderTopSummarySection(
       colorize,
     )
   }`;
+  const sessionsLine = `sessions: ${
+    formatStateCount(activeCount, "active", colorize)
+  }, ${formatStateCount(staleCount, "stale", colorize)}`;
+  const twinsLine = opts.twinSummary?.unavailableReason
+    ? `twins: unavailable (${opts.twinSummary.unavailableReason})`
+    : opts.twinSummary
+    ? `twins: ${
+      formatTwinCount(opts.twinSummary.currentCount, "current", colorize)
+    }, ${formatTwinCount(opts.twinSummary.behindCount, "behind", colorize)}, ${
+      formatTwinCount(opts.twinSummary.absentCount, "absent", colorize)
+    }`
+    : undefined;
 
   if (width < TWO_COLUMN_MIN_WIDTH) {
-    return [
+    const lines = [
       truncate(memoryLines[0], width),
       truncate(memoryLines[1], width),
       truncate(recordingLine, width),
-      truncate(
-        `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
-          formatStateCount(staleCount, "stale", colorize)
-        }`,
-        width,
-      ),
+      truncate(sessionsLine, width),
     ];
+    if (twinsLine) {
+      lines.push(truncate(twinsLine, width));
+    }
+    return lines;
   }
 
   const leftLines = [
     recordingLine,
-    `sessions: ${formatStateCount(activeCount, "active", colorize)}, ${
-      formatStateCount(staleCount, "stale", colorize)
-    }`,
+    sessionsLine,
+    ...(twinsLine ? [twinsLine] : []),
   ];
   const rightLines = memoryLines;
 
@@ -928,6 +1109,7 @@ export function renderStatusText(
     terminalWidth?: number;
     workspaceStatus?: WorkspaceStatusSummary;
     webStatus?: StatusWebState;
+    twinSummary?: StatusTwinSummary;
     showWorkspaceDetails?: boolean;
     recentErrors?: StatusRecentError[];
     suppressedRecentErrorKeys?: ReadonlySet<string>;
@@ -1002,10 +1184,11 @@ export function renderStatusText(
       staleCount,
       width,
       recordingActivity,
+      twinSummary: opts.twinSummary,
       colorize,
     }),
   );
-  if (workspaceSummary) {
+  if (workspaceSummary && !opts.showWorkspaceDetails) {
     lines.push(truncate(workspaceSummary, width));
   }
   lines.push(divider);
@@ -1127,17 +1310,19 @@ async function runLiveMode(
         await ctx.statusStore.load(),
         now,
       );
-      const [workspaceStatus, recentErrors, webStatus] = await Promise.all([
-        loadWorkspaceStatusSummary(
-          () => resolveWorkspaceRegistryStore(ctx).load(),
-          {
-            loadWorkspaceConfigOverrides,
-            readWorkspaceConfigWorkspaceId,
-          },
-        ),
-        loadRecentStatusErrors(ctx),
-        loadStatusWebState(ctx),
-      ]);
+      const [workspaceStatus, recentErrors, webStatus, twinSummary] =
+        await Promise.all([
+          loadWorkspaceStatusSummary(
+            () => resolveWorkspaceRegistryStore(ctx).load(),
+            {
+              loadWorkspaceConfigOverrides,
+              readWorkspaceConfigWorkspaceId,
+            },
+          ),
+          loadRecentStatusErrors(ctx),
+          loadStatusWebState(ctx),
+          loadStatusTwinSummary(ctx),
+        ]);
       const stale = isStatusSnapshotStale(snapshot, now);
       const terminalWidth = resolveTerminalWidth();
       const currentRecentErrorKeys = new Set(
@@ -1175,6 +1360,7 @@ async function runLiveMode(
         terminalWidth,
         workspaceStatus,
         webStatus,
+        twinSummary,
         recentErrors,
         suppressedRecentErrorKeys,
         colorize: shouldColorizeStatusOutput(),
@@ -1232,6 +1418,7 @@ export async function runStatusCommand(
     },
   );
   const webStatus = await loadStatusWebState(ctx);
+  const twinSummary = asJson ? undefined : await loadStatusTwinSummary(ctx);
   const stale = isStatusSnapshotStale(snapshot, now);
   const recentErrors = asJson ? undefined : await loadRecentStatusErrors(ctx);
   const suppressedRecentErrorKeys = asJson
@@ -1314,6 +1501,7 @@ export async function runStatusCommand(
       terminalWidth,
       workspaceStatus,
       webStatus,
+      twinSummary,
       showWorkspaceDetails: true,
       recentErrors,
       suppressedRecentErrorKeys,

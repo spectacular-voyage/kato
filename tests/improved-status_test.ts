@@ -754,10 +754,16 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
     now: NOW,
     stale: false,
     terminalWidth: 120,
+    twinSummary: {
+      currentCount: 2,
+      behindCount: 1,
+      absentCount: 3,
+    },
   });
   assertStringIncludes(out, "kato daemon");
   assertStringIncludes(out, "daemon memory:");
   assertStringIncludes(out, "session data size:");
+  assertStringIncludes(out, "twins: 2 current, 1 behind, 3 no twin");
   const daemonLineCount =
     out.split("\n").filter((line) => line.includes("kato daemon")).length;
   assertEquals(daemonLineCount, 1);
@@ -769,6 +775,46 @@ Deno.test("renderStatusText: wide width keeps two-column summary", () => {
   assertEquals(
     out.split("\n").some((line) => line.includes("session data size:")),
     true,
+  );
+});
+
+Deno.test("renderStatusText: memory summary column shares a left edge", () => {
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    terminalWidth: 120,
+    colorize: true,
+    twinSummary: {
+      currentCount: 1,
+      behindCount: 0,
+      absentCount: 0,
+    },
+  });
+  const stripAnsi = (line: string): string =>
+    line.replace(/\x1B\][^\u0007]*(?:\u0007|\x1B\\)/g, "").replace(
+      /\x1B\[[0-?]*[ -/]*[@-~]/g,
+      "",
+    );
+  const summaryLines = out.split("\n").filter((line) => {
+    const plain = stripAnsi(line);
+    return plain.includes("daemon memory:") ||
+      plain.includes("session data size:") ||
+      plain.includes("events 150");
+  });
+  assertEquals(summaryLines.length, 3);
+  assertEquals(
+    new Set(
+      summaryLines.map((line) => {
+        const plain = stripAnsi(line);
+        return plain.includes("daemon memory:")
+          ? plain.indexOf("daemon memory:")
+          : plain.includes("session data size:")
+          ? plain.indexOf("session data size:")
+          : plain.indexOf("events 150");
+      }),
+    ).size,
+    1,
   );
 });
 
@@ -815,10 +861,15 @@ Deno.test("renderStatusText: workspace detail section renders in non-live mode",
     now: NOW,
     stale: false,
     workspaceStatus,
+    twinSummary: {
+      currentCount: 0,
+      behindCount: 0,
+      absentCount: 0,
+    },
     showWorkspaceDetails: true,
     terminalWidth: 160,
   });
-  assertStringIncludes(out, "workspaces: 1 active, 1 invalid");
+  assertEquals(out.includes("workspaces: 1 active, 1 invalid"), false);
   assertStringIncludes(out, "Workspaces (1 active, 1 invalid)");
   assertStringIncludes(out, "● My.Proj -> ws-valid (valid)");
   assertStringIncludes(out, "○ Broken.Proj -> ws-invalid (invalid:");

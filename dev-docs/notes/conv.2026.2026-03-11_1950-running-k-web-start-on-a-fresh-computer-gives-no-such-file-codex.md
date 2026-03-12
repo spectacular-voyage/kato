@@ -2821,3 +2821,43 @@ Verified with:
   - `kato --version`, `kato init`, `kato web init/start/status/stop` all passed
 
 You should be able to rerun the workflow now.
+
+# djradon_2026-03-12_0042_46
+
+what's next?
+
+# gpt-5.4_2026-03-12_0043_13
+
+Next, I’d do this in order:
+
+1. Rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml).
+That confirms both recent fixes: the `_fresh/server.js` quality-gate issue and the npm `EACCES` packaging issue.
+
+2. Add npm wrapper install smoke on macOS and Windows, not just Linux.
+Right now the native binary matrix proves raw bundles on all platforms, but [`smoke-npm-install.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) only executes the host package on Ubuntu in the assembly job. If npm is the primary install path, native npm install needs proving on each OS.
+
+3. Add a manual npm publish workflow.
+The next workflow should publish platform packages first, then `kato`, from the assembled output described in [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md). I’d make it `workflow_dispatch` only and start with `npm publish --dry-run`.
+
+4. Update the public install docs.
+Once publish is real, update [`README.md`](/home/djradon/hub/spectacular-voyage/kato/README.md) and [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) to make `npm install -g kato` the primary path.
+
+If you want me to keep going now, I’d take step 2 next: per-platform npm install smoke in GitHub Actions.
+
+# gpt-5.4_2026-03-12_0043_16
+
+Next, I’d do this in order:
+
+1. Rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml).
+That confirms both recent fixes: the `_fresh/server.js` quality-gate issue and the npm `EACCES` packaging issue.
+
+2. Add npm wrapper install smoke on macOS and Windows, not just Linux.
+Right now the native binary matrix proves raw bundles on all platforms, but [`smoke-npm-install.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) only executes the host package on Ubuntu in the assembly job. If npm is the primary install path, native npm install needs proving on each OS.
+
+3. Add a manual npm publish workflow.
+The next workflow should publish platform packages first, then `kato`, from the assembled output described in [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md). I’d make it `workflow_dispatch` only and start with `npm publish --dry-run`.
+
+4. Update the public install docs.
+Once publish is real, update [`README.md`](/home/djradon/hub/spectacular-voyage/kato/README.md) and [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) to make `npm install -g kato` the primary path.
+
+If you want me to keep going now, I’d take step 2 next: per-platform npm install smoke in GitHub Actions.

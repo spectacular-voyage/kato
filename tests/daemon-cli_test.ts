@@ -1285,7 +1285,8 @@ Deno.test(
 
       assertEquals(code, 0);
       const output = harness.stdout.join("");
-      assertStringIncludes(output, "workspaces: 1 active, 1 invalid");
+      assertStringIncludes(output, "twins: 0 current, 0 behind, 0 no twin");
+      assertEquals(output.includes("workspaces: 1 active, 1 invalid"), false);
       assertStringIncludes(output, "Workspaces (1 active, 1 invalid)");
       assertStringIncludes(
         output,
