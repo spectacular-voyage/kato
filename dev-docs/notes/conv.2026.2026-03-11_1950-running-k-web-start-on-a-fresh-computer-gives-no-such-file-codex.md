@@ -2764,3 +2764,60 @@ After that, I’d do this in order:
 - Expand release smoke from “`--version` and `/login`” to full lifecycle: `kato init`, daemon start/status/stop, and web init/start/status/stop. That closes the remaining confidence gap in the binary plan note at [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
 
 If you want me to drive the next code change, I’d take the npm publish path first, then interactive web password.
+
+# djradon_2026-03-12_0037_32
+
+We finished the interactive password in a parallel chat.
+
+"Smoke npm install" failed with:
+
+ound 0 vulnerabilities
+$ (cd /home/runner/work/kato/kato/.test-tmp/npm-install-smoke/project && /home/runner/work/kato/kato/.test-tmp/npm-install-smoke/project/node_modules/.bin/kato --version)
+kato failed to launch the packaged binary: spawn /home/runner/work/kato/kato/.test-tmp/npm-install-smoke/project/node_modules/@spectacular-voyage/kato-linux-x64-gnu/bin/kato EACCES
+error: Uncaught (in promise) Error: Command failed with exit code 1: /home/runner/work/kato/kato/.test-tmp/npm-install-smoke/project/node_modules/.bin/kato --version
+    throw new Error(
+          ^
+    at runCommand (file:///home/runner/work/kato/kato/scripts/smoke-npm-install.ts:104:11)
+    at async file:///home/runner/work/kato/kato/scripts/smoke-npm-install.ts:236:3
+Error: Process completed with exit code 1.
+
+# gpt-5.4_2026-03-12_0037_48
+
+I’m looking at the npm assembly path and the workflow artifact handoff. The failure pattern points to Unix execute bits getting lost after `upload-artifact`/`download-artifact`, so I’m checking whether we need to `chmod` the packaged native binaries during npm assembly rather than relying on source file modes.
+
+# gpt-5.4_2026-03-12_0037_56
+
+The assembly script already tries to preserve source modes, which explains why local smoke passed. The GitHub failure is likely the downloaded bundle arriving with mode `0644`, so “preserve source mode” just preserved the broken mode. I’m patching npm assembly to force executable bits on packaged binaries and the wrapper launcher for non-Windows packages, then I’ll add a regression test that starts from non-executable bundle files.
+
+# gpt-5.4_2026-03-12_0038_04
+
+I’m making the fix in the assembly layer rather than the smoke script. That’s the right boundary: platform npm packages should always ship runnable native binaries, even if their input bundle came from an artifact system that stripped mode bits.
+
+# gpt-5.4_2026-03-12_0038_28
+
+The code fix is in. I’m running a focused verification pass and then a more realistic smoke where the source bundle binaries are deliberately downgraded to `0644` before npm assembly, which matches the GitHub artifact symptom.
+
+# gpt-5.4_2026-03-12_0038_36
+
+The regression test passed. I’ve also got the artifact-mode smoke running against a copied bundle whose native binaries were stripped to non-executable mode first; if that passes, it’s the closest local reproduction of the GitHub EACCES path.
+
+# gpt-5.4_2026-03-12_0039_02
+
+The end-to-end npm smoke is still running, likely in the `kato web start` polling window. I’m letting it finish so we have a real signal rather than assuming the chmod fix is enough.
+
+# gpt-5.4_2026-03-12_0039_22
+
+Root cause was the artifact handoff, not npm itself. The downloaded bundle binaries were arriving without Unix execute bits, and [`assemble-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) was preserving that broken mode into the platform package, so the wrapper hit `spawn ... EACCES`.
+
+I fixed it in [`assemble-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts): packaged native binaries are now explicitly `chmod 755` for non-Windows targets during npm assembly. I also added a regression in [`npm-package-assembly_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/npm-package-assembly_test.ts) that starts from `0644` Linux bundle binaries and asserts the assembled npm package restores execute bits.
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts`
+- a full local reproduction of the GitHub failure mode:
+  - copied a packaged Linux bundle
+  - stripped `kato`, `kato-daemon`, and `kato-web` to `0644`
+  - re-ran `assemble:npm-packages`
+  - re-ran `smoke-npm-install`
+  - `kato --version`, `kato init`, `kato web init/start/status/stop` all passed
+
+You should be able to rerun the workflow now.

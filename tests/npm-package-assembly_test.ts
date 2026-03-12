@@ -22,7 +22,10 @@ async function createBundleInput(
   label: string,
   target: string,
   version: string,
-  options: { staleAbsolutePaths?: boolean } = {},
+  options: {
+    staleAbsolutePaths?: boolean;
+    sourceBinaryMode?: number;
+  } = {},
 ): Promise<string> {
   const inputDir = join(root, label);
   const bundleDir = join(inputDir, `kato-v${version}-${label}`);
@@ -33,6 +36,10 @@ async function createBundleInput(
     : ["kato", "kato-daemon", "kato-web"];
   for (const fileName of binaryNames) {
     await writeExecutable(join(bundleDir, fileName), `echo ${fileName}\n`);
+    if (options.sourceBinaryMode !== undefined) {
+      await Deno.chmod(join(bundleDir, fileName), options.sourceBinaryMode)
+        .catch(() => {});
+    }
   }
   await Deno.writeTextFile(join(bundleDir, "README.md"), "# Bundle\n");
   await Deno.writeTextFile(join(bundleDir, "LICENSE"), "Apache-2.0\n");
@@ -221,4 +228,32 @@ Deno.test("assembleNpmPackages resolves downloaded artifact paths from stale bun
     join(outputDir, "platforms", "linux-x64-gnu", "bin", "kato"),
   );
   assert(stat.isFile);
+});
+
+Deno.test("assembleNpmPackages restores executable mode for unix platform binaries", async () => {
+  const root = uniquePath("unix-mode");
+  const inputDir = await createBundleInput(
+    root,
+    "linux-x64",
+    "linux-x86_64",
+    "0.2.4",
+    { sourceBinaryMode: 0o644 },
+  );
+  const outputDir = join(root, "output");
+
+  await assembleNpmPackages({
+    inputDirs: [inputDir],
+    outputDir,
+    wrapperPackageName: "kato",
+    platformPackagePrefix: "@spectacular-voyage/kato",
+    commandName: "kato",
+  });
+
+  const stat = await Deno.stat(
+    join(outputDir, "platforms", "linux-x64-gnu", "bin", "kato"),
+  );
+  assert(stat.isFile);
+  if (stat.mode !== null) {
+    assertEquals(stat.mode & 0o111, 0o111);
+  }
 });

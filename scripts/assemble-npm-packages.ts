@@ -197,7 +197,17 @@ async function ensureCleanDir(path: string): Promise<void> {
   await Deno.mkdir(path, { recursive: true });
 }
 
-async function copyFileWithMode(src: string, dest: string): Promise<void> {
+async function setExecutableMode(path: string): Promise<void> {
+  await Deno.chmod(path, 0o755).catch(() => {
+    // chmod is best-effort and may be unsupported on some platforms.
+  });
+}
+
+async function copyFileWithMode(
+  src: string,
+  dest: string,
+  options: { executable?: boolean } = {},
+): Promise<void> {
   await Deno.mkdir(dirname(dest), { recursive: true });
   await Deno.copyFile(src, dest);
   const stat = await Deno.stat(src);
@@ -205,6 +215,9 @@ async function copyFileWithMode(src: string, dest: string): Promise<void> {
     await Deno.chmod(dest, stat.mode).catch(() => {
       // chmod is best-effort and may be unsupported on some platforms.
     });
+  }
+  if (options.executable) {
+    await setExecutableMode(dest);
   }
 }
 
@@ -594,6 +607,7 @@ export async function assembleNpmPackages(
       await copyFileWithMode(
         join(input.localBundleDir, fileName),
         join(packageDir, "bin", fileName),
+        { executable: !definition.target.includes("windows") },
       );
     }
 
