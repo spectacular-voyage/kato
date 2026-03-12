@@ -20,7 +20,7 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
 }
 
 Deno.test(
-  "DenoDetachedWebLauncher launches via detached shell without requiring a vite binary path",
+  "DenoDetachedWebLauncher builds then launches the bundled web server via detached shell",
   async () => {
     let capturedCommand: string | undefined;
     let capturedOptions:
@@ -73,11 +73,15 @@ Deno.test(
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        "setsid '/fake/deno' 'run' '--ext=js' '-A' 'vite' '--host' '127.0.0.1' '--port' '5173'",
+        "'/fake/deno' 'run' '--ext=js' '-A' 'vite' 'build' >/dev/null",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        "nohup '/fake/deno' 'run' '--ext=js' '-A' 'vite' '--host' '127.0.0.1' '--port' '5173'",
+        "setsid '/fake/deno' 'serve' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
+      );
+      assertStringIncludes(
+        capturedOptions?.args?.[1] ?? "",
+        "nohup '/fake/deno' 'serve' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
     });
   },
@@ -115,11 +119,13 @@ Deno.test(
     const pid = await (
       launcher as unknown as {
         launchDetachedViaPowerShell(
+          executablePath: string,
           args: string[],
           workingDirectory: string,
         ): Promise<number>;
       }
     ).launchDetachedViaPowerShell(
+      "/fake/deno",
       ["run", "--ext=js", "-A", "vite", "--port", "3173"],
       "C:\\repo\\apps\\web",
     );
@@ -164,11 +170,16 @@ Deno.test(
         (
           failingLauncher as unknown as {
             launchDetachedViaPowerShell(
+              executablePath: string,
               args: string[],
               workingDirectory: string,
             ): Promise<number>;
           }
-        ).launchDetachedViaPowerShell(["run"], "C:\\repo\\apps\\web"),
+        ).launchDetachedViaPowerShell(
+          "/fake/deno",
+          ["run"],
+          "C:\\repo\\apps\\web",
+        ),
       Error,
       "PowerShell Start-Process launch failed",
     );
@@ -195,13 +206,71 @@ Deno.test(
         (
           invalidPidLauncher as unknown as {
             launchDetachedViaPowerShell(
+              executablePath: string,
               args: string[],
               workingDirectory: string,
             ): Promise<number>;
           }
-        ).launchDetachedViaPowerShell(["run"], "C:\\repo\\apps\\web"),
+        ).launchDetachedViaPowerShell(
+          "/fake/deno",
+          ["run"],
+          "C:\\repo\\apps\\web",
+        ),
       Error,
       "did not return a valid PID",
+    );
+  },
+);
+
+Deno.test(
+  "DenoDetachedWebLauncher can launch an installed web binary directly",
+  async () => {
+    let capturedCommand: string | undefined;
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+
+    const launcher = new DenoDetachedWebLauncher(
+      "/fake/deno",
+      "/repo",
+      (command, options) => {
+        capturedCommand = command;
+        capturedOptions = options;
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: 0,
+              stdout: new TextEncoder().encode("2468\n"),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+      false,
+      { installedExecutablePath: "/opt/kato/kato-web" },
+    );
+
+    const pid = await launcher.launchDetached({
+      hostname: "127.0.0.1",
+      port: 5173,
+    });
+
+    assertEquals(pid, 2468);
+    assertEquals(capturedCommand, "sh");
+    assertStringIncludes(
+      capturedOptions?.args?.[1] ?? "",
+      "setsid '/opt/kato/kato-web' '--host' '127.0.0.1' '--port' '5173'",
+    );
+    assertStringIncludes(
+      capturedOptions?.args?.[1] ?? "",
+      "nohup '/opt/kato/kato-web' '--host' '127.0.0.1' '--port' '5173'",
+    );
+    assertStringIncludes(
+      capturedOptions?.args?.[1] ?? "",
+      "cd '/opt/kato'",
     );
   },
 );

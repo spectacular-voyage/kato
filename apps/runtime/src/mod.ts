@@ -179,6 +179,10 @@ export {
   resolveHomeDir,
 } from "./utils/env.ts";
 export {
+  resolveInstalledExecutablePath,
+  type ResolveInstalledExecutablePathOptions,
+} from "./utils/executable_resolution.ts";
+export {
   appendExportsLogEntry,
   resolveExportsLogPath,
 } from "./utils/exports_log.ts";

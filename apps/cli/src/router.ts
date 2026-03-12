@@ -31,6 +31,7 @@ import {
   resolveDefaultWebConfigPath,
   resolveDefaultWebStatusPath,
   resolveHomeDir,
+  resolveInstalledExecutablePath,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
   WebConfigFileStore,
@@ -275,6 +276,41 @@ async function resolveIgnoredLocalKatoDirWarning(
     }
     throw error;
   }
+}
+
+function createDefaultDaemonLauncher(
+  runtime: DaemonCliRuntime,
+): DenoDetachedDaemonLauncher {
+  const launcherExecutablePath = Deno.execPath();
+  const installedExecutablePath = resolveInstalledExecutablePath({
+    envVarName: "KATO_DAEMON_BIN",
+    siblingBaseName: "kato-daemon",
+    launcherExecutablePath,
+  });
+  return new DenoDetachedDaemonLauncher(
+    runtime,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { installedExecutablePath },
+  );
+}
+
+function createDefaultWebLauncher(): DenoDetachedWebLauncher {
+  const launcherExecutablePath = Deno.execPath();
+  const installedExecutablePath = resolveInstalledExecutablePath({
+    envVarName: "KATO_WEB_BIN",
+    siblingBaseName: "kato-web",
+    launcherExecutablePath,
+  });
+  return new DenoDetachedWebLauncher(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { installedExecutablePath },
+  );
 }
 
 export async function runDaemonCli(
@@ -558,8 +594,8 @@ export async function runDaemonCli(
       runtime.now,
     );
   const daemonLauncher = options.daemonLauncher ??
-    new DenoDetachedDaemonLauncher(effectiveRuntime);
-  const webLauncher = options.webLauncher ?? new DenoDetachedWebLauncher();
+    createDefaultDaemonLauncher(effectiveRuntime);
+  const webLauncher = options.webLauncher ?? createDefaultWebLauncher();
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
       allowedRoots: sharedConfig.allowedWriteRoots,

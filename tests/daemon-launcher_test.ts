@@ -401,12 +401,14 @@ Deno.test("DenoDetachedDaemonLauncher encodes PowerShell launch script and retur
 
   const powerShellLauncher = launcher as unknown as {
     launchDetachedViaPowerShell(
+      executablePath: string,
       args: string[],
       env: Record<string, string>,
     ): Promise<number>;
   };
 
   const pid = await powerShellLauncher.launchDetachedViaPowerShell(
+    "/deno's/bin/deno",
     ["run", "--flag", "arg'withquote"],
     {
       KATO_RUNTIME_DIR: LAUNCHER_RUNTIME_DIR,
@@ -463,13 +465,14 @@ Deno.test("DenoDetachedDaemonLauncher surfaces PowerShell launch failures", asyn
 
   const powerShellLauncher = launcher as unknown as {
     launchDetachedViaPowerShell(
+      executablePath: string,
       args: string[],
       env: Record<string, string>,
     ): Promise<number>;
   };
 
   await assertRejects(
-    () => powerShellLauncher.launchDetachedViaPowerShell(["run"], {}),
+    () => powerShellLauncher.launchDetachedViaPowerShell("/deno", ["run"], {}),
     Error,
     "PowerShell Start-Process launch failed (exit 1): boom",
   );
@@ -502,14 +505,74 @@ Deno.test("DenoDetachedDaemonLauncher rejects invalid PowerShell pid output", as
 
   const powerShellLauncher = launcher as unknown as {
     launchDetachedViaPowerShell(
+      executablePath: string,
       args: string[],
       env: Record<string, string>,
     ): Promise<number>;
   };
 
   await assertRejects(
-    () => powerShellLauncher.launchDetachedViaPowerShell(["run"], {}),
+    () => powerShellLauncher.launchDetachedViaPowerShell("/deno", ["run"], {}),
     Error,
     "PowerShell Start-Process did not return a valid PID",
+  );
+});
+
+Deno.test("DenoDetachedDaemonLauncher can launch an installed daemon binary directly", async () => {
+  const runtime = {
+    runtimeDir: LAUNCHER_RUNTIME_DIR,
+    configPath: LAUNCHER_CONFIG_PATH,
+    statusPath: LAUNCHER_STATUS_PATH,
+    controlPath: LAUNCHER_CONTROL_PATH,
+    allowedWriteRoots: ["./notes"],
+    providerSessionRoots: {
+      claude: ["/sessions/claude"],
+      codex: [],
+      gemini: [],
+    },
+  };
+
+  let capturedCommand: string | undefined;
+  let capturedOptions:
+    | ConstructorParameters<typeof Deno.Command>[1]
+    | undefined;
+
+  const launcher = new DenoDetachedDaemonLauncher(
+    runtime,
+    "/deno",
+    "/repo/apps/daemon/src/main.ts",
+    (command, options) => {
+      capturedCommand = command;
+      capturedOptions = options;
+      return {
+        spawn() {
+          return { pid: 5150 };
+        },
+      };
+    },
+    false,
+    { installedExecutablePath: "/opt/kato/kato-daemon" },
+  );
+
+  const pid = await launcher.launchDetached();
+  assertEquals(pid, 5150);
+  assertEquals(capturedCommand, "/opt/kato/kato-daemon");
+  assertEquals(capturedOptions?.args, []);
+  assertEquals(capturedOptions?.stdin, "null");
+  assertEquals(capturedOptions?.stdout, "null");
+  assertEquals(capturedOptions?.stderr, "inherit");
+  assertEquals(capturedOptions?.env?.KATO_RUNTIME_DIR, runtime.runtimeDir);
+  assertEquals(capturedOptions?.env?.KATO_CONFIG_PATH, runtime.configPath);
+  assertEquals(
+    capturedOptions?.env?.KATO_DAEMON_STATUS_PATH,
+    runtime.statusPath,
+  );
+  assertEquals(
+    capturedOptions?.env?.KATO_DAEMON_CONTROL_PATH,
+    runtime.controlPath,
+  );
+  assertEquals(
+    capturedOptions?.env?.KATO_ALLOWED_WRITE_ROOTS_JSON,
+    JSON.stringify(runtime.allowedWriteRoots),
   );
 });

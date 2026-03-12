@@ -156,6 +156,10 @@ type DenoCommandFactory = (
   options: DenoCommandOptions,
 ) => CommandLike;
 
+export interface DetachedWebLauncherOptions {
+  installedExecutablePath?: string;
+}
+
 function resolveWorkspaceRoot(): string {
   return dirname(
     dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url))))),
@@ -191,13 +195,15 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     private readonly commandFactory: DenoCommandFactory = (command, options) =>
       new Deno.Command(command, options),
     private readonly preferPowerShellStartProcessOnWindows: boolean = true,
+    private readonly options: DetachedWebLauncherOptions = {},
   ) {}
 
   private launchDetachedViaShell(
+    executablePath: string,
     args: string[],
     workingDirectory: string,
   ): Promise<number> {
-    const quotedCommand = [this.denoExecPath, ...args].map(
+    const quotedCommand = [executablePath, ...args].map(
       toShellSingleQuoted,
     ).join(" ");
     const script = `cd ${
@@ -233,7 +239,39 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     });
   }
 
+  private launchDetachedScriptViaShell(script: string): Promise<number> {
+    const command = this.commandFactory("sh", {
+      args: ["-lc", script],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+      env: { CI: "true" },
+    });
+    if (typeof command.output !== "function") {
+      throw new Error(
+        "Detached shell launcher requires commandFactory output() support",
+      );
+    }
+    return command.output().then((result) => {
+      if (result.code !== 0) {
+        const errorText = new TextDecoder().decode(result.stderr).trim();
+        throw new Error(
+          `Detached shell launch failed (exit ${result.code}): ${errorText}`,
+        );
+      }
+      const stdoutText = new TextDecoder().decode(result.stdout).trim();
+      const pid = Number.parseInt(stdoutText, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        throw new Error(
+          `Detached shell launch did not return a valid PID: '${stdoutText}'`,
+        );
+      }
+      return pid;
+    });
+  }
+
   private launchDetachedViaPowerShell(
+    executablePath: string,
     args: string[],
     workingDirectory: string,
   ): Promise<number> {
@@ -241,7 +279,7 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     const script = `$ErrorActionPreference = 'Stop';
 $argList = @(${argList});
 $proc = Start-Process -FilePath ${
-      toPowerShellSingleQuoted(this.denoExecPath)
+      toPowerShellSingleQuoted(executablePath)
     } -ArgumentList $argList -WorkingDirectory ${
       toPowerShellSingleQuoted(workingDirectory)
     } -WindowStyle Hidden -PassThru;
@@ -282,15 +320,52 @@ $proc = Start-Process -FilePath ${
     });
   }
 
+  private launchDetachedScriptViaPowerShell(script: string): Promise<number> {
+    const encodedCommand = toPowerShellEncodedCommand(script);
+    const command = this.commandFactory("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encodedCommand,
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+      env: { CI: "true" },
+    });
+    if (typeof command.output !== "function") {
+      throw new Error(
+        "Detached PowerShell launcher requires commandFactory output() support",
+      );
+    }
+    return command.output().then((result) => {
+      if (result.code !== 0) {
+        const errorText = new TextDecoder().decode(result.stderr).trim();
+        throw new Error(
+          `PowerShell Start-Process launch failed (exit ${result.code}): ${errorText}`,
+        );
+      }
+      const stdoutText = new TextDecoder().decode(result.stdout).trim();
+      const pid = Number.parseInt(stdoutText, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        throw new Error(
+          `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
+        );
+      }
+      return pid;
+    });
+  }
+
   launchDetached(
     options: { hostname: string; port: number },
   ): Promise<number> {
-    const webAppRoot = resolveWebAppRoot(this.workspaceRoot);
-    const args = [
-      "run",
-      "--ext=js",
-      "-A",
-      "vite",
+    const installedExecutablePath = this.options.installedExecutablePath;
+    const webAppRoot = installedExecutablePath
+      ? dirname(installedExecutablePath)
+      : resolveWebAppRoot(this.workspaceRoot);
+    const executablePath = installedExecutablePath ?? this.denoExecPath;
+    const installedArgs = [
       "--host",
       options.hostname,
       "--port",
@@ -301,9 +376,61 @@ $proc = Start-Process -FilePath ${
       this.preferPowerShellStartProcessOnWindows &&
       Deno.build.os === "windows"
     ) {
-      return this.launchDetachedViaPowerShell(args, webAppRoot);
+      if (!installedExecutablePath) {
+        const script = `$ErrorActionPreference = 'Stop';
+Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
+& ${
+          toPowerShellSingleQuoted(executablePath)
+        } 'run' '--ext=js' '-A' 'vite' 'build';
+$argList = @('serve', '-A', '--host', ${
+          toPowerShellSingleQuoted(options.hostname)
+        }, '--port', ${
+          toPowerShellSingleQuoted(String(options.port))
+        }, '_fresh/server.js');
+$proc = Start-Process -FilePath ${
+          toPowerShellSingleQuoted(executablePath)
+        } -ArgumentList $argList -WorkingDirectory ${
+          toPowerShellSingleQuoted(webAppRoot)
+        } -WindowStyle Hidden -PassThru;
+[Console]::Out.WriteLine($proc.Id);`;
+        return this.launchDetachedScriptViaPowerShell(script);
+      }
+      return this.launchDetachedViaPowerShell(
+        executablePath,
+        installedArgs,
+        webAppRoot,
+      );
     }
 
-    return this.launchDetachedViaShell(args, webAppRoot);
+    if (!installedExecutablePath) {
+      const quotedBuildCommand = [
+        executablePath,
+        "run",
+        "--ext=js",
+        "-A",
+        "vite",
+        "build",
+      ].map(toShellSingleQuoted).join(" ");
+      const quotedServeCommand = [
+        executablePath,
+        "serve",
+        "-A",
+        "--host",
+        options.hostname,
+        "--port",
+        String(options.port),
+        "_fresh/server.js",
+      ].map(toShellSingleQuoted).join(" ");
+      const script = `cd ${
+        toShellSingleQuoted(webAppRoot)
+      } && ${quotedBuildCommand} >/dev/null && if command -v setsid >/dev/null 2>&1; then setsid ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
+      return this.launchDetachedScriptViaShell(script);
+    }
+
+    return this.launchDetachedViaShell(
+      executablePath,
+      installedArgs,
+      webAppRoot,
+    );
   }
 }

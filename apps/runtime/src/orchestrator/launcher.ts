@@ -49,6 +49,10 @@ type DenoCommandFactory = (
   options: DenoCommandOptions,
 ) => CommandLike;
 
+export interface DetachedDaemonLauncherOptions {
+  installedExecutablePath?: string;
+}
+
 function toPowerShellSingleQuoted(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -71,9 +75,11 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
     private readonly commandFactory: DenoCommandFactory = (command, options) =>
       new Deno.Command(command, options),
     private readonly preferPowerShellStartProcessOnWindows: boolean = true,
+    private readonly options: DetachedDaemonLauncherOptions = {},
   ) {}
 
   private launchDetachedViaPowerShell(
+    executablePath: string,
     args: string[],
     env: Record<string, string>,
   ): Promise<number> {
@@ -85,7 +91,7 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
 ${envAssignments};
 $argList = @(${argList});
 $proc = Start-Process -FilePath ${
-      toPowerShellSingleQuoted(this.denoExecPath)
+      toPowerShellSingleQuoted(executablePath)
     } -ArgumentList $argList -WindowStyle Hidden -PassThru;
 [Console]::Out.WriteLine($proc.Id);`;
     const encodedCommand = toPowerShellEncodedCommand(script);
@@ -124,6 +130,49 @@ $proc = Start-Process -FilePath ${
   }
 
   launchDetached(): Promise<number> {
+    const env = {
+      KATO_RUNTIME_DIR: this.runtime.runtimeDir,
+      KATO_CONFIG_PATH: this.runtime.configPath,
+      KATO_DAEMON_STATUS_PATH: this.runtime.statusPath,
+      KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
+      KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
+        this.runtime.allowedWriteRoots ?? [],
+      ),
+      KATO_CLAUDE_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.claude ?? [],
+      ),
+      KATO_CODEX_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.codex ?? [],
+      ),
+      KATO_GEMINI_SESSION_ROOTS: JSON.stringify(
+        this.runtime.providerSessionRoots?.gemini ?? [],
+      ),
+    };
+
+    const installedExecutablePath = this.options.installedExecutablePath;
+    if (installedExecutablePath) {
+      if (
+        this.preferPowerShellStartProcessOnWindows &&
+        Deno.build.os === "windows"
+      ) {
+        return this.launchDetachedViaPowerShell(
+          installedExecutablePath,
+          [],
+          env,
+        );
+      }
+
+      const command = this.commandFactory(installedExecutablePath, {
+        args: [],
+        stdin: "null",
+        stdout: "null",
+        stderr: "inherit",
+        env,
+      });
+      const child = command.spawn();
+      return Promise.resolve(child.pid);
+    }
+
     const workspaceSourceRoot = resolveWorkspaceSourceRoot(this.daemonMainPath);
     const userConfigDir = resolveUserConfigDir();
     const writeRoots = new Set<string>([
@@ -152,30 +201,12 @@ $proc = Start-Process -FilePath ${
       this.daemonMainPath,
       "__daemon-run",
     ];
-    const env = {
-      KATO_RUNTIME_DIR: this.runtime.runtimeDir,
-      KATO_CONFIG_PATH: this.runtime.configPath,
-      KATO_DAEMON_STATUS_PATH: this.runtime.statusPath,
-      KATO_DAEMON_CONTROL_PATH: this.runtime.controlPath,
-      KATO_ALLOWED_WRITE_ROOTS_JSON: JSON.stringify(
-        this.runtime.allowedWriteRoots ?? [],
-      ),
-      KATO_CLAUDE_SESSION_ROOTS: JSON.stringify(
-        this.runtime.providerSessionRoots?.claude ?? [],
-      ),
-      KATO_CODEX_SESSION_ROOTS: JSON.stringify(
-        this.runtime.providerSessionRoots?.codex ?? [],
-      ),
-      KATO_GEMINI_SESSION_ROOTS: JSON.stringify(
-        this.runtime.providerSessionRoots?.gemini ?? [],
-      ),
-    };
 
     if (
       this.preferPowerShellStartProcessOnWindows &&
       Deno.build.os === "windows"
     ) {
-      return this.launchDetachedViaPowerShell(args, env);
+      return this.launchDetachedViaPowerShell(this.denoExecPath, args, env);
     }
 
     const command = this.commandFactory(this.denoExecPath, {
