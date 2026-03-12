@@ -231,6 +231,10 @@ Deno.test("assembleNpmPackages resolves downloaded artifact paths from stale bun
 });
 
 Deno.test("assembleNpmPackages restores executable mode for unix platform binaries", async () => {
+  if (Deno.build.os === "windows") {
+    return;
+  }
+
   const root = uniquePath("unix-mode");
   const inputDir = await createBundleInput(
     root,

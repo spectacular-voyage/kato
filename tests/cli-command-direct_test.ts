@@ -1,4 +1,5 @@
 import {
+  assert,
   assertEquals,
   assertExists,
   assertRejects,
@@ -689,9 +690,11 @@ Deno.test("runExportCommand continues when export history append fails", async (
       );
       assertExists(warnRecord);
       assertEquals(warnRecord.channel, "operational");
-      assertStringIncludes(
-        String(warnRecord.attributes?.["error"] ?? ""),
-        "File exists",
+      const errorText = String(warnRecord.attributes?.["error"] ?? "")
+        .toLowerCase();
+      assert(
+        errorText.includes("file exists") ||
+          errorText.includes("already exists"),
       );
 
       await assertRejects(

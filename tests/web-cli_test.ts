@@ -35,6 +35,7 @@ function makeRuntimeHarness(runtimeDir: string): {
       statusPath: join(runtimeDir, "status.json"),
       controlPath: join(runtimeDir, "daemon-control.json"),
       cwdPath: runtimeDir,
+      isStdinTerminal: () => false,
       now: () => new Date("2026-03-07T20:00:00.000Z"),
       pid: Deno.pid,
       writeStdout: (text) => stdout.push(text),

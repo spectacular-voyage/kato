@@ -16,6 +16,10 @@ function currentNodeArch(): string {
   }
 }
 
+function currentNodePlatform(): string {
+  return Deno.build.os === "windows" ? "win32" : Deno.build.os;
+}
+
 Deno.test("resolveSmokePackagePaths falls back to downloaded artifact directories", async () => {
   const root = join(
     Deno.cwd(),
@@ -42,7 +46,7 @@ Deno.test("resolveSmokePackagePaths falls back to downloaded artifact directorie
           label: "linux-x64",
           target: "linux-x86_64",
           packageDir: "/stale/source/platforms/linux-x64-gnu",
-          os: Deno.build.os,
+          os: currentNodePlatform(),
           cpu: currentNodeArch(),
           ...(Deno.build.os === "linux" ? { libc: "glibc" } : {}),
           executablePath: "bin/kato",

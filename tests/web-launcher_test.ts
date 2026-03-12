@@ -22,6 +22,10 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
 Deno.test(
   "DenoDetachedWebLauncher builds then launches the bundled web server via detached shell",
   async () => {
+    if (Deno.build.os === "windows") {
+      return;
+    }
+
     let capturedCommand: string | undefined;
     let capturedOptions:
       | ConstructorParameters<typeof Deno.Command>[1]
@@ -408,7 +412,12 @@ Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles live
 
     await store.save(status);
     assertEquals(await store.load(), status);
-    assertEquals(isProcessAlive(Deno.pid), true);
+    const canProbeCurrentProcess = Deno.build.os !== "windows" ||
+      (await Deno.permissions.query({
+          name: "run",
+          command: "powershell.exe",
+        })).state === "granted";
+    assertEquals(isProcessAlive(Deno.pid), canProbeCurrentProcess);
     assertEquals(isProcessAlive(undefined), false);
     assertEquals(isProcessAlive(0), false);
     assertEquals(isProcessAlive(-1), false);

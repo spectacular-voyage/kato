@@ -240,6 +240,8 @@ export async function runWebInitCommand(
   }
 
   const password = await resolveWebInitPassword(options, {
+    isInteractiveTerminal: ctx.runtime.isStdinTerminal ??
+      (() => Deno.stdin.isTerminal()),
     promptForPassword: () =>
       promptForWebPassword(
         createDefaultWebPasswordPromptIO(ctx.runtime.writeStderr),
