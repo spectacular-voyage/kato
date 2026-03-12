@@ -1200,3 +1200,29 @@ yes please.
 # gpt-5.4_2026-03-11_2223_04
 
 I’m removing the root stub entrypoint and its test, then tightening the repo task config so it no longer references dead files. After that I’ll run a light validation pass on the updated `deno.json`.
+
+# gpt-5.4_2026-03-11_2223_29
+
+The stub and test are gone. I’m running a small validation pass on the updated repo tasks and test glob so we don’t leave `deno.json` inconsistent.
+
+`deno.json` is fine; the only failure is the new parser test file needing formatting. I’m fixing that and rerunning the same light validation.
+
+# gpt-5.4_2026-03-11_2223_38
+
+Removed the root stub entrypoint and test: [main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) and [main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts). I also cleaned [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) so repo tasks no longer reference them, and dropped the unused `dev:root` task.
+
+Validated with:
+- `deno task fmt:check`
+- `deno test --parallel --allow-read --allow-write=.test-tmp --allow-env=... tests/web-binary-entry_test.ts`
+
+I did not run the full repo `check` or full test suite.
+
+# gpt-5.4_2026-03-11_2223_40
+
+Removed the root stub entrypoint and test: [main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) and [main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts). I also cleaned [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) so repo tasks no longer reference them, and dropped the unused `dev:root` task.
+
+Validated with:
+- `deno task fmt:check`
+- `deno test --parallel --allow-read --allow-write=.test-tmp --allow-env=... tests/web-binary-entry_test.ts`
+
+I did not run the full repo `check` or full test suite.

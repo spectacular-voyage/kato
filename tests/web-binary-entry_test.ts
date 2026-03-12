@@ -1,7 +1,4 @@
-import {
-  assertEquals,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { parseWebBinaryServeOptions } from "../apps/web/src/binary_entry.ts";
 
 Deno.test("parseWebBinaryServeOptions uses defaults when args and env are empty", () => {
@@ -12,28 +9,34 @@ Deno.test("parseWebBinaryServeOptions uses defaults when args and env are empty"
 });
 
 Deno.test("parseWebBinaryServeOptions accepts env overrides", () => {
-  assertEquals(parseWebBinaryServeOptions([], {
-    HOSTNAME: "0.0.0.0",
-    PORT: "45175",
-  }), {
-    hostname: "0.0.0.0",
-    port: 45175,
-  });
+  assertEquals(
+    parseWebBinaryServeOptions([], {
+      HOSTNAME: "0.0.0.0",
+      PORT: "45175",
+    }),
+    {
+      hostname: "0.0.0.0",
+      port: 45175,
+    },
+  );
 });
 
 Deno.test("parseWebBinaryServeOptions lets args override env", () => {
-  assertEquals(parseWebBinaryServeOptions([
-    "--host",
-    "127.0.0.1",
-    "--port",
-    "4123",
-  ], {
-    HOSTNAME: "0.0.0.0",
-    PORT: "45175",
-  }), {
-    hostname: "127.0.0.1",
-    port: 4123,
-  });
+  assertEquals(
+    parseWebBinaryServeOptions([
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "4123",
+    ], {
+      HOSTNAME: "0.0.0.0",
+      PORT: "45175",
+    }),
+    {
+      hostname: "127.0.0.1",
+      port: 4123,
+    },
+  );
 });
 
 Deno.test("parseWebBinaryServeOptions rejects invalid ports", () => {
