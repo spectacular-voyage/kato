@@ -2,7 +2,6 @@ import { parseArgs } from "@std/cli";
 import {
   basename,
   dirname,
-  extname,
   fromFileUrl,
   isAbsolute,
   join,

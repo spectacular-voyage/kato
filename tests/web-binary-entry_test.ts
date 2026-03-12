@@ -11,7 +11,7 @@ Deno.test("parseWebBinaryServeOptions uses defaults when args and env are empty"
 Deno.test("parseWebBinaryServeOptions accepts env overrides", () => {
   assertEquals(
     parseWebBinaryServeOptions([], {
-      HOSTNAME: "0.0.0.0",
+      KATO_WEB_HOSTNAME: "0.0.0.0",
       PORT: "45175",
     }),
     {
@@ -29,12 +29,24 @@ Deno.test("parseWebBinaryServeOptions lets args override env", () => {
       "--port",
       "4123",
     ], {
-      HOSTNAME: "0.0.0.0",
+      KATO_WEB_HOSTNAME: "0.0.0.0",
       PORT: "45175",
     }),
     {
       hostname: "127.0.0.1",
       port: 4123,
+    },
+  );
+});
+
+Deno.test("parseWebBinaryServeOptions ignores ambient HOSTNAME", () => {
+  assertEquals(
+    parseWebBinaryServeOptions([], {
+      HOSTNAME: "ambient-hostname",
+    }),
+    {
+      hostname: "127.0.0.1",
+      port: 5173,
     },
   );
 });

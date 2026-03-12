@@ -22,7 +22,7 @@ jobs:
             expected_os: windows
             expected_arch: x86_64
           - label: macos-x64
-            runs_on: macos-13
+            runs_on: macos-15-intel
             expected_os: darwin
             expected_arch: x86_64
           - label: macos-arm64
@@ -74,7 +74,8 @@ jobs:
           "$bundle_dir/kato" --version
 
           port=45177
-          log_path="$bundle_dir/kato-web.log"
+          log_dir="${RUNNER_TEMP:-/tmp}"
+          log_path="$log_dir/kato-web-${{ matrix.label }}.log"
           "$bundle_dir/kato-web" --host 127.0.0.1 --port "$port" >"$log_path" 2>&1 &
           web_pid=$!
 
@@ -105,8 +106,9 @@ jobs:
           & "$bundlePath/kato.exe" --version
 
           $port = 45177
-          $stdoutLog = Join-Path $bundlePath "kato-web.stdout.log"
-          $stderrLog = Join-Path $bundlePath "kato-web.stderr.log"
+          $logDir = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+          $stdoutLog = Join-Path $logDir "kato-web-${{ matrix.label }}.stdout.log"
+          $stderrLog = Join-Path $logDir "kato-web-${{ matrix.label }}.stderr.log"
           $proc = Start-Process `
             -FilePath "$bundlePath/kato-web.exe" `
             -ArgumentList @("--host", "127.0.0.1", "--port", "$port") `

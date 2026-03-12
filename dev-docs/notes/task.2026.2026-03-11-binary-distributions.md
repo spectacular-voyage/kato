@@ -2,7 +2,7 @@
 id: lwoblwa43m6z5ign6ukghbs
 title: 2026 03 11 Binary Distributions
 desc: ""
-updated: 1773290313000
+updated: 1773295520734
 created: 1773290214027
 ---
 
@@ -321,3 +321,29 @@ Current implementation note:
   - HTTP probe of `/login`
 - the workflow file is implemented and YAML-validated locally, but it has not
   yet been exercised in GitHub in this task
+
+
+## Coderabbit Review
+
+- [ ] Fix binary-packaging quality-gate drift and rerun the full scripted quality
+      path for this slice:
+      - remove the current `scripts/package-binaries.ts` lint failure
+      - run `deno task lint`
+      - run the matching binary-build/package checks again after cleanup
+- [ ] Add automated tests for `scripts/package-binaries.ts` covering:
+      - version-mismatch rejection from `build-metadata.json`
+      - expected bundled file set
+      - emitted `bundle-metadata.json`
+      - archive/checksum creation
+- [ ] Add a smoke check that validates the downloadable archive itself, not just
+      the pre-archive bundle directory:
+      - extract `.tar.gz` / `.zip`
+      - run bundled `kato --version`
+      - run bundled `kato-web`
+      - HTTP probe `/login`
+- [ ] Exercise `.github/workflows/release-manual.yml` on real native GitHub
+      runners and capture any Windows/macOS-specific failures before treating
+      the workflow as release-ready.
+- [ ] Decide whether the first documented user-facing install should be direct
+      archive download or npm wrapper install, then align the binary docs and
+      release runbook with that channel priority.

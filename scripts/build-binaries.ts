@@ -194,7 +194,7 @@ const metadata: BuildMetadata = {
 
 for (const spec of specs) {
   const outputPath = join(outputDir, outputFileName(spec.name, target));
-  const args = ["compile"];
+  const args = ["compile", "--frozen"];
   if (spec.configPath) {
     args.push("--config", spec.configPath);
   }

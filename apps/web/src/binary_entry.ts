@@ -25,7 +25,8 @@ export function parseWebBinaryServeOptions(
   args: string[],
   env: Record<string, string | undefined>,
 ): WebBinaryServeOptions {
-  let hostname = resolveHostname(env.HOSTNAME) ?? DEFAULT_KATO_WEB_HOSTNAME;
+  let hostname = resolveHostname(env.KATO_WEB_HOSTNAME) ??
+    DEFAULT_KATO_WEB_HOSTNAME;
   let port = env.PORT ? parsePort(env.PORT, "PORT") : DEFAULT_KATO_WEB_PORT;
 
   for (let index = 0; index < args.length; index += 1) {

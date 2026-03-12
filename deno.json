@@ -4,7 +4,7 @@
     "dev:daemon": "deno run --allow-read --allow-write --allow-env --watch=apps/daemon/src,apps/runtime/src,shared/src apps/daemon/src/main.ts __daemon-run",
     "dev:web": "deno task --cwd apps/web dev",
     "dev:cloud": "deno run --watch=apps/cloud/src,shared/src apps/cloud/src/main.ts",
-    "build:binaries": "deno run -A scripts/build-binaries.ts",
+    "build:binaries": "deno run --frozen -A scripts/build-binaries.ts",
     "package:binaries": "deno run -A scripts/package-binaries.ts",
     "audit": "deno audit --frozen --level=high --lock deno.lock && deno audit --frozen --level=high --lock apps/web/deno.lock && deno audit --frozen --level=high --lock apps/cli/deno.lock && deno audit --frozen --level=high --lock apps/daemon/deno.lock",
     "fmt": "deno fmt deno.json apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",

@@ -1640,3 +1640,250 @@ I’m checking the current binary plan and open issues so I can give you the sho
 # gpt-5.4_2026-03-11_2255_09
 
 I’ve got the plan headings. I’m checking the interactive web password note too, because if the packaged bundle still needs `KATO_WEB_PASSWORD`, that may be the next UX blocker rather than more build plumbing.
+
+# gpt-5.4_2026-03-11_2255_25
+
+The next real unknown is cross-platform reality, not more local build plumbing.
+
+I’d do it in this order:
+
+1. Push the branch and run [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml).
+This is the first test that matters now. Linux is proven locally; Windows/macOS are still assumptions.
+
+2. After the first workflow run, fix whatever breaks on native runners.
+Most likely candidates are `kato-web` compile/start behavior, Windows zip packaging, or path assumptions in the smoke steps.
+
+3. Expand the workflow smoke checks from “binary exists and `/login` responds” to actual product lifecycle:
+`kato start`, `kato status`, `kato stop`, `kato web init`, `kato web start`, `kato web status`, `kato web stop`.
+That closes the gap still called out in [`task.2026.2026-03-11-binary-distributions.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+4. Make web password setup usable without env gymnastics.
+Your new note in [`task.2026.2026-03-11-interactive-web-password.md`](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-interactive-web-password.md) is probably the next UX slice after platform validation. A packaged binary flow still feels rough if `KATO_WEB_PASSWORD` is mandatory.
+
+After that, the remaining big items are signing/notarization and installer/distribution shape. I would not spend time on Permission Broker yet.
+
+If you want the next code change rather than just the plan, I’d take step 3 next: add packaged-bundle lifecycle smoke tests.
+
+# djradon_2026-03-11_2301_21
+
+I'd love to get distribution via npmjs going soon too. Can you fill out [task.2026.2026-03-11-npmjs-install.md](dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) for that?
+
+# gpt-5.4_2026-03-11_2301_28
+
+I’m drafting the npmjs distribution note against your existing task-note template, using the binary work as the baseline rather than starting from scratch. I’ll inspect the empty note and the guidance doc first, then patch the note directly.
+
+# gpt-5.4_2026-03-11_2301_38
+
+The note is empty, so I’m pulling a little repo context first. I want the npmjs plan to be concrete about what gets published, how installers pick the right binary, and where it intersects with the binary work already underway.
+
+# gpt-5.4_2026-03-11_2302_18
+
+I’ve got the structure. I’m patching the note with a concrete npm wrapper-plus-platform-packages plan that reuses the binary pipeline you already have, instead of inventing a separate npm-specific build path.
+
+# gpt-5.4_2026-03-11_2303_07
+
+The note is filled. I’m doing one read-through now to make sure the plan is internally consistent with the binary note, especially around package names, three-binary payload, and keeping npm as a wrapper channel instead of a separate build path.
+
+# gpt-5.4_2026-03-11_2303_12
+
+Filled out [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) using the same template as your other task notes.
+
+The note now makes the npm channel concrete:
+- npm is a secondary convenience channel on top of the binary pipeline
+- use a thin top-level wrapper package plus platform packages
+- each platform package carries `kato`, `kato-daemon`, and `kato-web`
+- no `postinstall` downloads, no local compile, no Deno requirement
+- release flow builds native bundles first, then assembles/publishes npm packages
+
+It also calls out the main open questions: final package names, `npx` support, Linux musl, publish auth model, and how public the platform packages should be. I didn’t run tests because this was a doc-only change.
+
+# gpt-5.4_2026-03-11_2303_14
+
+Filled out [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) using the same template as your other task notes.
+
+The note now makes the npm channel concrete:
+- npm is a secondary convenience channel on top of the binary pipeline
+- use a thin top-level wrapper package plus platform packages
+- each platform package carries `kato`, `kato-daemon`, and `kato-web`
+- no `postinstall` downloads, no local compile, no Deno requirement
+- release flow builds native bundles first, then assembles/publishes npm packages
+
+It also calls out the main open questions: final package names, `npx` support, Linux musl, publish auth model, and how public the platform packages should be. I didn’t run tests because this was a doc-only change.
+
+# djradon_2026-03-11_2306_12
+
+I expect npm to be the primary install method, it's more convenient than downloading an archive and putting it in a good location. Maybe it can automate the init too. 
+
+Here's coderabbit feedback. Anything you think worth addressing, put it as checkbox to-do items under ## Coderabbit Review. Then let me know sequencing of review-driven fixes ot continuing with implementation plan.
+
+# gpt-5.4_2026-03-11_2306_25
+
+I’m reading the binary task note around the `## Coderabbit Review` section so I can turn the worthwhile comments into concrete checkboxes instead of hand-waving them. After that I’ll tell you whether those fixes should come before or after the main implementation plan.
+
+# gpt-5.4_2026-03-11_2306_37
+
+I don’t actually have the CodeRabbit comment text in this chat, so I’m doing the next best thing: a quick review of the new binary-packaging slice and turning the issues I’d genuinely prioritize into `## Coderabbit Review` checkboxes. Then I’ll tell you whether those should preempt the main plan.
+
+# gpt-5.4_2026-03-11_2306_52
+
+I found at least one concrete hygiene issue in the new package script surface, so I’m sanity-checking lint as well before I write the review to-dos. If lint is red, that should absolutely be in the review-driven queue.
+
+# gpt-5.4_2026-03-11_2307_21
+
+I have a short list of review-driven items that are actually worth carrying. I’m adding them under `## Coderabbit Review` now, keeping them scoped to things that tighten correctness or release confidence rather than expanding scope.
+
+# djradon_2026-03-11_2307_25
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.github/workflows/release-manual.yml:
+- Around line 70-71: The smoke-test log files are being written into $bin_dir
+(e.g. log_path="$bin_dir/kato-web.log" and the "$bin_dir/kato-web" invocations
+redirecting stdout/stderr), which lets kato* globs pick them up into the release
+bundle; change those log paths so they are written outside the release upload
+directory (for example use $RUNNER_TEMP or /tmp:
+log_path="$RUNNER_TEMP/kato-web.log" and redirect stdout/stderr there) and apply
+the same change to the other similar invocations that create kato-web.stdout.log
+/ kato-web.stderr.log so the artifact globs no longer match these transient
+smoke-test logs.
+- Around line 24-25: The workflow matrix uses an outdated runner label
+"macos-13" for the "macos-x64" job; update the runs_on value for the macos-x64
+matrix leg by replacing "macos-13" with the current Intel runner label
+"macos-26-intel" (or "macos-15-intel" if you need a specific macOS 15
+environment) so the macos-x64 job runs on a supported macOS runner.
+
+In `@apps/web/src/activity_state.ts`:
+- Around line 54-64: The function providerAutoGeneratesTwins assumes
+runtimeConfig.providerAutoGenerateTwins exists and will throw if it's undefined;
+update the perProvider assignment in providerAutoGeneratesTwins to safely handle
+undefined (e.g., use optional chaining or default to an empty object for
+runtimeConfig.providerAutoGenerateTwins) so that accessing perProvider[provider]
+is safe, then return perProvider[provider] ??
+runtimeConfig.globalAutoGenerateTwins ?? false.
+
+In `@apps/web/src/binary_entry.ts`:
+- Around line 28-29: The code reads the ambient env.HOSTNAME to set hostname
+(via resolveHostname) which is unsafe; change the lookup to a namespaced
+variable like env.KATO_WEB_HOSTNAME instead so default bind address is not
+pulled from shell/CI/container HOSTNAME. Update the hostname assignment that
+uses resolveHostname(env.HOSTNAME) ?? DEFAULT_KATO_WEB_HOSTNAME to call
+resolveHostname(env.KATO_WEB_HOSTNAME) ?? DEFAULT_KATO_WEB_HOSTNAME (leave
+parsePort/DEFAULT_KATO_WEB_PORT and the variable name hostname unchanged).
+
+In `@apps/web/src/compiled_main.ts`:
+- Line 6: parseWebBinaryServeOptions is being given the whole environment
+(Deno.env.toObject()), which allows ambient HOSTNAME to override bind address;
+instead construct a sanitized env object before calling
+parseWebBinaryServeOptions by copying Deno.env.toObject() and removing HOSTNAME
+(or by explicitly building an env with only the web-related vars you intend to
+honor) and pass that sanitized object to parseWebBinaryServeOptions; update the
+call site where Deno.args and Deno.env.toObject() are used so it uses the
+filteredEnv (e.g., delete filteredEnv.HOSTNAME or pick only allowed keys) to
+prevent ambient HOSTNAME from changing the bind address.
+
+In `@scripts/build-binaries.ts`:
+- Around line 174-175: The deno compile invocations and the release task are not
+using --frozen which lets deps be re-resolved; update all invocations that call
+runCommand("deno", ["compile", ...]) in this script to include the "--frozen"
+flag (matching the existing runCommand("deno", ["install","--frozen"], ...)
+call) and ensure the parsed["skip-web-install"] branch remains unchanged; also
+update the corresponding task in deno.json to add "--frozen" to its deno
+install/compile arguments so the entire release pipeline uses locked
+dependencies for reproducible binaries.
+
+---
+
+Nitpick comments:
+In `@dev-docs/notes/release-notes.v0.2.4.md`:
+- Around line 1-8: The release notes file titled 'Release Notes v0.2.4'
+currently has only YAML front matter with an empty desc and no body; update the
+file by populating the desc field and adding a brief body summary that lists the
+primary v0.2.4 changes (e.g., binary build infrastructure, multi-platform
+workflow, notable bug fixes or improvements), mention any important upgrade or
+migration notes, and include a short contributors or acknowledgements line;
+locate the file by the title and the YAML fields (desc, id) and ensure the new
+content follows the existing front matter format.
+
+# gpt-5.4_2026-03-11_2307_35
+
+I’m verifying each CodeRabbit point against the current files before touching anything. I’ll only patch the findings that still reproduce in the repo as it stands, and I’ll call out the ones that are stale or not worth taking.
+
+# gpt-5.4_2026-03-11_2307_56
+
+Most of the findings still reproduce. The only one I’m verifying externally is the macOS runner label, because that has changed over time; the current GitHub docs do confirm `macos-13` is retired and current Intel labels are `macos-15-intel` and `macos-26-intel`. I’m patching the real issues now.
+
+# gpt-5.4_2026-03-11_2308_35
+
+The `compiled_main` point turns into a dependency question: once `parseWebBinaryServeOptions` stops reading ambient `HOSTNAME`, passing the full env stops being a bind-address problem. I’m checking the existing web-binary tests now so I can update only the behavior that actually changes and avoid redundant churn.
+
+# djradon_2026-03-11_2308_35
+
+Yes, lint failed, I had to patch the failure in another converstaion (async -> sync)
+
+# gpt-5.4_2026-03-11_2308_47
+
+I saw that. The current lint failure I found is separate from the async→sync patch: `scripts/package-binaries.ts` still has an unused `extname` import in the current tree. I’m rechecking the touched files before I patch anything else so I don’t trample work from the other conversation.
+
+# gpt-5.4_2026-03-11_2309_10
+
+I’ve isolated the fixes I’m actually taking: workflow log contamination, runner label refresh, the unsafe web-binary hostname env lookup, the `providerAutoGenerateTwins` null-safety issue, `--frozen` in compile/build task plumbing, the empty release notes file, and the current `package-binaries.ts` lint issue. I’m leaving `compiled_main.ts` alone unless it still matters after the hostname fix, because that one is likely subsumed.
+
+# gpt-5.4_2026-03-11_2309_38
+
+The review fixes are in. I’m validating the touched files now, including a fresh `build:binaries` smoke with the new `--frozen` path, so we know these aren’t just cosmetically correct.
+
+# gpt-5.4_2026-03-11_2309_46
+
+The focused checks are clean so far. I’m waiting on the frozen compile smoke now, because that’s the one behavior-changing review fix that needs a real end-to-end confirmation.
+
+# gpt-5.4_2026-03-11_2310_17
+
+The review fixes validated cleanly, including a successful frozen binary rebuild. I’m doing one last search pass for the old `HOSTNAME`-based web-binary contract so I can tell you precisely which review point I left untouched and why.
+
+# gpt-5.4_2026-03-11_2310_51
+
+I verified the review points against the current tree and fixed the ones that still reproduced.
+
+Applied fixes:
+- [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml): moved smoke-test logs out of the bundle directory and updated the retired `macos-13` runner to `macos-15-intel`. I verified the runner change against GitHub’s hosted-runner docs and the macOS 13 retirement note: https://docs.github.com/actions/reference/runners/github-hosted-runners and https://github.blog/changelog/2025-09-19-github-actions-macos-13-hosted-runner-image-is-closing-down/
+- [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts): `providerAutoGeneratesTwins()` now safely handles missing `providerAutoGenerateTwins`.
+- [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts) and [web-binary-entry_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-binary-entry_test.ts): web binary hostname now comes from `KATO_WEB_HOSTNAME`, and there’s a regression test proving ambient `HOSTNAME` is ignored.
+- [build-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/build-binaries.ts) and [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json): compile/build task now runs with `--frozen`.
+- [package-binaries.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/package-binaries.ts): removed the current lint failure.
+- [release-notes.v0.2.4.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.4.md): filled in the empty release notes stub.
+
+Not separately changed:
+- [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts): once `parseWebBinaryServeOptions()` stopped reading ambient `HOSTNAME`, the specific bind-address problem there stopped reproducing. I left it alone to avoid redundant churn.
+
+Validation passed:
+- `deno task fmt:check`
+- `deno lint scripts/build-binaries.ts scripts/package-binaries.ts apps/web/src/activity_state.ts apps/web/src/binary_entry.ts apps/web/src/compiled_main.ts tests/web-binary-entry_test.ts`
+- `deno check scripts/build-binaries.ts scripts/package-binaries.ts tests/web-binary-entry_test.ts`
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/review-smoke --skip-web-install --skip-web-build`
+- workflow YAML parse check
+
+On sequencing: the review-driven fixes are now small enough that I would go back to the implementation plan, not keep looping on review. The next priority should be:
+1. run the native GitHub workflow for real
+2. expand packaged-bundle smoke to full daemon/web lifecycle
+3. then build the npm wrapper channel on top of that proven binary pipeline
+
+That order fits your goal of making npm the primary user-facing install method without making npm hide unresolved binary/runtime problems.
+
+# djradon_2026-03-11_2311_39
+
+commit message please.
+
+# gpt-5.4_2026-03-11_2311_43
+
+`build: harden binary packaging and web runtime defaults`
+
+- move workflow smoke-test logs out of packaged artifact directories
+- refresh macOS Intel runner label in manual release workflow
+- ignore ambient `HOSTNAME` for `kato-web` and use `KATO_WEB_HOSTNAME`
+- make `providerAutoGenerateTwins` lookup null-safe
+- enforce `--frozen` in binary build task and root launcher task
+- fix `package-binaries.ts` lint drift
+- fill in `v0.2.4` release notes stub

@@ -55,7 +55,7 @@ export function providerAutoGeneratesTwins(
   provider: string,
   runtimeConfig: RuntimeConfig,
 ): boolean {
-  const perProvider = runtimeConfig.providerAutoGenerateTwins as Record<
+  const perProvider = (runtimeConfig.providerAutoGenerateTwins ?? {}) as Record<
     string,
     boolean | undefined
   >;
