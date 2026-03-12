@@ -25,6 +25,9 @@ jobs:
         run: deno install
         working-directory: apps/web
 
+      - name: Run dependency audit
+        run: deno task audit
+
       - name: Run non-test quality gates
         run: deno task ci:quality
 

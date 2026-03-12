@@ -2,16 +2,22 @@
 id: wvgli7yr4zmuwcalv6wyevu
 title: 2026 03 05 Distribution Solutions
 desc: ''
-updated: 1772866630000
+updated: 1773287793118
 created: 1772761416593
 ---
 
 ## Goal
 
 Define a post-`v0.2.0` distribution plan that makes `kato` easy to install for
-non-programmers, does not require Deno for the primary install path, supports
+non-programmers, does not require Vite for the primary install path, supports
 user-approved updating, has a sane uninstall story, and leaves room for later
 user-level service-manager integration.
+
+Security/permissions-wise:
+
+Phase 1: keep coarse Deno sandbox + app-level AllowedRoot
+Phase 2 hardening candidate: Permission Broker
+KV: maybe useful later for coordination, but not a reason to reshape distribution now
 
 ## Current Constraints From The Codebase
 
@@ -24,10 +30,24 @@ user-level service-manager integration.
   are derived from that root and live under the same `~/.kato/shared` tree.
 - Today the CLI launcher is source-oriented: it starts the daemon by running
   Deno against `apps/daemon/src/main.ts`.
+- Today `kato web start` is also source-oriented: it launches the current web
+  app from the repo checkout instead of a release-packaged web runtime.
+- The web app already has a production build/start split in `apps/web`
+  (`vite build` -> `deno serve -A _fresh/server.js`), so the web lifecycle can
+  move to prebuilt artifacts without changing the current Fresh/Vite scaffold.
 - Current least-privilege behavior partly depends on Deno subprocess permission
-  scoping (`--allow-read=...`, `--allow-write=...`). A compiled/binary path
-  must either preserve that boundary another way or accept that some of that
-  protection becomes app-level rather than runtime-enforced.
+  scoping (`--allow-read=...`, `--allow-write=...`, `--allow-run=...`).
+- A compiled Deno binary can preserve runtime permission enforcement by baking
+  permission flags into the executable at `deno compile` time.
+- The real compiled-distribution design questions are:
+  - which Kato executables can avoid `--allow-run` entirely
+  - whether a thin launcher binary should be the only component with
+    `--allow-run`, while daemon/web runtime binaries stay non-spawning
+  - how to handle user-specific path scopes (`~/.kato`, provider session roots,
+    workspace roots) without baking one machine's absolute paths into a generic
+    release artifact
+  - where app-level policy must still be stricter than Deno's raw baked
+    permissions
 
 ## Distribution Goals
 
@@ -81,6 +101,37 @@ Tradeoffs:
 - It makes service-manager docs less explicit.
 - It further blurs permission boundaries if compiled distribution already has to
   relax current Deno subprocess scoping.
+
+## Web Distribution Decision
+
+Recommendation:
+
+- Keep the current Fresh/Vite scaffold for contributor dev flow and CI builds.
+- Redefine `kato web start` as a production-style start from prebuilt web
+  artifacts, not a Vite dev-server launch.
+- Keep `deno task dev:web` as the live-reload path for contributors.
+- Build web artifacts in CI/release packaging, not on user machines.
+
+Important distinction:
+
+- keeping Vite is a build-time decision
+- removing Vite from `kato web start` is a runtime/distribution decision
+
+This means Phase 1 should treat the web UI like another shipped runtime target:
+
+- source installs may keep a source-tree fallback for developers
+- installed/binary users should get a prebuilt web runtime package
+- `kato web start` should resolve that installed web package first and only fall
+  back to source-tree/Deno launch logic in developer environments
+
+For planning purposes, assume a sibling installed web runtime target next to the
+CLI/daemon bundle. The exact implementation can remain open for now
+(`kato-web`, hidden compiled mode, or equivalent), but the user-facing contract
+should be locked now:
+
+- installed users do not build web assets locally
+- installed users do not need Vite for `kato web start`
+- `kato web start` and `deno task dev:web` are explicitly different products
 
 ## How The CLI Knows Which Daemon To Use
 
@@ -801,6 +852,10 @@ Add required checks: codecov/project and codecov/patch
 - Enforce Phase 1 signing/notarization policy for documented default installs.
 - Change launcher logic to resolve a sibling `kato-daemon` binary, with
   source-tree fallback for development.
+- Change `kato web start` to resolve a prebuilt web runtime package first, with
+  source-tree fallback for developers.
+- Build production web artifacts during release packaging and include the
+  resulting web runtime package in each platform bundle.
 - Define and write install-channel metadata (`install-channel.json` v1).
 - Define and enforce CLI/daemon version-skew policy (major mismatch blocks).
 - Define uninstall defaults: preserve `~/.kato`, remove program bits only.
@@ -832,11 +887,19 @@ Add required checks: codecov/project and codecov/patch
   - env override (`KATO_DAEMON_BIN`)
   - sibling installed binary
   - source-tree fallback for developers
+- Add a web runtime resolution abstraction with precedence:
+  - explicit CLI/env override
+  - sibling installed web runtime package
+  - source-tree fallback for developers
 - Add GitHub release workflow(s) that build:
   - Windows x64
   - macOS arm64
   - macOS x64
   - Linux x64
+- Add a release build step that runs `deno task --cwd apps/web build` before
+  packaging platform artifacts.
+- Add per-platform bundle assembly for the web runtime package/artifacts used by
+  `kato web start`.
 - Add native-runner matrix release jobs and platform smoke checks.
 - Add signing/notarization steps and secrets handling in release CI.
 - Add Linux arm64 in the second binary wave (Phase 2).
@@ -855,6 +918,8 @@ Add required checks: codecov/project and codecov/patch
 - Add explicit service/autostart cleanup commands.
 - Add checksum/signature verification design for updater work.
 - Add compiled-binary smoke tests.
+- Add `kato web init/start/status/stop` production-path smoke checks against the
+  packaged web runtime instead of the Vite dev server.
 - Implement CLI/daemon major-version mismatch hard fail plus minor/patch warning.
 - Keep one user-facing release version even if CLI and daemon keep separate
   internal versions.

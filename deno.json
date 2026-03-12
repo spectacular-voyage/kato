@@ -5,6 +5,7 @@
     "dev:web": "deno task --cwd apps/web dev",
     "dev:cloud": "deno run --watch=apps/cloud/src,shared/src apps/cloud/src/main.ts",
     "dev:root": "deno run --watch main.ts",
+    "audit": "deno audit --frozen --level=high --lock deno.lock && deno audit --frozen --level=high --lock apps/web/deno.lock && deno audit --frozen --level=high --lock apps/cli/deno.lock && deno audit --frozen --level=high --lock apps/daemon/deno.lock",
     "fmt": "deno fmt deno.json main.ts main_test.ts apps/cli apps/cloud apps/daemon apps/runtime shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "fmt:check": "deno fmt --check deno.json main.ts main_test.ts apps/cli apps/cloud apps/daemon apps/runtime shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "lint": "deno lint main.ts main_test.ts apps/cli apps/cloud apps/daemon apps/runtime shared tests apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
@@ -13,7 +14,7 @@
     "test:coverage": "deno test --parallel --clean --coverage=.test-tmp/coverage/root --allow-read --allow-write=.test-tmp --allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_DAEMON_STATUS_PATH,KATO_DAEMON_CONTROL_PATH,KATO_CLAUDE_SESSION_ROOTS,KATO_CODEX_SESSION_ROOTS,KATO_GEMINI_SESSION_ROOTS,KATO_DAEMON_MAX_MEMORY_MB,KATO_CONFIG_PATH,KATO_ALLOWED_WRITE_ROOT,KATO_ALLOWED_WRITE_ROOTS_JSON,KATO_WEB_PASSWORD main_test.ts tests/**/*_test.ts",
     "coverage:lcov": "deno coverage --lcov --output=coverage.lcov .test-tmp/coverage/root",
     "ci:quality": "deno task fmt --check && deno task lint && deno task check --frozen",
-    "ci": "deno task fmt --check && deno task lint && deno task check --frozen && deno task test --frozen"
+    "ci": "deno task audit && deno task fmt --check && deno task lint && deno task check --frozen && deno task test --frozen"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",

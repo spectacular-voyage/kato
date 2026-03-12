@@ -105,3 +105,76 @@ Confirm at least one Gemini command-handling event is present:
 - [x] Add Dependabot for GitHub Actions.
 - [x] Add coverage artifact generation and patch coverage gating.
 - [c] Add binary release workflow(s) with scoped `deno compile` permissions.
+
+## Planned Binary + Prebuilt Web Release Flow
+
+This section is target-state planning for the post-source-only release track. It
+does not replace the historical `v0.2.0` source-only steps above.
+
+### Product Decision
+
+- Keep Vite as the contributor/dev and CI build tool for `apps/web`.
+- Stop treating `kato web start` as a Vite/dev-server entrypoint.
+- Make `kato web start` use a prebuilt packaged web runtime.
+- Keep `deno task dev:web` as the live-reload developer path.
+
+### Release Packaging Contract
+
+Each platform release bundle should contain:
+
+- `kato`
+- `kato-daemon`
+- the packaged web runtime/artifacts required by `kato web start`
+
+Planning note:
+
+- the exact shipped web runtime shape can stay open for now (`kato-web`,
+  hidden compiled mode, or equivalent)
+- the release contract should still be fixed now: end users do not build web
+  assets locally and do not need Vite for `kato web start`
+
+### Planned Release Steps
+
+1. Confirm release commit is on `main` and CI is green.
+2. Run the full local quality gate:
+
+```bash
+deno task ci
+```
+
+3. Build production web artifacts:
+
+```bash
+deno task --cwd apps/web build
+```
+
+4. Build/package platform release artifacts on native runners:
+   - `kato`
+   - `kato-daemon`
+   - packaged web runtime/artifacts
+5. Assemble per-platform release archives/installers so the web runtime is
+   colocated with the CLI bundle.
+6. Run per-platform smoke checks against the packaged runtime, not the Vite dev
+   server:
+   - `kato --version`
+   - `kato status`
+   - `KATO_WEB_PASSWORD=<password> kato web init --username <username>`
+   - `kato web start`
+   - HTTP probe of `/login` on the configured host/port
+   - `kato web status`
+   - `kato web stop`
+7. Upload versioned and stable-name release assets.
+8. Publish GitHub release and any installer/channel metadata.
+
+### Planned Verification Checklist
+
+- [ ] `deno task ci` passed for the release commit.
+- [ ] `deno task --cwd apps/web build` passed before packaging.
+- [ ] Each platform artifact bundle includes the packaged web runtime/assets.
+- [ ] `kato web start` works from the packaged release output without invoking
+      the Vite dev server.
+- [ ] `/login` responds on the configured host/port after `kato web start`.
+- [ ] `kato web status` and `kato web stop` succeed against the packaged web
+      runtime.
+- [ ] Release notes distinguish developer `deno task dev:web` from installed
+      `kato web start`.
