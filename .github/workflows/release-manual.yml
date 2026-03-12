@@ -2,6 +2,21 @@ name: Release Manual
 
 on:
   workflow_dispatch:
+    inputs:
+      npm_publish_mode:
+        description: "What to do with the assembled npm packages"
+        required: true
+        default: skip
+        type: choice
+        options:
+          - skip
+          - dry-run
+          - publish
+      npm_tag:
+        description: "npm dist-tag to use for npm publish or dry-run"
+        required: true
+        default: latest
+        type: string
   push:
     paths:
       - .github/workflows/release-manual.yml
@@ -211,3 +226,49 @@ jobs:
             .test-tmp/npm-packages/release/**
           if-no-files-found: error
           compression-level: 0
+
+  publish-npm-packages:
+    name: Publish npm Packages
+    if: github.event_name == 'workflow_dispatch' && inputs.npm_publish_mode != 'skip'
+    needs: assemble-npm-packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download npm Package Assembly Artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: kato-npm-packages
+          path: .test-tmp/downloaded-npm-packages
+
+      - name: Publish npm Packages
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(
+            --input-dir .test-tmp/downloaded-npm-packages
+            --npm-bin npm
+            --tag "${{ inputs.npm_tag }}"
+          )
+          if [ "${{ inputs.npm_publish_mode }}" = "dry-run" ]; then
+            args+=(--dry-run)
+          fi
+          deno task publish:npm-packages -- "${args[@]}"

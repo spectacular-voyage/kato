@@ -220,6 +220,29 @@ Current manual CI entrypoint:
   - assemble npm packages with `deno task assemble:npm-packages`
   - run npm pack/install smoke with `deno task smoke:npm-install`
   - upload generated npm package assembly artifacts
+  - optionally run `deno task publish:npm-packages` from the assembled npm
+    artifact with `workflow_dispatch` inputs:
+    - `npm_publish_mode=skip`
+    - `npm_publish_mode=dry-run`
+    - `npm_publish_mode=publish`
+    - `npm_tag=<dist-tag>`
+
+Current npm publish behavior:
+
+- uses the same assembled npm packages from the current `release-manual` run
+- publishes platform packages first, then the public wrapper package
+- uses `npm publish --dry-run` when `npm_publish_mode=dry-run`
+- uses `npm publish --provenance` when `npm_publish_mode=publish`
+- is intended to use npm trusted publishing from GitHub Actions
+- leaves `NODE_AUTH_TOKEN` available as a fallback via `NPM_TOKEN` if trusted
+  publishing is not configured yet
+
+Trusted publishing note:
+
+- npm trusted publishers are configured per workflow file, so the npm registry
+  side must trust `.github/workflows/release-manual.yml` for `kato` and each
+  `@spectacular-voyage/kato-*` platform package before `npm_publish_mode=publish`
+  will work without a token.
 
 ### Planned Release Steps
 
@@ -268,9 +291,13 @@ deno task assemble:npm-packages -- --input-dir <bundle-dir> [--input-dir <bundle
 deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>
 ```
 
-10. Assemble per-platform release archives/installers so the web runtime is
+10. If publishing to npm for this release, run the manual publish path from the
+    same workflow artifacts:
+   - `npm_publish_mode=dry-run` first
+   - then `npm_publish_mode=publish` once dry-run output looks correct
+11. Assemble per-platform release archives/installers so the web runtime is
    colocated with the CLI bundle.
-11. Run per-platform smoke checks against the packaged runtime, not the Vite dev
+12. Run per-platform smoke checks against the packaged runtime, not the Vite dev
    server:
    - `kato --version`
    - `kato status`
@@ -286,8 +313,8 @@ Manual local note:
   interactive terminal.
 - Keep release/CI smoke on `KATO_WEB_PASSWORD` or `--password-stdin`; do not
   rely on an interactive prompt in workflow automation.
-12. Upload versioned and stable-name release assets.
-13. Publish GitHub release and any installer/channel metadata.
+13. Upload versioned and stable-name release assets.
+14. Publish GitHub release and any installer/channel metadata.
 
 ### Planned Verification Checklist
 
@@ -304,6 +331,8 @@ Manual local note:
       passed for the release candidate.
 - [ ] `deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>`
       passed for the host package.
+- [ ] `deno task publish:npm-packages -- --input-dir <npm-package-dir> --npm-bin <npm-path> --dry-run`
+      passed for the release candidate.
 - [ ] Each platform artifact bundle includes `kato`, `kato-daemon`, and
       `kato-web` unless an explicit fallback exception is documented.
 - [ ] `kato web start` works from the packaged release output without invoking

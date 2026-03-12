@@ -1484,6 +1484,9 @@ Deno.test(
         port: 3173,
       });
       const webConfigStore = {
+        getPath() {
+          return join(katoDir, "web", "kato-web-config.yaml");
+        },
         load() {
           return Promise.resolve(webConfig);
         },
@@ -1491,7 +1494,7 @@ Deno.test(
           return Promise.resolve({
             created: false,
             config: defaultConfig,
-            path: join(katoDir, "web", "kato-web-config.yaml"),
+            path: this.getPath(),
           });
         },
       };

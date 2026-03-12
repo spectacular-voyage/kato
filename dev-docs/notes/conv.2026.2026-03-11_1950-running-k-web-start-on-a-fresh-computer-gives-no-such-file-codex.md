@@ -2861,3 +2861,69 @@ The next workflow should publish platform packages first, then `kato`, from the 
 Once publish is real, update [`README.md`](/home/djradon/hub/spectacular-voyage/kato/README.md) and [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) to make `npm install -g kato` the primary path.
 
 If you want me to keep going now, I’d take step 2 next: per-platform npm install smoke in GitHub Actions.
+
+# djradon_2026-03-12_0051_44
+
+OK, that worked.  For #2, I coul test on Windows, but I'll have to postpone Mac testing until tomorrow. Can we just defer install smoke and jump straight to #3
+
+# gpt-5.4_2026-03-12_0051_56
+
+I’m taking the publish workflow next. First I’m checking the existing release/npm notes and workflow shape so the new manual publish path fits the current binary assembly pipeline instead of duplicating it.
+
+# gpt-5.4_2026-03-12_0053_49
+
+I’m folding publish into the existing `release-manual` workflow instead of creating a second near-duplicate matrix. That keeps the published npm packages tied to the exact artifacts built in the same run, and it matches how npm trusted publishing is configured per workflow file.
+
+# gpt-5.4_2026-03-12_0054_10
+
+I’ve added a dedicated publish script so the workflow doesn’t need shell-heavy npm logic. Next I’m wiring it into repo tasks and the manual workflow with explicit `skip` / `dry-run` / `publish` inputs.
+
+# gpt-5.4_2026-03-12_0054_30
+
+I’ve got the workflow shape in place. I’m updating the npm task note and release runbook now so they describe the actual trigger surface: `release-manual.yml` can now build/assemble/smoke as before, and optionally do an npm dry-run or real publish from the same artifacts.
+
+# gpt-5.4_2026-03-12_0054_59
+
+The workflow and script wiring are in. I’m doing a focused verification pass now, including a real local `npm publish --dry-run` over the assembled packages, so this isn’t just YAML that looks plausible.
+
+# gpt-5.4_2026-03-12_0055_22
+
+The local dry-run publish is still running. I’m waiting on the actual `npm publish --dry-run` output so we know the generated package dirs are publishable, not just packable.
+
+# gpt-5.4_2026-03-12_0055_51
+
+The dry-run publish path works locally. I’m doing one final repo-level `check` pass so the new publish script is covered by the same quality gate as the rest of the release tooling.
+
+# gpt-5.4_2026-03-12_0056_03
+
+The publish workflow changes themselves are clean. The only thing blocking a full repo `check` right now is a separate type error from the parallel interactive-password work: a `WebConfigStoreLike` test double in [`daemon-cli_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts) is missing the new `getPath()` method. I’m patching that mock so the shared quality gate is green again.
+
+# gpt-5.4_2026-03-12_0056_12
+
+The repo-level blocker was just that one outdated test double. I’ve patched it and I’m rerunning the full `check` gate so the publish work and the parallel password changes are both accounted for together.
+
+# gpt-5.4_2026-03-12_0056_32
+
+Yes. I went straight to the publish path, but I folded it into [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) instead of creating a second near-duplicate workflow. That keeps publish tied to the exact artifacts built in the same run.
+
+What changed:
+- [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) now takes `workflow_dispatch` inputs:
+  - `npm_publish_mode`: `skip`, `dry-run`, `publish`
+  - `npm_tag`: npm dist-tag
+- [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) publishes platform packages first and `kato` last.
+- [`deno.json`](/home/djradon/hub/spectacular-voyage/kato/deno.json) now has `deno task publish:npm-packages`.
+- [`publish-npm-packages_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/publish-npm-packages_test.ts) covers publish ordering.
+- I updated [the npm install task note](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) and [the release runbook](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md).
+- I also fixed one unrelated repo-wide `check` blocker from the parallel password work in [`daemon-cli_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts#L1486).
+
+Verified:
+- `deno test tests/publish-npm-packages_test.ts`
+- `deno task publish:npm-packages -- --input-dir .test-tmp/npm-packages/package-smoke --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm --dry-run`
+- `deno task check --frozen`
+- workflow YAML parse check
+
+The dry-run publish succeeded locally for both:
+- `@spectacular-voyage/kato-linux-x64-gnu@0.2.4`
+- `kato@0.2.4`
+
+So the next operational step is simple: run `Release Manual` once with `npm_publish_mode=dry-run`, then again with `npm_publish_mode=publish` when you’re ready. I set the workflow up for npm trusted publishing, with `NPM_TOKEN` fallback if you need it; the implementation followed npm/GitHub’s current docs: https://docs.npmjs.com/trusted-publishers , https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-nodejs-packages , https://github.com/actions/setup-node .

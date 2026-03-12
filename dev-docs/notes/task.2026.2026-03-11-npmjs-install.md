@@ -192,8 +192,8 @@ Why this order matters:
   package includes three binaries plus metadata?
 - Do we need a Linux musl package for the first public npm cut, or is explicit
   `linux-x64-gnu` support enough?
-- Which publish mechanism should own registry auth in CI:
-  token-based publish or trusted publishing?
+- How much Windows/macOS native npm-install smoke do we require before calling
+  the npm channel release-ready?
 
 ## Decisions
 
@@ -212,6 +212,8 @@ Why this order matters:
   binary installs.
 - Unsupported platforms should fail with an explicit runtime error, not an
   implicit broken install.
+- Prefer npm trusted publishing from GitHub Actions, with `NPM_TOKEN` only as a
+  fallback if trusted publishing is not yet configured.
 
 ## Contract Changes
 
@@ -259,6 +261,8 @@ Why this order matters:
   or Deno.
 - Add publish-assembly checks proving the npm platform package contents match
   the packaged native bundle contents for the same version.
+- Current local publish dry-run result:
+  - `deno task publish:npm-packages -- --input-dir <npm-package-dir> --npm-bin <npm-path> --dry-run`
 - Add install/update/uninstall doc verification for the npm channel once the
   README wording exists.
 
@@ -289,7 +293,7 @@ Why this order matters:
       supported platform package plus the wrapper package.
 - [x] Extend the release workflow so npm package assembly happens after native
       bundle packaging.
-- [ ] Add npm publish automation only after local package assembly and install
-      smoke checks are stable.
+- [x] Add npm publish automation with a manual `skip` / `dry-run` / `publish`
+      control in `.github/workflows/release-manual.yml`.
 - [ ] Update README/install docs and [[dev.release-runbook]] once the npm
       package shape is proven.
