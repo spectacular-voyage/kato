@@ -597,3 +597,89 @@ If you want, I can turn that into a concrete “Phase 0.5: installed bundle + De
 # djradon_2026-03-11_2116_31
 
 Or should I just jump to binaries.
+
+# gpt-5.4_2026-03-11_2117_01
+
+Yes, I would jump to binaries, but with a deliberately smaller Phase 1.
+
+The intermediate “installed source bundle + Deno prerequisite” path is a real quick win, but it has one big problem: you’ll do most of that packaging/install work twice. It improves UX, but it does not satisfy your actual distribution goal of “non-programmer install, no Deno prerequisite.”
+
+My recommendation:
+
+- Jump to binaries now.
+- Do not let Permission Broker block Phase 1.
+- Accept coarse baked Deno permissions plus app-level `AllowedRoot` enforcement for the first binary release.
+- Keep Vite only for build/dev.
+- Make `kato web start` use packaged production web artifacts, not the dev server.
+
+Concretely, Phase 1 should be:
+
+- `kato` as the launcher binary
+- `kato-daemon` as a compiled binary
+- packaged prebuilt web runtime/artifacts for `kato web start`
+- no Permission Broker yet
+- no attempt to preserve dynamic Deno-enforced `AllowedRoot` as a release blocker
+
+Why this is the right cut:
+
+- It hits the real user goal.
+- It avoids building a temporary Deno-dependent install channel you’ll retire.
+- It keeps the security model good enough: Deno as a coarse sandbox, Kato as the fine-grained policy layer.
+- It leaves room to add Permission Broker later if you decide the extra complexity is worth it.
+
+I would only avoid jumping to binaries if this is a hard requirement right now:
+- “runtime-mutated `AllowedRoot` must remain Deno-enforced, not just app-enforced.”
+
+If that is not a hard requirement, binaries are the better use of effort.
+
+The practical sequencing I’d use is:
+
+1. Switch `kato web start` to packaged production artifacts.
+2. Add binary packaging for `kato` and `kato-daemon`.
+3. Ship the first installer/direct bundle.
+4. Revisit Permission Broker as a hardening follow-up, not as part of the first release.
+
+If you want, I can update the distribution note to explicitly make this the recommendation: “skip the Deno-dependent interim channel and go straight to a minimal binary Phase 1.”
+
+# gpt-5.4_2026-03-11_2117_02
+
+Yes, I would jump to binaries, but with a deliberately smaller Phase 1.
+
+The intermediate “installed source bundle + Deno prerequisite” path is a real quick win, but it has one big problem: you’ll do most of that packaging/install work twice. It improves UX, but it does not satisfy your actual distribution goal of “non-programmer install, no Deno prerequisite.”
+
+My recommendation:
+
+- Jump to binaries now.
+- Do not let Permission Broker block Phase 1.
+- Accept coarse baked Deno permissions plus app-level `AllowedRoot` enforcement for the first binary release.
+- Keep Vite only for build/dev.
+- Make `kato web start` use packaged production web artifacts, not the dev server.
+
+Concretely, Phase 1 should be:
+
+- `kato` as the launcher binary
+- `kato-daemon` as a compiled binary
+- packaged prebuilt web runtime/artifacts for `kato web start`
+- no Permission Broker yet
+- no attempt to preserve dynamic Deno-enforced `AllowedRoot` as a release blocker
+
+Why this is the right cut:
+
+- It hits the real user goal.
+- It avoids building a temporary Deno-dependent install channel you’ll retire.
+- It keeps the security model good enough: Deno as a coarse sandbox, Kato as the fine-grained policy layer.
+- It leaves room to add Permission Broker later if you decide the extra complexity is worth it.
+
+I would only avoid jumping to binaries if this is a hard requirement right now:
+- “runtime-mutated `AllowedRoot` must remain Deno-enforced, not just app-enforced.”
+
+If that is not a hard requirement, binaries are the better use of effort.
+
+The practical sequencing I’d use is:
+
+1. Switch `kato web start` to packaged production artifacts.
+2. Add binary packaging for `kato` and `kato-daemon`.
+3. Ship the first installer/direct bundle.
+4. Revisit Permission Broker as a hardening follow-up, not as part of the first release.
+
+If you want, I can update the distribution note to explicitly make this the recommendation: “skip the Deno-dependent interim channel and go straight to a minimal binary Phase 1.”

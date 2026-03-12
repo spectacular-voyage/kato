@@ -48,13 +48,14 @@ export default define.page(async function LoginPage(ctx) {
         title="Login"
         description="Authenticate to access conversation data and operator state."
         showLogout
+        showBrandLogo={false}
         csrfToken={ctx.state.csrfToken}
         liveAppStatus={false}
         appStatus={appStatus}
       />
 
-      <section class="grid">
-        <article class="card span-5">
+      <section class="grid login-grid">
+        <article class="card login-card">
           <h2>Sign In</h2>
           {error ? <p class="danger">Invalid username or password.</p> : null}
           <form method="post" class="login-form">

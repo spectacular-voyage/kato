@@ -6,6 +6,7 @@ interface AppHeaderProps {
   description: string;
   currentPath?: string;
   showLogout?: boolean;
+  showBrandLogo?: boolean;
   csrfToken?: string;
   liveAppStatus?: boolean;
   appStatus?: {
@@ -30,20 +31,25 @@ function getTabClass(href: string, currentPath: string | undefined): string {
 
 export default function AppHeader(props: AppHeaderProps) {
   const liveAppStatus = props.liveAppStatus ?? true;
+  const showBrandLogo = props.showBrandLogo ?? true;
 
   return (
     <section class="app-header">
       <div class="app-header-top">
         <div class="app-header-identity">
-          <a class="brand-link" href="/" aria-label="Kato Web home">
-            <img
-              class="brand-logo"
-              src="/brand/logo"
-              alt="Kato logo"
-              width="56"
-              height="56"
-            />
-          </a>
+          {showBrandLogo
+            ? (
+              <a class="brand-link" href="/" aria-label="Kato Web home">
+                <img
+                  class="brand-logo"
+                  src="/brand/logo"
+                  alt="Kato logo"
+                  width="56"
+                  height="56"
+                />
+              </a>
+            )
+            : null}
           <div class="app-header-copy">
             <p class="mono muted app-eyebrow">kato operator console</p>
             <h1>{props.title}</h1>

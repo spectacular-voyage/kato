@@ -16,13 +16,17 @@ export default define.page(function App({ Component, state }) {
           <Component />
         </main>
         <footer class="app-footer">
-          <img
-            class="footer-wordmark"
-            src="/brand/wordmark"
-            alt="Kato"
-            width="240"
-            height="48"
-          />
+          {state.pathname !== "/login"
+            ? (
+              <img
+                class="footer-wordmark"
+                src="/brand/wordmark"
+                alt="Kato"
+                width="240"
+                height="48"
+              />
+            )
+            : null}
           <p class="footer-copy">
             © 2026{" "}
             <a

@@ -37,6 +37,7 @@ app.use(async (ctx) => {
   ctx.state.appName = "Kato Web";
   ctx.state.authenticated = false;
   ctx.state.csrfToken = undefined;
+  ctx.state.pathname = new URL(ctx.req.url).pathname;
   return await ctx.next();
 });
 

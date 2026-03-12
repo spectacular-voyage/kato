@@ -292,6 +292,16 @@ a {
   gap: 12px;
 }
 
+.login-grid {
+  justify-content: center;
+}
+
+.login-card {
+  grid-column: 4 / span 6;
+  width: min(100%, 34rem);
+  justify-self: center;
+}
+
 .card-split {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
@@ -1118,6 +1128,11 @@ a {
   .card-split,
   .log-search-form {
     grid-template-columns: 1fr;
+  }
+
+  .login-card {
+    grid-column: span 12;
+    width: 100%;
   }
 
   .log-search-actions {
