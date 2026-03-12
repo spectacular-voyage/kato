@@ -1,7 +1,10 @@
 import { Head } from "fresh/runtime";
 import SummaryLive from "../islands/SummaryLive.tsx";
 import AppHeader from "../src/app_header.tsx";
-import { loadSummaryPageData } from "../src/loaders/status.ts";
+import {
+  loadSummaryPageData,
+  toAppChromeStatus,
+} from "../src/loaders/status.ts";
 import { define } from "../utils.ts";
 
 export default define.page(async function Home(ctx) {
@@ -19,10 +22,10 @@ export default define.page(async function Home(ctx) {
           currentPath="/"
           showLogout
           csrfToken={ctx.state.csrfToken}
-          appStatus={{
+          appStatus={toAppChromeStatus({
             daemon: summary.daemon,
-            snapshot: summary.stale ? "stale" : "current",
-          }}
+            stale: summary.stale,
+          })}
         />
         <SummaryLive initialData={summary} endpoint="/api/summary" />
       </div>

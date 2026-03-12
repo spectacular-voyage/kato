@@ -683,3 +683,254 @@ The practical sequencing I’d use is:
 4. Revisit Permission Broker as a hardening follow-up, not as part of the first release.
 
 If you want, I can update the distribution note to explicitly make this the recommendation: “skip the Deno-dependent interim channel and go straight to a minimal binary Phase 1.”
+
+# djradon_2026-03-11_2133_39
+
+Is the "packaged prebuilt web runtime/artifacts" a binary?
+
+# gpt-5.4_2026-03-11_2133_46
+
+Not necessarily.
+
+“Packaged prebuilt web runtime/artifacts” just means the files `kato web start` needs are already built and shipped in the release bundle. That could be:
+
+- Non-binary packaged artifacts:
+  - `_fresh/server.js`
+  - `_fresh/server/...`
+  - static assets
+  - then launch with a Deno runtime
+
+- A binary:
+  - a compiled `kato-web` executable
+  - or a compiled hidden web-server mode inside another executable
+
+So in the plan we’ve been discussing, “packaged prebuilt web runtime/artifacts” most naturally means “not Vite, not source build on the user machine.” It does not by itself imply a binary.
+
+The clean distinction is:
+
+- prebuilt:
+  user does not run `vite build`
+- packaged:
+  shipped in the release/install bundle
+- binary:
+  executable machine-code artifact produced by `deno compile`
+
+For a first binary distribution, a very plausible shape is mixed:
+- `kato`: binary
+- `kato-daemon`: binary
+- web: packaged prebuilt JS/assets, not necessarily compiled
+
+That said, if you want the cleanest “no Deno prerequisite anywhere” story, then eventually the web side probably wants a binary runtime too, or a bundled runtime hidden behind the launcher.
+
+# djradon_2026-03-11_2138_00
+
+yeah. It's really the web service that needs binary the most, as it not only unrequires deno, but it unrequires node et al.
+
+OK, so the task note has kinda gotten unwieldy. Shall we craft a tight implementation plan (using my preferred template from [dev.general-guidance.md](dev-docs/notes/dev.general-guidance.md) ) just for the binaries. If we can include a web binary, that'd be great.
+
+# gpt-5.4_2026-03-11_2138_09
+
+I’m pulling the task-note template and the new binary-distributions note, then I’ll rewrite that note into a tighter implementation plan focused on binary shipping, including the web-binary decision path.
+
+# gpt-5.4_2026-03-11_2138_30
+
+I have the template and the scope. I’m turning the empty `2026 03 11 Binary Distributions` note into a focused implementation plan that separates the broad strategy note from the actionable binary track, with the web binary as the preferred target and a fallback explicitly called out if compile-time reality blocks it.
+
+# gpt-5.4_2026-03-11_2139_31
+
+The new note is in place. I’m doing one quick readback to make sure it actually follows the template cleanly and that the “web binary preferred, fallback explicit” decision isn’t buried.
+
+# gpt-5.4_2026-03-11_2139_39
+
+I drafted a focused binary-distribution plan in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md). It follows the template from [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md) with `Goal`, `Summary`, `Discussion`, `Open Issues`, `Decisions`, `Contract Changes`, `Testing`, `Non-Goals`, and a checkboxed `Implementation Plan`.
+
+The note makes the binary plan explicit:
+- jump straight to Phase 1 native binaries
+- prefer a three-binary bundle: `kato`, `kato-daemon`, `kato-web`
+- keep Vite only for dev/build, not installed runtime
+- use coarse baked Deno permissions plus app-level `AllowedRoot`
+- treat a non-binary packaged web runtime only as a temporary fallback if `kato-web` compile is blocked
+
+I didn’t run tests because this was a doc-only change. One detail: this note currently shows as a new untracked file in git, so if that’s intentional, the next step is just to keep refining it; if not, we can also link it from the broader distribution note or trim that older note to point here.
+
+# djradon_2026-03-11_2146_15
+
+I'm not sure we'll be able to get rid of vite in the "installed runtime contract" -- not sure what that means, but don't we depend on vite for the reactivity/live data/islands aspects of the web app?
+
+# gpt-5.4_2026-03-11_2146_18
+
+I’m checking the current Fresh docs on build/runtime responsibilities so I can answer this precisely. The key point is whether islands/reactivity require Vite after build, or only during dev/build.
+
+# gpt-5.4_2026-03-11_2146_38
+
+Probably not. “Installed runtime contract” just means: what the user’s installed app needs present at run time in order for `kato web start` to work.
+
+For Fresh 2, the official docs split that into two phases:
+
+- Build phase: run `deno task build` / `vite build`, which creates `_fresh` with optimized assets.
+- Runtime phase: run `deno serve -A _fresh/server.js`.
+
+Sources:
+- [Fresh deployment docs](https://fresh.deno.dev/docs/deployment)
+- [Fresh troubleshooting: production should start from `_fresh/server.js`, not `main.ts`](https://fresh.deno.dev/docs/latest/advanced/troubleshooting)
+
+So the islands/reactivity/live-data behavior does **not** imply that the installed machine must have Vite installed. Fresh’s [islands docs](https://fresh.deno.dev/docs/concepts/islands) say islands are rendered on server and client and “Fresh will take care of making it interactive on the client.” The build step prepares the client JS/assets for that. After build, the runtime contract is the generated `_fresh` output plus a server that runs it.
+
+So the clean interpretation is:
+
+- Vite is still part of the **build toolchain**
+- Vite is not necessarily part of the **installed runtime contract**
+- the installed runtime contract is ideally:
+  - `_fresh/server.js`
+  - emitted client/assets under `_fresh`
+  - whatever runtime executes that server, ideally a `kato-web` binary or at least a packaged runtime
+
+The analogy is: TypeScript apps depend on `tsc` to build, but not on `tsc` to run.
+
+One caveat: if we cannot compile `apps/web` into a standalone `kato-web` cleanly, then the fallback installed runtime may still need a Deno runtime bundled or assumed present. But even in that fallback, it still should not need Vite on the target machine.
+
+So I would keep the wording, but tighten it to:
+- “Do not keep Vite in the installed **runtime dependency set**.”
+- “Keep Vite in the dev/build toolchain.”
+
+If you want, I can patch that phrasing directly in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+# gpt-5.4_2026-03-11_2146_40
+
+Probably not. “Installed runtime contract” just means: what the user’s installed app needs present at run time in order for `kato web start` to work.
+
+For Fresh 2, the official docs split that into two phases:
+
+- Build phase: run `deno task build` / `vite build`, which creates `_fresh` with optimized assets.
+- Runtime phase: run `deno serve -A _fresh/server.js`.
+
+Sources:
+- [Fresh deployment docs](https://fresh.deno.dev/docs/deployment)
+- [Fresh troubleshooting: production should start from `_fresh/server.js`, not `main.ts`](https://fresh.deno.dev/docs/latest/advanced/troubleshooting)
+
+So the islands/reactivity/live-data behavior does **not** imply that the installed machine must have Vite installed. Fresh’s [islands docs](https://fresh.deno.dev/docs/concepts/islands) say islands are rendered on server and client and “Fresh will take care of making it interactive on the client.” The build step prepares the client JS/assets for that. After build, the runtime contract is the generated `_fresh` output plus a server that runs it.
+
+So the clean interpretation is:
+
+- Vite is still part of the **build toolchain**
+- Vite is not necessarily part of the **installed runtime contract**
+- the installed runtime contract is ideally:
+  - `_fresh/server.js`
+  - emitted client/assets under `_fresh`
+  - whatever runtime executes that server, ideally a `kato-web` binary or at least a packaged runtime
+
+The analogy is: TypeScript apps depend on `tsc` to build, but not on `tsc` to run.
+
+One caveat: if we cannot compile `apps/web` into a standalone `kato-web` cleanly, then the fallback installed runtime may still need a Deno runtime bundled or assumed present. But even in that fallback, it still should not need Vite on the target machine.
+
+So I would keep the wording, but tighten it to:
+- “Do not keep Vite in the installed **runtime dependency set**.”
+- “Keep Vite in the dev/build toolchain.”
+
+If you want, I can patch that phrasing directly in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+# djradon_2026-03-11_2148_43
+
+sure. And begin if you're ready.
+
+# gpt-5.4_2026-03-11_2148_55
+
+I’m tightening the wording in the binary-distributions note and then starting with the first implementation slice that won’t block on full packaging: explicit daemon/web binary override resolution plus launcher wiring. That gives us a concrete step toward installed binaries without needing the whole release pipeline in one shot.
+
+# gpt-5.4_2026-03-11_2149_05
+
+I’m checking the daemon and web entrypoints now before editing, because the override slice only makes sense if the compiled binaries can accept a stable invocation shape from the launcher. Then I’ll patch the new resolution path and keep the existing source fallback intact.
+
+# gpt-5.4_2026-03-11_2150_25
+
+I’ve chosen the smallest real implementation slice: binary-path resolution and launcher wiring. That means explicit `KATO_DAEMON_BIN` / `KATO_WEB_BIN` support plus sibling-binary detection from a compiled `kato`, while preserving the current source fallback for developer runs.
+
+# gpt-5.4_2026-03-11_2151_01
+
+I’m editing the launcher/runtime code now. The scope is still narrow: add installed-binary path resolution, wire `KATO_DAEMON_BIN` / `KATO_WEB_BIN`, and keep the current source-based behavior as fallback.
+
+# gpt-5.4_2026-03-11_2151_50
+
+The launcher wiring is in. I’m patching the tests now for three cases: sibling-binary resolution, env override precedence, and installed-binary launch behavior for both daemon and web.
+
+# gpt-5.4_2026-03-11_2152_27
+
+The code and tests are patched. I’m running format plus the focused test files now, because this slice touches constructor signatures, CLI wiring, and a new utility module.
+
+# gpt-5.4_2026-03-11_2152_39
+
+The first focused run surfaced two small issues: one test was over-assuming Windows path behavior on Linux, and my direct test command was missing `KATO_RUNTIME_DIR` in the env allowlist. I’m patching the Windows-only assertion and rerunning with the right env flags.
+
+# gpt-5.4_2026-03-11_2152_59
+
+The focused launcher tests are clean. I’m doing one more pass through CLI wiring now: a targeted `web-cli` suite plus direct type-checks on the router and launcher modules, since that’s where the new binary-resolution path was introduced.
+
+# gpt-5.4_2026-03-11_2153_09
+
+The router and CLI path check out too. I’m taking a final diff/status pass now so I can summarize exactly what changed and what the next implementation slice should be.
+
+# gpt-5.4_2026-03-11_2153_25
+
+I started the first binary-oriented implementation slice and tightened the note wording.
+
+The note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) now says “installed runtime dependency set” instead of “installed runtime contract” for the Vite point. On code, the launcher path now has real binary-resolution scaffolding:
+- [executable_resolution.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/executable_resolution.ts) adds installed-executable resolution with precedence `env override -> sibling binary -> source fallback`.
+- [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts) now wires `KATO_DAEMON_BIN` and `KATO_WEB_BIN` into the default launcher creation.
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) can now launch an installed `kato-daemon` binary directly.
+- [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts) can now launch an installed `kato-web` binary directly.
+
+This does not build binaries yet. It makes the CLI ready to prefer them once they exist, while preserving the current developer fallback. I also added focused coverage in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts), [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts), and [executable-resolution_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/executable-resolution_test.ts).
+
+Verified with:
+```bash
+deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts
+deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_WEB_PASSWORD tests/web-cli_test.ts
+deno check apps/cli/src/router.ts apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts apps/runtime/src/utils/executable_resolution.ts
+```
+
+I did not run full `deno task ci`. There are also unrelated existing worktree changes outside this slice that I left untouched. The next implementation step should be the first actual `deno compile` proof-of-concept for `kato`, `kato-daemon`, and `kato-web`.
+
+# gpt-5.4_2026-03-11_2153_34
+
+I started the first binary-oriented implementation slice and tightened the note wording.
+
+The note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) now says “installed runtime dependency set” instead of “installed runtime contract” for the Vite point. On code, the launcher path now has real binary-resolution scaffolding:
+- [executable_resolution.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/executable_resolution.ts) adds installed-executable resolution with precedence `env override -> sibling binary -> source fallback`.
+- [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts) now wires `KATO_DAEMON_BIN` and `KATO_WEB_BIN` into the default launcher creation.
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) can now launch an installed `kato-daemon` binary directly.
+- [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts) can now launch an installed `kato-web` binary directly.
+
+This does not build binaries yet. It makes the CLI ready to prefer them once they exist, while preserving the current developer fallback. I also added focused coverage in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts), [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts), and [executable-resolution_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/executable-resolution_test.ts).
+
+Verified with:
+```bash
+deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts
+deno test --allow-read --allow-write=.test-tmp --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_WEB_PASSWORD tests/web-cli_test.ts
+deno check apps/cli/src/router.ts apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts apps/runtime/src/utils/executable_resolution.ts
+```
+
+I did not run full `deno task ci`. There are also unrelated existing worktree changes outside this slice that I left untouched. The next implementation step should be the first actual `deno compile` proof-of-concept for `kato`, `kato-daemon`, and `kato-web`.
+
+# djradon_2026-03-11_2154_41
+
+Can you stage just your changes please (9 files)
+
+# gpt-5.4_2026-03-11_2154_52
+
+I’m staging only the binary-launcher slice I changed: the 4 runtime/CLI files, 3 test files, the new executable-resolution utility, and the binary-distributions task note. I’ll leave the unrelated worktree changes untouched.
+
+# gpt-5.4_2026-03-11_2155_07
+
+Staged just these 9 files:
+
+- [router.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/router.ts)
+- [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/mod.ts)
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts)
+- [executable_resolution.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/utils/executable_resolution.ts)
+- [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md)
+- [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts)
+- [executable-resolution_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/executable-resolution_test.ts)
+- [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts)
+
+Unrelated worktree changes were left unstaged.

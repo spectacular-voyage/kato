@@ -1,6 +1,7 @@
 import LogsResultsLive from "../islands/LogsResultsLive.tsx";
 import AppHeader from "./app_header.tsx";
 import { DEFAULT_LOG_LEVEL_FILTER } from "./loaders/logs.ts";
+import type { AppChromeStatus } from "./loaders/status.ts";
 import type {
   LogChannel,
   LogChannelFilter,
@@ -72,10 +73,7 @@ export interface LogPageViewProps {
   pageData: LogPageData;
   csrfToken?: string;
   liveResultsEndpoint?: string;
-  appStatus: {
-    daemon: "running" | "stopped";
-    snapshot: "current" | "stale";
-  };
+  appStatus: AppChromeStatus;
 }
 
 export default function LogPageView(props: LogPageViewProps) {

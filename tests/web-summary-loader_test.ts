@@ -461,7 +461,7 @@ Deno.test("loadAppChromeStatus distinguishes stale running snapshots from stoppe
       save: () => Promise.resolve(),
     },
   });
-  assertEquals(staleStatus.daemon, "running");
+  assertEquals(staleStatus.daemon, "unknown");
   assertEquals(staleStatus.snapshot, "stale");
 
   const stoppedStatus = await loadAppChromeStatus({

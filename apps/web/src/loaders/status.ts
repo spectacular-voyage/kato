@@ -55,7 +55,7 @@ export interface SummaryRecentError {
 }
 
 export interface AppChromeStatus {
-  daemon: "running" | "stopped";
+  daemon: "running" | "stopped" | "unknown";
   snapshot: "current" | "stale";
 }
 
@@ -120,10 +120,25 @@ export async function loadAppChromeStatus(
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(statusPath, now);
   const snapshot = await statusStore.load();
+  const stale = isStatusSnapshotStale(snapshot, now());
 
-  return {
+  return toAppChromeStatus({
     daemon: snapshot.daemonRunning ? "running" : "stopped",
-    snapshot: isStatusSnapshotStale(snapshot, now()) ? "stale" : "current",
+    stale,
+  });
+}
+
+export function toAppChromeStatus(options: {
+  daemon: "running" | "stopped";
+  stale: boolean;
+}): AppChromeStatus {
+  return {
+    daemon: options.daemon === "stopped"
+      ? "stopped"
+      : options.stale
+      ? "unknown"
+      : "running",
+    snapshot: options.stale ? "stale" : "current",
   };
 }
 

@@ -1,3 +1,4 @@
+import type { AppChromeStatus } from "./loaders/status.ts";
 import HeaderStatusLive from "../islands/HeaderStatusLive.tsx";
 import { HeaderStatusStack } from "./header_status.tsx";
 
@@ -9,10 +10,7 @@ interface AppHeaderProps {
   showBrandLogo?: boolean;
   csrfToken?: string;
   liveAppStatus?: boolean;
-  appStatus?: {
-    daemon: "running" | "stopped";
-    snapshot: "current" | "stale";
-  };
+  appStatus?: AppChromeStatus;
 }
 
 const NAV_ITEMS = [

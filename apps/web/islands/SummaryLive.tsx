@@ -1,7 +1,14 @@
 import type { SummaryPageData } from "../src/loaders/status.ts";
 import { buildSessionInventorySessionHref } from "../src/session_routes.ts";
-import { formatTimestamp } from "../src/time.ts";
+import {
+  formatRelativeTimestamp,
+  formatTimestamp,
+  parseTimestampMs,
+} from "../src/time.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
+import { useEffect, useState } from "preact/hooks";
+
+const LIVE_CLOCK_INTERVAL_MS = 1_000;
 
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined) {
@@ -21,28 +28,30 @@ function formatBytes(bytes: number | undefined): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function relativeTimestamp(value: string | undefined): string {
-  if (!value) {
-    return "n/a";
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return value;
-  }
-  const diffSeconds = Math.max(
-    0,
-    Math.floor((Date.now() - timestamp) / 1000),
-  );
-  if (diffSeconds < 60) {
-    return `${diffSeconds}s ago`;
-  }
-  if (diffSeconds < 3600) {
-    return `${Math.floor(diffSeconds / 60)}m ago`;
-  }
-  if (diffSeconds < 86400) {
-    return `${Math.floor(diffSeconds / 3600)}h ago`;
-  }
-  return `${Math.floor(diffSeconds / 86400)}d ago`;
+function resolveInitialClockMs(data: SummaryPageData): number {
+  return parseTimestampMs(data.generatedAt) ??
+    parseTimestampMs(data.heartbeatAt) ??
+    0;
+}
+
+function useSummaryClock(data: SummaryPageData): number {
+  const [nowMs, setNowMs] = useState(() => resolveInitialClockMs(data));
+
+  useEffect(() => {
+    const dataTimestampMs = resolveInitialClockMs(data);
+    setNowMs((current) => Math.max(current, dataTimestampMs));
+  }, [data.generatedAt, data.heartbeatAt]);
+
+  useEffect(() => {
+    const syncNow = () => {
+      setNowMs(Date.now());
+    };
+    syncNow();
+    const interval = setInterval(syncNow, LIVE_CLOCK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  return nowMs;
 }
 
 function buildLogHref(
@@ -74,6 +83,7 @@ export default function SummaryLive(
     endpoint: props.endpoint,
     intervalMs: LIVE_POLL_INTERVAL_MS,
   });
+  const nowMs = useSummaryClock(data);
   const activeSessionsByProvider = new Map(
     data.providers.map((
       provider,
@@ -88,6 +98,7 @@ export default function SummaryLive(
   const activeSessionRows = data.summarySessions
     .filter((session) => session.state === "active")
     .slice(0, 10);
+  const heartbeatAge = formatRelativeTimestamp(data.heartbeatAt, nowMs);
 
   return (
     <section class="grid">
@@ -158,6 +169,9 @@ export default function SummaryLive(
             : "Snapshot heartbeat is current."}
         </p>
         <p class="mono">Heartbeat: {formatTimestamp(data.heartbeatAt)}</p>
+        <p class={data.stale ? "mono stale" : "mono muted"}>
+          Age: {heartbeatAge}
+        </p>
         <p class="mono">
           Memory RSS: {formatBytes(data.memory?.process.rss)}
         </p>
@@ -257,7 +271,7 @@ export default function SummaryLive(
                 <div>{error.message}</div>
                 <div class="muted">
                   {formatTimestamp(error.timestamp)} ·{" "}
-                  {relativeTimestamp(error.timestamp)}
+                  {formatRelativeTimestamp(error.timestamp, nowMs)}
                 </div>
               </li>
             ))}
