@@ -188,6 +188,24 @@ function toPowerShellEncodedCommand(script: string): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
+function parseDetachedPid(stdoutText: string): number | undefined {
+  const lines = stdoutText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!/^\d+$/.test(line)) {
+      continue;
+    }
+    const pid = Number.parseInt(line, 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      return pid;
+    }
+  }
+  return undefined;
+}
+
 export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
   constructor(
     private readonly denoExecPath: string = Deno.execPath(),
@@ -229,8 +247,8 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
@@ -260,8 +278,8 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
@@ -316,8 +334,8 @@ ${startProcessArgs}
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
@@ -353,8 +371,8 @@ ${startProcessArgs}
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );

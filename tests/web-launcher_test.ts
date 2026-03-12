@@ -223,6 +223,44 @@ Deno.test(
 );
 
 Deno.test(
+  "DenoDetachedWebLauncher PowerShell script helper accepts build output before the pid",
+  async () => {
+    const launcher = new DenoDetachedWebLauncher(
+      "/fake/deno",
+      "C:\\repo",
+      () => ({
+        spawn() {
+          throw new Error("unexpected spawn call");
+        },
+        output() {
+          return Promise.resolve({
+            code: 0,
+            stdout: new TextEncoder().encode(
+              [
+                "vite v7.3.1 building client environment for production...",
+                "transforming...",
+                "✓ 2 modules transformed.",
+                "29284",
+                "",
+              ].join("\n"),
+            ),
+            stderr: new Uint8Array(),
+          });
+        },
+      }),
+    );
+
+    const pid = await (
+      launcher as unknown as {
+        launchDetachedScriptViaPowerShell(script: string): Promise<number>;
+      }
+    ).launchDetachedScriptViaPowerShell("Write-Output 'stub'");
+
+    assertEquals(pid, 29284);
+  },
+);
+
+Deno.test(
   "DenoDetachedWebLauncher can launch an installed web binary directly",
   async () => {
     let capturedCommand: string | undefined;
