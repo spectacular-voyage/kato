@@ -2,6 +2,9 @@ name: Release Manual
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/release-manual.yml
 
 jobs:
   build-binaries:
