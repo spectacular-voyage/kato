@@ -1,5 +1,9 @@
 import { parseArgs } from "@std/cli";
 import { dirname, fromFileUrl, isAbsolute, join, resolve } from "@std/path";
+import {
+  restorePlatformPackageExecutableModes,
+  restoreWrapperPackageExecutableModes,
+} from "./npm-package-permissions.ts";
 
 interface NpmPackagesMetadata {
   createdAt: string;
@@ -191,7 +195,31 @@ if (import.meta.main) {
   }
   baseEnv.PATH = `${dirname(npmBin)}${baseEnv.PATH ? `:${baseEnv.PATH}` : ""}`;
 
-  for (const target of await resolvedPublicationOrder(metadata, inputDir)) {
+  const targets = await resolvedPublicationOrder(metadata, inputDir);
+  const packageDirsByName = new Map(
+    targets.map((target) => [target.packageName, target.packageDir]),
+  );
+  const wrapperDir = packageDirsByName.get(metadata.wrapperPackageName);
+  if (!wrapperDir) {
+    throw new Error(
+      `Resolved publication order did not include wrapper package ${metadata.wrapperPackageName}`,
+    );
+  }
+  await restoreWrapperPackageExecutableModes(wrapperDir);
+  for (const platformPackage of metadata.platformPackages) {
+    const packageDir = packageDirsByName.get(platformPackage.packageName);
+    if (!packageDir) {
+      throw new Error(
+        `Resolved publication order did not include platform package ${platformPackage.packageName}`,
+      );
+    }
+    await restorePlatformPackageExecutableModes(
+      packageDir,
+      platformPackage.target,
+    );
+  }
+
+  for (const target of targets) {
     const args = ["publish", "--tag", tag];
     if (parsed["dry-run"]) {
       args.push("--dry-run");

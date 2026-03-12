@@ -1,5 +1,9 @@
 import { parseArgs } from "@std/cli";
 import { dirname, fromFileUrl, isAbsolute, join, resolve } from "@std/path";
+import {
+  restorePlatformPackageExecutableModes,
+  restoreWrapperPackageExecutableModes,
+} from "./npm-package-permissions.ts";
 
 interface NpmPackagesMetadata {
   createdAt: string;
@@ -289,6 +293,11 @@ if (import.meta.main) {
     metadata,
     inputDir,
     libc,
+  );
+  await restoreWrapperPackageExecutableModes(wrapperDir);
+  await restorePlatformPackageExecutableModes(
+    platformPackage.packageDir,
+    platformPackage.target,
   );
 
   const baseEnv: Record<string, string> = {};

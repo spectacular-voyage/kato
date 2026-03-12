@@ -248,7 +248,11 @@ Trusted publishing note:
   `@spectacular-voyage/kato-*` platform package before `npm_publish_mode=publish`
   will work without a token.
 
-### Planned Release Steps
+### Current Release Steps
+
+Use `.github/workflows/release-manual.yml` as the primary release path. The
+script-by-script commands below remain useful for local debugging and manual
+fallback, but the normal release cut should go through the workflow.
 
 1. Bump versions and create the next release-notes stub:
 
@@ -256,87 +260,105 @@ Trusted publishing note:
 deno task bump:version -- --patch
 ```
 
-2. Confirm release commit is on `main` and CI is green.
-3. Run the full local quality gate:
+2. Confirm the release commit is on `main` and the normal CI quality gate is
+   green.
+3. Trigger `Release Manual` from GitHub Actions with the inputs you want for
+   this pass:
+   - `npm_publish_mode=skip`, `dry-run`, or `publish`
+   - `npm_tag=<dist-tag>`
+   - `github_release_mode=skip`, `draft`, or `publish`
+4. Let the workflow run the actual release pipeline:
+   - build binaries on Linux x64, Windows x64, macOS x64, and macOS arm64
+   - package each platform bundle
+   - run the lightweight packaged-bundle smoke on each native runner
+   - assemble the npm wrapper and platform packages
+   - run native-runner npm install smoke on Linux, Windows, macOS x64, and
+     macOS arm64
+   - optionally publish npm packages from the assembled artifact
+   - optionally create or update the GitHub Release with archives, checksums,
+     and the matching release-notes body
+5. Review the results for the draft pass:
+   - npm dry-run output looks correct
+   - all native smoke jobs are green
+   - the draft GitHub Release contains the expected per-platform archives and
+     `.sha256` files
+   - the release page body matches `release-notes.v<version>.md`
+6. If the draft pass looks good, rerun `Release Manual` for the same commit
+   with publish-oriented inputs:
+   - `npm_publish_mode=publish` when you are ready to publish npm packages
+   - `github_release_mode=publish` when you are ready to publish the release
+
+Current workflow caveat:
+
+- the workflow supports the draft-first pattern, but publishing currently means
+  rerunning the full workflow for the same commit; it does not yet have a
+  lightweight "publish existing draft release" path
+
+Manual local note:
+
+- `kato web init --username <username>` now prompts for the password on an
+  interactive terminal
+- keep release/CI smoke on `KATO_WEB_PASSWORD` or `--password-stdin`; do not
+  rely on an interactive prompt in workflow automation
+
+### Manual Fallback Steps
+
+Use these only when debugging the workflow or bootstrapping a release outside
+GitHub Actions.
+
+1. Run the full local quality gate:
 
 ```bash
 deno task ci
 ```
 
-4. Build platform binaries on the native runner with the scripted builder:
+2. Build platform binaries with the scripted builder:
 
 ```bash
 deno task build:binaries -- --output-dir <staging-dir>
 ```
 
-5. Verify staged build metadata and version alignment before packaging:
+3. Verify staged build metadata and version alignment:
    - inspect `<staging-dir>/build-metadata.json`
    - confirm CLI/daemon/web versions are aligned for the release cut
-6. Package the staged binaries into release bundles:
+4. Package the staged binaries:
 
 ```bash
 deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>
 ```
 
-7. Verify packaged bundle outputs:
+5. Verify packaged bundle outputs:
    - versioned bundle directory exists
    - platform archive exists
    - archive checksum exists
    - `bundle-metadata.json` exists
-8. Assemble npm wrapper and platform packages from the packaged bundle outputs:
+6. Assemble npm wrapper and platform packages from the packaged bundle outputs:
 
 ```bash
 deno task assemble:npm-packages -- --input-dir <bundle-dir> [--input-dir <bundle-dir> ...]
 ```
 
-9. Run npm pack/install smoke on the assembled packages:
+7. Run npm pack/install smoke on the assembled packages:
 
 ```bash
 deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>
 ```
 
-10. If publishing to npm for this release, run the manual publish path from the
-    same workflow artifacts:
-   - `npm_publish_mode=dry-run` first
-   - then `npm_publish_mode=publish` once dry-run output looks correct
-11. Assemble per-platform release archives/installers so the web runtime is
-   colocated with the CLI bundle.
-12. Run per-platform smoke checks against the packaged runtime, not the Vite dev
-   server:
-   - `kato --version`
-   - `kato status`
-   - `KATO_WEB_PASSWORD=<password> kato web init --username <username>`
-   - `kato web start`
-   - HTTP probe of `/login` on the configured host/port
-   - `kato web status`
-   - `kato web stop`
+8. If publishing manually to npm from the assembled artifact, use:
+   - `deno task publish:npm-packages -- --input-dir <npm-package-dir> --npm-bin <npm-path> --dry-run`
+   - then the same command without `--dry-run`
 
-Manual local note:
-
-- `kato web init --username <username>` now prompts for the password on an
-  interactive terminal.
-- Keep release/CI smoke on `KATO_WEB_PASSWORD` or `--password-stdin`; do not
-  rely on an interactive prompt in workflow automation.
-13. Upload versioned and stable-name release assets.
-14. Publish GitHub release and any installer/channel metadata.
-
-### Planned Verification Checklist
+### Current Verification Checklist
 
 - [ ] `deno task ci` passed for the release commit.
-- [ ] `deno task build:binaries -- --output-dir <staging-dir>` passed on each
-      native runner.
-- [ ] `<staging-dir>/build-metadata.json` exists and shows aligned release
-      versions.
-- [ ] `deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>`
-      passed on each native runner.
-- [ ] Packaged output includes bundle directory, archive, checksum, and
-      `bundle-metadata.json`.
-- [ ] `deno task assemble:npm-packages -- --input-dir <bundle-dir> [...]`
-      passed for the release candidate.
-- [ ] `deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>`
-      passed for the host package.
-- [ ] `deno task publish:npm-packages -- --input-dir <npm-package-dir> --npm-bin <npm-path> --dry-run`
-      passed for the release candidate.
+- [ ] `Release Manual` completed the native binary build matrix for the release
+      commit.
+- [ ] `Release Manual` completed the packaged-bundle smoke slice on all four
+      native runners.
+- [ ] `Release Manual` completed the native npm install smoke matrix on Linux,
+      Windows, macOS x64, and macOS arm64.
+- [ ] The build artifacts show aligned CLI/daemon/web versions for the release
+      cut.
 - [ ] Each platform artifact bundle includes `kato`, `kato-daemon`, and
       `kato-web` unless an explicit fallback exception is documented.
 - [ ] `kato web start` works from the packaged release output without invoking
@@ -344,5 +366,15 @@ Manual local note:
 - [ ] `/login` responds on the configured host/port after `kato web start`.
 - [ ] `kato web status` and `kato web stop` succeed against the packaged web
       runtime.
+- [ ] `Release Manual` npm dry-run or publish output looks correct for
+      `@spectacular-voyage/kato` and the `@spectacular-voyage/kato-*`
+      platform packages.
+- [ ] The GitHub Release contains the expected per-platform archives, checksums,
+      and matching release-notes body for the release version.
 - [ ] Release notes distinguish developer `deno task dev:web` from installed
       `kato web start`.
+
+### TODO
+
+- [ ] Add a lightweight workflow path to publish an existing draft GitHub
+      Release without rerunning the full release pipeline.
