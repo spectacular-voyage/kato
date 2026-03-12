@@ -2672,3 +2672,71 @@ We're just working on main for now. I'm fine with that, but feel free to bump me
 - harden npm package assembly for downloaded workflow artifacts
 - add tests for version bumping and npm package assembly path resolution
 - update binary/npm task notes and release runbook for npm-wrapper-first releases
+
+# djradon_2026-03-12_0009_33
+
+had a strange "non-test quality gate" failure:
+
+TS2307 [ERROR]: Cannot find module 'file:///home/runner/work/kato/kato/apps/web/_fresh/server.js'.
+    at file:///home/runner/work/kato/kato/apps/web/src/compiled_main.ts:1:20
+
+error: Type checking failed.
+Error: Process completed with exit code 1.
+
+# gpt-5.4_2026-03-12_0009_43
+
+I’m checking the binary build path around `compiled_main.ts` and the release workflow to see where type checking is happening before `_fresh/server.js` exists. If that’s the cause, I’ll patch the entrypoint or task ordering so the quality gate stops depending on generated build output.
+
+# gpt-5.4_2026-03-12_0009_57
+
+The failure is exactly what it looks like: `apps/web` type checking is touching `src/compiled_main.ts` before Fresh has generated `_fresh/server.js`. I’m checking the cleanest fix now, most likely making the web `check` task stop depending on generated output rather than trying to paper over it with a fake `_fresh` file.
+
+# gpt-5.4_2026-03-12_0010_00
+
+I’ve confirmed the failure path from the config. I’m reproducing `apps/web`’s `check` locally now so I can patch the minimum necessary change and verify it against the actual task, not just the stack trace.
+
+# gpt-5.4_2026-03-12_0010_38
+
+The clean fix is to stop statically importing `_fresh/server.js`. Root `check` also touches `apps/web/src/compiled_main.ts`, so excluding the file from one task would still leave the same CI failure elsewhere. I’m patching `compiled_main.ts` to lazy-load the generated Fresh server at runtime instead.
+
+# gpt-5.4_2026-03-12_0010_44
+
+The patch is in. I’m verifying two things now: normal repo checks still pass, and a copied `apps/web` tree with `_fresh` removed can now survive `deno task check`, which is the CI failure mode you hit.
+
+# gpt-5.4_2026-03-12_0011_05
+
+The binary compile still works after the change, which was the risky part. I’m running the real root `check` task now so we have the exact gate signal that failed in CI, not just isolated file checks.
+
+# gpt-5.4_2026-03-12_0011_13
+
+The root quality gate passes now. I’m just cleaning the temporary verification directories I created so I don’t leave extra noise in `.test-tmp`, then I’ll summarize the cause and the fix.
+
+# gpt-5.4_2026-03-12_0011_25
+
+The failure was real and the cause was narrow: [`apps/web/src/compiled_main.ts:1`](file:///home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts#L1) had a static import of `_fresh/server.js`, so any `deno check` that touched that file would fail on a clean runner before the Fresh build had generated `_fresh`.
+
+I changed it to lazy-load the Fresh server at runtime instead in [`apps/web/src/compiled_main.ts:9`](file:///home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts#L9). That keeps the binary/runtime behavior the same, but removes the generated-file dependency from the non-build quality gate.
+
+Verified:
+- `deno task check --frozen`
+- `deno task --cwd apps/web check`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/compiled-main-smoke --skip-web-install --skip-web-build`
+
+So this one should be safe to rerun in GitHub now.
+
+# gpt-5.4_2026-03-12_0011_28
+
+The failure was real and the cause was narrow: [`apps/web/src/compiled_main.ts:1`](file:///home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts#L1) had a static import of `_fresh/server.js`, so any `deno check` that touched that file would fail on a clean runner before the Fresh build had generated `_fresh`.
+
+I changed it to lazy-load the Fresh server at runtime instead in [`apps/web/src/compiled_main.ts:9`](file:///home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts#L9). That keeps the binary/runtime behavior the same, but removes the generated-file dependency from the non-build quality gate.
+
+Verified:
+- `deno task check --frozen`
+- `deno task --cwd apps/web check`
+- `deno task build:binaries -- --output-dir .test-tmp/binaries/compiled-main-smoke --skip-web-install --skip-web-build`
+
+So this one should be safe to rerun in GitHub now.
+
+# djradon_2026-03-12_0012_27
+
+ok, what's next?

@@ -2,7 +2,7 @@
 id: zskc5s6r8d1khexmq6q6q7t
 title: Release Runbook
 desc: ''
-updated: 1772776769658
+updated: 1773299382157
 created: 1772551839242
 ---
 
@@ -23,7 +23,7 @@ is deferred to a follow-up hardening track.
   - tag: `v0.2.0`
   - `apps/cli/deno.json` `version`: `0.2.0`
 - Daemon version is allowed to differ for this release line.
-
+A
 ### Release Steps
 
 1. Confirm release commit is on `main` and CI is green.
