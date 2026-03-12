@@ -270,5 +270,7 @@ jobs:
           )
           if [ "${{ inputs.npm_publish_mode }}" = "dry-run" ]; then
             args+=(--dry-run)
+          else
+            args+=(--provenance)
           fi
           deno task publish:npm-packages -- "${args[@]}"

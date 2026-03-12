@@ -232,7 +232,9 @@ Current npm publish behavior:
 - uses the same assembled npm packages from the current `release-manual` run
 - publishes platform packages first, then the public wrapper package
 - uses `npm publish --dry-run` when `npm_publish_mode=dry-run`
-- uses `npm publish --provenance` when `npm_publish_mode=publish`
+- uses plain `npm publish` for local/manual bootstrap publishes
+- adds `npm publish --provenance` only when the GitHub workflow runs with
+  `npm_publish_mode=publish`
 - is intended to use npm trusted publishing from GitHub Actions
 - leaves `NODE_AUTH_TOKEN` available as a fallback via `NPM_TOKEN` if trusted
   publishing is not configured yet

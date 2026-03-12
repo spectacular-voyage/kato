@@ -3044,3 +3044,783 @@ The path-resolution patch is in. I’m running both the targeted tests and a loc
 # gpt-5.4_2026-03-12_0108_17
 
 The regression test passed. The stale-metadata dry-run is still packing the Linux platform tarball, which is slow but expected because the package is large; I’m waiting for the wrapper publish to complete too so we know the path fallback works end to end.
+
+# gpt-5.4_2026-03-12_0108_51
+
+That failure is fixed.
+
+Root cause: [`npm-packages-metadata.json`](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/npm-packages/package-smoke/npm-packages-metadata.json) was carrying absolute `wrapperDir` / `packageDir` paths from the assembly job. In the later publish job, the artifact is downloaded somewhere else, so [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) was trying to `cd` into directories that did not exist.
+
+I patched the publish script to resolve downloaded package directories locally instead of trusting stale absolute paths, and added a regression in [`publish-npm-packages_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/publish-npm-packages_test.ts) for that exact case.
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/publish-npm-packages_test.ts`
+- a local `publish:npm-packages --dry-run` against a copied package assembly whose metadata paths were intentionally rewritten to `/stale/source/...`
+- both the platform package and wrapper package completed `npm publish --dry-run`
+
+So you should be able to rerun the workflow without changing the artifact download path.
+
+# djradon_2026-03-12_0108_56
+
+How will npm know the publishing account is me if it's run from github actions?
+
+# gpt-5.4_2026-03-12_0109_05
+
+I’m checking the current npm and GitHub Actions docs for trusted publishing and token-based publish, because the answer depends on which auth path you use in the workflow.
+
+# gpt-5.4_2026-03-12_0109_50
+
+If you use trusted publishing, npm does not identify “you at a keyboard.” It identifies an authorized workflow.
+
+Specifically, npm says trusted publishing for GitHub Actions works by creating a trust relationship via OIDC, and npm will accept publishes from the specific authorized workflow you configure for the package:
+- GitHub org/user
+- repository
+- workflow filename
+- optional environment  
+Sources: https://docs.npmjs.com/trusted-publishers/ , https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
+
+So for `kato`, npm will know:
+- this publish came from `spectacular-voyage/kato`
+- from `.github/workflows/release-manual.yml`
+- on a GitHub-hosted runner
+- with `id-token: write`
+
+It will not be “because this was djradon personally” in the normal CLI sense. It is “because this workflow is the trusted publisher for this package.”
+
+If you use `NPM_TOKEN` instead, then npm knows the publishing account from the token. In that mode, the token owner must already have write access to `kato` and each `@spectacular-voyage/kato-*` package. Source: https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
+
+So the short answer is:
+
+- trusted publishing: npm authenticates the workflow
+- token publishing: npm authenticates the token owner
+
+One practical consequence: for a brand-new package, you may need a one-time bootstrap under an account that owns/publishes the package before switching fully to trusted publishing. I’m inferring that from npm’s trusted publisher setup being configured in package settings on npmjs.com.
+
+# gpt-5.4_2026-03-12_0109_52
+
+If you use trusted publishing, npm does not identify “you at a keyboard.” It identifies an authorized workflow.
+
+Specifically, npm says trusted publishing for GitHub Actions works by creating a trust relationship via OIDC, and npm will accept publishes from the specific authorized workflow you configure for the package:
+- GitHub org/user
+- repository
+- workflow filename
+- optional environment  
+Sources: https://docs.npmjs.com/trusted-publishers/ , https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
+
+So for `kato`, npm will know:
+- this publish came from `spectacular-voyage/kato`
+- from `.github/workflows/release-manual.yml`
+- on a GitHub-hosted runner
+- with `id-token: write`
+
+It will not be “because this was djradon personally” in the normal CLI sense. It is “because this workflow is the trusted publisher for this package.”
+
+If you use `NPM_TOKEN` instead, then npm knows the publishing account from the token. In that mode, the token owner must already have write access to `kato` and each `@spectacular-voyage/kato-*` package. Source: https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
+
+So the short answer is:
+
+- trusted publishing: npm authenticates the workflow
+- token publishing: npm authenticates the token owner
+
+One practical consequence: for a brand-new package, you may need a one-time bootstrap under an account that owns/publishes the package before switching fully to trusted publishing. I’m inferring that from npm’s trusted publisher setup being configured in package settings on npmjs.com.
+
+# djradon_2026-03-12_0111_27
+
+So how do I establish "“this workflow is the trusted publisher for this package.”"
+
+# gpt-5.4_2026-03-12_0111_30
+
+I’m checking npm’s current trusted-publisher setup steps directly, because the exact UI flow and whether you need an existing package already configured are both easy to get wrong from memory.
+
+# gpt-5.4_2026-03-12_0111_57
+
+On npmjs.com, you do it per package.
+
+For each package:
+
+1. Open the package on npmjs.com.
+2. Go to `Settings`.
+3. Find `Trusted publishing`.
+4. Choose `GitHub Actions`.
+5. Enter:
+   - Organization or user: `spectacular-voyage`
+   - Repository: `kato`
+   - Workflow filename: `release-manual.yml`
+   - Environment name: only if you use a GitHub Actions environment
+6. Save.
+
+For Kato, that means repeating it for:
+- `kato`
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-darwin-arm64`
+
+Important constraints from npm’s docs:
+- the workflow filename must match exactly, including `.yml`
+- fields are case-sensitive
+- it only works on GitHub-hosted runners
+- each package can have only one trusted publisher at a time
+- your workflow needs `id-token: write`  
+Sources:
+- https://docs.npmjs.com/trusted-publishers/
+- https://docs.github.com/en/actions/tutorials/publish-nodejs-packages
+
+One practical note: because npm’s setup is under `Packages -> YOUR_PACKAGE -> Settings -> Trusted publishing`, I would treat first publish of a brand-new package as a likely bootstrap step with a token/manual publish, then switch that package to trusted publishing. That last part is my inference from the package-settings flow, not an explicit npm statement.
+
+For your current workflow, the trusted workflow name should be:
+- `release-manual.yml`
+
+because that is the file actually doing `npm publish` in this repo.
+
+# gpt-5.4_2026-03-12_0111_58
+
+On npmjs.com, you do it per package.
+
+For each package:
+
+1. Open the package on npmjs.com.
+2. Go to `Settings`.
+3. Find `Trusted publishing`.
+4. Choose `GitHub Actions`.
+5. Enter:
+   - Organization or user: `spectacular-voyage`
+   - Repository: `kato`
+   - Workflow filename: `release-manual.yml`
+   - Environment name: only if you use a GitHub Actions environment
+6. Save.
+
+For Kato, that means repeating it for:
+- `kato`
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-darwin-arm64`
+
+Important constraints from npm’s docs:
+- the workflow filename must match exactly, including `.yml`
+- fields are case-sensitive
+- it only works on GitHub-hosted runners
+- each package can have only one trusted publisher at a time
+- your workflow needs `id-token: write`  
+Sources:
+- https://docs.npmjs.com/trusted-publishers/
+- https://docs.github.com/en/actions/tutorials/publish-nodejs-packages
+
+One practical note: because npm’s setup is under `Packages -> YOUR_PACKAGE -> Settings -> Trusted publishing`, I would treat first publish of a brand-new package as a likely bootstrap step with a token/manual publish, then switch that package to trusted publishing. That last part is my inference from the package-settings flow, not an explicit npm statement.
+
+For your current workflow, the trusted workflow name should be:
+- `release-manual.yml`
+
+because that is the file actually doing `npm publish` in this repo.
+
+# djradon_2026-03-12_0113_27
+
+OK, so I have to do the first publish locally? How do I do that? Probably the platform-specific packages first and then "kato"?
+
+# gpt-5.4_2026-03-12_0114_10
+
+Yes. For bootstrap, I’d do the first publish manually, and yes: platform packages first, then `kato`.
+
+Two important details:
+
+- You do not strictly need to do it locally. You could also do the first publish from GitHub Actions with an `NPM_TOKEN`.
+- But for brand-new scoped packages, npm requires `--access public` on first publish. That means the safest bootstrap is manual, because the current automation does not add that flag yet.
+
+Recommended bootstrap order:
+
+1. Publish each platform package first:
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-darwin-arm64`
+
+2. Publish unscoped `kato` last.
+
+Why that order:
+- the wrapper’s `optionalDependencies` point at the platform packages
+- publishing `kato` last avoids a brief broken install window
+
+From this repo, the manual path is:
+
+```bash
+npm login
+```
+
+If you use 2FA for writes, npm may also prompt for an OTP during publish.
+
+Then, from the assembled package output:
+
+```bash
+cd .test-tmp/npm-packages/release/platforms/linux-x64-gnu
+npm publish --access public --tag next
+
+cd ../win32-x64
+npm publish --access public --tag next
+
+cd ../darwin-x64
+npm publish --access public --tag next
+
+cd ../darwin-arm64
+npm publish --access public --tag next
+
+cd ../../wrapper
+npm publish --tag next
+```
+
+If you want to go straight to public default install, use `latest` instead of `next`.
+
+If you want a final dry run first:
+
+```bash
+cd .test-tmp/npm-packages/release/platforms/linux-x64-gnu
+npm publish --access public --tag next --dry-run
+
+cd ../../wrapper
+npm publish --tag next --dry-run
+```
+
+After those packages exist on npmjs, configure trusted publishing for each one, pointing to:
+- repo: `spectacular-voyage/kato`
+- workflow: `release-manual.yml`
+
+Then future releases can come from GitHub Actions instead of your local machine.
+
+One warning: npm versions are immutable. Once `0.2.4` is published for a package, you cannot republish that same version. If you already burned a version in testing, bump before the real publish.
+
+Sources:
+- npm publish docs: https://docs.npmjs.com/cli/v10/commands/npm-publish/
+- scoped public package publish docs: https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/
+- npm scopes docs: https://docs.npmjs.com/cli/v10/using-npm/scope
+- trusted publishers docs: https://docs.npmjs.com/trusted-publishers/
+
+One gap worth fixing next: teach [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) to add `--access public` for first publish of scoped platform packages.
+
+# gpt-5.4_2026-03-12_0114_11
+
+Yes. For bootstrap, I’d do the first publish manually, and yes: platform packages first, then `kato`.
+
+Two important details:
+
+- You do not strictly need to do it locally. You could also do the first publish from GitHub Actions with an `NPM_TOKEN`.
+- But for brand-new scoped packages, npm requires `--access public` on first publish. That means the safest bootstrap is manual, because the current automation does not add that flag yet.
+
+Recommended bootstrap order:
+
+1. Publish each platform package first:
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-darwin-arm64`
+
+2. Publish unscoped `kato` last.
+
+Why that order:
+- the wrapper’s `optionalDependencies` point at the platform packages
+- publishing `kato` last avoids a brief broken install window
+
+From this repo, the manual path is:
+
+```bash
+npm login
+```
+
+If you use 2FA for writes, npm may also prompt for an OTP during publish.
+
+Then, from the assembled package output:
+
+```bash
+cd .test-tmp/npm-packages/release/platforms/linux-x64-gnu
+npm publish --access public --tag next
+
+cd ../win32-x64
+npm publish --access public --tag next
+
+cd ../darwin-x64
+npm publish --access public --tag next
+
+cd ../darwin-arm64
+npm publish --access public --tag next
+
+cd ../../wrapper
+npm publish --tag next
+```
+
+If you want to go straight to public default install, use `latest` instead of `next`.
+
+If you want a final dry run first:
+
+```bash
+cd .test-tmp/npm-packages/release/platforms/linux-x64-gnu
+npm publish --access public --tag next --dry-run
+
+cd ../../wrapper
+npm publish --tag next --dry-run
+```
+
+After those packages exist on npmjs, configure trusted publishing for each one, pointing to:
+- repo: `spectacular-voyage/kato`
+- workflow: `release-manual.yml`
+
+Then future releases can come from GitHub Actions instead of your local machine.
+
+One warning: npm versions are immutable. Once `0.2.4` is published for a package, you cannot republish that same version. If you already burned a version in testing, bump before the real publish.
+
+Sources:
+- npm publish docs: https://docs.npmjs.com/cli/v10/commands/npm-publish/
+- scoped public package publish docs: https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/
+- npm scopes docs: https://docs.npmjs.com/cli/v10/using-npm/scope
+- trusted publishers docs: https://docs.npmjs.com/trusted-publishers/
+
+One gap worth fixing next: teach [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) to add `--access public` for first publish of scoped platform packages.
+
+# djradon_2026-03-12_0117_36
+
+so I do "deno task package:binaries", then assemble:npm-packages, then the npm publish? wrapper gets built in package:binaries?
+
+# gpt-5.4_2026-03-12_0117_43
+
+Almost. The wrapper is not built by `package:binaries`.
+
+The sequence is:
+
+1. Build native binaries
+```bash
+deno task build:binaries -- --output-dir .test-tmp/binaries/release
+```
+
+2. Package those binaries into per-platform bundles
+```bash
+deno task package:binaries -- --input-dir .test-tmp/binaries/release --label linux-x64
+```
+
+3. Assemble npm packages from the packaged bundle output
+```bash
+deno task assemble:npm-packages -- \
+  --input-dir .test-tmp/bundles/linux-x64 \
+  --output-dir .test-tmp/npm-packages/release
+```
+
+This is the step that generates:
+- wrapper package `kato`
+- platform package `@spectacular-voyage/kato-linux-x64-gnu`
+
+4. Publish the assembled npm packages
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/npm-packages/release \
+  --npm-bin npm \
+  --dry-run
+```
+
+Then real publish:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/npm-packages/release \
+  --npm-bin npm
+```
+
+So the boundary is:
+
+- `build:binaries`: creates `kato`, `kato-daemon`, `kato-web`
+- `package:binaries`: creates release bundle directories/archives from those binaries
+- `assemble:npm-packages`: creates the npm wrapper and platform package directories
+- `publish:npm-packages`: runs `npm publish` on those assembled package dirs
+
+If you’re doing all four platforms, `assemble:npm-packages` takes multiple `--input-dir` flags, one per packaged bundle directory root.
+
+# gpt-5.4_2026-03-12_0117_44
+
+Almost. The wrapper is not built by `package:binaries`.
+
+The sequence is:
+
+1. Build native binaries
+```bash
+deno task build:binaries -- --output-dir .test-tmp/binaries/release
+```
+
+2. Package those binaries into per-platform bundles
+```bash
+deno task package:binaries -- --input-dir .test-tmp/binaries/release --label linux-x64
+```
+
+3. Assemble npm packages from the packaged bundle output
+```bash
+deno task assemble:npm-packages -- \
+  --input-dir .test-tmp/bundles/linux-x64 \
+  --output-dir .test-tmp/npm-packages/release
+```
+
+This is the step that generates:
+- wrapper package `kato`
+- platform package `@spectacular-voyage/kato-linux-x64-gnu`
+
+4. Publish the assembled npm packages
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/npm-packages/release \
+  --npm-bin npm \
+  --dry-run
+```
+
+Then real publish:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/npm-packages/release \
+  --npm-bin npm
+```
+
+So the boundary is:
+
+- `build:binaries`: creates `kato`, `kato-daemon`, `kato-web`
+- `package:binaries`: creates release bundle directories/archives from those binaries
+- `assemble:npm-packages`: creates the npm wrapper and platform package directories
+- `publish:npm-packages`: runs `npm publish` on those assembled package dirs
+
+If you’re doing all four platforms, `assemble:npm-packages` takes multiple `--input-dir` flags, one per packaged bundle directory root.
+
+# djradon_2026-03-12_0120_08
+
+"deno task package:binaries -- --input-dir .test-tmp/binaries/release --label linux-x64" is only for linux, I'll have to repeat that for the other 3 with appropriate labels?
+
+# gpt-5.4_2026-03-12_0120_14
+
+Yes.
+
+`package:binaries` packages one already-built staging directory for one platform label at a time. So if you have four separate build outputs, you run it four times with the matching label:
+
+- `linux-x64`
+- `windows-x64`
+- `macos-x64`
+- `macos-arm64`
+
+Example shape:
+
+```bash
+deno task package:binaries -- --input-dir .test-tmp/binaries/linux-x64 --label linux-x64
+deno task package:binaries -- --input-dir .test-tmp/binaries/windows-x64 --label windows-x64
+deno task package:binaries -- --input-dir .test-tmp/binaries/macos-x64 --label macos-x64
+deno task package:binaries -- --input-dir .test-tmp/binaries/macos-arm64 --label macos-arm64
+```
+
+Then `assemble:npm-packages` consumes all four packaged bundle roots together with repeated `--input-dir`.
+
+One important detail: you cannot produce all four native binaries from one plain local build dir unless you have actually built each target. `package:binaries` only repackages what is already in the staging dir; it does not cross-compile or relabel binaries for you.
+
+# djradon_2026-03-12_0123_48
+
+missing directory for non-linux packages:
+
+ls .test-tmp/binaries/release/                                                                                                                                                                                     ─╯
+compiled-main-smoke/  host-smoke/           linux-x86_64/         package-smoke/        release/              review-smoke/
+
+# gpt-5.4_2026-03-12_0124_04
+
+Right. That local tree only has Linux builds. Nothing is wrong there.
+
+What you have in `.test-tmp/binaries/...` is just what has been built on this machine, and this machine is Linux. The macOS and Windows binaries were built on GitHub’s native runners, not locally, so they won’t appear in your local `.test-tmp/binaries/release/`.
+
+So for all 4 npm packages, you have two realistic paths:
+
+1. Easiest: use the GitHub workflow artifacts
+- rerun `Release Manual`
+- let it build all 4 platforms
+- download the `kato-npm-packages` artifact
+- publish from that assembled package set
+
+2. Manual/local assembly from per-platform artifacts
+- download:
+  - `kato-linux-x64`
+  - `kato-windows-x64`
+  - `kato-macos-x64`
+  - `kato-macos-arm64`
+- then run `assemble:npm-packages` with all four downloaded bundle dirs
+
+Important constraint: do not publish the `kato` wrapper from a Linux-only assembly. If you assemble from only Linux input, the generated wrapper will only know about the Linux platform package.
+
+So the short answer is:
+- yes, non-Linux package inputs are missing locally because you never built or downloaded them here
+- for first real npm publish, the best source is the workflow artifacts, not your local `.test-tmp/binaries/release/` tree
+
+# djradon_2026-03-12_0136_11
+
+So I extract the kato-npm-packages.zip to where?
+
+# gpt-5.4_2026-03-12_0136_27
+
+Anywhere convenient. The scripts do not require a special location.
+
+What matters is that the extracted directory contains:
+- `npm-packages-metadata.json`
+- `wrapper/`
+- `platforms/linux-x64-gnu/`
+- `platforms/win32-x64/`
+- `platforms/darwin-x64/`
+- `platforms/darwin-arm64/`
+
+For example:
+
+```bash
+mkdir -p .test-tmp/downloaded-npm-packages
+unzip ~/Downloads/kato-npm-packages.zip -d .test-tmp/downloaded-npm-packages
+```
+
+Then publish from that root:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --dry-run
+```
+
+and then the real publish:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm
+```
+
+One check first:
+
+```bash
+find .test-tmp/downloaded-npm-packages -maxdepth 2 -type d | sort
+```
+
+You should see `wrapper` plus the four platform dirs. If the zip extracts into an extra top-level folder, just point `--input-dir` at that inner folder instead.
+
+# djradon_2026-03-12_0139_42
+
+your "real publish" command doesn't have the "latest" tag?
+
+# gpt-5.4_2026-03-12_0139_47
+
+Correct. It defaults to `latest`.
+
+[`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) sets `--tag` to `latest` by default, so these two are equivalent:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm
+```
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --tag latest
+```
+
+If you want to be explicit, I’d include it anyway:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --tag latest
+```
+
+Use a different tag only if you want a prerelease lane, like `next`.
+
+# djradon_2026-03-12_0140_43
+
+dry run looks good:
+
+ deno task publish:npm-packages -- \                                                                                                                                                                                ─╯
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --dry-run
+
+Task publish:npm-packages deno run --frozen -A scripts/publish-npm-packages.ts "--" "--input-dir" ".test-tmp/downloaded-npm-packages" "--npm-bin" "npm" "--dry-run"
+$ (cd /home/djradon/hub/spectacular-voyage/kato/.test-tmp/downloaded-npm-packages/platforms/darwin-arm64 && npm publish --tag latest --dry-run)
+npm notice
+npm notice 📦  @spectacular-voyage/kato-darwin-arm64@0.2.4
+npm notice Tarball Contents
+npm notice 10.7kB LICENSE
+npm notice 251B README.md
+npm notice 80.4MB bin/kato
+npm notice 80.6MB bin/kato-daemon
+npm notice 147.9MB bin/kato-web
+npm notice 1.5kB build-metadata.json
+npm notice 652B bundle-metadata.json
+npm notice 546B package.json
+npm notice Tarball Details
+npm notice name: @spectacular-voyage/kato-darwin-arm64
+npm notice version: 0.2.4
+npm notice filename: spectacular-voyage-kato-darwin-arm64-0.2.4.tgz
+npm notice package size: 121.5 MB
+npm notice unpacked size: 308.8 MB
+npm notice shasum: 0329208e9eb7323428e1d7176a2132660482e2ed
+npm notice integrity: sha512-f4h6rZc5Y3qvw[...]tDX5G47iEDeZQ==
+npm notice total files: 8
+npm notice
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access (dry-run)
++ @spectacular-voyage/kato-darwin-arm64@0.2.4
+$ (cd /home/djradon/hub/spectacular-voyage/kato/.test-tmp/downloaded-npm-packages/platforms/darwin-x64 && npm publish --tag latest --dry-run)
+npm notice
+npm notice 📦  @spectacular-voyage/kato-darwin-x64@0.2.4
+npm notice Tarball Contents
+npm notice 10.7kB LICENSE
+npm notice 247B README.md
+npm notice 87.8MB bin/kato
+npm notice 88.0MB bin/kato-daemon
+npm notice 157.7MB bin/kato-web
+npm notice 1.5kB build-metadata.json
+npm notice 636B bundle-metadata.json
+npm notice 540B package.json
+npm notice Tarball Details
+npm notice name: @spectacular-voyage/kato-darwin-x64
+npm notice version: 0.2.4
+npm notice filename: spectacular-voyage-kato-darwin-x64-0.2.4.tgz
+npm notice package size: 128.1 MB
+npm notice unpacked size: 333.5 MB
+npm notice shasum: 536cb6afd4f3d2604b68d2dbb87927b2488827d4
+npm notice integrity: sha512-m+xaqmKoEqvWo[...]sE7U31vmPD5rQ==
+npm notice total files: 8
+npm notice
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access (dry-run)
++ @spectacular-voyage/kato-darwin-x64@0.2.4
+$ (cd /home/djradon/hub/spectacular-voyage/kato/.test-tmp/downloaded-npm-packages/platforms/linux-x64-gnu && npm publish --tag latest --dry-run)
+npm notice
+npm notice 📦  @spectacular-voyage/kato-linux-x64-gnu@0.2.4
+npm notice Tarball Contents
+npm notice 10.7kB LICENSE
+npm notice 250B README.md
+npm notice 96.8MB bin/kato
+npm notice 97.1MB bin/kato-daemon
+npm notice 167.6MB bin/kato-web
+npm notice 1.5kB build-metadata.json
+npm notice 632B bundle-metadata.json
+npm notice 571B package.json
+npm notice Tarball Details
+npm notice name: @spectacular-voyage/kato-linux-x64-gnu
+npm notice version: 0.2.4
+npm notice filename: spectacular-voyage-kato-linux-x64-gnu-0.2.4.tgz
+npm notice package size: 134.9 MB
+npm notice unpacked size: 361.5 MB
+npm notice shasum: 73d18c6bb4b936ce68ce74fd7a33dc3edab0028a
+npm notice integrity: sha512-9Sq/nyVqPahEa[...]9PrC+TP4Uve6g==
+npm notice total files: 8
+npm notice
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access (dry-run)
++ @spectacular-voyage/kato-linux-x64-gnu@0.2.4
+$ (cd /home/djradon/hub/spectacular-voyage/kato/.test-tmp/downloaded-npm-packages/platforms/win32-x64 && npm publish --tag latest --dry-run)
+npm notice
+npm notice 📦  @spectacular-voyage/kato-win32-x64@0.2.4
+npm notice Tarball Contents
+npm notice 10.7kB LICENSE
+npm notice 248B README.md
+npm notice 96.0MB bin/kato-daemon.exe
+npm notice 167.6MB bin/kato-web.exe
+npm notice 95.7MB bin/kato.exe
+npm notice 1.4kB build-metadata.json
+npm notice 630B bundle-metadata.json
+npm notice 540B package.json
+npm notice Tarball Details
+npm notice name: @spectacular-voyage/kato-win32-x64
+npm notice version: 0.2.4
+npm notice filename: spectacular-voyage-kato-win32-x64-0.2.4.tgz
+npm notice package size: 132.5 MB
+npm notice unpacked size: 359.4 MB
+npm notice shasum: c59bb0e4ae163cb20c1596f10682a9c4de3e8a01
+npm notice integrity: sha512-MO3zng0C5BsFl[...]cjvrvx1Xl7F0g==
+npm notice total files: 8
+npm notice
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access (dry-run)
++ @spectacular-voyage/kato-win32-x64@0.2.4
+$ (cd /home/djradon/hub/spectacular-voyage/kato/.test-tmp/downloaded-npm-packages/wrapper && npm publish --tag latest --dry-run)
+npm notice
+npm notice 📦  kato@0.2.4
+npm notice Tarball Contents
+npm notice 10.7kB LICENSE
+npm notice 315B README.md
+npm notice 2.4kB bin/kato.cjs
+npm notice 659B package-map.json
+npm notice 724B package.json
+npm notice Tarball Details
+npm notice name: kato
+npm notice version: 0.2.4
+npm notice filename: kato-0.2.4.tgz
+npm notice package size: 5.3 kB
+npm notice unpacked size: 14.8 kB
+npm notice shasum: a38b9cfc62ff4277119b17d4b5ef6bc99f0e48ef
+npm notice integrity: sha512-6Qck3iAd67v71[...]KZmiJq3uYrF4A==
+npm notice total files: 5
+npm notice
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and default access (dry-run)
++ kato@0.2.4
+
+# gpt-5.4_2026-03-12_0140_48
+
+That looks correct. The publish order is right, the package names and tarballs look coherent, and the wrapper is last.
+
+Two practical notes before the real publish:
+
+- The scoped platform packages are first-publish candidates, so if npm rejects them, the likely issue is needing explicit `--access public` on first real publish.
+- These tarballs are large, roughly `121 MB` to `135 MB` packed and `309 MB` to `362 MB` unpacked per platform package, so expect real publish to take a bit.
+
+If you want to proceed manually, the next command is:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --tag latest
+```
+
+If npm errors on the first scoped package with a public-access complaint, stop there and I’d patch [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) to add `--access public` for scoped publishes.
+
+# gpt-5.4_2026-03-12_0140_49
+
+That looks correct. The publish order is right, the package names and tarballs look coherent, and the wrapper is last.
+
+Two practical notes before the real publish:
+
+- The scoped platform packages are first-publish candidates, so if npm rejects them, the likely issue is needing explicit `--access public` on first real publish.
+- These tarballs are large, roughly `121 MB` to `135 MB` packed and `309 MB` to `362 MB` unpacked per platform package, so expect real publish to take a bit.
+
+If you want to proceed manually, the next command is:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin npm \
+  --tag latest
+```
+
+If npm errors on the first scoped package with a public-access complaint, stop there and I’d patch [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) to add `--access public` for scoped publishes.
+
+# djradon_2026-03-12_0142_54
+
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access
+npm error code EUSAGE
+npm error Automatic provenance generation not supported for provider: null
+npm error A complete log of this run can be found in: /home/djradon/.npm/_logs/2026-03-12T08_42_01_015Z-debug-0.log
+error: Uncaught (in promise) Error: Command failed with exit code 1: npm publish --tag latest --provenance
+    throw new Error(
+          ^
+    at runCommand (file:///home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts:130:11)
+    at async file:///home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts:199:5
+
+# gpt-5.4_2026-03-12_0143_06
+
+The failure is expected for a local publish. `--provenance` only works when npm can see a supported CI/OIDC provider, and locally that provider is `null`. I’m changing the publish script so provenance is opt-in instead of forced, then I’ll wire the workflow to request it explicitly while local manual publishes stay plain `npm publish`.
+
+# gpt-5.4_2026-03-12_0143_13
+
+I’m changing the publish script so local real publishes no longer force provenance. The workflow will still opt into provenance explicitly, which is the right split: local bootstrap publish should be plain npm auth, GitHub Actions publish should use OIDC provenance.
+
+# gpt-5.4_2026-03-12_0143_29
+
+The behavior split is patched. I’m running a focused verification now: lint/check, YAML parse, and a local dry-run publish to confirm the script still works with the new flag contract.
+
+# gpt-5.4_2026-03-12_0143_34
+
+The script behavior is fine; the failed verification run just used bare `npm`, and this shell still doesn’t have your nvm path. I’m rerunning the publish dry-run with the explicit npm path so we validate the actual change rather than the shell environment.
+
+# gpt-5.4_2026-03-12_0143_57
+
+The dry-run publish is still chewing through the large platform tarballs, which is expected. I’m waiting for completion so I can give you the exact local command to rerun safely now.

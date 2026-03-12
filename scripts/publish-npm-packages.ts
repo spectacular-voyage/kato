@@ -145,6 +145,7 @@ function printUsage(): void {
       "  --npm-bin <path>      npm executable to use (default: npm)",
       "  --tag <name>          npm dist-tag to publish under (default: latest)",
       "  --dry-run             Run `npm publish --dry-run` instead of a real publish",
+      "  --provenance          Add `--provenance` to real npm publishes",
       "  --help                Show this help",
     ].join("\n"),
   );
@@ -154,10 +155,11 @@ if (import.meta.main) {
   const rawArgs = Deno.args[0] === "--" ? Deno.args.slice(1) : Deno.args;
   const parsed = parseArgs(rawArgs, {
     string: ["input-dir", "npm-bin", "tag"],
-    boolean: ["dry-run", "help"],
+    boolean: ["dry-run", "help", "provenance"],
     default: {
       help: false,
       "dry-run": false,
+      provenance: false,
       "npm-bin": "npm",
       tag: "latest",
     },
@@ -193,7 +195,7 @@ if (import.meta.main) {
     const args = ["publish", "--tag", tag];
     if (parsed["dry-run"]) {
       args.push("--dry-run");
-    } else {
+    } else if (parsed.provenance) {
       args.push("--provenance");
     }
     await runCommand(npmBin, args, target.packageDir, baseEnv);
