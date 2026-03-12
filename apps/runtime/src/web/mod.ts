@@ -4,6 +4,7 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
+const UTF8_DECODER = new TextDecoder();
 
 export interface WebServerStatus {
   schemaVersion: 1;
@@ -87,9 +88,53 @@ export function resolveDefaultWebStatusPath(
   return join(katoDir, "web", WEB_STATUS_FILENAME);
 }
 
+function runPowerShellSync(script: string): Deno.CommandOutput {
+  const encodedCommand = toPowerShellEncodedCommand(script);
+  return new Deno.Command("powershell.exe", {
+    args: [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      encodedCommand,
+    ],
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+    env: { CI: "true" },
+  }).outputSync();
+}
+
+function isWindowsProcessAlive(pid: number): boolean {
+  try {
+    const result = runPowerShellSync(
+      `$ErrorActionPreference = 'Stop';
+$proc = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue;
+if ($null -eq $proc) {
+  exit 1
+}
+exit 0`,
+    );
+    return result.code === 0;
+  } catch (error) {
+    if (
+      error instanceof Deno.errors.NotFound ||
+      error instanceof Deno.errors.NotCapable ||
+      error instanceof Deno.errors.PermissionDenied ||
+      error instanceof TypeError
+    ) {
+      return false;
+    }
+    return false;
+  }
+}
+
 export function isProcessAlive(pid: number | undefined): boolean {
   if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
     return false;
+  }
+  if (Deno.build.os === "windows") {
+    // Windows does not support `kill(pid, 0)` probes, so use tasklist.
+    return isWindowsProcessAlive(pid);
   }
   try {
     Deno.kill(pid, 0);
@@ -104,6 +149,57 @@ export function isProcessAlive(pid: number | undefined): boolean {
       return false;
     }
     return false;
+  }
+}
+
+function terminateWindowsProcess(pid: number, force: boolean): void {
+  try {
+    const result = runPowerShellSync(
+      `$ErrorActionPreference = 'Stop';
+$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue;
+if ($null -eq $proc) {
+  exit 0
+}
+Stop-Process -Id ${pid}${force ? " -Force" : ""} -ErrorAction Stop;
+exit 0`,
+    );
+    if (result.code === 0) {
+      return;
+    }
+
+    const errorText = UTF8_DECODER.decode(result.stderr).trim();
+    throw new Error(
+      errorText.length > 0
+        ? `Failed to stop Windows process ${pid}: ${errorText}`
+        : `Failed to stop Windows process ${pid} (exit ${result.code})`,
+    );
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export function terminateProcess(
+  pid: number | undefined,
+  force: boolean = false,
+): void {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
+    return;
+  }
+  if (Deno.build.os === "windows") {
+    terminateWindowsProcess(pid, force);
+    return;
+  }
+
+  const signal = force ? "SIGKILL" : "SIGTERM";
+  try {
+    Deno.kill(pid, signal);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
   }
 }
 
@@ -405,8 +501,11 @@ ${startProcessArgs}
 Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
 & ${
           toPowerShellSingleQuoted(executablePath)
-        } 'run' '--ext=js' '-A' 'vite' 'build';
-$argList = @('serve', '-A', '--host', ${
+        } 'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build';
+if ($LASTEXITCODE -ne 0) {
+  throw "vite build failed with exit code $LASTEXITCODE"
+}
+$argList = @('serve', '--node-modules-dir=auto', '-A', '--host', ${
           toPowerShellSingleQuoted(options.hostname)
         }, '--port', ${
           toPowerShellSingleQuoted(String(options.port))
@@ -430,6 +529,7 @@ $proc = Start-Process -FilePath ${
       const quotedBuildCommand = [
         executablePath,
         "run",
+        "--node-modules-dir=auto",
         "--ext=js",
         "-A",
         "vite",
@@ -438,6 +538,7 @@ $proc = Start-Process -FilePath ${
       const quotedServeCommand = [
         executablePath,
         "serve",
+        "--node-modules-dir=auto",
         "-A",
         "--host",
         options.hostname,

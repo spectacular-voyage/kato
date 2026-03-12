@@ -59,6 +59,10 @@ function currentNodeArch(): string {
   }
 }
 
+function currentNodePlatform(): string {
+  return Deno.build.os === "windows" ? "win32" : Deno.build.os;
+}
+
 async function detectCurrentLibc(): Promise<"glibc" | "musl" | undefined> {
   if (Deno.build.os !== "linux") {
     return undefined;
@@ -86,7 +90,7 @@ function findHostPlatformPackage(
   metadata: NpmPackagesMetadata,
   libc: string | undefined,
 ): HostPlatformPackage | undefined {
-  const os = Deno.build.os;
+  const os = currentNodePlatform();
   const cpu = currentNodeArch();
   return metadata.platformPackages.find((entry) => {
     if (entry.os !== os || entry.cpu !== cpu) {
