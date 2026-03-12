@@ -90,10 +90,40 @@ That means:
 - release packaging builds production web output first
 - `kato web start` launches the installed production runtime, not the dev server
 
+### Linux proof of concept
+
+The first Linux smoke pass is now real, not speculative:
+
+- `kato` compiles from `apps/cli/src/main.ts`
+- `kato-daemon` compiles from `apps/daemon/src/main.ts`
+- `kato-web` compiles from Fresh production output plus a small Kato wrapper
+  entrypoint using:
+  `deno task --cwd apps/web build`
+  then
+  from `apps/web`:
+  `deno compile --include _fresh -A src/compiled_main.ts`
+- the compiled `kato-web` binary starts and serves `/login` successfully on
+  Linux
+- the wrapper keeps the installed-binary contract aligned with the launcher by
+  accepting `--host` and `--port`
+- current Linux `kato-web` output is large because Deno embeds `_fresh` plus
+  npm-derived web dependencies; bundle size needs explicit packaging review
+
+The two concrete web blockers were both local code issues, not a Fresh compile
+dead end:
+
+- islands were importing mixed client/server helpers from
+  `apps/web/src/loaders/activity_state.ts`, which pulled runtime filesystem code
+  into the client bundle
+- `apps/runtime/src/orchestrator/launcher.ts` used
+  `new URL("../../../daemon/src/main.ts", import.meta.url)`, which Vite treated
+  as a client asset reference and copied into `_fresh/client`
+
 ## Open Issues
 
-- Can `apps/web` be compiled cleanly into a standalone `kato-web` binary with
-  stable asset inclusion and startup behavior across Windows, macOS, and Linux?
+- `apps/web` now compiles into a standalone `kato-web` binary on Linux. The
+  remaining issue is validating stable asset inclusion and startup behavior on
+  Windows and macOS.
 - What is the narrowest practical `--allow-run` policy for the launcher when
   sibling executables live in an installed bundle with platform-specific paths?
 - Should `kato-web` be a documented user-visible executable, or a private
@@ -147,6 +177,12 @@ That means:
   precedence.
 - Add compile smoke coverage for `kato`, `kato-daemon`, and the initial
   `kato-web` target.
+- Current Linux smoke result:
+  - `deno compile --config apps/cli/deno.json ... apps/cli/src/main.ts`
+  - `deno compile --config apps/daemon/deno.json ... apps/daemon/src/main.ts`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - HTTP probe of compiled `kato-web` at `/login`
 - Add packaged-runtime smoke checks for:
   - `kato --version`
   - `kato start`
@@ -176,24 +212,24 @@ That means:
 
 ## Implementation Plan
 
-- [ ] Add a binary-resolution abstraction for daemon launch with precedence:
+- [x] Add a binary-resolution abstraction for daemon launch with precedence:
       `KATO_DAEMON_BIN` -> sibling binary -> developer fallback.
-- [ ] Add a binary-resolution abstraction for web launch with precedence:
+- [x] Add a binary-resolution abstraction for web launch with precedence:
       `KATO_WEB_BIN` -> sibling binary -> developer fallback.
-- [ ] Refactor `kato start` / `kato restart` launcher paths to target installed
+- [x] Refactor `kato start` / `kato restart` launcher paths to target installed
       daemon binaries instead of repo source by default.
-- [ ] Refactor `kato web start` to target installed web binaries instead of the
+- [x] Refactor `kato web start` to target installed web binaries instead of the
       current source/dev path by default.
-- [ ] Build a minimal `deno compile` proof of concept for `kato`.
-- [ ] Build a minimal `deno compile` proof of concept for `kato-daemon`.
-- [ ] Build a minimal `deno compile` proof of concept for `kato-web`.
+- [x] Build a minimal `deno compile` proof of concept for `kato`.
+- [x] Build a minimal `deno compile` proof of concept for `kato-daemon`.
+- [x] Build a minimal `deno compile` proof of concept for `kato-web`.
 - [ ] Verify whether `kato-web` can include the required production assets and
       start cleanly on all target platforms.
 - [ ] If `kato-web` compile is blocked, document the exact blocker and add the
       temporary fallback plan as packaged prebuilt web runtime artifacts.
 - [ ] Define Phase 1 compile permissions for each executable, with launcher-only
       spawning power where possible.
-- [ ] Add focused tests for installed binary discovery and lifecycle behavior.
+- [x] Add focused tests for installed binary discovery and lifecycle behavior.
 - [ ] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
       executables for the initial platform matrix.
 - [ ] Add bundle assembly steps so each platform artifact includes the required

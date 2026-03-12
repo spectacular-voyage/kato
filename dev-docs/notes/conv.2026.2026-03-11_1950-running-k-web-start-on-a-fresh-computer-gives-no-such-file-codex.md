@@ -934,3 +934,269 @@ Staged just these 9 files:
 - [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts)
 
 Unrelated worktree changes were left unstaged.
+
+# djradon_2026-03-11_2209_52
+
+ok, proceed
+
+ok, proceed
+
+# gpt-5.4_2026-03-11_2210_03
+
+I’m moving to the first real binary proof-of-concept now. I’ll verify the actual compile entrypoints and then try focused `deno compile` runs for `kato`, `kato-daemon`, and `kato-web` before deciding whether code or docs need the next adjustment.
+
+# gpt-5.4_2026-03-11_2210_14
+
+I have the entrypoints. Next I’m attempting local compile proofs for CLI and daemon directly, and then I’ll probe the web path from built output rather than guessing whether Fresh wants `main.ts` or `_fresh/server.js` as the compile input.
+
+# gpt-5.4_2026-03-11_2211_32
+
+I’m checking the exact entrypoints and the current note language before I run compile attempts, so the next edits reflect real results rather than assumptions.
+
+The entrypoints are straightforward. Next I’m checking current task definitions and whether there is already any compile-related wiring before I generate artifacts under a temp directory.
+
+The repo split is slightly different than the note assumes: the user-facing CLI entry is still the top-level `main.ts`, not `apps/cli/src/main.ts`. I’m validating that before compiling the wrong binary.
+
+The top-level `main.ts` is not the CLI. I’m locating the actual `kato` entrypoint so the compile smoke test targets the same command users already run.
+
+I found the actual CLI entry in `apps/cli/src/main.ts`; the top-level `main.ts` is just an old workspace stub. I’m pulling the CLI package config too, because compile will need the right cwd/import map context.
+
+Proceeding with the first binary proof-of-concept. I’m going to validate `deno compile` for the CLI and daemon first, then test the web build/start path to see whether a `kato-web` binary is viable or whether we need a temporary packaged-runtime fallback.
+
+I’m checking the exact entrypoints and the current note language before I run compile attempts, so the next edits reflect real results rather than assumptions.
+
+The entrypoints are straightforward. Next I’m checking current task definitions and whether there is already any compile-related wiring before I generate artifacts under a temp directory.
+
+The repo split is slightly different than the note assumes: the user-facing CLI entry is still the top-level `main.ts`, not `apps/cli/src/main.ts`. I’m validating that before compiling the wrong binary.
+
+The top-level `main.ts` is not the CLI. I’m locating the actual `kato` entrypoint so the compile smoke test targets the same command users already run.
+
+I found the actual CLI entry in `apps/cli/src/main.ts`; the top-level `main.ts` is just an old workspace stub. I’m pulling the CLI package config too, because compile will need the right cwd/import map context.
+
+# gpt-5.4_2026-03-11_2211_52
+
+I’m isolating the compile experiments in a temp copy of the repo so the Fresh build output doesn’t churn your working tree. After that I’ll compile CLI and daemon, then build and compile the web app inside that copy.
+
+# gpt-5.4_2026-03-11_2212_01
+
+I have a clean temp copy. Next I’m doing focused compile smokes for `kato` and `kato-daemon` in parallel, with enough baked permissions to make the compiled artifacts runnable for basic checks.
+
+# gpt-5.4_2026-03-11_2212_04
+
+The CLI compile had to fetch `denort`; the daemon compile is still resolving/checking. I’m polling both before I move to the web build.
+
+# gpt-5.4_2026-03-11_2212_10
+
+Both CLI and daemon compiled cleanly. I’m doing one minimal execution check on each now to confirm the artifacts actually start as binaries, not just compile.
+
+# gpt-5.4_2026-03-11_2212_13
+
+CLI and daemon look viable as binaries. I’m moving to the web path now: build production output in the temp copy, inspect what Fresh emits, then compile the smallest plausible `kato-web` target from that built output.
+
+# gpt-5.4_2026-03-11_2212_18
+
+The Fresh/Vite production build is running. Once that finishes I’ll inspect the emitted server entry and asset layout before choosing the compile target.
+
+# gpt-5.4_2026-03-11_2212_35
+
+The build emits both `_fresh/server.js` and `_fresh/compiled-entry.js`, which is promising. I’m checking the compiled entry next because that is the likely target if Fresh intends binary packaging.
+
+# gpt-5.4_2026-03-11_2213_00
+
+Fresh’s own current docs confirm the intended binary target is `_fresh/compiled-entry.js` with `--include _fresh`. I’m using that exact path for the web smoke test instead of inventing a custom wrapper.
+
+# gpt-5.4_2026-03-11_2213_08
+
+The first `kato-web` attempt failed at compile time, and the failure is concrete: the generated client asset `main-BtUZReaM.ts` contains broken file-relative imports under `_fresh/client/assets/...`. I’m inspecting that emitted file before deciding whether the blocker is “compile only” or “build output itself.”
+
+# gpt-5.4_2026-03-11_2213_13
+
+That emitted `main-*.ts` is clearly wrong: it’s bundling daemon code into the client asset path. I’m checking the Fresh/Vite config and the app entry selection now, because this may be a pre-existing web build misconfiguration rather than a binary-only blocker.
+
+# gpt-5.4_2026-03-11_2213_30
+
+This looks like a Fresh/Vite artifact quirk rather than an immediate runtime blocker. The first failure is purely at compile-time type checking, so I’m retrying `kato-web` with `--no-check` to see whether the binary itself still works.
+
+# gpt-5.4_2026-03-11_2213_45
+
+I’m tracing whether that bad client asset is coming from a real app import path or from the Fresh build tooling. If it’s an actual app import leak into the client bundle, we need to fix the web app before any web binary will be stable.
+
+# gpt-5.4_2026-03-11_2213_58
+
+I found a real app-level leak, not just a compile quirk: several islands import `apps/web/src/loaders/activity_state.ts`, and that module also imports runtime filesystem config code. That explains why server-side runtime code is getting dragged into the built client asset graph.
+
+# gpt-5.4_2026-03-11_2214_13
+
+I have a clean fix shape: move the client-safe activity helpers out of the loader module, keep the filesystem-backed runtime-config loader server-only, then rerun the Fresh build/compile. I’m making that split now.
+
+# gpt-5.4_2026-03-11_2214_43
+
+The split is in. I’m sanity-checking the import cleanup before rerunning the web build, because that change touched the loader graph in a few places.
+
+# gpt-5.4_2026-03-11_2214_54
+
+The import split is cleaned up. I’m running a local web check on the real tree first, then I’ll refresh the temp copy and retry the Fresh build plus `kato-web` compile.
+
+# gpt-5.4_2026-03-11_2214_56
+
+The web check is clean semantically; it only failed on formatting. I’m formatting the touched web files and then rerunning the check before going back to the compile proof.
+
+# gpt-5.4_2026-03-11_2215_09
+
+There’s one remaining server module still importing `ActivityState` from the old loader path. I’m fixing that last reference and then rerunning the web check.
+
+# gpt-5.4_2026-03-11_2215_23
+
+The web import graph is now clean. I’ve synced the patched `apps/web` tree into the temp repo and I’m rebuilding Fresh there before the second `kato-web` compile attempt.
+
+# gpt-5.4_2026-03-11_2215_51
+
+The client graph is fixed, but the build still emits one extra manifest entry for `../daemon/src/main.ts`. That’s now the specific blocker I’m tracing, because it’s what keeps the Fresh compile path from closing.
+
+# gpt-5.4_2026-03-11_2216_05
+
+I found the second blocker. It’s not in Fresh itself: Vite is treating `new URL("../../../daemon/src/main.ts", import.meta.url)` in the runtime launcher as an asset reference and copying the daemon source into `_fresh/client/assets`. That stray asset is what keeps `deno compile` from succeeding on the built web app.
+
+# gpt-5.4_2026-03-11_2216_45
+
+The stray daemon asset is gone from the client manifest. I’m retrying the actual `kato-web` compile now against the rebuilt `_fresh/compiled-entry.js`.
+
+# gpt-5.4_2026-03-11_2216_53
+
+The web binary now compiles. I’m doing one live execution check with a localhost bind and an HTTP probe to confirm it behaves as a real standalone server, not just a compilable artifact.
+
+# gpt-5.4_2026-03-11_2217_40
+
+I have enough evidence now to update the binary plan note with facts instead of guesses: CLI/daemon compile cleanly, `kato-web` compile is viable on Linux, and the real web blockers were an island import leak plus a Vite asset transform on the daemon launcher path.
+
+# gpt-5.4_2026-03-11_2218_01
+
+I’ve updated the note. Before I wrap this slice, I’m rerunning the launcher regression tests because the web-binary work required one real code change in `apps/runtime/src/orchestrator/launcher.ts`.
+
+# gpt-5.4_2026-03-11_2218_12
+
+I’m checking the worktree state one last time so I can tell you exactly what this slice changed versus what was already dirty.
+
+# gpt-5.4_2026-03-11_2218_39
+
+One important gap remains: the compiled Fresh entry expects `HOSTNAME`/`PORT` env vars, while the existing installed-binary launcher contract already expects a `kato-web` binary that accepts `--host` and `--port`. I’m closing that gap with a tiny web-binary wrapper so the binary target matches the launcher contract instead of requiring a special case.
+
+# gpt-5.4_2026-03-11_2219_05
+
+I’m switching the web compile target from Fresh’s env-only `compiled-entry.js` to a Kato wrapper under `apps/web/src` that parses `--host` and `--port` and then serves the built `_fresh/server.js`. That keeps the installed-binary contract aligned with the launcher.
+
+# gpt-5.4_2026-03-11_2219_21
+
+The wrapper and parser test are in. I’m running the web check plus the new parser test, then I’ll recompile `kato-web` from the wrapper entry to confirm the launcher-compatible contract.
+
+# gpt-5.4_2026-03-11_2219_28
+
+The new parser test is running; the web check only wants a formatting pass on `binary_entry.ts`. I’m fixing that and then rerunning the check.
+
+# gpt-5.4_2026-03-11_2219_40
+
+The wrapper type-check failure is narrow: Fresh’s generated `server.fetch` signature doesn’t line up cleanly with `Deno.serve`’s overloads. I’m fixing that with an explicit TCP-options type and handler cast so the wrapper stays minimal.
+
+# gpt-5.4_2026-03-11_2220_10
+
+I’ve switched the source tree over to the wrapper entrypoint. I’m rebuilding the temp Fresh output one more time, then compiling `kato-web` from `src/compiled_main.ts` and probing it with the same `--host/--port` contract the launcher already uses.
+
+# gpt-5.4_2026-03-11_2220_34
+
+The wrapper-based binary compiled cleanly. I’m doing one final live probe using the real launcher-style arguments so we can say `kato-web` works with `--host`/`--port`, not just env vars.
+
+# gpt-5.4_2026-03-11_2220_51
+
+I’ve closed the last contract mismatch. The web binary now compiles and runs behind a Kato wrapper that accepts the same `--host`/`--port` args the launcher already uses, so I’m updating the task note to reflect the final proof path instead of the intermediate Fresh-only entrypoint.
+
+# gpt-5.4_2026-03-11_2220_59
+
+One data point worth preserving for distribution planning: the compiled Linux `kato-web` binary is large because Deno embeds the built `_fresh` output plus npm-derived `node_modules`. I’m adding that size implication to the task note so it doesn’t get rediscovered later.
+
+# gpt-5.4_2026-03-11_2221_23
+
+I caught one doc accuracy issue: the verified web compile command is cwd-sensitive because of `--include _fresh`. I’m correcting the note so it matches the command that actually passed, instead of implying a repo-root invocation.
+
+# gpt-5.4_2026-03-11_2221_51
+
+**Progress**
+
+`kato-web` is now proven viable as a real Linux binary, not just a planning assumption. I fixed the two blockers that were preventing that:
+
+- I split client-safe activity helpers into [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts) and left runtime-config loading server-only in [loaders/activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), so islands no longer drag filesystem/runtime code into the client bundle.
+- I changed [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) to stop using the static `new URL(..., import.meta.url)` pattern that Vite was turning into a stray client asset.
+- I added a wrapper entrypoint at [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts) with arg parsing in [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts), so the compiled `kato-web` binary accepts `--host` and `--port`, matching the existing launcher contract.
+- I updated the binary plan note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) with the real Linux proof and remaining cross-platform work.
+
+**Verification**
+
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts`
+- In a temp repo copy:
+  - `deno compile` succeeded for `kato`
+  - `deno compile` succeeded for `kato-daemon`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - the compiled `kato-web --host 127.0.0.1 --port 45176` served `/login` with HTTP 200
+
+One important data point: the current Linux `kato-web` binary is large, about 69 MB, because Deno embeds `_fresh` plus npm-derived web dependencies. I did not update [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) yet; the next step should be turning these verified compile commands into repeatable scripts/CI and then documenting the release flow. These new changes are currently unstaged.
+
+# gpt-5.4_2026-03-11_2221_52
+
+**Progress**
+
+`kato-web` is now proven viable as a real Linux binary, not just a planning assumption. I fixed the two blockers that were preventing that:
+
+- I split client-safe activity helpers into [activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/activity_state.ts) and left runtime-config loading server-only in [loaders/activity_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/activity_state.ts), so islands no longer drag filesystem/runtime code into the client bundle.
+- I changed [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) to stop using the static `new URL(..., import.meta.url)` pattern that Vite was turning into a stray client asset.
+- I added a wrapper entrypoint at [compiled_main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/compiled_main.ts) with arg parsing in [binary_entry.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/binary_entry.ts), so the compiled `kato-web` binary accepts `--host` and `--port`, matching the existing launcher contract.
+- I updated the binary plan note in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) with the real Linux proof and remaining cross-platform work.
+
+**Verification**
+
+- `deno task --cwd apps/web check`
+- `deno test tests/web-binary-entry_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts tests/executable-resolution_test.ts`
+- In a temp repo copy:
+  - `deno compile` succeeded for `kato`
+  - `deno compile` succeeded for `kato-daemon`
+  - `deno task --cwd apps/web build`
+  - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
+  - the compiled `kato-web --host 127.0.0.1 --port 45176` served `/login` with HTTP 200
+
+One important data point: the current Linux `kato-web` binary is large, about 69 MB, because Deno embeds `_fresh` plus npm-derived web dependencies. I did not update [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) yet; the next step should be turning these verified compile commands into repeatable scripts/CI and then documenting the release flow. These new changes are currently unstaged.
+
+# djradon_2026-03-11_2221_52
+
+Should we remove the top-level main.ts and its test?
+
+# gpt-5.4_2026-03-11_2222_02
+
+I’m checking what still references the top-level `main.ts` and whether `main_test.ts` protects anything meaningful, so the recommendation is based on the current repo rather than on the old layout assumption.
+
+# gpt-5.4_2026-03-11_2222_06
+
+The root file pair looks isolated. I’m checking the repo-level task wiring and README references so I can say whether removing them has any collateral beyond cleanup.
+
+# gpt-5.4_2026-03-11_2222_18
+
+Yes, I would remove them.
+
+[main.ts](/home/djradon/hub/spectacular-voyage/kato/main.ts) is not the product entrypoint anymore. It just prints a daemon-description string, while the real CLI entry is [apps/cli/src/main.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/main.ts). That mismatch already caused confusion during the binary work.
+
+[main_test.ts](/home/djradon/hub/spectacular-voyage/kato/main_test.ts) is only testing two string-returning helpers in that stub. It is not protecting real behavior.
+
+The only real fallout is cleanup in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json):
+- remove `dev:root`
+- stop listing `main.ts` / `main_test.ts` in `fmt`, `lint`, `check`, `test`, and `test:coverage`
+
+If you want a repo-root convenience entry later, it should be a real shim to the CLI, not the current placeholder. But as it stands, the root `main.ts` and its test are dead weight. If you want, I can remove them and update `deno.json` in one pass.
+
+# djradon_2026-03-11_2222_49
+
+yes please.
+
+# gpt-5.4_2026-03-11_2223_04
+
+I’m removing the root stub entrypoint and its test, then tightening the repo task config so it no longer references dead files. After that I’ll run a light validation pass on the updated `deno.json`.

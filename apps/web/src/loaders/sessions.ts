@@ -16,9 +16,9 @@ import { relative } from "@std/path";
 import {
   type ActivityState,
   deriveSessionGenerationState,
-  loadRuntimeConfigOrDefault,
   providerAutoGeneratesTwins,
-} from "./activity_state.ts";
+} from "../activity_state.ts";
+import { loadRuntimeConfigOrDefault } from "./activity_state.ts";
 import { buildSessionInventorySessionHref } from "../session_routes.ts";
 
 export interface SessionRecordingActivityRow {

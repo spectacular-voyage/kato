@@ -2,7 +2,7 @@ import {
   PersistentSessionStateStore,
   resolveDefaultKatoDir,
 } from "@kato/runtime";
-import type { ActivityState } from "./activity_state.ts";
+import type { ActivityState } from "../activity_state.ts";
 import type { LoadSessionActivityRowsOptions } from "./sessions.ts";
 import {
   loadSessionActivityRows,
