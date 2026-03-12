@@ -330,8 +330,13 @@ Current implementation note:
 - a follow-up Ubuntu job now:
   - downloads the per-platform bundle artifacts
   - assembles npm wrapper/platform packages
-  - runs npm pack/install smoke for the host package
   - uploads the generated npm package assembly output
+- a native-runner post-assembly npm smoke matrix now:
+  - downloads the assembled `kato-npm-packages` artifact on Linux, Windows,
+    macOS x64, and macOS arm64
+  - runs `deno task smoke:npm-install` on each native runner
+  - keeps the smoke assertions aligned through the shared smoke script instead
+    of per-OS workflow forks
 - the default npm wrapper target is now `@spectacular-voyage/kato`
 - it also runs a lightweight packaged-bundle smoke slice on each runner:
   - `kato --version`
@@ -342,6 +347,10 @@ Current implementation note:
 - the npm assembly and host-package smoke path has also been exercised in
   GitHub
 - local npm publish dry-run has succeeded for the assembled package set
+- `.github/workflows/release-manual.yml` now also has a GitHub Release job that
+  can create or update a draft or published release from the packaged bundle
+  artifacts, upload the versioned archives and checksums, and use the matching
+  `release-notes.v<version>.md` body for the release page
 - first real publish attempt surfaced the remaining product decision that the
   wrapper package should be scoped as `@spectacular-voyage/kato`, so release
   artifacts must be regenerated after that naming change before the first real
@@ -352,16 +361,16 @@ Current implementation note:
 The next smoke expansion should focus on the install channel users will
 actually touch, not only the raw bundle directory.
 
-- [ ] Add a post-assembly npm smoke job matrix to
+- [x] Add a post-assembly npm smoke job matrix to
       `.github/workflows/release-manual.yml` for:
       - Windows x64
       - macOS x64
       - macOS arm64
       - Linux x64
-- [ ] Have each npm smoke runner download the assembled `kato-npm-packages`
+- [x] Have each npm smoke runner download the assembled `kato-npm-packages`
       artifact and run:
       `deno task smoke:npm-install -- --input-dir <downloaded-dir> --npm-bin npm`
-- [ ] Keep the smoke assertions aligned across platforms:
+- [x] Keep the smoke assertions aligned across platforms:
       - `kato --version`
       - `kato init`
       - `kato web init`
@@ -369,7 +378,7 @@ actually touch, not only the raw bundle directory.
       - HTTP probe of `/login`
       - `kato web status`
       - `kato web stop`
-- [ ] Fix platform-specific npm install or process-launch issues in
+- [x] Fix platform-specific npm install or process-launch issues in
       `scripts/smoke-npm-install.ts` rather than forking per-OS workflow logic.
 - [ ] Only treat the npm channel as release-hardened once the above job matrix
       is green on real native runners.
@@ -387,9 +396,9 @@ install path:
 
 Planned follow-up:
 
-- [ ] Add a release-upload job after binary packaging and npm validation that
+- [x] Add a release-upload job after binary packaging and npm validation that
       attaches per-platform archives and checksums to the tagged GitHub Release.
-- [ ] Upload at least these assets for each release:
+- [c] Upload at least these assets for each release:
       - `kato-v<version>-linux-x64.tar.gz`
       - `kato-v<version>-linux-x64.tar.gz.sha256`
       - `kato-v<version>-windows-x64.zip`
@@ -398,12 +407,12 @@ Planned follow-up:
       - `kato-v<version>-macos-x64.tar.gz.sha256`
       - `kato-v<version>-macos-arm64.tar.gz`
       - `kato-v<version>-macos-arm64.tar.gz.sha256`
-- [ ] Keep GitHub Release assets versioned in Phase 1; defer stable-name alias
+- [x] Keep GitHub Release assets versioned in Phase 1; defer stable-name alias
       assets until the installer/download story settles.
-- [ ] Prefer creating or updating a draft GitHub Release after successful
+- [c] Prefer creating or updating a draft GitHub Release after successful
       package assembly, then publish/undraft it only after npm publish for that
       version succeeds.
-- [ ] Include or link release notes for the same version so archive consumers
+- [x] Include or link release notes for the same version so archive consumers
       can understand platform support, checksums, and install guidance from the
       release page alone.
 
