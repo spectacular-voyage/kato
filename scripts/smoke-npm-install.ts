@@ -48,7 +48,7 @@ async function readMetadata(path: string): Promise<NpmPackagesMetadata> {
   return JSON.parse(raw) as NpmPackagesMetadata;
 }
 
-function currentNodeArch(): string {
+export function currentNodeArch(): string {
   switch (Deno.build.arch) {
     case "x86_64":
       return "x64";

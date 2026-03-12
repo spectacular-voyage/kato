@@ -363,7 +363,14 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           path: .test-tmp/downloaded-bundles
-          pattern: kato-*
+          pattern: kato-*-x64
+          merge-multiple: false
+
+      - name: Download macOS ARM64 Binary Artifact Bundle
+        uses: actions/download-artifact@v5
+        with:
+          path: .test-tmp/downloaded-bundles
+          pattern: kato-macos-arm64
           merge-multiple: false
 
       - name: Prepare Release Metadata

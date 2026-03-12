@@ -4,7 +4,15 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
+const WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS = 250;
 const UTF8_DECODER = new TextDecoder();
+
+type CachedPowerShellResult = {
+  expiresAtMs: number;
+  result: Deno.CommandOutput;
+};
+
+const windowsProcessAliveCache = new Map<number, CachedPowerShellResult>();
 
 export interface WebServerStatus {
   schemaVersion: 1;
@@ -104,26 +112,36 @@ function runPowerShellSync(script: string): Deno.CommandOutput {
   }).outputSync();
 }
 
-function isWindowsProcessAlive(pid: number): boolean {
-  try {
-    const result = runPowerShellSync(
-      `$ErrorActionPreference = 'Stop';
+function runWindowsProcessAliveProbe(pid: number): Deno.CommandOutput {
+  const now = Date.now();
+  const cached = windowsProcessAliveCache.get(pid);
+  if (cached && cached.expiresAtMs > now) {
+    return cached.result;
+  }
+  if (cached) {
+    windowsProcessAliveCache.delete(pid);
+  }
+
+  const result = runPowerShellSync(
+    `$ErrorActionPreference = 'Stop';
 $proc = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue;
 if ($null -eq $proc) {
   exit 1
 }
 exit 0`,
-    );
+  );
+  windowsProcessAliveCache.set(pid, {
+    expiresAtMs: now + WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS,
+    result,
+  });
+  return result;
+}
+
+function isWindowsProcessAlive(pid: number): boolean {
+  try {
+    const result = runWindowsProcessAliveProbe(pid);
     return result.code === 0;
-  } catch (error) {
-    if (
-      error instanceof Deno.errors.NotFound ||
-      error instanceof Deno.errors.NotCapable ||
-      error instanceof Deno.errors.PermissionDenied ||
-      error instanceof TypeError
-    ) {
-      return false;
-    }
+  } catch {
     return false;
   }
 }
@@ -153,14 +171,23 @@ export function isProcessAlive(pid: number | undefined): boolean {
 }
 
 function terminateWindowsProcess(pid: number, force: boolean): void {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new TypeError(`Invalid Windows process id: ${pid}`);
+  }
+
+  const validatedPid = pid;
+  const safePid = String(validatedPid);
+  const shouldForce = force === true;
+  windowsProcessAliveCache.delete(validatedPid);
+
   try {
     const result = runPowerShellSync(
       `$ErrorActionPreference = 'Stop';
-$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue;
+$proc = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue;
 if ($null -eq $proc) {
   exit 0
 }
-Stop-Process -Id ${pid}${force ? " -Force" : ""} -ErrorAction Stop;
+Stop-Process -Id ${safePid}${shouldForce ? " -Force" : ""} -ErrorAction Stop;
 exit 0`,
     );
     if (result.code === 0) {
@@ -170,8 +197,8 @@ exit 0`,
     const errorText = UTF8_DECODER.decode(result.stderr).trim();
     throw new Error(
       errorText.length > 0
-        ? `Failed to stop Windows process ${pid}: ${errorText}`
-        : `Failed to stop Windows process ${pid} (exit ${result.code})`,
+        ? `Failed to stop Windows process ${validatedPid}: ${errorText}`
+        : `Failed to stop Windows process ${validatedPid} (exit ${result.code})`,
     );
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {

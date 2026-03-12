@@ -1,20 +1,10 @@
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
+  currentNodeArch,
   localProjectCommandPath,
   resolveSmokePackagePaths,
 } from "../scripts/smoke-npm-install.ts";
-
-function currentNodeArch(): string {
-  switch (Deno.build.arch) {
-    case "x86_64":
-      return "x64";
-    case "aarch64":
-      return "arm64";
-    default:
-      return Deno.build.arch;
-  }
-}
 
 function currentNodePlatform(): string {
   return Deno.build.os === "windows" ? "win32" : Deno.build.os;
