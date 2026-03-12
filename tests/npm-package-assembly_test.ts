@@ -120,13 +120,13 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   const metadata = await assembleNpmPackages({
     inputDirs: [inputDir],
     outputDir,
-    wrapperPackageName: "kato",
+    wrapperPackageName: "@spectacular-voyage/kato",
     platformPackagePrefix: "@spectacular-voyage/kato",
     commandName: "kato",
   });
 
   assertEquals(metadata.version, "0.2.4");
-  assertEquals(metadata.wrapperPackageName, "kato");
+  assertEquals(metadata.wrapperPackageName, "@spectacular-voyage/kato");
   assertEquals(metadata.platformPackages.length, 1);
   assertEquals(
     metadata.platformPackages[0].packageName,
@@ -136,7 +136,7 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   const wrapperPackageJson = JSON.parse(
     await Deno.readTextFile(join(outputDir, "wrapper", "package.json")),
   ) as Record<string, unknown>;
-  assertEquals(wrapperPackageJson["name"], "kato");
+  assertEquals(wrapperPackageJson["name"], "@spectacular-voyage/kato");
   assertEquals(
     (wrapperPackageJson["bin"] as Record<string, string>)["kato"],
     "bin/kato.cjs",
@@ -195,7 +195,7 @@ Deno.test("assembleNpmPackages rejects mismatched bundle versions", async () => 
       assembleNpmPackages({
         inputDirs: [linuxDir, macDir],
         outputDir,
-        wrapperPackageName: "kato",
+        wrapperPackageName: "@spectacular-voyage/kato",
         platformPackagePrefix: "@spectacular-voyage/kato",
         commandName: "kato",
       }),
@@ -218,7 +218,7 @@ Deno.test("assembleNpmPackages resolves downloaded artifact paths from stale bun
   const metadata = await assembleNpmPackages({
     inputDirs: [inputDir],
     outputDir,
-    wrapperPackageName: "kato",
+    wrapperPackageName: "@spectacular-voyage/kato",
     platformPackagePrefix: "@spectacular-voyage/kato",
     commandName: "kato",
   });
@@ -244,7 +244,7 @@ Deno.test("assembleNpmPackages restores executable mode for unix platform binari
   await assembleNpmPackages({
     inputDirs: [inputDir],
     outputDir,
-    wrapperPackageName: "kato",
+    wrapperPackageName: "@spectacular-voyage/kato",
     platformPackagePrefix: "@spectacular-voyage/kato",
     commandName: "kato",
   });

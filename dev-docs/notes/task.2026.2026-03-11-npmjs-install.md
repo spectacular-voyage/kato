@@ -47,7 +47,7 @@ The correct relationship is:
 Recommended package set:
 
 - top-level package:
-  - final public name: `kato`
+  - final public name: `@spectacular-voyage/kato`
 - platform packages, for example:
   - `@spectacular-voyage/kato-win32-x64`
   - `@spectacular-voyage/kato-darwin-x64`
@@ -72,7 +72,7 @@ keeping Kato itself native.
 Current local implementation status:
 
 - `scripts/assemble-npm-packages.ts` generates:
-  - wrapper package `kato`
+  - wrapper package `@spectacular-voyage/kato`
   - platform packages such as `@spectacular-voyage/kato-linux-x64-gnu`
 - `scripts/smoke-npm-install.ts` performs a local smoke of:
   - `npm pack`
@@ -187,7 +187,7 @@ Why this order matters:
 - Should the platform packages be published as fully public implementation
   details, or documented only indirectly through the top-level install command?
 - Do we want npm global install as the primary documented npm path, or also
-  support `npx kato@latest ...` in Phase 1?
+  support `npx @spectacular-voyage/kato@latest ...` in Phase 1?
 - How much npm-package payload duplication is acceptable when each platform
   package includes three binaries plus metadata?
 - Do we need a Linux musl package for the first public npm cut, or is explicit
@@ -203,7 +203,7 @@ Why this order matters:
 - The preferred npm architecture is:
   - one top-level wrapper package
   - one platform package per supported target
-- The public wrapper package name is `kato`.
+- The public wrapper package name is `@spectacular-voyage/kato`.
 - The default platform package prefix is `@spectacular-voyage/kato`.
 - Platform packages should include `kato`, `kato-daemon`, and `kato-web`.
 - The public npm entrypoint remains `kato`; `kato-daemon` and `kato-web` remain
@@ -218,11 +218,11 @@ Why this order matters:
 ## Contract Changes
 
 - Add a documented npm install path, expected to look like:
-  - `npm install -g kato`
+  - `npm install -g @spectacular-voyage/kato`
 - Add a documented npm upgrade path, expected to look like:
-  - `npm update -g kato`
+  - `npm update -g @spectacular-voyage/kato`
 - Add a documented npm uninstall path, expected to look like:
-  - `npm uninstall -g kato`
+  - `npm uninstall -g @spectacular-voyage/kato`
 - Clarify in user docs that npm uninstall removes the installed program but
   does not automatically delete Kato-owned data under `~/.kato`.
 - Add a Node-based wrapper entrypoint that must preserve:
@@ -240,7 +240,7 @@ Why this order matters:
 - Current local npm smoke result:
   - `deno run --frozen -A scripts/smoke-npm-install.ts --input-dir .test-tmp/npm-packages/package-smoke --npm-bin <npm-path>`
   - passed for:
-    - wrapper package `kato`
+    - wrapper package `@spectacular-voyage/kato`
     - platform package `@spectacular-voyage/kato-linux-x64-gnu`
     - `kato --version`
     - `kato init`
@@ -279,7 +279,7 @@ Why this order matters:
 
 - [x] Confirm the publish names for the top-level package and all platform
       packages:
-      `kato` plus scoped platform packages under
+      `@spectacular-voyage/kato` plus scoped platform packages under
       `@spectacular-voyage/kato-*`.
 - [x] Add a script that assembles npm package directories from the existing
       packaged binary outputs.

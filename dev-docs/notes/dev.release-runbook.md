@@ -231,6 +231,7 @@ Current npm publish behavior:
 
 - uses the same assembled npm packages from the current `release-manual` run
 - publishes platform packages first, then the public wrapper package
+- current wrapper package target is `@spectacular-voyage/kato`
 - uses `npm publish --dry-run` when `npm_publish_mode=dry-run`
 - uses plain `npm publish` for local/manual bootstrap publishes
 - adds `npm publish --provenance` only when the GitHub workflow runs with
@@ -242,7 +243,8 @@ Current npm publish behavior:
 Trusted publishing note:
 
 - npm trusted publishers are configured per workflow file, so the npm registry
-  side must trust `.github/workflows/release-manual.yml` for `kato` and each
+  side must trust `.github/workflows/release-manual.yml` for
+  `@spectacular-voyage/kato` and each
   `@spectacular-voyage/kato-*` platform package before `npm_publish_mode=publish`
   will work without a token.
 

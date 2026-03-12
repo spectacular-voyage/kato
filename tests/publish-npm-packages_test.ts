@@ -9,7 +9,7 @@ Deno.test("publicationOrder publishes platform packages before the wrapper", () 
   const ordered = publicationOrder({
     createdAt: "2026-03-12T00:00:00.000Z",
     version: "0.2.4",
-    wrapperPackageName: "kato",
+    wrapperPackageName: "@spectacular-voyage/kato",
     platformPackagePrefix: "@spectacular-voyage/kato",
     commandName: "kato",
     wrapperDir: "/tmp/wrapper",
@@ -41,7 +41,7 @@ Deno.test("publicationOrder publishes platform packages before the wrapper", () 
     [
       "@spectacular-voyage/kato-linux-x64-gnu",
       "@spectacular-voyage/kato-win32-x64",
-      "kato",
+      "@spectacular-voyage/kato",
     ],
   );
 });
@@ -62,7 +62,7 @@ Deno.test("resolvedPublicationOrder falls back to downloaded npm package paths",
     {
       createdAt: "2026-03-12T00:00:00.000Z",
       version: "0.2.4",
-      wrapperPackageName: "kato",
+      wrapperPackageName: "@spectacular-voyage/kato",
       platformPackagePrefix: "@spectacular-voyage/kato",
       commandName: "kato",
       wrapperDir: "/stale/source/wrapper",

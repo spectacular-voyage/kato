@@ -80,7 +80,7 @@ interface PlatformPackageDefinition {
   webExecutablePath: string;
 }
 
-const DEFAULT_WRAPPER_PACKAGE_NAME = "kato";
+const DEFAULT_WRAPPER_PACKAGE_NAME = "@spectacular-voyage/kato";
 const DEFAULT_COMMAND_NAME = "kato";
 const DEFAULT_PLATFORM_PACKAGE_PREFIX = "@spectacular-voyage/kato";
 const REQUIRED_BINARY_BASENAMES = ["kato", "kato-daemon", "kato-web"] as const;

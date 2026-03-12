@@ -3824,3 +3824,414 @@ The script behavior is fine; the failed verification run just used bare `npm`, a
 # gpt-5.4_2026-03-12_0143_57
 
 The dry-run publish is still chewing through the large platform tarballs, which is expected. I’m waiting for completion so I can give you the exact local command to rerun safely now.
+
+# gpt-5.4_2026-03-12_0145_09
+
+The local dry-run is behaving correctly with the new default: no provenance locally, just plain `npm publish --dry-run`. I’ve got enough signal now to give you the exact next command; the rest of this run is just continuing through the remaining two packages.
+
+# gpt-5.4_2026-03-12_0145_44
+
+Local bootstrap publish now works the way it should.
+
+I changed [`publish-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts) so `--provenance` is opt-in instead of forced. That means:
+
+- local/manual publish: plain `npm publish`
+- GitHub Actions publish: explicit `--provenance`
+
+I also updated [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) so the workflow adds `--provenance` only in `npm_publish_mode=publish`, and updated [the runbook](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) accordingly.
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/publish-npm-packages_test.ts`
+- `deno task publish:npm-packages -- --input-dir .test-tmp/downloaded-npm-packages --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm --dry-run`
+
+That dry-run completed end to end for all four platform packages plus `kato`.
+
+So your next real local publish command is:
+
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm \
+  --tag latest
+```
+
+If you want, after that I’d move straight to updating [`README.md`](/home/djradon/hub/spectacular-voyage/kato/README.md) so `npm install -g kato` becomes the primary documented install path.
+
+# djradon_2026-03-12_0147_54
+
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/@spectacular-voyage%2fkato-darwin-arm64 - Scope not found
+npm error 404
+npm error 404  The requested resource '@spectacular-voyage/kato-darwin-arm64@0.2.4' could not be found or you do not have permission to access it.
+npm error 404
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.
+npm error A complete log of this run can be found in: /home/djradon/.npm/_logs/2026-03-12T08_47_21_977Z-debug-0.log
+error: Uncaught (in promise) Error: Command failed with exit code 1: /home/djradon/.nvm/versions/node/v25.8.1/bin/npm publish --tag latest
+    throw new Error(
+          ^
+    at runCommand (file:///home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts:130:11)
+    at async file:///home/djradon/hub/spectacular-voyage/kato/scripts/publish-npm-packages.ts:201:5
+
+# gpt-5.4_2026-03-12_0147_59
+
+I’m checking npm’s current org/scope behavior against the exact `E404 scope not found` path, because the likely fix is on npmjs account/org setup rather than in Kato’s packaging scripts.
+
+# gpt-5.4_2026-03-12_0148_37
+
+This is an npm scope/account problem, not a Kato packaging problem.
+
+`E404 ... Scope not found` on `@spectacular-voyage/kato-darwin-arm64` means npm does not currently recognize your publish as authorized for the `@spectacular-voyage` scope. npm’s docs say:
+
+- an organization’s name is its scope
+- to publish to an organization scope, that organization must exist on npmjs.com
+- the publishing user must have the appropriate org permissions  
+Sources:
+- https://docs.npmjs.com/creating-an-organization/
+- https://docs.npmjs.com/cli/v8/using-npm/scope/
+- https://docs.npmjs.com/package-scope-access-level-and-visibility/
+- https://docs.npmjs.com/about-organization-scopes-and-packages/
+
+What to check next:
+
+1. Confirm you are logged into npm as the expected user:
+```bash
+npm whoami
+```
+
+2. In npmjs.com, confirm the org really exists as exactly `spectacular-voyage`.
+The scope must match the org name exactly: `@spectacular-voyage`.
+
+3. In npmjs.com, confirm your user is a member of that org and has write/publish rights for org public packages.
+npm’s access matrix says org public packages are writable by members of a team with read/write access.
+
+If the org exists but your user is not in it with write access, add yourself there first.
+
+If the org does not actually exist on npmjs.com yet, create it first. The docs state the org name becomes the scope.
+
+After that, rerun the publish.
+
+One important side note: unscoped `kato` is different. npm’s docs say only user accounts create/manage unscoped packages, while organizations manage scoped packages. So:
+- `@spectacular-voyage/kato-*` depends on org scope existing and your org permissions
+- `kato` will publish under your user ownership, not the org scope
+
+If you want, I can add a preflight check to the publish script so it fails early with a clearer “scope/org membership” message before trying the first `npm publish`.
+
+# gpt-5.4_2026-03-12_0148_39
+
+This is an npm scope/account problem, not a Kato packaging problem.
+
+`E404 ... Scope not found` on `@spectacular-voyage/kato-darwin-arm64` means npm does not currently recognize your publish as authorized for the `@spectacular-voyage` scope. npm’s docs say:
+
+- an organization’s name is its scope
+- to publish to an organization scope, that organization must exist on npmjs.com
+- the publishing user must have the appropriate org permissions  
+Sources:
+- https://docs.npmjs.com/creating-an-organization/
+- https://docs.npmjs.com/cli/v8/using-npm/scope/
+- https://docs.npmjs.com/package-scope-access-level-and-visibility/
+- https://docs.npmjs.com/about-organization-scopes-and-packages/
+
+What to check next:
+
+1. Confirm you are logged into npm as the expected user:
+```bash
+npm whoami
+```
+
+2. In npmjs.com, confirm the org really exists as exactly `spectacular-voyage`.
+The scope must match the org name exactly: `@spectacular-voyage`.
+
+3. In npmjs.com, confirm your user is a member of that org and has write/publish rights for org public packages.
+npm’s access matrix says org public packages are writable by members of a team with read/write access.
+
+If the org exists but your user is not in it with write access, add yourself there first.
+
+If the org does not actually exist on npmjs.com yet, create it first. The docs state the org name becomes the scope.
+
+After that, rerun the publish.
+
+One important side note: unscoped `kato` is different. npm’s docs say only user accounts create/manage unscoped packages, while organizations manage scoped packages. So:
+- `@spectacular-voyage/kato-*` depends on org scope existing and your org permissions
+- `kato` will publish under your user ownership, not the org scope
+
+If you want, I can add a preflight check to the publish script so it fails early with a clearer “scope/org membership” message before trying the first `npm publish`.
+
+# djradon_2026-03-12_0153_50
+
+ok, remind me, there was a follow up item. maybe to associate "kato" with an org? And then the github actions registration.
+
+# gpt-5.4_2026-03-12_0153_56
+
+Yes. After the first successful manual publish, the follow-up items are:
+
+- Give the unscoped `kato` package explicit org/team management.
+  Publishing `kato` does not automatically attach it to `@spectacular-voyage`. The follow-up is to grant org team access to the unscoped package, for example with `npm access grant ...` or the npmjs package access UI.
+
+- Configure trusted publishing on npmjs.com for each package.
+  Do this per package:
+  - `kato`
+  - `@spectacular-voyage/kato-linux-x64-gnu`
+  - `@spectacular-voyage/kato-win32-x64`
+  - `@spectacular-voyage/kato-darwin-x64`
+  - `@spectacular-voyage/kato-darwin-arm64`
+
+  Point them at:
+  - GitHub org/user: `spectacular-voyage`
+  - repo: `kato`
+  - workflow file: `release-manual.yml`
+
+- Then switch routine releases to GitHub Actions.
+  Use `Release Manual` with:
+  - `npm_publish_mode=dry-run`
+  - then `npm_publish_mode=publish`
+
+So the sequence after bootstrap is:
+
+1. publish manually once
+2. grant org/team access to unscoped `kato`
+3. set trusted publishers for all 5 packages
+4. use Actions for future publishes
+
+If you want, I can turn that into a short checklist in the runbook right now.
+
+# gpt-5.4_2026-03-12_0153_58
+
+Yes. After the first successful manual publish, the follow-up items are:
+
+- Give the unscoped `kato` package explicit org/team management.
+  Publishing `kato` does not automatically attach it to `@spectacular-voyage`. The follow-up is to grant org team access to the unscoped package, for example with `npm access grant ...` or the npmjs package access UI.
+
+- Configure trusted publishing on npmjs.com for each package.
+  Do this per package:
+  - `kato`
+  - `@spectacular-voyage/kato-linux-x64-gnu`
+  - `@spectacular-voyage/kato-win32-x64`
+  - `@spectacular-voyage/kato-darwin-x64`
+  - `@spectacular-voyage/kato-darwin-arm64`
+
+  Point them at:
+  - GitHub org/user: `spectacular-voyage`
+  - repo: `kato`
+  - workflow file: `release-manual.yml`
+
+- Then switch routine releases to GitHub Actions.
+  Use `Release Manual` with:
+  - `npm_publish_mode=dry-run`
+  - then `npm_publish_mode=publish`
+
+So the sequence after bootstrap is:
+
+1. publish manually once
+2. grant org/team access to unscoped `kato`
+3. set trusted publishers for all 5 packages
+4. use Actions for future publishes
+
+If you want, I can turn that into a short checklist in the runbook right now.
+
+# djradon_2026-03-12_0156_10
+
+Hah, kato is taken. I guess we'll go with scoped kato
+
+# gpt-5.4_2026-03-12_0156_22
+
+I’m taking this as “switch the public npm wrapper from unscoped `kato` to scoped `@spectacular-voyage/kato`.” I’m locating every place that bakes in the wrapper package name so I can update the generator, workflow-facing docs, and tests together.
+
+# gpt-5.4_2026-03-12_0156_33
+
+I’m switching the generated wrapper package name to `@spectacular-voyage/kato` now. That removes the unscoped-package ownership wrinkle entirely, but it does mean the install docs and task notes need to move from `npm install -g kato` to `npm install -g @spectacular-voyage/kato`.
+
+# gpt-5.4_2026-03-12_0156_40
+
+I’m patching the generator defaults and the notes together. After this, any new `assemble:npm-packages` run will produce `@spectacular-voyage/kato` as the wrapper, and the old “associate unscoped `kato` with the org” follow-up goes away.
+
+# gpt-5.4_2026-03-12_0157_14
+
+I’ve updated the generator defaults and the main task/runbook notes. I’m doing a quick sweep for any remaining `npm install -g kato` or “wrapper package `kato`” references so I don’t leave conflicting instructions behind.
+
+# gpt-5.4_2026-03-12_0157_28
+
+I’ve updated the default name, but I still need one more pass over the npm task note for scoped install examples like `npx` and `npm install -g`. Then I’ll regenerate a local package set and verify the scoped wrapper actually installs and smoke-runs.
+
+# gpt-5.4_2026-03-12_0157_40
+
+The naming/docs pass is complete. I’m regenerating a fresh npm package set with the new default wrapper name and running both the temp-install smoke and a publish dry-run against it, so you have a concrete re-run path instead of just changed constants.
+
+# gpt-5.4_2026-03-12_0157_55
+
+The tests are clean. The scoped smoke is now in the slow npm phase, which is what I expected because it’s repacking large binaries again; I’m waiting for the wrapper install and dry-run publish to finish so I can give you the exact next command sequence.
+
+# gpt-5.4_2026-03-12_0159_18
+
+Switched the wrapper default to `@spectacular-voyage/kato`.
+
+What I changed:
+- [`scripts/assemble-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) now defaults the wrapper package name to `@spectacular-voyage/kato`
+- updated the npm assembly/publish tests in [`npm-package-assembly_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/npm-package-assembly_test.ts) and [`publish-npm-packages_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/publish-npm-packages_test.ts)
+- updated [the npm install task note](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) and [the release runbook](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts tests/publish-npm-packages_test.ts`
+- regenerated a fresh package set at `.test-tmp/npm-packages/scoped-smoke`
+- `smoke-npm-install` passed with the scoped wrapper:
+  - `npm install` of `@spectacular-voyage/kato` tarball + Linux platform tarball
+  - `kato --version`
+  - `kato init`
+  - `kato web init/start/status/stop`
+
+One important consequence: you need to regenerate the npm package assembly before publishing. Your old `downloaded-npm-packages` tree still contains wrapper metadata for unscoped `kato`.
+
+Use either:
+```bash
+deno task assemble:npm-packages -- \
+  --input-dir <bundle-dir-1> \
+  --input-dir <bundle-dir-2> \
+  --input-dir <bundle-dir-3> \
+  --input-dir <bundle-dir-4> \
+  --output-dir .test-tmp/downloaded-npm-packages
+```
+
+or rerun `Release Manual` so the uploaded `kato-npm-packages` artifact is rebuilt with `@spectacular-voyage/kato`.
+
+One more thing: my final local `publish --dry-run` against the regenerated scoped package set hit:
+- `You cannot publish over the previously published versions: 0.2.4.`
+
+So at least one `@spectacular-voyage/kato-*` package version `0.2.4` now exists on npm. That means for the real release you likely need to bump to `0.2.5` before republishing the full set.
+
+# gpt-5.4_2026-03-12_0159_19
+
+Switched the wrapper default to `@spectacular-voyage/kato`.
+
+What I changed:
+- [`scripts/assemble-npm-packages.ts`](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) now defaults the wrapper package name to `@spectacular-voyage/kato`
+- updated the npm assembly/publish tests in [`npm-package-assembly_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/npm-package-assembly_test.ts) and [`publish-npm-packages_test.ts`](/home/djradon/hub/spectacular-voyage/kato/tests/publish-npm-packages_test.ts)
+- updated [the npm install task note](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) and [the release runbook](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts tests/publish-npm-packages_test.ts`
+- regenerated a fresh package set at `.test-tmp/npm-packages/scoped-smoke`
+- `smoke-npm-install` passed with the scoped wrapper:
+  - `npm install` of `@spectacular-voyage/kato` tarball + Linux platform tarball
+  - `kato --version`
+  - `kato init`
+  - `kato web init/start/status/stop`
+
+One important consequence: you need to regenerate the npm package assembly before publishing. Your old `downloaded-npm-packages` tree still contains wrapper metadata for unscoped `kato`.
+
+Use either:
+```bash
+deno task assemble:npm-packages -- \
+  --input-dir <bundle-dir-1> \
+  --input-dir <bundle-dir-2> \
+  --input-dir <bundle-dir-3> \
+  --input-dir <bundle-dir-4> \
+  --output-dir .test-tmp/downloaded-npm-packages
+```
+
+or rerun `Release Manual` so the uploaded `kato-npm-packages` artifact is rebuilt with `@spectacular-voyage/kato`.
+
+One more thing: my final local `publish --dry-run` against the regenerated scoped package set hit:
+- `You cannot publish over the previously published versions: 0.2.4.`
+
+So at least one `@spectacular-voyage/kato-*` package version `0.2.4` now exists on npm. That means for the real release you likely need to bump to `0.2.5` before republishing the full set.
+
+# djradon_2026-03-12_0159_19
+
+What's involved in supporting npx installs? Any benefits?
+
+# gpt-5.4_2026-03-12_0159_27
+
+I’m checking npm’s current `npx`/`npm exec` behavior in the docs, because the exact UX and whether it buys us anything beyond the scoped wrapper package are both easy to overstate.
+
+# gpt-5.4_2026-03-12_0159_59
+
+Very little is required. With the scoped wrapper package, `npx` support is mostly already there.
+
+Because npm’s current `npx` is just `npm exec`, and it can run a package’s `bin`, your wrapper package should work as:
+
+```bash
+npx @spectacular-voyage/kato@latest --version
+npx @spectacular-voyage/kato@latest init
+npx @spectacular-voyage/kato@latest web start
+```
+
+That works because npm says:
+- if the package is not already present locally, `npx`/`npm exec` installs it into the npm cache and adds its binaries to `PATH`
+- if a package has a single `bin` entry, that command is used  
+Sources:
+- https://docs.npmjs.com/cli/v11/commands/npm-exec
+- https://docs.npmjs.com/about-scopes
+
+So for Kato, “supporting `npx`” mostly means:
+- publish the scoped wrapper package successfully
+- document the right command form: `npx @spectacular-voyage/kato@latest ...`
+- maybe add one workflow/local smoke for that exact invocation
+
+Benefits:
+- zero global install
+- easy “try it once” onboarding
+- handy for CI or ephemeral environments
+- avoids PATH/setup questions
+
+Tradeoffs:
+- slower first run, because npm may fetch large platform tarballs into cache
+- not a great primary path for a background daemon-style tool users run often
+- cache-based execution is less explicit than a normal global install
+- users still need to type the scoped package name unless they install globally
+
+My recommendation:
+- support `npx` as a secondary convenience path
+- keep `npm install -g @spectacular-voyage/kato` as the primary documented install path
+
+If you want, the next small step is to add one smoke like:
+```bash
+npx @spectacular-voyage/kato@latest --version
+```
+and then document it in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
+
+# gpt-5.4_2026-03-12_0200_00
+
+Very little is required. With the scoped wrapper package, `npx` support is mostly already there.
+
+Because npm’s current `npx` is just `npm exec`, and it can run a package’s `bin`, your wrapper package should work as:
+
+```bash
+npx @spectacular-voyage/kato@latest --version
+npx @spectacular-voyage/kato@latest init
+npx @spectacular-voyage/kato@latest web start
+```
+
+That works because npm says:
+- if the package is not already present locally, `npx`/`npm exec` installs it into the npm cache and adds its binaries to `PATH`
+- if a package has a single `bin` entry, that command is used  
+Sources:
+- https://docs.npmjs.com/cli/v11/commands/npm-exec
+- https://docs.npmjs.com/about-scopes
+
+So for Kato, “supporting `npx`” mostly means:
+- publish the scoped wrapper package successfully
+- document the right command form: `npx @spectacular-voyage/kato@latest ...`
+- maybe add one workflow/local smoke for that exact invocation
+
+Benefits:
+- zero global install
+- easy “try it once” onboarding
+- handy for CI or ephemeral environments
+- avoids PATH/setup questions
+
+Tradeoffs:
+- slower first run, because npm may fetch large platform tarballs into cache
+- not a great primary path for a background daemon-style tool users run often
+- cache-based execution is less explicit than a normal global install
+- users still need to type the scoped package name unless they install globally
+
+My recommendation:
+- support `npx` as a secondary convenience path
+- keep `npm install -g @spectacular-voyage/kato` as the primary documented install path
+
+If you want, the next small step is to add one smoke like:
+```bash
+npx @spectacular-voyage/kato@latest --version
+```
+and then document it in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
