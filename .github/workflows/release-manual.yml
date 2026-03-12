@@ -215,9 +215,6 @@ jobs:
 
           deno task assemble:npm-packages -- "${args[@]}" --output-dir .test-tmp/npm-packages/release
 
-      - name: Smoke npm Install
-        run: deno task smoke:npm-install -- --input-dir .test-tmp/npm-packages/release --npm-bin npm
-
       - name: Upload npm Package Assembly Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -227,10 +224,77 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  smoke-npm-install:
+    name: Smoke npm Install (${{ matrix.label }})
+    needs: assemble-npm-packages
+    runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64
+            runs_on: ubuntu-latest
+            expected_os: linux
+            expected_arch: x86_64
+          - label: windows-x64
+            runs_on: windows-latest
+            expected_os: windows
+            expected_arch: x86_64
+          - label: macos-x64
+            runs_on: macos-15-intel
+            expected_os: darwin
+            expected_arch: x86_64
+          - label: macos-arm64
+            runs_on: macos-latest
+            expected_os: darwin
+            expected_arch: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Verify Native Runner Architecture
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          EXPECTED_ARCH: ${{ matrix.expected_arch }}
+        run: |
+          deno eval '
+            const expectedOs = Deno.env.get("EXPECTED_OS");
+            const expectedArch = Deno.env.get("EXPECTED_ARCH");
+            if (Deno.build.os !== expectedOs || Deno.build.arch !== expectedArch) {
+              console.error(
+                `Expected ${expectedOs}/${expectedArch}, got ${Deno.build.os}/${Deno.build.arch}`,
+              );
+              Deno.exit(1);
+            }
+            console.log(`Runner verified: ${Deno.build.os}/${Deno.build.arch}`);
+          '
+
+      - name: Download npm Package Assembly Artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: kato-npm-packages
+          path: .test-tmp/downloaded-npm-packages
+
+      - name: Smoke npm Install
+        run: deno task smoke:npm-install -- --input-dir .test-tmp/downloaded-npm-packages --npm-bin npm
+
   publish-npm-packages:
     name: Publish npm Packages
     if: github.event_name == 'workflow_dispatch' && inputs.npm_publish_mode != 'skip'
-    needs: assemble-npm-packages
+    needs: smoke-npm-install
     runs-on: ubuntu-latest
     permissions:
       contents: read
