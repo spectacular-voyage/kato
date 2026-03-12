@@ -26,9 +26,6 @@ on:
           - skip
           - draft
           - publish
-  push:
-    paths:
-      - .github/workflows/release-manual.yml
 
 jobs:
   build-binaries:
