@@ -412,11 +412,12 @@ Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles live
 
     await store.save(status);
     assertEquals(await store.load(), status);
-    const canProbeCurrentProcess = Deno.build.os !== "windows" ||
-      (await Deno.permissions.query({
-          name: "run",
-          command: "powershell.exe",
-        })).state === "granted";
+    const canProbeCurrentProcess = Deno.build.os === "windows"
+      ? (await Deno.permissions.query({
+        name: "run",
+        command: "powershell.exe",
+      })).state === "granted"
+      : (await Deno.permissions.query({ name: "run" })).state === "granted";
     assertEquals(isProcessAlive(Deno.pid), canProbeCurrentProcess);
     assertEquals(isProcessAlive(undefined), false);
     assertEquals(isProcessAlive(0), false);
