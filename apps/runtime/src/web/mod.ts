@@ -4,6 +4,15 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
+const WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS = 250;
+const UTF8_DECODER = new TextDecoder();
+
+type CachedPowerShellResult = {
+  expiresAtMs: number;
+  result: Deno.CommandOutput;
+};
+
+const windowsProcessAliveCache = new Map<number, CachedPowerShellResult>();
 
 export interface WebServerStatus {
   schemaVersion: 1;
@@ -87,9 +96,63 @@ export function resolveDefaultWebStatusPath(
   return join(katoDir, "web", WEB_STATUS_FILENAME);
 }
 
+function runPowerShellSync(script: string): Deno.CommandOutput {
+  const encodedCommand = toPowerShellEncodedCommand(script);
+  return new Deno.Command("powershell.exe", {
+    args: [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      encodedCommand,
+    ],
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+    env: { CI: "true" },
+  }).outputSync();
+}
+
+function runWindowsProcessAliveProbe(pid: number): Deno.CommandOutput {
+  const now = Date.now();
+  const cached = windowsProcessAliveCache.get(pid);
+  if (cached && cached.expiresAtMs > now) {
+    return cached.result;
+  }
+  if (cached) {
+    windowsProcessAliveCache.delete(pid);
+  }
+
+  const result = runPowerShellSync(
+    `$ErrorActionPreference = 'Stop';
+$proc = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue;
+if ($null -eq $proc) {
+  exit 1
+}
+exit 0`,
+  );
+  windowsProcessAliveCache.set(pid, {
+    expiresAtMs: now + WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS,
+    result,
+  });
+  return result;
+}
+
+function isWindowsProcessAlive(pid: number): boolean {
+  try {
+    const result = runWindowsProcessAliveProbe(pid);
+    return result.code === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function isProcessAlive(pid: number | undefined): boolean {
   if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
     return false;
+  }
+  if (Deno.build.os === "windows") {
+    // Windows does not support `kill(pid, 0)` probes, so use tasklist.
+    return isWindowsProcessAlive(pid);
   }
   try {
     Deno.kill(pid, 0);
@@ -104,6 +167,66 @@ export function isProcessAlive(pid: number | undefined): boolean {
       return false;
     }
     return false;
+  }
+}
+
+function terminateWindowsProcess(pid: number, force: boolean): void {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new TypeError(`Invalid Windows process id: ${pid}`);
+  }
+
+  const validatedPid = pid;
+  const safePid = String(validatedPid);
+  const shouldForce = force === true;
+  windowsProcessAliveCache.delete(validatedPid);
+
+  try {
+    const result = runPowerShellSync(
+      `$ErrorActionPreference = 'Stop';
+$proc = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue;
+if ($null -eq $proc) {
+  exit 0
+}
+Stop-Process -Id ${safePid}${shouldForce ? " -Force" : ""} -ErrorAction Stop;
+exit 0`,
+    );
+    if (result.code === 0) {
+      return;
+    }
+
+    const errorText = UTF8_DECODER.decode(result.stderr).trim();
+    throw new Error(
+      errorText.length > 0
+        ? `Failed to stop Windows process ${validatedPid}: ${errorText}`
+        : `Failed to stop Windows process ${validatedPid} (exit ${result.code})`,
+    );
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export function terminateProcess(
+  pid: number | undefined,
+  force: boolean = false,
+): void {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
+    return;
+  }
+  if (Deno.build.os === "windows") {
+    terminateWindowsProcess(pid, force);
+    return;
+  }
+
+  const signal = force ? "SIGKILL" : "SIGTERM";
+  try {
+    Deno.kill(pid, signal);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
   }
 }
 
@@ -188,6 +311,24 @@ function toPowerShellEncodedCommand(script: string): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
+function parseDetachedPid(stdoutText: string): number | undefined {
+  const lines = stdoutText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!/^\d+$/.test(line)) {
+      continue;
+    }
+    const pid = Number.parseInt(line, 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      return pid;
+    }
+  }
+  return undefined;
+}
+
 export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
   constructor(
     private readonly denoExecPath: string = Deno.execPath(),
@@ -229,8 +370,8 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
@@ -260,8 +401,8 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
@@ -275,14 +416,20 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     args: string[],
     workingDirectory: string,
   ): Promise<number> {
-    const argList = args.map(toPowerShellSingleQuoted).join(", ");
-    const script = `$ErrorActionPreference = 'Stop';
-$argList = @(${argList});
+    const startProcessArgs = args.length > 0
+      ? `$argList = @(${args.map(toPowerShellSingleQuoted).join(", ")});
 $proc = Start-Process -FilePath ${
-      toPowerShellSingleQuoted(executablePath)
-    } -ArgumentList $argList -WorkingDirectory ${
-      toPowerShellSingleQuoted(workingDirectory)
-    } -WindowStyle Hidden -PassThru;
+        toPowerShellSingleQuoted(executablePath)
+      } -ArgumentList $argList -WorkingDirectory ${
+        toPowerShellSingleQuoted(workingDirectory)
+      } -WindowStyle Hidden -PassThru;`
+      : `$proc = Start-Process -FilePath ${
+        toPowerShellSingleQuoted(executablePath)
+      } -WorkingDirectory ${
+        toPowerShellSingleQuoted(workingDirectory)
+      } -WindowStyle Hidden -PassThru;`;
+    const script = `$ErrorActionPreference = 'Stop';
+${startProcessArgs}
 [Console]::Out.WriteLine($proc.Id);`;
     const encodedCommand = toPowerShellEncodedCommand(script);
     const command = this.commandFactory("powershell.exe", {
@@ -310,8 +457,8 @@ $proc = Start-Process -FilePath ${
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
@@ -347,8 +494,8 @@ $proc = Start-Process -FilePath ${
         );
       }
       const stdoutText = new TextDecoder().decode(result.stdout).trim();
-      const pid = Number.parseInt(stdoutText, 10);
-      if (!Number.isFinite(pid) || pid <= 0) {
+      const pid = parseDetachedPid(stdoutText);
+      if (pid === undefined) {
         throw new Error(
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
@@ -381,8 +528,11 @@ $proc = Start-Process -FilePath ${
 Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
 & ${
           toPowerShellSingleQuoted(executablePath)
-        } 'run' '--ext=js' '-A' 'vite' 'build';
-$argList = @('serve', '-A', '--host', ${
+        } 'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build';
+if ($LASTEXITCODE -ne 0) {
+  throw "vite build failed with exit code $LASTEXITCODE"
+}
+$argList = @('serve', '--node-modules-dir=auto', '-A', '--host', ${
           toPowerShellSingleQuoted(options.hostname)
         }, '--port', ${
           toPowerShellSingleQuoted(String(options.port))
@@ -406,6 +556,7 @@ $proc = Start-Process -FilePath ${
       const quotedBuildCommand = [
         executablePath,
         "run",
+        "--node-modules-dir=auto",
         "--ext=js",
         "-A",
         "vite",
@@ -414,6 +565,7 @@ $proc = Start-Process -FilePath ${
       const quotedServeCommand = [
         executablePath,
         "serve",
+        "--node-modules-dir=auto",
         "-A",
         "--host",
         options.hostname,

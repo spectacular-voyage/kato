@@ -20,6 +20,17 @@ interface NpmPackagesMetadata {
   }>;
 }
 
+interface HostPlatformPackage {
+  packageName: string;
+  label: string;
+  target: string;
+  packageDir: string;
+  os: string;
+  cpu: string;
+  libc?: string;
+  executablePath: string;
+}
+
 function repoRoot(): string {
   return dirname(dirname(fromFileUrl(import.meta.url)));
 }
@@ -28,12 +39,16 @@ function resolvePath(root: string, value: string): string {
   return isAbsolute(value) ? value : resolve(root, value);
 }
 
+function pathListSeparator(os: string = Deno.build.os): string {
+  return os === "windows" ? ";" : ":";
+}
+
 async function readMetadata(path: string): Promise<NpmPackagesMetadata> {
   const raw = await Deno.readTextFile(path);
   return JSON.parse(raw) as NpmPackagesMetadata;
 }
 
-function currentNodeArch(): string {
+export function currentNodeArch(): string {
   switch (Deno.build.arch) {
     case "x86_64":
       return "x64";
@@ -42,6 +57,10 @@ function currentNodeArch(): string {
     default:
       return Deno.build.arch;
   }
+}
+
+function currentNodePlatform(): string {
+  return Deno.build.os === "windows" ? "win32" : Deno.build.os;
 }
 
 async function detectCurrentLibc(): Promise<"glibc" | "musl" | undefined> {
@@ -70,8 +89,8 @@ async function detectCurrentLibc(): Promise<"glibc" | "musl" | undefined> {
 function findHostPlatformPackage(
   metadata: NpmPackagesMetadata,
   libc: string | undefined,
-) {
-  const os = Deno.build.os;
+): HostPlatformPackage | undefined {
+  const os = currentNodePlatform();
   const cpu = currentNodeArch();
   return metadata.platformPackages.find((entry) => {
     if (entry.os !== os || entry.cpu !== cpu) {
@@ -82,6 +101,83 @@ function findHostPlatformPackage(
     }
     return true;
   });
+}
+
+async function resolveDownloadedPath(
+  inputDir: string,
+  preferredPath: string,
+  fallbackPath?: string,
+): Promise<string> {
+  const candidates = [
+    preferredPath,
+    join(inputDir, preferredPath.split(/[\\/]/).at(-1) ?? preferredPath),
+    ...(fallbackPath ? [fallbackPath] : []),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const stat = await Deno.stat(candidate);
+      if (stat.isDirectory) {
+        return candidate;
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(
+    `Could not resolve downloaded npm package path for ${preferredPath} under ${inputDir}`,
+  );
+}
+
+export async function resolveSmokePackagePaths(
+  metadata: NpmPackagesMetadata,
+  inputDir: string,
+  libc: string | undefined,
+): Promise<{ wrapperDir: string; platformPackage: HostPlatformPackage }> {
+  const platformPackage = findHostPlatformPackage(metadata, libc);
+  if (!platformPackage) {
+    throw new Error(
+      `No platform package found for host ${Deno.build.os}/${currentNodeArch()}${
+        libc ? `/${libc}` : ""
+      }`,
+    );
+  }
+
+  const wrapperDir = await resolveDownloadedPath(
+    inputDir,
+    metadata.wrapperDir,
+    join(inputDir, "wrapper"),
+  );
+  const resolvedPlatformDir = await resolveDownloadedPath(
+    inputDir,
+    platformPackage.packageDir,
+    join(
+      inputDir,
+      "platforms",
+      platformPackage.packageDir.split(/[\\/]/).at(-1) ?? platformPackage.label,
+    ),
+  );
+  return {
+    wrapperDir,
+    platformPackage: {
+      ...platformPackage,
+      packageDir: resolvedPlatformDir,
+    },
+  };
+}
+
+export function localProjectCommandPath(
+  projectDir: string,
+  commandName: string,
+  os: string = Deno.build.os,
+): string {
+  return join(
+    projectDir,
+    "node_modules",
+    ".bin",
+    os === "windows" ? `${commandName}.cmd` : commandName,
+  );
 }
 
 async function runCommand(
@@ -119,7 +215,9 @@ async function npmPack(
     cwd: packageDir,
     env: {
       ...baseEnv,
-      PATH: `${dirname(npmBin)}${baseEnv.PATH ? `:${baseEnv.PATH}` : ""}`,
+      PATH: `${dirname(npmBin)}${
+        baseEnv.PATH ? `${pathListSeparator()}${baseEnv.PATH}` : ""
+      }`,
     },
     stdout: "piped",
     stderr: "inherit",
@@ -187,14 +285,11 @@ if (import.meta.main) {
     join(inputDir, "npm-packages-metadata.json"),
   );
   const libc = await detectCurrentLibc();
-  const platformPackage = findHostPlatformPackage(metadata, libc);
-  if (!platformPackage) {
-    throw new Error(
-      `No platform package found for host ${Deno.build.os}/${currentNodeArch()}${
-        libc ? `/${libc}` : ""
-      }`,
-    );
-  }
+  const { wrapperDir, platformPackage } = await resolveSmokePackagePaths(
+    metadata,
+    inputDir,
+    libc,
+  );
 
   const baseEnv: Record<string, string> = {};
   for (const [key, value] of Object.entries(Deno.env.toObject())) {
@@ -202,9 +297,11 @@ if (import.meta.main) {
       baseEnv[key] = value;
     }
   }
-  baseEnv.PATH = `${dirname(npmBin)}${baseEnv.PATH ? `:${baseEnv.PATH}` : ""}`;
+  baseEnv.PATH = `${dirname(npmBin)}${
+    baseEnv.PATH ? `${pathListSeparator()}${baseEnv.PATH}` : ""
+  }`;
 
-  const wrapperTarball = await npmPack(npmBin, metadata.wrapperDir, baseEnv);
+  const wrapperTarball = await npmPack(npmBin, wrapperDir, baseEnv);
   const platformTarball = await npmPack(
     npmBin,
     platformPackage.packageDir,
@@ -234,7 +331,7 @@ if (import.meta.main) {
   );
 
   await runCommand(
-    join(projectDir, "node_modules", ".bin", metadata.commandName),
+    localProjectCommandPath(projectDir, metadata.commandName),
     ["--version"],
     projectDir,
     baseEnv,
@@ -247,12 +344,7 @@ if (import.meta.main) {
     USERPROFILE: homeDir,
     KATO_WEB_PASSWORD: "smoke-pass",
   };
-  const katoBin = join(
-    projectDir,
-    "node_modules",
-    ".bin",
-    metadata.commandName,
-  );
+  const katoBin = localProjectCommandPath(projectDir, metadata.commandName);
 
   await runCommand(katoBin, ["init"], projectDir, smokeEnv);
   await runCommand(

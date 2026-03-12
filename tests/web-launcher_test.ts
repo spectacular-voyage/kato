@@ -22,6 +22,10 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
 Deno.test(
   "DenoDetachedWebLauncher builds then launches the bundled web server via detached shell",
   async () => {
+    if (Deno.build.os === "windows") {
+      return;
+    }
+
     let capturedCommand: string | undefined;
     let capturedOptions:
       | ConstructorParameters<typeof Deno.Command>[1]
@@ -73,17 +77,72 @@ Deno.test(
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        "'/fake/deno' 'run' '--ext=js' '-A' 'vite' 'build' >/dev/null",
+        "'/fake/deno' 'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build' >/dev/null",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        "setsid '/fake/deno' 'serve' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
+        "setsid '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
-        "nohup '/fake/deno' 'serve' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
+        "nohup '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
     });
+  },
+);
+
+Deno.test(
+  "DenoDetachedWebLauncher Windows source path auto-materializes npm modules and fails closed on build errors",
+  async () => {
+    if (Deno.build.os !== "windows") {
+      return;
+    }
+
+    let capturedCommand: string | undefined;
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+
+    const launcher = new DenoDetachedWebLauncher(
+      "C:\\fake\\deno.exe",
+      "C:\\repo",
+      (command, options) => {
+        capturedCommand = command;
+        capturedOptions = options;
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: 0,
+              stdout: new TextEncoder().encode("2468\n"),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+    );
+
+    const pid = await launcher.launchDetached({
+      hostname: "127.0.0.1",
+      port: 5173,
+    });
+
+    assertEquals(pid, 2468);
+    assertEquals(capturedCommand, "powershell.exe");
+    const decoded = decodePowerShellEncodedCommand(
+      capturedOptions?.args?.[3] ?? "",
+    );
+    assertStringIncludes(
+      decoded,
+      "'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build'",
+    );
+    assertStringIncludes(decoded, "$LASTEXITCODE -ne 0");
+    assertStringIncludes(
+      decoded,
+      "$argList = @('serve', '--node-modules-dir=auto', '-A', '--host', '127.0.0.1', '--port', '5173', '_fresh/server.js');",
+    );
   },
 );
 
@@ -223,6 +282,44 @@ Deno.test(
 );
 
 Deno.test(
+  "DenoDetachedWebLauncher PowerShell script helper accepts build output before the pid",
+  async () => {
+    const launcher = new DenoDetachedWebLauncher(
+      "/fake/deno",
+      "C:\\repo",
+      () => ({
+        spawn() {
+          throw new Error("unexpected spawn call");
+        },
+        output() {
+          return Promise.resolve({
+            code: 0,
+            stdout: new TextEncoder().encode(
+              [
+                "vite v7.3.1 building client environment for production...",
+                "transforming...",
+                "✓ 2 modules transformed.",
+                "29284",
+                "",
+              ].join("\n"),
+            ),
+            stderr: new Uint8Array(),
+          });
+        },
+      }),
+    );
+
+    const pid = await (
+      launcher as unknown as {
+        launchDetachedScriptViaPowerShell(script: string): Promise<number>;
+      }
+    ).launchDetachedScriptViaPowerShell("Write-Output 'stub'");
+
+    assertEquals(pid, 29284);
+  },
+);
+
+Deno.test(
   "DenoDetachedWebLauncher can launch an installed web binary directly",
   async () => {
     let capturedCommand: string | undefined;
@@ -297,7 +394,7 @@ Deno.test(
   },
 );
 
-Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles obvious cases", async () => {
+Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles live and invalid pids", async () => {
   await withTestTempDir("web-status-roundtrip-", async (rootDir) => {
     const statusPath = join(rootDir, "kato-web-status.json");
     const store = new WebServerStatusFileStore(statusPath);
@@ -315,6 +412,13 @@ Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles obvi
 
     await store.save(status);
     assertEquals(await store.load(), status);
+    const canProbeCurrentProcess = Deno.build.os === "windows"
+      ? (await Deno.permissions.query({
+        name: "run",
+        command: "powershell.exe",
+      })).state === "granted"
+      : (await Deno.permissions.query({ name: "run" })).state === "granted";
+    assertEquals(isProcessAlive(Deno.pid), canProbeCurrentProcess);
     assertEquals(isProcessAlive(undefined), false);
     assertEquals(isProcessAlive(0), false);
     assertEquals(isProcessAlive(-1), false);

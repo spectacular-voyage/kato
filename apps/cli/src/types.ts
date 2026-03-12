@@ -90,6 +90,7 @@ export interface DaemonCliRuntime {
   cwdPath?: string;
   allowedWriteRoots?: string[];
   providerSessionRoots?: ProviderSessionRoots;
+  isStdinTerminal?: () => boolean;
   now: () => Date;
   pid: number;
   writeStdout: (text: string) => void;

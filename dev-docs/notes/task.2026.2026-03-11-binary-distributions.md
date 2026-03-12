@@ -196,6 +196,7 @@ runner matrix:
 - `kato` remains the launcher and primary user entrypoint.
 - npm wrapper install should be treated as the intended primary user-facing
   install channel once publish automation is in place.
+- The primary npm wrapper package name is `@spectacular-voyage/kato`.
 - Preferred Phase 1 bundle is three binaries:
   - `kato`
   - `kato-daemon`
@@ -290,10 +291,12 @@ runner matrix:
 - [x] Build a minimal `deno compile` proof of concept for `kato-daemon`.
 - [x] Build a minimal `deno compile` proof of concept for `kato-web`.
 - [x] Add a repeatable local binary build task and metadata manifest.
-- [ ] Verify whether `kato-web` can include the required production assets and
-      start cleanly on all target platforms.
-- [ ] If `kato-web` compile is blocked, document the exact blocker and add the
-      temporary fallback plan as packaged prebuilt web runtime artifacts.
+- [x] Verify that `kato-web` includes the required production assets and starts
+      cleanly on the initial target matrix:
+      Linux x64, Windows x64, macOS x64, macOS arm64.
+- [x] Confirm that the packaged-artifact fallback is not needed for the initial
+      target matrix; keep it only as a contingency for future unsupported
+      platforms.
 - [ ] Define Phase 1 compile permissions for each executable, with launcher-only
       spawning power where possible.
 - [x] Add focused tests for installed binary discovery and lifecycle behavior.
@@ -327,15 +330,91 @@ Current implementation note:
 - a follow-up Ubuntu job now:
   - downloads the per-platform bundle artifacts
   - assembles npm wrapper/platform packages
-  - runs npm pack/install smoke for the host package
   - uploads the generated npm package assembly output
+- a native-runner post-assembly npm smoke matrix now:
+  - downloads the assembled `kato-npm-packages` artifact on Linux, Windows,
+    macOS x64, and macOS arm64
+  - runs `deno task smoke:npm-install` on each native runner
+  - keeps the smoke assertions aligned through the shared smoke script instead
+    of per-OS workflow forks
+- the default npm wrapper target is now `@spectacular-voyage/kato`
 - it also runs a lightweight packaged-bundle smoke slice on each runner:
   - `kato --version`
   - `kato-web --host 127.0.0.1 --port 45177`
   - HTTP probe of `/login`
-- the binary-only matrix has already been exercised successfully in GitHub
-- the npm assembly/smoke extension has been implemented and YAML-validated
-  locally, but it has not yet been exercised in GitHub in this task
+- the binary matrix has already been exercised successfully in GitHub on all
+  four native runners
+- the npm assembly and host-package smoke path has also been exercised in
+  GitHub
+- local npm publish dry-run has succeeded for the assembled package set
+- `.github/workflows/release-manual.yml` now also has a GitHub Release job that
+  can create or update a draft or published release from the packaged bundle
+  artifacts, upload the versioned archives and checksums, and use the matching
+  `release-notes.v<version>.md` body for the release page
+- first real publish attempt surfaced the remaining product decision that the
+  wrapper package should be scoped as `@spectacular-voyage/kato`, so release
+  artifacts must be regenerated after that naming change before the first real
+  npm release cut
+
+## Additional Smoke Plan
+
+The next smoke expansion should focus on the install channel users will
+actually touch, not only the raw bundle directory.
+
+- [x] Add a post-assembly npm smoke job matrix to
+      `.github/workflows/release-manual.yml` for:
+      - Windows x64
+      - macOS x64
+      - macOS arm64
+      - Linux x64
+- [x] Have each npm smoke runner download the assembled `kato-npm-packages`
+      artifact and run:
+      `deno task smoke:npm-install -- --input-dir <downloaded-dir> --npm-bin npm`
+- [x] Keep the smoke assertions aligned across platforms:
+      - `kato --version`
+      - `kato init`
+      - `kato web init`
+      - `kato web start`
+      - HTTP probe of `/login`
+      - `kato web status`
+      - `kato web stop`
+- [x] Fix platform-specific npm install or process-launch issues in
+      `scripts/smoke-npm-install.ts` rather than forking per-OS workflow logic.
+- [ ] Only treat the npm channel as release-hardened once the above job matrix
+      is green on real native runners.
+
+## GitHub Release Plan
+
+GitHub Release assets are still worth doing even if npm becomes the primary
+install path:
+
+- they provide a direct-download fallback for users who do not want npm
+- they keep versioned archives, checksums, and release notes in one immutable
+  place
+- they give the binary pipeline a user-visible release surface independent of
+  npm registry state
+
+Planned follow-up:
+
+- [x] Add a release-upload job after binary packaging and npm validation that
+      attaches per-platform archives and checksums to the tagged GitHub Release.
+- [c] Upload at least these assets for each release:
+      - `kato-v<version>-linux-x64.tar.gz`
+      - `kato-v<version>-linux-x64.tar.gz.sha256`
+      - `kato-v<version>-windows-x64.zip`
+      - `kato-v<version>-windows-x64.zip.sha256`
+      - `kato-v<version>-macos-x64.tar.gz`
+      - `kato-v<version>-macos-x64.tar.gz.sha256`
+      - `kato-v<version>-macos-arm64.tar.gz`
+      - `kato-v<version>-macos-arm64.tar.gz.sha256`
+- [x] Keep GitHub Release assets versioned in Phase 1; defer stable-name alias
+      assets until the installer/download story settles.
+- [c] Prefer creating or updating a draft GitHub Release after successful
+      package assembly, then publish/undraft it only after npm publish for that
+      version succeeds.
+- [x] Include or link release notes for the same version so archive consumers
+      can understand platform support, checksums, and install guidance from the
+      release page alone.
 
 
 ## Coderabbit Review
@@ -355,7 +434,7 @@ Current implementation note:
       - run bundled `kato --version`
       - run bundled `kato-web`
       - HTTP probe `/login`
-- [ ] Exercise `.github/workflows/release-manual.yml` on real native GitHub
+- [x] Exercise `.github/workflows/release-manual.yml` on real native GitHub
       runners and capture any Windows/macOS-specific failures before treating
       the workflow as release-ready.
 - [x] Decide that the first documented user-facing install target should be npm

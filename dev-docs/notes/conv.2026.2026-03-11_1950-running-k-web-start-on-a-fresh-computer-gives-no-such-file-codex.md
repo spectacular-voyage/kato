@@ -4283,3 +4283,566 @@ Given that at least one `0.2.4` platform package appears to have already been pu
 - new `0.2.5` version files
 
 If you only cared about a local Linux-only smoke, you could rebuild locally. But for the real multi-platform npm release, yes: rerun `Release Manual`.
+
+# djradon_2026-03-12_0844_38
+
+OK, so I will re-upload the 4 platform packages and the wrapper. Remind me the commands?
+
+# gpt-5.4_2026-03-12_0844_45
+
+Assuming you have already rerun `Release Manual` for `0.2.5` and downloaded the new `kato-npm-packages` artifact, the commands are:
+
+1. Extract the artifact somewhere convenient, for example:
+```bash
+mkdir -p .test-tmp/downloaded-npm-packages
+unzip ~/Downloads/kato-npm-packages.zip -d .test-tmp/downloaded-npm-packages
+```
+
+2. Dry-run publish with your local npm:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm \
+  --tag latest \
+  --dry-run
+```
+
+3. Real publish:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm \
+  --tag latest
+```
+
+That publishes in the correct order automatically:
+- `@spectacular-voyage/kato-darwin-arm64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato`
+
+If you want to inspect the extracted package set first:
+```bash
+find .test-tmp/downloaded-npm-packages -maxdepth 2 -type d | sort
+```
+
+You should see:
+- `wrapper`
+- `platforms/darwin-arm64`
+- `platforms/darwin-x64`
+- `platforms/linux-x64-gnu`
+- `platforms/win32-x64`
+
+One caution: make sure this extracted tree came from the rerun after the `0.2.5` bump, not the old `0.2.4` artifact.
+
+# gpt-5.4_2026-03-12_0844_48
+
+Assuming you have already rerun `Release Manual` for `0.2.5` and downloaded the new `kato-npm-packages` artifact, the commands are:
+
+1. Extract the artifact somewhere convenient, for example:
+```bash
+mkdir -p .test-tmp/downloaded-npm-packages
+unzip ~/Downloads/kato-npm-packages.zip -d .test-tmp/downloaded-npm-packages
+```
+
+2. Dry-run publish with your local npm:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm \
+  --tag latest \
+  --dry-run
+```
+
+3. Real publish:
+```bash
+deno task publish:npm-packages -- \
+  --input-dir .test-tmp/downloaded-npm-packages \
+  --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm \
+  --tag latest
+```
+
+That publishes in the correct order automatically:
+- `@spectacular-voyage/kato-darwin-arm64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato`
+
+If you want to inspect the extracted package set first:
+```bash
+find .test-tmp/downloaded-npm-packages -maxdepth 2 -type d | sort
+```
+
+You should see:
+- `wrapper`
+- `platforms/darwin-arm64`
+- `platforms/darwin-x64`
+- `platforms/linux-x64-gnu`
+- `platforms/win32-x64`
+
+One caution: make sure this extracted tree came from the rerun after the `0.2.5` bump, not the old `0.2.4` artifact.
+
+# djradon_2026-03-12_0853_37
+
+OK, should we pick back up the smoke tests for windows and macos? I assume you still think that's worth doing?
+
+# gpt-5.4_2026-03-12_0853_45
+
+Yes. I still think it’s worth doing, and now it matters more.
+
+You have the binary matrix working and npm publish wiring in place, but the remaining risk is exactly the platform-specific install path:
+- Windows npm install behavior
+- macOS npm install behavior
+- wrapper resolution on each OS
+- executable permission/path edge cases outside Linux
+
+Linux-only smoke was enough to build the pipeline. It is not enough to call the npm channel production-hardened.
+
+So I’d do this next:
+- add per-platform npm smoke to `release-manual.yml`
+- at minimum on:
+  - `windows-latest`
+  - `macos-latest`
+  - `macos-15-intel`
+- use the already-built native package for that runner, install the assembled wrapper + matching platform package, then run:
+  - `kato --version`
+  - `kato init`
+  - `kato web init`
+  - `kato web start`
+  - probe `/login`
+  - `kato web status`
+  - `kato web stop`
+
+That closes the last serious distribution gap.
+
+So yes: worth doing, and I’d put it ahead of README polish. If you want, I can implement the workflow extension now.
+
+# gpt-5.4_2026-03-12_0853_48
+
+Yes. I still think it’s worth doing, and now it matters more.
+
+You have the binary matrix working and npm publish wiring in place, but the remaining risk is exactly the platform-specific install path:
+- Windows npm install behavior
+- macOS npm install behavior
+- wrapper resolution on each OS
+- executable permission/path edge cases outside Linux
+
+Linux-only smoke was enough to build the pipeline. It is not enough to call the npm channel production-hardened.
+
+So I’d do this next:
+- add per-platform npm smoke to `release-manual.yml`
+- at minimum on:
+  - `windows-latest`
+  - `macos-latest`
+  - `macos-15-intel`
+- use the already-built native package for that runner, install the assembled wrapper + matching platform package, then run:
+  - `kato --version`
+  - `kato init`
+  - `kato web init`
+  - `kato web start`
+  - probe `/login`
+  - `kato web status`
+  - `kato web stop`
+
+That closes the last serious distribution gap.
+
+So yes: worth doing, and I’d put it ahead of README polish. If you want, I can implement the workflow extension now.
+
+# djradon_2026-03-12_0857_50
+
+Can you update all the checkboxes in [task.2026.2026-03-11-binary-distributions.md](dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) and add your plan for the additional smoke tests there in a new section? Also include something for how we're going to add our binaries to Github Release, assuming that's still worth doing.
+
+# gpt-5.4_2026-03-12_0857_57
+
+I’m updating the binary distribution note to reflect the current state rather than the earlier plan, then I’ll add a concrete follow-up section for cross-platform npm smoke and GitHub Release asset publication.
+
+# gpt-5.4_2026-03-12_0858_38
+
+I’ve got the reality gap now: the note still reads like “workflow exists, maybe works,” but you now have real native-runner success and a scoped npm wrapper decision. I’m tightening the existing checkboxes and adding explicit follow-up sections for cross-platform npm smoke and GitHub Release publication.
+
+# gpt-5.4_2026-03-12_0859_03
+
+The note is patched. I’m doing one quick read-through of the changed sections to make sure the new checkboxes and follow-up sections are internally consistent and don’t accidentally claim more than we’ve actually proved.
+
+# gpt-5.4_2026-03-12_0859_16
+
+Updated [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+What changed:
+- checked off the items that are now actually proven:
+  - `kato-web` works across the initial native-runner matrix
+  - the packaged-artifact fallback is not needed for that matrix
+  - `release-manual.yml` has been exercised on real GitHub runners
+- updated the current-state note so it reflects:
+  - real GitHub runner success
+  - npm assembly/host smoke exercised in GitHub
+  - the scoped wrapper decision `@spectacular-voyage/kato`
+  - the need to regenerate artifacts after that naming change
+- added `## Additional Smoke Plan`
+  - concrete plan for Windows/macOS/Linux npm-install smoke on native runners
+- added `## GitHub Release Plan`
+  - why release assets are still worth doing
+  - what files to upload
+  - how to sequence draft release vs npm publish
+
+I didn’t run tests because this was a doc-only update. The next concrete implementation slice from that note is the cross-platform npm smoke matrix, then the GitHub Release upload job.
+
+# djradon_2026-03-12_0906_48
+
+OK, proceed.
+
+# gpt-5.4_2026-03-12_0907_05
+
+I’m taking the next concrete slice from the note: cross-platform npm-install smoke on native runners. First I’m checking the current workflow and smoke script together, because the smoke script probably needs the same downloaded-artifact path hardening that publish already needed.
+
+# gpt-5.4_2026-03-12_0907_41
+
+I have the likely failure points: downloaded-artifact path resolution, Windows `.cmd` shims, and PATH separator handling. I’m patching those in the smoke script first, then I’ll wire the new native-runner npm smoke matrix into `release-manual.yml` and make publish wait on it.
+
+# gpt-5.4_2026-03-12_0908_00
+
+I’m editing the smoke script now at the right abstraction boundary: resolve local package dirs from downloaded metadata, normalize PATH separator, and choose the local npm bin shim correctly per OS. That should let the same smoke command run unchanged on Windows and macOS.
+
+# gpt-5.4_2026-03-12_0908_23
+
+I’ve hardened the script. Now I’m adding focused tests for the two new behaviors we actually care about: downloaded-artifact path fallback and Windows `.cmd` shim selection.
+
+# gpt-5.4_2026-03-12_0908_46
+
+The workflow change is straightforward now: move npm install smoke out of the Ubuntu assembly job and into a separate native-runner matrix, then make publish wait on that matrix. That gives us the per-OS install signal without duplicating assembly work.
+
+# gpt-5.4_2026-03-12_0909_15
+
+The workflow wiring is in. I’m running targeted verification now: the new smoke-script tests, a local end-to-end npm smoke using the scoped wrapper, and YAML validation for the new matrix job.
+
+# gpt-5.4_2026-03-12_0909_38
+
+Type check found one Deno namespace mismatch. I’m replacing the `Deno.BuildInfo` annotation with a local OS union so the script stays portable across the repo’s current Deno version.
+
+# gpt-5.4_2026-03-12_0909_41
+
+The type issue is fixed. I’m rerunning the exact same verification set so we end with one clean signal instead of partial passes.
+
+# gpt-5.4_2026-03-12_0909_52
+
+Deno’s `build.os` union is wider than the platforms we care about. I’m loosening those helper params to plain `string`; the logic only distinguishes `windows` from everything else anyway.
+
+# gpt-5.4_2026-03-12_0910_09
+
+That typing issue is out of the way. I’m rerunning the same targeted gate and the stale-metadata end-to-end smoke one more time.
+
+# gpt-5.4_2026-03-12_0910_21
+
+The targeted tests are now clean. The stale-metadata smoke is in the heavy npm-pack/install phase again, which is the right end-to-end check for the new downloaded-artifact logic.
+
+# gpt-5.4_2026-03-12_0911_15
+
+The cross-platform smoke wiring is in, and the stale-download-path end-to-end smoke passed. I’m running the repo `check` gate now so this lands with the same baseline signal as the rest of the release tooling.
+
+# gpt-5.4_2026-03-12_0911_29
+
+The repo `check` gate is green. I’m marking the plan complete and then I’ll summarize exactly what changed and what still needs a real GitHub run.
+
+# gpt-5.4_2026-03-12_0911_35
+
+Implemented the cross-platform npm smoke slice.
+
+Changes:
+- [smoke-npm-install.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) now handles downloaded-artifact metadata paths, uses the correct PATH separator on Windows, and uses the Windows `.cmd` shim for the local `kato` bin.
+- Added focused coverage in [smoke-npm-install_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/smoke-npm-install_test.ts) for stale downloaded paths and Windows bin-path selection.
+- Updated [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) so npm smoke is now a native-runner matrix job on Linux, Windows, macOS x64, and macOS arm64, and npm publish now waits on that matrix instead of only the Ubuntu assembly job.
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/smoke-npm-install_test.ts`
+- `deno task check --frozen`
+- workflow YAML parse
+- end-to-end local smoke from a copied npm package assembly with intentionally stale metadata paths:
+  - install scoped wrapper + Linux platform package
+  - `kato --version`
+  - `kato init`
+  - `kato web init/start/status/stop`
+
+What’s not proven yet is the GitHub run itself for the new matrix. The next step is to rerun `Release Manual`; that should now exercise native npm-install smoke on all four runners before any publish step can run.
+
+# gpt-5.4_2026-03-12_0911_36
+
+Implemented the cross-platform npm smoke slice.
+
+Changes:
+- [smoke-npm-install.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) now handles downloaded-artifact metadata paths, uses the correct PATH separator on Windows, and uses the Windows `.cmd` shim for the local `kato` bin.
+- Added focused coverage in [smoke-npm-install_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/smoke-npm-install_test.ts) for stale downloaded paths and Windows bin-path selection.
+- Updated [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) so npm smoke is now a native-runner matrix job on Linux, Windows, macOS x64, and macOS arm64, and npm publish now waits on that matrix instead of only the Ubuntu assembly job.
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp tests/smoke-npm-install_test.ts`
+- `deno task check --frozen`
+- workflow YAML parse
+- end-to-end local smoke from a copied npm package assembly with intentionally stale metadata paths:
+  - install scoped wrapper + Linux platform package
+  - `kato --version`
+  - `kato init`
+  - `kato web init/start/status/stop`
+
+What’s not proven yet is the GitHub run itself for the new matrix. The next step is to rerun `Release Manual`; that should now exercise native npm-install smoke on all four runners before any publish step can run.
+
+# djradon_2026-03-12_0947_21
+
+I was able "npm i @spectacular-voyage/kato"  on windows. I was actually expecting to be able to run "kato" from the command line, but of course that was a fantasy. How do I run it? How do I enable "kato" as a command?
+
+# gpt-5.4_2026-03-12_0952_35
+
+`npm i @spectacular-voyage/kato` installs it into the current project, not as a global shell command.
+
+So on Windows you have three main ways to run it:
+
+1. Global install
+```powershell
+npm install -g @spectacular-voyage/kato
+kato --version
+```
+
+That is the normal way to make `kato` available as a command everywhere.
+
+2. Run from the local project with `npx`
+```powershell
+npx @spectacular-voyage/kato --version
+```
+
+or if it is already installed in that project:
+```powershell
+npx kato --version
+```
+
+3. Run the local npm bin shim directly
+PowerShell:
+```powershell
+.\node_modules\.bin\kato.cmd --version
+```
+
+On Windows, npm creates a `.cmd` shim under `node_modules\.bin`, which is why local-project execution works that way.
+
+So if your goal is “type `kato` anywhere”, use:
+
+```powershell
+npm install -g @spectacular-voyage/kato
+```
+
+If `kato` still is not found after a global install, the usual issue is that npm’s global bin directory is not on `PATH`. You can inspect it with:
+
+```powershell
+npm bin -g
+```
+
+and make sure that directory is on your user `PATH`.
+
+One more note: for a daemon-style tool like this, I would document global install as the primary path, and `npx` as a convenience/testing path.
+
+# gpt-5.4_2026-03-12_0952_36
+
+`npm i @spectacular-voyage/kato` installs it into the current project, not as a global shell command.
+
+So on Windows you have three main ways to run it:
+
+1. Global install
+```powershell
+npm install -g @spectacular-voyage/kato
+kato --version
+```
+
+That is the normal way to make `kato` available as a command everywhere.
+
+2. Run from the local project with `npx`
+```powershell
+npx @spectacular-voyage/kato --version
+```
+
+or if it is already installed in that project:
+```powershell
+npx kato --version
+```
+
+3. Run the local npm bin shim directly
+PowerShell:
+```powershell
+.\node_modules\.bin\kato.cmd --version
+```
+
+On Windows, npm creates a `.cmd` shim under `node_modules\.bin`, which is why local-project execution works that way.
+
+So if your goal is “type `kato` anywhere”, use:
+
+```powershell
+npm install -g @spectacular-voyage/kato
+```
+
+If `kato` still is not found after a global install, the usual issue is that npm’s global bin directory is not on `PATH`. You can inspect it with:
+
+```powershell
+npm bin -g
+```
+
+and make sure that directory is on your user `PATH`.
+
+One more note: for a daemon-style tool like this, I would document global install as the primary path, and `npx` as a convenience/testing path.
+
+# djradon_2026-03-12_1002_18
+
+Oh man, late night. It worked and ran, but gave:
+
+PS C:\Users\drich\hub\spectacular-voyage\kato> kato start 
+Command failed: PowerShell Start-Process launch failed (exit 1): #< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><S S="Error">Start-Process : Cannot validate argument on parameter 'ArgumentList'. The argument is null, empty, or an element of the argument collection contains a null value. Supply a collection _x000D__x000A_</S><S S="Error">that does not contain any null values and then try the command again._x000D__x000A_</S><S S="Error">At line:11 char:190_x000D__x000A_</S><S S="Error">+ ... ge\kato-win32-x64\bin\kato-daemon.exe' -ArgumentList $argList -Window ..._x000D__x000A_</S><S S="Error">+                                                          ~~~~~~~~_x000D__x000A_</S><S S="Error">    + CategoryInfo          : InvalidData: (:) [Start-Process], ParentContainsErrorRecordException_x000D__x000A_</S><S S="Error">    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand_x000D__x000A_</S><S S="Error"> _x000D__x000A_</S></Objs>
+
+# gpt-5.4_2026-03-12_1002_25
+
+I’m tracing the Windows detached-launch path now. The error points to the PowerShell `Start-Process` wrapper building an `ArgumentList` array with a null entry, so I’m checking the launcher code and the packaged binary resolution path together and I’ll patch it at the source rather than papering over it in docs.
+
+# gpt-5.4_2026-03-12_1002_35
+
+I found the likely root cause. On Windows, the installed `kato-daemon.exe` path passes an empty `args` array into the PowerShell helper, and our script still emits `-ArgumentList $argList`. PowerShell is rejecting that empty collection. I’m patching the helper to omit `-ArgumentList` entirely when there are no args, and I’ll add a regression test for the installed-binary path.
+
+# gpt-5.4_2026-03-12_1002_43
+
+I’m making the fix where the bad script is generated, and I’m going to add the regression at the helper level so we don’t need a full Windows runner to catch it next time. I’ll also check the web PowerShell helper for the same empty-argument pattern while I’m in there.
+
+# gpt-5.4_2026-03-12_1003_06
+
+I’ve fixed the script generation. Now I’m adding the exact regression: PowerShell helper with an installed executable and no args should not emit `-ArgumentList` at all.
+
+# gpt-5.4_2026-03-12_1003_17
+
+The regression is in. I’m running the daemon/web launcher tests plus a repo check to make sure this Windows-specific fix didn’t disturb the existing PowerShell launch paths.
+
+# gpt-5.4_2026-03-12_1003_23
+
+It was the expected missing import. I’m fixing that and rerunning the same targeted gate.
+
+# gpt-5.4_2026-03-12_1003_44
+
+Confirmed. The Windows failure was a real bug in the packaged daemon launcher.
+
+Cause:
+- when `kato start` launches an installed `kato-daemon.exe` on Windows, the PowerShell helper in [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) was still passing `-ArgumentList` even though the installed daemon launch has no args
+- PowerShell rejects an empty `ArgumentList`, which is the exact error you saw
+
+I fixed it:
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) now omits `-ArgumentList` entirely when the arg list is empty
+- I made the same helper more robust in [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- added a regression test in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts tests/daemon-launcher_test.ts`
+
+Important practical point: your currently published Windows npm package still has the old bug. This fix will only reach Windows users after the next rebuilt/republished package set. So before the real npm release, rerun `Release Manual`, regenerate the npm packages, and publish that updated version.
+
+# gpt-5.4_2026-03-12_1003_48
+
+Confirmed. The Windows failure was a real bug in the packaged daemon launcher.
+
+Cause:
+- when `kato start` launches an installed `kato-daemon.exe` on Windows, the PowerShell helper in [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) was still passing `-ArgumentList` even though the installed daemon launch has no args
+- PowerShell rejects an empty `ArgumentList`, which is the exact error you saw
+
+I fixed it:
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) now omits `-ArgumentList` entirely when the arg list is empty
+- I made the same helper more robust in [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- added a regression test in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts tests/daemon-launcher_test.ts`
+
+Important practical point: your currently published Windows npm package still has the old bug. This fix will only reach Windows users after the next rebuilt/republished package set. So before the real npm release, rerun `Release Manual`, regenerate the npm packages, and publish that updated version.
+
+# djradon_2026-03-12_1009_45
+
+OK, so we should prepare for a 0.2.6 release right? Seems like as a general strategy we should release all binaries and do the github release too. Should we tackle that now?
+
+# gpt-5.4_2026-03-12_1010_25
+
+Yes. If `0.2.5` is already public on npm, I would cut `0.2.6`.
+
+Reason:
+- the published Windows package has a real launcher bug in `kato start`
+- that is a release-quality defect, not just a docs issue
+- npm versions are immutable, so the fix wants a new version
+
+And yes, I think we should tackle the full release path now. The right strategy is:
+
+- npm remains the primary install channel
+- GitHub Release carries the per-platform archives and checksums as the fallback/manual channel
+- both should be produced from the same release run
+
+The sequence I’d use for `0.2.6` is:
+
+1. Bump to `0.2.6`.
+2. Add the GitHub Release draft/upload step to `release-manual.yml`.
+3. Keep release assets to the 4 binary archives plus `.sha256` files.
+4. Rerun `Release Manual` on `0.2.6`.
+5. Let it pass:
+   - binary matrix
+   - cross-platform npm smoke
+   - npm publish
+   - release asset upload
+6. Publish/undraft the GitHub Release only after npm publish succeeds.
+
+So yes: this is the right thing to do now. I would make the next implementation slice “draft GitHub Release + upload binary archives/checksums from `release-manual.yml`,” then cut `0.2.6`.
+
+# gpt-5.4_2026-03-12_1010_26
+
+Yes. If `0.2.5` is already public on npm, I would cut `0.2.6`.
+
+Reason:
+- the published Windows package has a real launcher bug in `kato start`
+- that is a release-quality defect, not just a docs issue
+- npm versions are immutable, so the fix wants a new version
+
+And yes, I think we should tackle the full release path now. The right strategy is:
+
+- npm remains the primary install channel
+- GitHub Release carries the per-platform archives and checksums as the fallback/manual channel
+- both should be produced from the same release run
+
+The sequence I’d use for `0.2.6` is:
+
+1. Bump to `0.2.6`.
+2. Add the GitHub Release draft/upload step to `release-manual.yml`.
+3. Keep release assets to the 4 binary archives plus `.sha256` files.
+4. Rerun `Release Manual` on `0.2.6`.
+5. Let it pass:
+   - binary matrix
+   - cross-platform npm smoke
+   - npm publish
+   - release asset upload
+6. Publish/undraft the GitHub Release only after npm publish succeeds.
+
+So yes: this is the right thing to do now. I would make the next implementation slice “draft GitHub Release + upload binary archives/checksums from `release-manual.yml`,” then cut `0.2.6`.
+
+# djradon_2026-03-12_1014_21
+
+can you add the github release  stuff to [release-manual.yml](.github/workflows/release-manual.yml) and fill in release-notes.v0.2.6.md
+
+can you add the github release  stuff to [release-manual.yml](.github/workflows/release-manual.yml) and fill in release-notes.v0.2.6.md
+
+# gpt-5.4_2026-03-12_1014_30
+
+I’m updating the release workflow and the `v0.2.6` notes together. First I’m checking the current workflow shape and the existing release-note style so the new release-upload step matches what’s already in the repo.
+
+# gpt-5.4_2026-03-12_1014_38
+
+I’ve confirmed the workflow currently stops at binaries, npm assembly, smoke, and npm publish. Next I’m reading the tail of the workflow and the runbook sections that already describe the intended GitHub Release behavior so I can implement the release upload without inventing a conflicting flow.
+
+# gpt-5.4_2026-03-12_1014_48
+
+I have enough context now. I’m checking the bundle metadata and packaging script so the release job uploads the right files and can derive the release version/tag from the artifacts rather than hardcoding it.
+
+# gpt-5.4_2026-03-12_1015_37
+
+I’m deciding between the GitHub CLI and a release action for the new upload job. I’m checking the locally available `gh` flags so the workflow can safely create/update a draft release and then publish it from the same job without guessing at unsupported options.
+
+# gpt-5.4_2026-03-12_1017_06
+
+I’m patching the workflow now. The release job will stay independent of npm publish so you can still use it when npm publication is manual, but it will only run on `workflow_dispatch` and will create/update the versioned GitHub Release from the built bundle artifacts.

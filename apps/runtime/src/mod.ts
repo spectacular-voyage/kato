@@ -210,5 +210,6 @@ export {
   DenoDetachedWebLauncher,
   isProcessAlive,
   resolveDefaultWebStatusPath,
+  terminateProcess,
   WebServerStatusFileStore,
 } from "./web/mod.ts";

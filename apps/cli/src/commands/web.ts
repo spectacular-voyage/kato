@@ -4,7 +4,11 @@ import {
   promptForWebPassword,
 } from "./web_password_prompt.ts";
 import { DEFAULT_KATO_WEB_HOSTNAME, DEFAULT_KATO_WEB_PORT } from "@kato/shared";
-import { createInitializedWebConfig, isProcessAlive } from "@kato/runtime";
+import {
+  createInitializedWebConfig,
+  isProcessAlive,
+  terminateProcess,
+} from "@kato/runtime";
 
 const STARTUP_ACK_TIMEOUT_MS = 10_000;
 const STARTUP_ACK_POLL_INTERVAL_MS = 100;
@@ -176,15 +180,9 @@ export async function resolveWebInitPassword(
 
 function sendSignalIfRunning(
   pid: number,
-  signal: Deno.Signal,
+  force: boolean,
 ): void {
-  try {
-    Deno.kill(pid, signal);
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
-  }
+  terminateProcess(pid, force);
 }
 
 async function waitForProcessExit(
@@ -242,6 +240,8 @@ export async function runWebInitCommand(
   }
 
   const password = await resolveWebInitPassword(options, {
+    isInteractiveTerminal: ctx.runtime.isStdinTerminal ??
+      (() => Deno.stdin.isTerminal()),
     promptForPassword: () =>
       promptForWebPassword(
         createDefaultWebPasswordPromptIO(ctx.runtime.writeStderr),
@@ -432,9 +432,9 @@ export async function runWebStopCommand(
   }
 
   if (status.pid !== undefined) {
-    sendSignalIfRunning(status.pid, "SIGTERM");
+    sendSignalIfRunning(status.pid, false);
     if (!(await waitForProcessExit(status.pid, WEB_STOP_TIMEOUT_MS))) {
-      sendSignalIfRunning(status.pid, "SIGKILL");
+      sendSignalIfRunning(status.pid, true);
       if (!(await waitForProcessExit(status.pid, WEB_STOP_KILL_TIMEOUT_MS))) {
         throw new Error(
           `Timed out waiting for web server to stop (pid: ${status.pid})`,

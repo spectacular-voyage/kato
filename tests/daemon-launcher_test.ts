@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { dirname, join } from "@std/path";
 import { DenoDetachedDaemonLauncher } from "../apps/runtime/src/mod.ts";
 import {
@@ -436,6 +441,65 @@ Deno.test("DenoDetachedDaemonLauncher encodes PowerShell launch script and retur
     "$argList = @('run', '--flag', 'arg''withquote')",
   );
   assertStringIncludes(script, "-FilePath '/deno''s/bin/deno'");
+});
+
+Deno.test("DenoDetachedDaemonLauncher PowerShell helper omits ArgumentList when args are empty", async () => {
+  let capturedOptions:
+    | ConstructorParameters<typeof Deno.Command>[1]
+    | undefined;
+
+  const launcher = new DenoDetachedDaemonLauncher(
+    {
+      runtimeDir: LAUNCHER_RUNTIME_DIR,
+      configPath: LAUNCHER_CONFIG_PATH,
+      statusPath: LAUNCHER_STATUS_PATH,
+      controlPath: LAUNCHER_CONTROL_PATH,
+    },
+    "/deno",
+    "/repo/apps/daemon/src/main.ts",
+    (_command, options) => {
+      capturedOptions = options;
+      return {
+        spawn() {
+          throw new Error("spawn should not be used for PowerShell path");
+        },
+        output() {
+          return Promise.resolve({
+            code: 0,
+            stdout: new TextEncoder().encode("4242\n"),
+            stderr: new Uint8Array(),
+          });
+        },
+      };
+    },
+    true,
+  );
+
+  const powerShellLauncher = launcher as unknown as {
+    launchDetachedViaPowerShell(
+      executablePath: string,
+      args: string[],
+      env: Record<string, string>,
+    ): Promise<number>;
+  };
+
+  const pid = await powerShellLauncher.launchDetachedViaPowerShell(
+    "C:\\Program Files\\Kato\\kato-daemon.exe",
+    [],
+    {},
+  );
+
+  assertEquals(pid, 4242);
+  const encoded = capturedOptions?.args?.[3];
+  if (!encoded) {
+    throw new Error("launcher did not encode PowerShell command");
+  }
+  const script = decodeUtf16LeBase64(encoded);
+  assertStringIncludes(
+    script,
+    "Start-Process -FilePath 'C:\\Program Files\\Kato\\kato-daemon.exe'",
+  );
+  assert(!script.includes("-ArgumentList"));
 });
 
 Deno.test("DenoDetachedDaemonLauncher surfaces PowerShell launch failures", async () => {

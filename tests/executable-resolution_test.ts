@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import { resolveInstalledExecutablePath } from "../apps/runtime/src/mod.ts";
 import {
   restoreRuntimeEnv,
@@ -24,7 +25,7 @@ Deno.test("resolveInstalledExecutablePath prefers env override", async () => {
           name === "KATO_DAEMON_BIN" ? "~/bin/custom-daemon" : undefined,
       });
 
-      assertEquals(path, "/home/tester/bin/custom-daemon");
+      assertEquals(path, join("/home/tester", "bin", "custom-daemon"));
     } finally {
       restoreRuntimeEnv(snapshot);
     }
@@ -39,7 +40,7 @@ Deno.test("resolveInstalledExecutablePath falls back to sibling executable for i
     readEnv: () => undefined,
   });
 
-  assertEquals(path, "/opt/kato/kato-daemon");
+  assertEquals(path, join("/opt/kato", "kato-daemon"));
 });
 
 Deno.test("resolveInstalledExecutablePath keeps Windows executable suffix for sibling binaries", () => {
