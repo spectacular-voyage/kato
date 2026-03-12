@@ -94,13 +94,17 @@ export class DenoDetachedDaemonLauncher implements DaemonProcessLauncherLike {
     const envAssignments = Object.entries(env).map(([key, value]) =>
       `$env:${key}=${toPowerShellSingleQuoted(value)}`
     ).join(";\n");
-    const argList = args.map(toPowerShellSingleQuoted).join(", ");
+    const startProcessArgs = args.length > 0
+      ? `$argList = @(${args.map(toPowerShellSingleQuoted).join(", ")});
+$proc = Start-Process -FilePath ${
+        toPowerShellSingleQuoted(executablePath)
+      } -ArgumentList $argList -WindowStyle Hidden -PassThru;`
+      : `$proc = Start-Process -FilePath ${
+        toPowerShellSingleQuoted(executablePath)
+      } -WindowStyle Hidden -PassThru;`;
     const script = `$ErrorActionPreference = 'Stop';
 ${envAssignments};
-$argList = @(${argList});
-$proc = Start-Process -FilePath ${
-      toPowerShellSingleQuoted(executablePath)
-    } -ArgumentList $argList -WindowStyle Hidden -PassThru;
+${startProcessArgs}
 [Console]::Out.WriteLine($proc.Id);`;
     const encodedCommand = toPowerShellEncodedCommand(script);
     const command = this.commandFactory("powershell.exe", {

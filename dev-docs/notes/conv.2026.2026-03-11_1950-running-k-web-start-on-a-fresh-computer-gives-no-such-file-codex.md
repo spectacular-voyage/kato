@@ -4590,3 +4590,259 @@ What’s not proven yet is the GitHub run itself for the new matrix. The next st
 # djradon_2026-03-12_0947_21
 
 I was able "npm i @spectacular-voyage/kato"  on windows. I was actually expecting to be able to run "kato" from the command line, but of course that was a fantasy. How do I run it? How do I enable "kato" as a command?
+
+# gpt-5.4_2026-03-12_0952_35
+
+`npm i @spectacular-voyage/kato` installs it into the current project, not as a global shell command.
+
+So on Windows you have three main ways to run it:
+
+1. Global install
+```powershell
+npm install -g @spectacular-voyage/kato
+kato --version
+```
+
+That is the normal way to make `kato` available as a command everywhere.
+
+2. Run from the local project with `npx`
+```powershell
+npx @spectacular-voyage/kato --version
+```
+
+or if it is already installed in that project:
+```powershell
+npx kato --version
+```
+
+3. Run the local npm bin shim directly
+PowerShell:
+```powershell
+.\node_modules\.bin\kato.cmd --version
+```
+
+On Windows, npm creates a `.cmd` shim under `node_modules\.bin`, which is why local-project execution works that way.
+
+So if your goal is “type `kato` anywhere”, use:
+
+```powershell
+npm install -g @spectacular-voyage/kato
+```
+
+If `kato` still is not found after a global install, the usual issue is that npm’s global bin directory is not on `PATH`. You can inspect it with:
+
+```powershell
+npm bin -g
+```
+
+and make sure that directory is on your user `PATH`.
+
+One more note: for a daemon-style tool like this, I would document global install as the primary path, and `npx` as a convenience/testing path.
+
+# gpt-5.4_2026-03-12_0952_36
+
+`npm i @spectacular-voyage/kato` installs it into the current project, not as a global shell command.
+
+So on Windows you have three main ways to run it:
+
+1. Global install
+```powershell
+npm install -g @spectacular-voyage/kato
+kato --version
+```
+
+That is the normal way to make `kato` available as a command everywhere.
+
+2. Run from the local project with `npx`
+```powershell
+npx @spectacular-voyage/kato --version
+```
+
+or if it is already installed in that project:
+```powershell
+npx kato --version
+```
+
+3. Run the local npm bin shim directly
+PowerShell:
+```powershell
+.\node_modules\.bin\kato.cmd --version
+```
+
+On Windows, npm creates a `.cmd` shim under `node_modules\.bin`, which is why local-project execution works that way.
+
+So if your goal is “type `kato` anywhere”, use:
+
+```powershell
+npm install -g @spectacular-voyage/kato
+```
+
+If `kato` still is not found after a global install, the usual issue is that npm’s global bin directory is not on `PATH`. You can inspect it with:
+
+```powershell
+npm bin -g
+```
+
+and make sure that directory is on your user `PATH`.
+
+One more note: for a daemon-style tool like this, I would document global install as the primary path, and `npx` as a convenience/testing path.
+
+# djradon_2026-03-12_1002_18
+
+Oh man, late night. It worked and ran, but gave:
+
+PS C:\Users\drich\hub\spectacular-voyage\kato> kato start 
+Command failed: PowerShell Start-Process launch failed (exit 1): #< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><S S="Error">Start-Process : Cannot validate argument on parameter 'ArgumentList'. The argument is null, empty, or an element of the argument collection contains a null value. Supply a collection _x000D__x000A_</S><S S="Error">that does not contain any null values and then try the command again._x000D__x000A_</S><S S="Error">At line:11 char:190_x000D__x000A_</S><S S="Error">+ ... ge\kato-win32-x64\bin\kato-daemon.exe' -ArgumentList $argList -Window ..._x000D__x000A_</S><S S="Error">+                                                          ~~~~~~~~_x000D__x000A_</S><S S="Error">    + CategoryInfo          : InvalidData: (:) [Start-Process], ParentContainsErrorRecordException_x000D__x000A_</S><S S="Error">    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand_x000D__x000A_</S><S S="Error"> _x000D__x000A_</S></Objs>
+
+# gpt-5.4_2026-03-12_1002_25
+
+I’m tracing the Windows detached-launch path now. The error points to the PowerShell `Start-Process` wrapper building an `ArgumentList` array with a null entry, so I’m checking the launcher code and the packaged binary resolution path together and I’ll patch it at the source rather than papering over it in docs.
+
+# gpt-5.4_2026-03-12_1002_35
+
+I found the likely root cause. On Windows, the installed `kato-daemon.exe` path passes an empty `args` array into the PowerShell helper, and our script still emits `-ArgumentList $argList`. PowerShell is rejecting that empty collection. I’m patching the helper to omit `-ArgumentList` entirely when there are no args, and I’ll add a regression test for the installed-binary path.
+
+# gpt-5.4_2026-03-12_1002_43
+
+I’m making the fix where the bad script is generated, and I’m going to add the regression at the helper level so we don’t need a full Windows runner to catch it next time. I’ll also check the web PowerShell helper for the same empty-argument pattern while I’m in there.
+
+# gpt-5.4_2026-03-12_1003_06
+
+I’ve fixed the script generation. Now I’m adding the exact regression: PowerShell helper with an installed executable and no args should not emit `-ArgumentList` at all.
+
+# gpt-5.4_2026-03-12_1003_17
+
+The regression is in. I’m running the daemon/web launcher tests plus a repo check to make sure this Windows-specific fix didn’t disturb the existing PowerShell launch paths.
+
+# gpt-5.4_2026-03-12_1003_23
+
+It was the expected missing import. I’m fixing that and rerunning the same targeted gate.
+
+# gpt-5.4_2026-03-12_1003_44
+
+Confirmed. The Windows failure was a real bug in the packaged daemon launcher.
+
+Cause:
+- when `kato start` launches an installed `kato-daemon.exe` on Windows, the PowerShell helper in [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) was still passing `-ArgumentList` even though the installed daemon launch has no args
+- PowerShell rejects an empty `ArgumentList`, which is the exact error you saw
+
+I fixed it:
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) now omits `-ArgumentList` entirely when the arg list is empty
+- I made the same helper more robust in [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- added a regression test in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts tests/daemon-launcher_test.ts`
+
+Important practical point: your currently published Windows npm package still has the old bug. This fix will only reach Windows users after the next rebuilt/republished package set. So before the real npm release, rerun `Release Manual`, regenerate the npm packages, and publish that updated version.
+
+# gpt-5.4_2026-03-12_1003_48
+
+Confirmed. The Windows failure was a real bug in the packaged daemon launcher.
+
+Cause:
+- when `kato start` launches an installed `kato-daemon.exe` on Windows, the PowerShell helper in [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) was still passing `-ArgumentList` even though the installed daemon launch has no args
+- PowerShell rejects an empty `ArgumentList`, which is the exact error you saw
+
+I fixed it:
+- [launcher.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/orchestrator/launcher.ts) now omits `-ArgumentList` entirely when the arg list is empty
+- I made the same helper more robust in [web/mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts)
+- added a regression test in [daemon-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-launcher_test.ts)
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/daemon-launcher_test.ts tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/orchestrator/launcher.ts apps/runtime/src/web/mod.ts tests/daemon-launcher_test.ts`
+
+Important practical point: your currently published Windows npm package still has the old bug. This fix will only reach Windows users after the next rebuilt/republished package set. So before the real npm release, rerun `Release Manual`, regenerate the npm packages, and publish that updated version.
+
+# djradon_2026-03-12_1009_45
+
+OK, so we should prepare for a 0.2.6 release right? Seems like as a general strategy we should release all binaries and do the github release too. Should we tackle that now?
+
+# gpt-5.4_2026-03-12_1010_25
+
+Yes. If `0.2.5` is already public on npm, I would cut `0.2.6`.
+
+Reason:
+- the published Windows package has a real launcher bug in `kato start`
+- that is a release-quality defect, not just a docs issue
+- npm versions are immutable, so the fix wants a new version
+
+And yes, I think we should tackle the full release path now. The right strategy is:
+
+- npm remains the primary install channel
+- GitHub Release carries the per-platform archives and checksums as the fallback/manual channel
+- both should be produced from the same release run
+
+The sequence I’d use for `0.2.6` is:
+
+1. Bump to `0.2.6`.
+2. Add the GitHub Release draft/upload step to `release-manual.yml`.
+3. Keep release assets to the 4 binary archives plus `.sha256` files.
+4. Rerun `Release Manual` on `0.2.6`.
+5. Let it pass:
+   - binary matrix
+   - cross-platform npm smoke
+   - npm publish
+   - release asset upload
+6. Publish/undraft the GitHub Release only after npm publish succeeds.
+
+So yes: this is the right thing to do now. I would make the next implementation slice “draft GitHub Release + upload binary archives/checksums from `release-manual.yml`,” then cut `0.2.6`.
+
+# gpt-5.4_2026-03-12_1010_26
+
+Yes. If `0.2.5` is already public on npm, I would cut `0.2.6`.
+
+Reason:
+- the published Windows package has a real launcher bug in `kato start`
+- that is a release-quality defect, not just a docs issue
+- npm versions are immutable, so the fix wants a new version
+
+And yes, I think we should tackle the full release path now. The right strategy is:
+
+- npm remains the primary install channel
+- GitHub Release carries the per-platform archives and checksums as the fallback/manual channel
+- both should be produced from the same release run
+
+The sequence I’d use for `0.2.6` is:
+
+1. Bump to `0.2.6`.
+2. Add the GitHub Release draft/upload step to `release-manual.yml`.
+3. Keep release assets to the 4 binary archives plus `.sha256` files.
+4. Rerun `Release Manual` on `0.2.6`.
+5. Let it pass:
+   - binary matrix
+   - cross-platform npm smoke
+   - npm publish
+   - release asset upload
+6. Publish/undraft the GitHub Release only after npm publish succeeds.
+
+So yes: this is the right thing to do now. I would make the next implementation slice “draft GitHub Release + upload binary archives/checksums from `release-manual.yml`,” then cut `0.2.6`.
+
+# djradon_2026-03-12_1014_21
+
+can you add the github release  stuff to [release-manual.yml](.github/workflows/release-manual.yml) and fill in release-notes.v0.2.6.md
+
+can you add the github release  stuff to [release-manual.yml](.github/workflows/release-manual.yml) and fill in release-notes.v0.2.6.md
+
+# gpt-5.4_2026-03-12_1014_30
+
+I’m updating the release workflow and the `v0.2.6` notes together. First I’m checking the current workflow shape and the existing release-note style so the new release-upload step matches what’s already in the repo.
+
+# gpt-5.4_2026-03-12_1014_38
+
+I’ve confirmed the workflow currently stops at binaries, npm assembly, smoke, and npm publish. Next I’m reading the tail of the workflow and the runbook sections that already describe the intended GitHub Release behavior so I can implement the release upload without inventing a conflicting flow.
+
+# gpt-5.4_2026-03-12_1014_48
+
+I have enough context now. I’m checking the bundle metadata and packaging script so the release job uploads the right files and can derive the release version/tag from the artifacts rather than hardcoding it.
+
+# gpt-5.4_2026-03-12_1015_37
+
+I’m deciding between the GitHub CLI and a release action for the new upload job. I’m checking the locally available `gh` flags so the workflow can safely create/update a draft release and then publish it from the same job without guessing at unsupported options.
+
+# gpt-5.4_2026-03-12_1017_06
+
+I’m patching the workflow now. The release job will stay independent of npm publish so you can still use it when npm publication is manual, but it will only run on `workflow_dispatch` and will create/update the versioned GitHub Release from the built bundle artifacts.

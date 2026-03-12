@@ -275,14 +275,20 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     args: string[],
     workingDirectory: string,
   ): Promise<number> {
-    const argList = args.map(toPowerShellSingleQuoted).join(", ");
-    const script = `$ErrorActionPreference = 'Stop';
-$argList = @(${argList});
+    const startProcessArgs = args.length > 0
+      ? `$argList = @(${args.map(toPowerShellSingleQuoted).join(", ")});
 $proc = Start-Process -FilePath ${
-      toPowerShellSingleQuoted(executablePath)
-    } -ArgumentList $argList -WorkingDirectory ${
-      toPowerShellSingleQuoted(workingDirectory)
-    } -WindowStyle Hidden -PassThru;
+        toPowerShellSingleQuoted(executablePath)
+      } -ArgumentList $argList -WorkingDirectory ${
+        toPowerShellSingleQuoted(workingDirectory)
+      } -WindowStyle Hidden -PassThru;`
+      : `$proc = Start-Process -FilePath ${
+        toPowerShellSingleQuoted(executablePath)
+      } -WorkingDirectory ${
+        toPowerShellSingleQuoted(workingDirectory)
+      } -WindowStyle Hidden -PassThru;`;
+    const script = `$ErrorActionPreference = 'Stop';
+${startProcessArgs}
 [Console]::Out.WriteLine($proc.Id);`;
     const encodedCommand = toPowerShellEncodedCommand(script);
     const command = this.commandFactory("powershell.exe", {

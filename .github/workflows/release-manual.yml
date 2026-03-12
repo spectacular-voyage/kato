@@ -17,6 +17,15 @@ on:
         required: true
         default: latest
         type: string
+      github_release_mode:
+        description: "What to do with the GitHub Release for this version"
+        required: true
+        default: skip
+        type: choice
+        options:
+          - skip
+          - draft
+          - publish
   push:
     paths:
       - .github/workflows/release-manual.yml
@@ -338,3 +347,135 @@ jobs:
             args+=(--provenance)
           fi
           deno task publish:npm-packages -- "${args[@]}"
+
+  manage-github-release:
+    name: Manage GitHub Release
+    if: github.event_name == 'workflow_dispatch' && inputs.github_release_mode != 'skip'
+    needs: smoke-npm-install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Binary Artifact Bundles
+        uses: actions/download-artifact@v5
+        with:
+          path: .test-tmp/downloaded-bundles
+          pattern: kato-*
+          merge-multiple: false
+
+      - name: Prepare Release Metadata
+        id: prepare-release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t metadata_files < <(find .test-tmp/downloaded-bundles -mindepth 2 -maxdepth 2 -type f -name bundle-metadata.json | sort)
+          if [ "${#metadata_files[@]}" -eq 0 ]; then
+            echo "No bundle-metadata.json files were downloaded"
+            exit 1
+          fi
+
+          version=$(python3 - "${metadata_files[@]}" <<'PY'
+          import json
+          import sys
+
+          versions = []
+          for path in sys.argv[1:]:
+              with open(path, "r", encoding="utf-8") as handle:
+                  versions.append(json.load(handle)["version"])
+
+          unique = sorted(set(versions))
+          if len(unique) != 1:
+              raise SystemExit(
+                  f"Expected one bundled release version, got: {', '.join(unique)}"
+              )
+
+          print(unique[0])
+          PY
+          )
+
+          tag="v${version}"
+          title="${tag}"
+          notes_source="dev-docs/notes/release-notes.v${version}.md"
+          if [ ! -f "$notes_source" ]; then
+            echo "Release notes file not found: $notes_source"
+            exit 1
+          fi
+
+          notes_body="$RUNNER_TEMP/release-notes-${tag}.md"
+          awk '
+            BEGIN { in_frontmatter = 0; frontmatter_done = 0 }
+            NR == 1 && $0 == "---" { in_frontmatter = 1; next }
+            in_frontmatter && $0 == "---" { in_frontmatter = 0; frontmatter_done = 1; next }
+            !in_frontmatter && frontmatter_done { print }
+          ' "$notes_source" > "$notes_body"
+
+          if [ ! -s "$notes_body" ]; then
+            echo "Release notes body is empty after stripping front matter: $notes_source"
+            exit 1
+          fi
+
+          assets_file="$RUNNER_TEMP/release-assets-${tag}.txt"
+          find .test-tmp/downloaded-bundles -mindepth 2 -maxdepth 2 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) | sort > "$assets_file"
+          if [ ! -s "$assets_file" ]; then
+            echo "No release archives or checksum assets were found"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "notes_body=$notes_body" >> "$GITHUB_OUTPUT"
+          echo "assets_file=$assets_file" >> "$GITHUB_OUTPUT"
+
+      - name: Create or Update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ inputs.github_release_mode }}
+          RELEASE_TAG: ${{ steps.prepare-release.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.prepare-release.outputs.title }}
+          RELEASE_NOTES_BODY: ${{ steps.prepare-release.outputs.notes_body }}
+          RELEASE_ASSETS_FILE: ${{ steps.prepare-release.outputs.assets_file }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t assets < "$RELEASE_ASSETS_FILE"
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets were prepared"
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+
+            edit_args=(
+              "$RELEASE_TAG"
+              --title "$RELEASE_TITLE"
+              --notes-file "$RELEASE_NOTES_BODY"
+              --target "$GITHUB_SHA"
+            )
+            if [ "$RELEASE_MODE" = "draft" ]; then
+              edit_args+=(--draft)
+            else
+              edit_args+=(--draft=false --latest)
+            fi
+            gh release edit "${edit_args[@]}"
+          else
+            create_args=(
+              "$RELEASE_TAG"
+              --title "$RELEASE_TITLE"
+              --notes-file "$RELEASE_NOTES_BODY"
+              --target "$GITHUB_SHA"
+            )
+            if [ "$RELEASE_MODE" = "draft" ]; then
+              create_args+=(--draft)
+            else
+              create_args+=(--latest)
+            fi
+            create_args+=("${assets[@]}")
+            gh release create "${create_args[@]}"
+          fi
