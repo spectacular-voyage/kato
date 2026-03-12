@@ -152,3 +152,62 @@ jobs:
             .test-tmp/bundles/${{ matrix.label }}/**
           if-no-files-found: error
           compression-level: 0
+
+  assemble-npm-packages:
+    name: Assemble npm Packages
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Download Binary Artifact Bundles
+        uses: actions/download-artifact@v5
+        with:
+          path: .test-tmp/downloaded-bundles
+
+      - name: Assemble npm Packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t bundle_inputs < <(find .test-tmp/downloaded-bundles -mindepth 1 -maxdepth 1 -type d | sort)
+          if [ "${#bundle_inputs[@]}" -eq 0 ]; then
+            echo "No bundle artifacts were downloaded"
+            exit 1
+          fi
+
+          args=()
+          for input_dir in "${bundle_inputs[@]}"; do
+            if [ ! -f "$input_dir/bundle-metadata.json" ]; then
+              echo "Missing bundle-metadata.json in $input_dir"
+              exit 1
+            fi
+            args+=(--input-dir "$input_dir")
+          done
+
+          deno task assemble:npm-packages -- "${args[@]}" --output-dir .test-tmp/npm-packages/release
+
+      - name: Smoke npm Install
+        run: deno task smoke:npm-install -- --input-dir .test-tmp/npm-packages/release --npm-bin npm
+
+      - name: Upload npm Package Assembly Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kato-npm-packages
+          path: |
+            .test-tmp/npm-packages/release/**
+          if-no-files-found: error
+          compression-level: 0

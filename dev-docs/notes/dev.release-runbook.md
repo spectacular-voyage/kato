@@ -138,6 +138,34 @@ Planning note:
 
 ### Current Local Build Task
 
+Current semi-automatic version bump entrypoint:
+
+```bash
+deno task bump:version -- --patch
+```
+
+Other supported forms:
+
+```bash
+deno task bump:version -- --minor
+deno task bump:version -- --major
+deno task bump:version -- --version 0.2.5
+```
+
+Current version bump behavior:
+
+- updates `apps/cli/deno.json`
+- updates `apps/daemon/deno.json`
+- updates `apps/web/deno.json`
+- creates `dev-docs/notes/release-notes.v<version>.md` if it does not already
+  exist
+- supports `--dry-run` for previewing the change
+
+This is intentionally semi-automatic:
+
+- it prepares the versioned files and release-notes stub
+- it does not commit, tag, or publish anything
+
 The current repeatable local build entrypoint is:
 
 ```bash
@@ -188,39 +216,61 @@ Current manual CI entrypoint:
   - package platform bundles with `deno task package:binaries`
   - smoke-test `kato --version` and bundled `kato-web` from the packaged bundle
   - upload bundle directory, archive, checksum, and bundle metadata
+  - download all bundle artifacts on Ubuntu
+  - assemble npm packages with `deno task assemble:npm-packages`
+  - run npm pack/install smoke with `deno task smoke:npm-install`
+  - upload generated npm package assembly artifacts
 
 ### Planned Release Steps
 
-1. Confirm release commit is on `main` and CI is green.
-2. Run the full local quality gate:
+1. Bump versions and create the next release-notes stub:
+
+```bash
+deno task bump:version -- --patch
+```
+
+2. Confirm release commit is on `main` and CI is green.
+3. Run the full local quality gate:
 
 ```bash
 deno task ci
 ```
 
-3. Build platform binaries on the native runner with the scripted builder:
+4. Build platform binaries on the native runner with the scripted builder:
 
 ```bash
 deno task build:binaries -- --output-dir <staging-dir>
 ```
 
-4. Verify staged build metadata and version alignment before packaging:
+5. Verify staged build metadata and version alignment before packaging:
    - inspect `<staging-dir>/build-metadata.json`
    - confirm CLI/daemon/web versions are aligned for the release cut
-5. Package the staged binaries into release bundles:
+6. Package the staged binaries into release bundles:
 
 ```bash
 deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>
 ```
 
-6. Verify packaged bundle outputs:
+7. Verify packaged bundle outputs:
    - versioned bundle directory exists
    - platform archive exists
    - archive checksum exists
    - `bundle-metadata.json` exists
-7. Assemble per-platform release archives/installers so the web runtime is
+8. Assemble npm wrapper and platform packages from the packaged bundle outputs:
+
+```bash
+deno task assemble:npm-packages -- --input-dir <bundle-dir> [--input-dir <bundle-dir> ...]
+```
+
+9. Run npm pack/install smoke on the assembled packages:
+
+```bash
+deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>
+```
+
+10. Assemble per-platform release archives/installers so the web runtime is
    colocated with the CLI bundle.
-8. Run per-platform smoke checks against the packaged runtime, not the Vite dev
+11. Run per-platform smoke checks against the packaged runtime, not the Vite dev
    server:
    - `kato --version`
    - `kato status`
@@ -229,8 +279,8 @@ deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>
    - HTTP probe of `/login` on the configured host/port
    - `kato web status`
    - `kato web stop`
-9. Upload versioned and stable-name release assets.
-10. Publish GitHub release and any installer/channel metadata.
+12. Upload versioned and stable-name release assets.
+13. Publish GitHub release and any installer/channel metadata.
 
 ### Planned Verification Checklist
 
@@ -243,6 +293,10 @@ deno task package:binaries -- --input-dir <staging-dir> --label <platform-label>
       passed on each native runner.
 - [ ] Packaged output includes bundle directory, archive, checksum, and
       `bundle-metadata.json`.
+- [ ] `deno task assemble:npm-packages -- --input-dir <bundle-dir> [...]`
+      passed for the release candidate.
+- [ ] `deno task smoke:npm-install -- --input-dir <npm-package-dir> --npm-bin <npm-path>`
+      passed for the host package.
 - [ ] Each platform artifact bundle includes `kato`, `kato-daemon`, and
       `kato-web` unless an explicit fallback exception is documented.
 - [ ] `kato web start` works from the packaged release output without invoking

@@ -19,6 +19,8 @@ does not require Deno, Vite, or Node on the target machine.
   [[task.2026.2026-03-05-distribution-solutions]] into one implementation track.
 - Phase 1 should jump directly to native binaries rather than building an
   intermediate Deno-required installer channel.
+- The native binary pipeline should now be treated as the build substrate for
+  npm-wrapper-first installation, not only as a direct archive-download path.
 - Preferred bundle shape:
   - `kato`
   - `kato-daemon`
@@ -192,6 +194,8 @@ runner matrix:
   `AllowedRoot`.
 - Permission Broker is explicitly deferred; it is not a release blocker.
 - `kato` remains the launcher and primary user entrypoint.
+- npm wrapper install should be treated as the intended primary user-facing
+  install channel once publish automation is in place.
 - Preferred Phase 1 bundle is three binaries:
   - `kato`
   - `kato-daemon`
@@ -302,7 +306,7 @@ runner matrix:
       `kato --version`, bundled `kato-web`, and HTTP probe of `/login`.
 - [ ] Expand packaged-bundle smoke checks to full daemon lifecycle and web
       lifecycle coverage.
-- [ ] Align the binary docs and release runbook with npm wrapper install as the
+- [x] Align the binary docs and release runbook with npm wrapper install as the
       intended primary user-facing channel.
 - [x] Update [[dev.release-runbook]] once the implementation shape is proven by
       a real binary build and smoke pass.
@@ -320,12 +324,18 @@ Current implementation note:
   - platform archive (`.tar.gz` or `.zip`)
   - archive checksum
   - `bundle-metadata.json`
+- a follow-up Ubuntu job now:
+  - downloads the per-platform bundle artifacts
+  - assembles npm wrapper/platform packages
+  - runs npm pack/install smoke for the host package
+  - uploads the generated npm package assembly output
 - it also runs a lightweight packaged-bundle smoke slice on each runner:
   - `kato --version`
   - `kato-web --host 127.0.0.1 --port 45177`
   - HTTP probe of `/login`
-- the workflow file is implemented and YAML-validated locally, but it has not
-  yet been exercised in GitHub in this task
+- the binary-only matrix has already been exercised successfully in GitHub
+- the npm assembly/smoke extension has been implemented and YAML-validated
+  locally, but it has not yet been exercised in GitHub in this task
 
 
 ## Coderabbit Review
@@ -350,5 +360,5 @@ Current implementation note:
       the workflow as release-ready.
 - [x] Decide that the first documented user-facing install target should be npm
       wrapper install rather than direct archive download.
-- [ ] Align the binary docs and release runbook with npm wrapper install as the
+- [x] Align the binary docs and release runbook with npm wrapper install as the
       intended primary user-facing channel.

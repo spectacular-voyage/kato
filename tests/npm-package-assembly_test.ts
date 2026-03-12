@@ -22,6 +22,7 @@ async function createBundleInput(
   label: string,
   target: string,
   version: string,
+  options: { staleAbsolutePaths?: boolean } = {},
 ): Promise<string> {
   const inputDir = join(root, label);
   const bundleDir = join(inputDir, `kato-v${version}-${label}`);
@@ -72,8 +73,12 @@ async function createBundleInput(
           createdAt: "2026-03-12T00:00:00.000Z",
           version,
           label,
-          buildMetadataPath,
-          bundleDir,
+          buildMetadataPath: options.staleAbsolutePaths
+            ? `/stale/source/${label}/build-metadata.json`
+            : buildMetadataPath,
+          bundleDir: options.staleAbsolutePaths
+            ? `/stale/source/${label}/kato-v${version}-${label}`
+            : bundleDir,
           archivePath: join(inputDir, `kato-v${version}-${label}.tar.gz`),
           checksumPath: join(
             inputDir,
@@ -190,4 +195,30 @@ Deno.test("assembleNpmPackages rejects mismatched bundle versions", async () => 
     Error,
     "Bundle version mismatch across inputs",
   );
+});
+
+Deno.test("assembleNpmPackages resolves downloaded artifact paths from stale bundle metadata", async () => {
+  const root = uniquePath("downloaded");
+  const inputDir = await createBundleInput(
+    root,
+    "linux-x64",
+    "linux-x86_64",
+    "0.2.4",
+    { staleAbsolutePaths: true },
+  );
+  const outputDir = join(root, "output");
+
+  const metadata = await assembleNpmPackages({
+    inputDirs: [inputDir],
+    outputDir,
+    wrapperPackageName: "kato",
+    platformPackagePrefix: "@spectacular-voyage/kato",
+    commandName: "kato",
+  });
+
+  assertEquals(metadata.platformPackages.length, 1);
+  const stat = await Deno.stat(
+    join(outputDir, "platforms", "linux-x64-gnu", "bin", "kato"),
+  );
+  assert(stat.isFile);
 });

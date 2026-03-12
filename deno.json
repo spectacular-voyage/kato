@@ -7,6 +7,8 @@
     "build:binaries": "deno run --frozen -A scripts/build-binaries.ts",
     "package:binaries": "deno run -A scripts/package-binaries.ts",
     "assemble:npm-packages": "deno run --frozen -A scripts/assemble-npm-packages.ts",
+    "smoke:npm-install": "deno run --frozen -A scripts/smoke-npm-install.ts",
+    "bump:version": "deno run --frozen -A scripts/bump-version.ts",
     "audit": "deno audit --frozen --level=high --lock deno.lock && deno audit --frozen --level=high --lock apps/web/deno.lock && deno audit --frozen --level=high --lock apps/cli/deno.lock && deno audit --frozen --level=high --lock apps/daemon/deno.lock",
     "fmt": "deno fmt deno.json apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "fmt:check": "deno fmt --check deno.json apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",

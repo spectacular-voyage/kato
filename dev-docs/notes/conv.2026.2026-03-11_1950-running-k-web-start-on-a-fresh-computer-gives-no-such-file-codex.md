@@ -2190,3 +2190,485 @@ commit message please.
 - generate Node launcher, package map, and npm package metadata from bundle outputs
 - add focused tests for npm package assembly and version mismatch rejection
 - update npm install task note to reflect current package shape and completed steps
+
+# djradon_2026-03-11_2346_14
+
+what about mac and windows packages?
+
+# gpt-5.4_2026-03-11_2346_21
+
+The generator already supports them. It maps bundled binary targets to platform packages like:
+
+- `@spectacular-voyage/kato-linux-x64-gnu`
+- `@spectacular-voyage/kato-win32-x64`
+- `@spectacular-voyage/kato-darwin-x64`
+- `@spectacular-voyage/kato-darwin-arm64`
+
+That logic is in [assemble-npm-packages.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts). The reason you only saw Linux output is that I only had a local Linux bundle to feed into it.
+
+So the current state is:
+- code path exists for macOS and Windows package generation
+- local proof only exists for Linux
+- real next step is feeding the workflow’s macOS/Windows bundle outputs into `assemble:npm-packages`
+
+Concretely, once you have bundle directories from:
+- `windows-x64`
+- `macos-x64`
+- `macos-arm64`
+
+you’d run something like:
+
+```bash
+deno task assemble:npm-packages -- \
+  --input-dir <linux bundle dir> \
+  --input-dir <windows bundle dir> \
+  --input-dir <macos x64 bundle dir> \
+  --input-dir <macos arm64 bundle dir> \
+  --output-dir .test-tmp/npm-packages/release
+```
+
+and it will generate all four platform packages plus the top-level `kato` wrapper.
+
+What is still missing is:
+- multi-platform smoke using the real workflow outputs
+- `npm pack` / install tests
+- wiring this assembly step into the release workflow
+
+So: support is implemented, but macOS/Windows packages are not yet proven with actual bundle inputs.
+
+# djradon_2026-03-11_2347_02
+
+Wait, I want to just use @node not @spectacular-voyage/kato-linux-x64-gnu
+
+# gpt-5.4_2026-03-11_2347_18
+
+You can’t use just `@node` as a package name. In npm, that’s only a scope. The actual package would need to be something like:
+
+- `@node/kato-linux-x64-gnu`
+- `@node/kato-win32-x64`
+- `@node/kato-darwin-x64`
+- `@node/kato-darwin-arm64`
+
+So yes, the platform packages can use a shorter scope, but only if you control that npm scope. Two cautions:
+
+- `@node` is likely a bad choice unless you actually own it.
+- Even if available, it will look official/Node-adjacent and create avoidable confusion.
+
+The clean setup is still:
+
+- public wrapper: `kato`
+- internal platform packages: `@your-scope/kato-*`
+
+If you do have a short scope you want, tell me the exact one and I can switch the generator from `@spectacular-voyage/kato-*` to that.
+
+# djradon_2026-03-11_2350_18
+
+oops, I mean kato.  I see where I was wrong... we're already using "kato" as the public wrapper, but the internal packages will be @spectacular-voyage/kato-*
+
+Explain to me the npm pack stuff.
+
+# gpt-5.4_2026-03-11_2350_27
+
+`npm pack` creates the exact tarball npm would publish, without publishing it.
+
+For this project, that matters because the real question is not “did we write plausible `package.json` files?” It is “if npm packs these directories, do the tarballs contain the right files and install correctly?”
+
+The typical flow is:
+
+1. Generate package directories
+- wrapper package dir
+- platform package dir
+
+2. Run `npm pack` inside each package dir
+- this produces files like:
+  - `kato-0.2.4.tgz`
+  - `spectacular-voyage-kato-linux-x64-gnu-0.2.4.tgz`
+
+3. Inspect or install those tarballs locally
+- `npm install -g ./kato-0.2.4.tgz`
+- or install into a temp project
+- then run `kato --version`
+
+Why it’s useful:
+- verifies `files`, `bin`, `optionalDependencies`, `os`, `cpu`, and `libc` behavior
+- catches missing binaries or metadata before publish
+- tests what npm will actually ship, not just our generated directories
+
+For Kato, the important smoke sequence will be:
+
+1. `deno task assemble:npm-packages ...`
+2. `npm pack` the wrapper package
+3. `npm pack` a platform package
+4. install them into a temp location
+5. run:
+   - `kato --version`
+   - likely `kato web start` or at least wrapper resolution checks
+
+One nuance: because the wrapper depends on platform packages, local smoke may need either:
+- installing the platform tarball first, then the wrapper tarball
+- or a temp setup that rewrites/install-resolves those local tarballs together
+
+So `npm pack` is the local “pre-publish reality check.” It’s the right next step now that package assembly exists.
+
+# djradon_2026-03-11_2351_52
+
+OK, do you need me to do something?
+
+# gpt-5.4_2026-03-11_2351_56
+
+Yes. The next step needs real `npm` on this machine, and you said Node is now installed, so I need one quick confirmation from the environment.
+
+Please run:
+
+```bash
+node -v
+npm -v
+```
+
+If both work, I can continue straight into:
+- `npm pack` for the generated wrapper/platform packages
+- local install smoke
+- fixing whatever breaks
+
+If you want, I can also just try those commands myself next.
+
+# gpt-5.4_2026-03-11_2351_58
+
+Yes. The next step needs real `npm` on this machine, and you said Node is now installed, so I need one quick confirmation from the environment.
+
+Please run:
+
+```bash
+node -v
+npm -v
+```
+
+If both work, I can continue straight into:
+- `npm pack` for the generated wrapper/platform packages
+- local install smoke
+- fixing whatever breaks
+
+If you want, I can also just try those commands myself next.
+
+# djradon_2026-03-11_2352_32
+
+node -v                                                                                                                                                         ─╯
+npm -v
+
+v25.8.1
+11.11.0
+
+# gpt-5.4_2026-03-11_2352_44
+
+Node and npm are good. I’m moving straight into the first real npm smoke: pack the generated wrapper and platform package, install both tarballs into a temp project, and run the wrapper command through npm’s own bin path.
+
+# gpt-5.4_2026-03-11_2353_00
+
+The tool shell doesn’t currently have your updated npm PATH, even though your interactive terminal does. I’m locating the installed Node binary and then I’ll use that explicit path for the npm smoke instead of depending on shell startup state.
+
+# gpt-5.4_2026-03-11_2353_19
+
+The npm CLI itself has a `#!/usr/bin/env node` shebang, so I need to inject the nvm `bin` dir into PATH for these subprocesses. That’s an environment quirk, not a package issue. I’m rerunning with the explicit PATH now.
+
+# djradon_2026-03-11_2353_40
+
+I can just restart vscode if you want.
+
+# gpt-5.4_2026-03-11_2353_45
+
+No need. I can continue with the explicit nvm `PATH` override and finish the npm smoke from here.
+
+What I learned already:
+- wrapper tarball looks good
+- Linux platform tarball packs successfully
+- the Linux platform tarball is huge:
+  - packed: about `134 MB`
+  - unpacked: about `360 MB`
+
+So the next step is still the real install smoke, not VS Code restart. If you want, I’ll continue with:
+1. install the wrapper + platform tarballs into a temp npm project
+2. run the packaged `kato --version`
+3. see whether wrapper resolution works as intended
+
+# djradon_2026-03-11_2354_07
+
+continue
+
+# gpt-5.4_2026-03-11_2354_17
+
+I’m moving from `npm pack` to the real install path now: temp project, install both tarballs, then run the wrapper command out of `node_modules/.bin`. That will tell us whether the generated package linkage is actually correct, not just packable.
+
+# gpt-5.4_2026-03-11_2354_22
+
+The tarballs are where they should be. I’m installing both into a temp project in one shot so npm has both the public wrapper and the matching native platform package available during resolution.
+
+# gpt-5.4_2026-03-11_2354_26
+
+The first install miss was just pathing: from the temp project, those `../...` tarball paths were wrong. I’m rerunning with absolute tarball paths so we can test the package logic instead of npm’s cwd semantics.
+
+# gpt-5.4_2026-03-11_2354_34
+
+The install is running now against the real tarballs. If this succeeds, the next step is just executing the wrapper out of `node_modules/.bin` and then deciding whether to add a web-start smoke here or keep that for workflow coverage.
+
+# gpt-5.4_2026-03-11_2354_46
+
+The install path worked. I’m running the generated `kato` shim from `node_modules/.bin` now, which is the actual wrapper behavior we care about.
+
+# gpt-5.4_2026-03-11_2354_57
+
+The wrapper works for `--version`. I’m checking the existing web CLI tests for the minimal `web init` / `web start` path so I can reuse the known-good invocation and keep this npm smoke isolated from your real `~/.kato` state.
+
+# gpt-5.4_2026-03-11_2355_05
+
+The wrapper `--version` path is good. I’m stretching the smoke one step further: isolated `HOME`, `kato init`, `kato web init`, `kato web start`, probe `/login`, then `kato web stop`. That’s the first real end-to-end npm install test.
+
+# gpt-5.4_2026-03-11_2355_12
+
+The npm-installed binaries initialized cleanly and got through `web init`. I’m waiting on the detached `web start` path now; if this passes, we’ve proven the wrapper plus native package works for the real local web lifecycle, not just `--version`.
+
+# gpt-5.4_2026-03-11_2355_27
+
+The full local npm path just worked: `npm install` of the generated tarballs, `./node_modules/.bin/kato --version`, `kato init`, `kato web init`, `kato web start`, `/login`, `kato web status`, and `kato web stop`.
+
+I’m codifying that next as a repeatable smoke script/task so this doesn’t stay a one-off manual proof.
+
+# gpt-5.4_2026-03-11_2355_41
+
+I have the structure. The smoke script will read the generated npm package metadata, pick the host-matching platform package, pack both tarballs, install them into a temp project, and run the same isolated web lifecycle we just proved manually.
+
+# gpt-5.4_2026-03-11_2356_13
+
+The repeatable smoke script is in. I’m validating it with the same nvm-backed npm path and then I’ll update the npm note/checklists so the “local `npm pack` and install smoke” item can move from plan to done.
+
+# gpt-5.4_2026-03-11_2356_19
+
+Two small issues showed up in the scripted version:
+- one lint nit (`allocatePort` didn’t need `async`)
+- the npm shebang still needed the Node bin dir on `PATH` when the script is run non-interactively
+
+I’m patching those now and rerunning the smoke end to end.
+
+# gpt-5.4_2026-03-11_2356_25
+
+The script fixes are in. I’m rerunning lint plus the full scripted npm smoke now; if this passes, we can mark the npm pack/install smoke item done in the note instead of treating it as a manual one-off.
+
+# gpt-5.4_2026-03-11_2356_29
+
+The scripted smoke is running now using the real npm tarballs and the explicit nvm npm path. If this completes, we’ll have a repeatable command for local npm validation, not just an interactive transcript.
+
+# gpt-5.4_2026-03-11_2357_09
+
+The remaining failure is the same shebang issue, but on `npm install` and the generated wrapper script this time. The fix is straightforward: put the npm/node bin dir into the base env `PATH` once, so every spawned npm or wrapper command sees `node`.
+
+# gpt-5.4_2026-03-11_2357_19
+
+I’ve normalized PATH for the whole smoke environment now. I’m rerunning the scripted npm smoke one more time; if this passes, the local npm pack/install/web-lifecycle item is done for Linux.
+
+# gpt-5.4_2026-03-11_2357_21
+
+The rerun is in progress. I’m expecting the pack/install part to clear now; the only remaining risk is whether the scripted web lifecycle behaves the same as the manual one under the cleaned temp environment.
+
+# gpt-5.4_2026-03-11_2357_58
+
+It’s past the npm install launch and still working, which is expected given the binary tarball size. I’m letting it finish rather than interrupting it; the install payload is large enough that the first scripted run is just slow.
+
+# gpt-5.4_2026-03-11_2358_14
+
+The scripted Linux npm smoke passed end to end. I’m updating the npm task note to record that the local `npm pack` + temp install + web lifecycle proof is now real, not just planned.
+
+# gpt-5.4_2026-03-11_2358_37
+
+The note patch just needed a narrower edit. I’m applying the testing/result updates in smaller hunks rather than rewriting the whole section.
+
+# gpt-5.4_2026-03-11_2358_59
+
+The implementation-plan hunk just needed an exact-range patch. I’m flipping that one checkbox now.
+
+# gpt-5.4_2026-03-11_2359_08
+
+The scripted npm smoke is done. I’m just running a final short validation pass on the new smoke script and the updated npm note before I hand back the exact next step.
+
+# gpt-5.4_2026-03-11_2359_20
+
+Added a repeatable npm-install smoke at [smoke-npm-install.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) and wired it as `deno task smoke:npm-install` in [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json). I also updated [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) to mark local `npm pack` plus temp-install smoke as done.
+
+The local npm path is now proven on Linux:
+- `npm pack` for `kato`
+- `npm pack` for `@spectacular-voyage/kato-linux-x64-gnu`
+- temp install of both tarballs
+- `./node_modules/.bin/kato --version`
+- isolated `kato init`
+- isolated `kato web init`
+- isolated `kato web start`
+- `/login`
+- `kato web status`
+- `kato web stop`
+
+Validated with:
+- `deno lint scripts/smoke-npm-install.ts`
+- `deno check scripts/smoke-npm-install.ts scripts/assemble-npm-packages.ts`
+- `deno run --frozen -A scripts/smoke-npm-install.ts --input-dir .test-tmp/npm-packages/package-smoke --npm-bin /home/djradon/.nvm/versions/node/v25.8.1/bin/npm`
+
+The next concrete step is to extend [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) so it assembles npm packages from the native bundles and runs the same smoke on each native runner. One practical note: the Linux platform tarball is large, about `134 MB` packed and `360 MB` unpacked, so npm package size is now a real release concern rather than a hypothetical one.
+
+# djradon_2026-03-12_0000_49
+
+OK, let's extend release-manual. Is there a way to do version bumping semi-automatically too?
+
+# gpt-5.4_2026-03-12_0001_00
+
+I’m extending the manual release workflow to cover the new npm package path, and I’m checking the current version sources at the same time so I can suggest or implement the lightest useful version-bump automation instead of bolting on something awkward.
+
+# gpt-5.4_2026-03-12_0001_15
+
+I’m going to do two things in one pass: extend `release-manual.yml` to assemble and smoke npm packages from the built bundle artifacts, and add a small version-bump helper so version changes stop being manual hand edits across three app configs. First I’m checking the current action versions and existing release-note/version patterns so I don’t invent the wrong shape.
+
+# gpt-5.4_2026-03-12_0001_47
+
+I’ve got the workflow surface and current app versions. I’m checking the existing release-note file pattern now so the version-bump helper can update the three app versions and bootstrap the matching release note stub without guessing wrong about filenames or front matter.
+
+# gpt-5.4_2026-03-12_0002_22
+
+I’ve settled the shape: one new release workflow job on Ubuntu that downloads all bundle artifacts, assembles the npm packages, and runs the Linux npm smoke; plus a small version-bump helper that updates the three app versions and creates the next release-notes stub. I’m editing those pieces now.
+
+# gpt-5.4_2026-03-12_0003_30
+
+I caught one workflow-critical issue before validating it: the current npm assembly code trusts absolute paths embedded in `bundle-metadata.json`, which works locally but will break after artifact download on a different runner. I’m fixing that now so the new npm-assembly job can actually consume cross-runner artifacts.
+
+# gpt-5.4_2026-03-12_0003_42
+
+I’ve patched the path resolution. I’m adding one targeted test that simulates downloaded artifacts with stale absolute paths, because that’s exactly the workflow case that would have failed.
+
+# gpt-5.4_2026-03-12_0003_55
+
+I’m patching the test with the exact current formatting. This adds the stale-absolute-path case that the workflow download job depends on.
+
+# gpt-5.4_2026-03-12_0004_12
+
+I’ve fixed the artifact-path issue and added the regression test. I’m validating the workflow YAML, the new version-bump helper, and the npm assembly/smoke scripts before I update the notes/runbook.
+
+# gpt-5.4_2026-03-12_0004_37
+
+The code is validated. I’m updating the npm task note and the release runbook now so they reflect the actual workflow shape: bundle build, npm assembly/smoke, and the new `bump:version` helper.
+
+# gpt-5.4_2026-03-12_0004_56
+
+The workflow and runbook are aligned now. I’m checking the binary task note for the one remaining stale checkbox about npm-as-primary so I can decide whether it’s now honest to flip that too.
+
+# gpt-5.4_2026-03-12_0005_16
+
+I can make that checkbox honest by updating the binary note itself to reflect npm-wrapper-first install, not just the runbook. I’m doing that now, and I’ll narrow the workflow note so it distinguishes “binary matrix already exercised” from “new npm extension not yet exercised.”
+
+# gpt-5.4_2026-03-12_0005_36
+
+The code side is done; I’m running one final repo-format/check pass on the new scripts and the workflow YAML so I can hand you a clean summary of exactly what changed and what still needs a real GitHub run.
+
+# gpt-5.4_2026-03-12_0006_01
+
+Extended [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) and added semi-automatic version bumping.
+
+What changed:
+- `Release Manual` now has a follow-up Ubuntu job that:
+  - downloads the per-platform bundle artifacts
+  - assembles npm packages from them
+  - runs the Linux npm pack/install smoke
+  - uploads the generated npm package assembly artifact
+- added [bump-version.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/bump-version.ts) and task `deno task bump:version`
+- added [smoke-npm-install.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) for repeatable local npm smoke
+- hardened [assemble-npm-packages.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) so downloaded workflow artifacts still work even though `bundle-metadata.json` contains original absolute paths
+- updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md), [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md), and [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md)
+
+Version bumping now looks like:
+```bash
+deno task bump:version -- --patch
+deno task bump:version -- --minor
+deno task bump:version -- --major
+deno task bump:version -- --version 0.2.5
+deno task bump:version -- --patch --dry-run
+```
+
+That updates:
+- `apps/cli/deno.json`
+- `apps/daemon/deno.json`
+- `apps/web/deno.json`
+
+and creates `dev-docs/notes/release-notes.v<version>.md` if missing.
+
+Validated:
+- `deno task fmt:check`
+- `deno lint scripts/bump-version.ts scripts/assemble-npm-packages.ts scripts/smoke-npm-install.ts tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno check scripts/bump-version.ts scripts/assemble-npm-packages.ts scripts/smoke-npm-install.ts tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno run --frozen -A scripts/bump-version.ts --patch --dry-run`
+- local npm smoke passed end to end with `kato init`, `kato web init/start/status/stop`
+
+What’s still not proven:
+- the new npm assembly job in GitHub Actions itself has not been run yet. The next real step is to trigger `Release Manual` again and confirm the new `Assemble npm Packages` job passes.
+
+# gpt-5.4_2026-03-12_0006_05
+
+Extended [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) and added semi-automatic version bumping.
+
+What changed:
+- `Release Manual` now has a follow-up Ubuntu job that:
+  - downloads the per-platform bundle artifacts
+  - assembles npm packages from them
+  - runs the Linux npm pack/install smoke
+  - uploads the generated npm package assembly artifact
+- added [bump-version.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/bump-version.ts) and task `deno task bump:version`
+- added [smoke-npm-install.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/smoke-npm-install.ts) for repeatable local npm smoke
+- hardened [assemble-npm-packages.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) so downloaded workflow artifacts still work even though `bundle-metadata.json` contains original absolute paths
+- updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md), [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md), and [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md)
+
+Version bumping now looks like:
+```bash
+deno task bump:version -- --patch
+deno task bump:version -- --minor
+deno task bump:version -- --major
+deno task bump:version -- --version 0.2.5
+deno task bump:version -- --patch --dry-run
+```
+
+That updates:
+- `apps/cli/deno.json`
+- `apps/daemon/deno.json`
+- `apps/web/deno.json`
+
+and creates `dev-docs/notes/release-notes.v<version>.md` if missing.
+
+Validated:
+- `deno task fmt:check`
+- `deno lint scripts/bump-version.ts scripts/assemble-npm-packages.ts scripts/smoke-npm-install.ts tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno check scripts/bump-version.ts scripts/assemble-npm-packages.ts scripts/smoke-npm-install.ts tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/bump-version_test.ts tests/npm-package-assembly_test.ts`
+- `deno run --frozen -A scripts/bump-version.ts --patch --dry-run`
+- local npm smoke passed end to end with `kato init`, `kato web init/start/status/stop`
+
+What’s still not proven:
+- the new npm assembly job in GitHub Actions itself has not been run yet. The next real step is to trigger `Release Manual` again and confirm the new `Assemble npm Packages` job passes.
+
+# djradon_2026-03-12_0006_44
+
+commit message please.
+
+We're just working on main for now. I'm fine with that, but feel free to bump me into a branch.
+
+# gpt-5.4_2026-03-12_0006_48
+
+`build: extend release flow with npm packaging and version bump tooling`
+
+- add npm package assembly and smoke-install support to the release pipeline
+- add `bump:version` helper to update app versions and create release-note stubs
+- harden npm package assembly for downloaded workflow artifacts
+- add tests for version bumping and npm package assembly path resolution
+- update binary/npm task notes and release runbook for npm-wrapper-first releases
+
+# gpt-5.4_2026-03-12_0006_49
+
+`build: extend release flow with npm packaging and version bump tooling`
+
+- add npm package assembly and smoke-install support to the release pipeline
+- add `bump:version` helper to update app versions and create release-note stubs
+- harden npm package assembly for downloaded workflow artifacts
+- add tests for version bumping and npm package assembly path resolution
+- update binary/npm task notes and release runbook for npm-wrapper-first releases

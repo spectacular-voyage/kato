@@ -69,6 +69,22 @@ Recommended responsibilities:
 This model keeps install/uninstall inside npm's normal ownership model while
 keeping Kato itself native.
 
+Current local implementation status:
+
+- `scripts/assemble-npm-packages.ts` generates:
+  - wrapper package `kato`
+  - platform packages such as `@spectacular-voyage/kato-linux-x64-gnu`
+- `scripts/smoke-npm-install.ts` performs a local smoke of:
+  - `npm pack`
+  - temp-project install
+  - `kato --version`
+  - isolated `kato init`
+  - isolated `kato web init`
+  - isolated `kato web start`
+  - HTTP probe of `/login`
+  - `kato web status`
+  - `kato web stop`
+
 ### Why not source install or postinstall download
 
 The npm channel should not:
@@ -217,6 +233,20 @@ Why this order matters:
 
 - Add unit tests for the wrapper's platform-package resolution and
   unsupported-platform error path.
+- Current local assembly test result:
+  - `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts`
+- Current local npm smoke result:
+  - `deno run --frozen -A scripts/smoke-npm-install.ts --input-dir .test-tmp/npm-packages/package-smoke --npm-bin <npm-path>`
+  - passed for:
+    - wrapper package `kato`
+    - platform package `@spectacular-voyage/kato-linux-x64-gnu`
+    - `kato --version`
+    - `kato init`
+    - `kato web init`
+    - `kato web start`
+    - `/login`
+    - `kato web status`
+    - `kato web stop`
 - Add local smoke coverage using `npm pack` for:
   - wrapper package
   - one platform package
@@ -255,9 +285,9 @@ Why this order matters:
       needed `libc` metadata.
 - [x] Make each platform package include `kato`, `kato-daemon`, `kato-web`, and
       release metadata.
-- [ ] Add local `npm pack` and temp-install smoke checks for at least one
+- [x] Add local `npm pack` and temp-install smoke checks for at least one
       supported platform package plus the wrapper package.
-- [ ] Extend the release workflow so npm package assembly happens after native
+- [x] Extend the release workflow so npm package assembly happens after native
       bundle packaging.
 - [ ] Add npm publish automation only after local package assembly and install
       smoke checks are stable.

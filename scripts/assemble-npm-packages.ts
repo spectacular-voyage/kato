@@ -62,6 +62,8 @@ interface BundleInput {
   inputDir: string;
   bundleMetadata: BundleMetadata;
   buildMetadata: BuildMetadata;
+  localBuildMetadataPath: string;
+  localBundleDir: string;
 }
 
 interface PlatformPackageDefinition {
@@ -142,8 +144,17 @@ function requireUnifiedReleaseVersion(inputs: BundleInput[]): string {
 async function readBundleInput(inputDir: string): Promise<BundleInput> {
   const bundleMetadataPath = join(inputDir, "bundle-metadata.json");
   const bundleMetadata = await readJsonFile<BundleMetadata>(bundleMetadataPath);
-  const buildMetadata = await readJsonFile<BuildMetadata>(
+  const localBundleDir = await resolveDownloadedPath(
+    inputDir,
+    bundleMetadata.bundleDir,
+  );
+  const localBuildMetadataPath = await resolveDownloadedPath(
+    inputDir,
     bundleMetadata.buildMetadataPath,
+    join(localBundleDir, "build-metadata.json"),
+  );
+  const buildMetadata = await readJsonFile<BuildMetadata>(
+    localBuildMetadataPath,
   );
   const appVersion = requireUnifiedAppVersion(buildMetadata);
   if (bundleMetadata.version !== appVersion) {
@@ -154,7 +165,7 @@ async function readBundleInput(inputDir: string): Promise<BundleInput> {
 
   for (const baseName of REQUIRED_BINARY_BASENAMES) {
     const binaryPath = join(
-      bundleMetadata.bundleDir,
+      localBundleDir,
       binaryFileName(baseName, buildMetadata.target),
     );
     const stat = await Deno.stat(binaryPath).catch((error) => {
@@ -168,7 +179,13 @@ async function readBundleInput(inputDir: string): Promise<BundleInput> {
     }
   }
 
-  return { inputDir, bundleMetadata, buildMetadata };
+  return {
+    inputDir,
+    bundleMetadata,
+    buildMetadata,
+    localBuildMetadataPath,
+    localBundleDir,
+  };
 }
 
 async function ensureCleanDir(path: string): Promise<void> {
@@ -189,6 +206,31 @@ async function copyFileWithMode(src: string, dest: string): Promise<void> {
       // chmod is best-effort and may be unsupported on some platforms.
     });
   }
+}
+
+async function resolveDownloadedPath(
+  inputDir: string,
+  preferredPath: string,
+  fallbackPath?: string,
+): Promise<string> {
+  const candidates = [
+    preferredPath,
+    join(inputDir, preferredPath.split(/[\\/]/).at(-1) ?? preferredPath),
+    ...(fallbackPath ? [fallbackPath] : []),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await Deno.stat(candidate);
+      return candidate;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(
+    `Could not resolve downloaded artifact path for ${preferredPath} under ${inputDir}`,
+  );
 }
 
 function resolvePlatformPackageDefinition(
@@ -539,7 +581,7 @@ export async function assembleNpmPackages(
       makePlatformPackageJson(definition.packageName, version, definition),
     );
     await copyFileWithMode(
-      input.bundleMetadata.buildMetadataPath,
+      input.localBuildMetadataPath,
       join(packageDir, "build-metadata.json"),
     );
     await copyFileWithMode(
@@ -550,7 +592,7 @@ export async function assembleNpmPackages(
     for (const baseName of REQUIRED_BINARY_BASENAMES) {
       const fileName = binaryFileName(baseName, definition.target);
       await copyFileWithMode(
-        join(input.bundleMetadata.bundleDir, fileName),
+        join(input.localBundleDir, fileName),
         join(packageDir, "bin", fileName),
       );
     }
