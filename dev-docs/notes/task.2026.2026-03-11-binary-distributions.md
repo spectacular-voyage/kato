@@ -268,7 +268,7 @@ runner matrix:
 - Permission Broker in Phase 1.
 - Dynamic Deno-enforced `AllowedRoot` updates in Phase 1.
 - `systemd --user`, `launchd`, or Windows startup/service integration in Phase 1.
-- npm/JSR executable distribution in Phase 1.
+- JSR executable distribution in Phase 1.
 - A temporary Deno-required installer channel.
 - Replacing the Fresh/Vite developer workflow.
 
@@ -298,7 +298,12 @@ runner matrix:
 - [x] Add bundle assembly steps so each platform artifact includes the required
       sibling executables and metadata.
 - [ ] Add signing/notarization steps required for documented default installs.
-- [ ] Add packaged-bundle smoke checks for daemon lifecycle and web lifecycle.
+- [x] Add lightweight packaged-bundle smoke checks for:
+      `kato --version`, bundled `kato-web`, and HTTP probe of `/login`.
+- [ ] Expand packaged-bundle smoke checks to full daemon lifecycle and web
+      lifecycle coverage.
+- [ ] Align the binary docs and release runbook with npm wrapper install as the
+      intended primary user-facing channel.
 - [x] Update [[dev.release-runbook]] once the implementation shape is proven by
       a real binary build and smoke pass.
 
@@ -325,11 +330,10 @@ Current implementation note:
 
 ## Coderabbit Review
 
-- [ ] Fix binary-packaging quality-gate drift and rerun the full scripted quality
-      path for this slice:
-      - remove the current `scripts/package-binaries.ts` lint failure
-      - run `deno task lint`
-      - run the matching binary-build/package checks again after cleanup
+- [x] Remove the current `scripts/package-binaries.ts` lint failure and rerun
+      focused validation for the binary-packaging slice.
+- [ ] Run the full repo `deno task lint` pass after the current cross-turn
+      changes settle, not just the focused binary/web lint slice.
 - [ ] Add automated tests for `scripts/package-binaries.ts` covering:
       - version-mismatch rejection from `build-metadata.json`
       - expected bundled file set
@@ -344,6 +348,7 @@ Current implementation note:
 - [ ] Exercise `.github/workflows/release-manual.yml` on real native GitHub
       runners and capture any Windows/macOS-specific failures before treating
       the workflow as release-ready.
-- [ ] Decide whether the first documented user-facing install should be direct
-      archive download or npm wrapper install, then align the binary docs and
-      release runbook with that channel priority.
+- [x] Decide that the first documented user-facing install target should be npm
+      wrapper install rather than direct archive download.
+- [ ] Align the binary docs and release runbook with npm wrapper install as the
+      intended primary user-facing channel.

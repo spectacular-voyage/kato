@@ -1887,3 +1887,118 @@ commit message please.
 - enforce `--frozen` in binary build task and root launcher task
 - fix `package-binaries.ts` lint drift
 - fill in `v0.2.4` release notes stub
+
+# djradon_2026-03-11_2312_44
+
+Can you update the task checkbox, specifically under coderabbit review
+
+# gpt-5.4_2026-03-11_2312_50
+
+I’m updating the `## Coderabbit Review` checklist to reflect what is actually fixed now, and I’ll leave the items that still need real workflow execution or policy decisions unchecked.
+
+# gpt-5.4_2026-03-11_2312_59
+
+I’m tightening the checklist rather than just flipping boxes blindly. One item is only partially done, and your npm preference means the “which channel is primary” decision can now be recorded separately from the doc-alignment work.
+
+# gpt-5.4_2026-03-11_2313_07
+
+Updated [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) under `## Coderabbit Review`.
+
+I split the first item so it accurately reflects reality:
+- the focused lint failure and validation are marked done
+- the full-repo `deno task lint` remains open
+
+I also recorded your install-channel preference:
+- npm wrapper install is now marked as the chosen primary user-facing target
+- the follow-up doc/runbook alignment remains open
+
+# djradon_2026-03-11_2313_15
+
+implementation plan checkbox probably need updating too.
+
+# gpt-5.4_2026-03-11_2313_23
+
+I’m checking the implementation plan against what’s actually done now. I’ll update only the boxes that are genuinely stale rather than reshuffling the whole note.
+
+# gpt-5.4_2026-03-11_2313_46
+
+The main stale part is that the plan still treats packaged-bundle smoke as entirely undone, when we actually have a lighter version in place. I’m updating that, and I’m also removing the now-wrong “npm is a non-goal” contradiction while I’m in the note.
+
+# gpt-5.4_2026-03-11_2313_52
+
+Updated the implementation plan in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) to match reality.
+
+Changes:
+- split packaged-bundle smoke into:
+  - done: lightweight `kato --version` + bundled `kato-web` + `/login`
+  - still open: full daemon/web lifecycle coverage
+- added an open plan item to align binary docs/runbook with npm wrapper install as the primary user-facing channel
+- removed the stale non-goal that said npm distribution was out of scope for Phase 1
+
+That note is now more consistent with both the current implementation and your install-channel preference.
+
+# gpt-5.4_2026-03-11_2313_54
+
+Updated the implementation plan in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md) to match reality.
+
+Changes:
+- split packaged-bundle smoke into:
+  - done: lightweight `kato --version` + bundled `kato-web` + `/login`
+  - still open: full daemon/web lifecycle coverage
+- added an open plan item to align binary docs/runbook with npm wrapper install as the primary user-facing channel
+- removed the stale non-goal that said npm distribution was out of scope for Phase 1
+
+That note is now more consistent with both the current implementation and your install-channel preference.
+
+# djradon_2026-03-11_2317_24
+
+Hmmm, https://github.com/spectacular-voyage/kato/blob/main/.github/workflows/release-manual.yml is there, but https://github.com/spectacular-voyage/kato/actions/workflows/release-manual.yml says "This workflow does not exist." Maybe a syntax error?
+
+# gpt-5.4_2026-03-11_2317_32
+
+I’m checking the live GitHub URLs directly. If the file is on `main` but the workflow page still says it doesn’t exist, the likely causes are a workflow parse error, GitHub not recognizing it as a valid workflow, or a mismatch between the repo’s default branch state and the URL you’re hitting.
+
+# gpt-5.4_2026-03-11_2317_54
+
+I can reproduce the GitHub-side symptom: the file is visible on `main`, but the Actions workflow page still says `This workflow does not exist.` The next check is whether GitHub is rejecting it as a workflow definition, not whether the YAML is parseable as plain YAML.
+
+# gpt-5.4_2026-03-11_2318_03
+
+GitHub’s own workflow index is the key test here. I’m querying the public Actions API now; if `release-manual.yml` isn’t in that list, GitHub is not accepting it as a workflow definition yet.
+
+# gpt-5.4_2026-03-11_2318_15
+
+GitHub’s public Actions API confirms the problem: `release-manual.yml` is on `main`, but GitHub has not indexed it as a workflow at all. That means it’s not a visibility glitch; GitHub is rejecting it as a workflow definition somewhere after plain YAML parsing.
+
+# gpt-5.4_2026-03-11_2319_29
+
+Probably not a plain YAML syntax error.
+
+I checked three things:
+
+- the file is really on `main`: [release-manual.yml](https://github.com/spectacular-voyage/kato/blob/main/.github/workflows/release-manual.yml)
+- plain YAML parsing is fine
+- GitHub’s Actions API still does **not** list it among the repo workflows: [Actions workflows API](https://api.github.com/repos/spectacular-voyage/kato/actions/workflows)
+
+That means GitHub has not registered it as a workflow yet. There are two realistic causes:
+
+1. GitHub-specific workflow validation error
+2. the old `workflow_dispatch` registration quirk, where a manual-only workflow is not registered until it also has a non-manual trigger at least once
+
+That second behavior is documented anecdotally in GitHub’s community forum: [discussion #8140](https://github.com/orgs/community/discussions/8140). In that thread, adding a temporary `push:` trigger is the workaround.
+
+The fastest thing to try is:
+
+```yaml
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/release-manual.yml
+```
+
+Merge that, let it register once, then check whether:
+`https://github.com/spectacular-voyage/kato/actions/workflows/release-manual.yml`
+starts working. If it does, you can decide whether to keep `push:` or remove it after registration.
+
+So my read is: not obviously a syntax problem, more likely “GitHub hasn’t registered this dispatch-only workflow yet.” If you want, I can patch in that temporary `push.paths` trigger now.
