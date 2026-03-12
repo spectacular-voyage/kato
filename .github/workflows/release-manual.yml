@@ -1,0 +1,141 @@
+name: Release Manual
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-binaries:
+    name: Build Binaries (${{ matrix.label }})
+    runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64
+            runs_on: ubuntu-latest
+            expected_os: linux
+            expected_arch: x86_64
+          - label: windows-x64
+            runs_on: windows-latest
+            expected_os: windows
+            expected_arch: x86_64
+          - label: macos-x64
+            runs_on: macos-13
+            expected_os: darwin
+            expected_arch: x86_64
+          - label: macos-arm64
+            runs_on: macos-latest
+            expected_os: darwin
+            expected_arch: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Verify Native Runner Architecture
+        env:
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          EXPECTED_ARCH: ${{ matrix.expected_arch }}
+        run: |
+          deno eval '
+            const expectedOs = Deno.env.get("EXPECTED_OS");
+            const expectedArch = Deno.env.get("EXPECTED_ARCH");
+            if (Deno.build.os !== expectedOs || Deno.build.arch !== expectedArch) {
+              console.error(
+                `Expected ${expectedOs}/${expectedArch}, got ${Deno.build.os}/${Deno.build.arch}`,
+              );
+              Deno.exit(1);
+            }
+            console.log(`Runner verified: ${Deno.build.os}/${Deno.build.arch}`);
+          '
+
+      - name: Build Binaries
+        run: deno task build:binaries -- --output-dir .test-tmp/binaries/${{ matrix.label }}
+
+      - name: Smoke Test (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin_dir=".test-tmp/binaries/${{ matrix.label }}"
+          "$bin_dir/kato" --version
+
+          port=45177
+          log_path="$bin_dir/kato-web.log"
+          "$bin_dir/kato-web" --host 127.0.0.1 --port "$port" >"$log_path" 2>&1 &
+          web_pid=$!
+
+          cleanup() {
+            kill "$web_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:${port}/login" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat "$log_path"
+          exit 1
+
+      - name: Smoke Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binDir = ".test-tmp/binaries/${{ matrix.label }}"
+          & "$binDir/kato.exe" --version
+
+          $port = 45177
+          $stdoutLog = Join-Path $binDir "kato-web.stdout.log"
+          $stderrLog = Join-Path $binDir "kato-web.stderr.log"
+          $proc = Start-Process `
+            -FilePath "$binDir/kato-web.exe" `
+            -ArgumentList @("--host", "127.0.0.1", "--port", "$port") `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog `
+            -PassThru
+
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                $resp = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/login"
+                if ($resp.StatusCode -eq 200) {
+                  $ok = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+
+            if (-not $ok) {
+              if (Test-Path $stdoutLog) { Get-Content $stdoutLog }
+              if (Test-Path $stderrLog) { Get-Content $stderrLog }
+              throw "kato-web did not respond on /login"
+            }
+          } finally {
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+            }
+          }
+
+      - name: Upload Binary Artifact Bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: kato-${{ matrix.label }}
+          path: |
+            .test-tmp/binaries/${{ matrix.label }}/kato*
+            .test-tmp/binaries/${{ matrix.label }}/kato-daemon*
+            .test-tmp/binaries/${{ matrix.label }}/kato-web*
+            .test-tmp/binaries/${{ matrix.label }}/build-metadata.json
+          if-no-files-found: error
+          compression-level: 0

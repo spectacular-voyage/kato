@@ -119,6 +119,31 @@ dead end:
   `new URL("../../../daemon/src/main.ts", import.meta.url)`, which Vite treated
   as a client asset reference and copied into `_fresh/client`
 
+### Repeatable local build task
+
+The proof-of-concept compile flow is now scripted in `scripts/build-binaries.ts`
+and exposed as:
+
+- `deno task build:binaries`
+
+Current behavior:
+
+- default output goes to `.test-tmp/binaries/<host-os>-<host-arch>`
+- `build-metadata.json` is written alongside the binaries
+- frozen `apps/web` install/build is run before `kato-web` compile unless
+  explicitly skipped
+- ad hoc local smoke rebuilds can skip repeated web setup, for example:
+  `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+
+Current bootstrap permission profile in the scripted build:
+
+- `kato`: `--allow-read --allow-write --allow-env --allow-net --allow-run`
+- `kato-daemon`: `--allow-read --allow-write --allow-env`
+- `kato-web`: `--allow-read --allow-write --allow-env --allow-net`
+
+This is good enough for repeatable local builds, but launcher `--allow-run`
+scoping is still an open hardening item.
+
 ## Open Issues
 
 - `apps/web` now compiles into a standalone `kato-web` binary on Linux. The
@@ -126,6 +151,9 @@ dead end:
   Windows and macOS.
 - What is the narrowest practical `--allow-run` policy for the launcher when
   sibling executables live in an installed bundle with platform-specific paths?
+- The current scripted build metadata shows `cli` / `daemon` at `0.2.4` while
+  `apps/web/deno.json` is still `0.2.3`; release version alignment still needs
+  to be enforced before packaging.
 - Should `kato-web` be a documented user-visible executable, or a private
   sibling binary launched only through `kato web ...`?
 - How should release bundles lay out executables and auxiliary files so CLI
@@ -183,6 +211,10 @@ dead end:
   - `deno task --cwd apps/web build`
   - from `apps/web`: `deno compile --include _fresh -A src/compiled_main.ts`
   - HTTP probe of compiled `kato-web` at `/login`
+- Current scripted host build result:
+  - `deno task build:binaries -- --output-dir .test-tmp/binaries/host-smoke --skip-web-install --skip-web-build`
+  - `./.test-tmp/binaries/host-smoke/kato --version`
+  - `build-metadata.json` emitted beside the binaries
 - Add packaged-runtime smoke checks for:
   - `kato --version`
   - `kato start`
@@ -223,6 +255,7 @@ dead end:
 - [x] Build a minimal `deno compile` proof of concept for `kato`.
 - [x] Build a minimal `deno compile` proof of concept for `kato-daemon`.
 - [x] Build a minimal `deno compile` proof of concept for `kato-web`.
+- [x] Add a repeatable local binary build task and metadata manifest.
 - [ ] Verify whether `kato-web` can include the required production assets and
       start cleanly on all target platforms.
 - [ ] If `kato-web` compile is blocked, document the exact blocker and add the
@@ -230,7 +263,7 @@ dead end:
 - [ ] Define Phase 1 compile permissions for each executable, with launcher-only
       spawning power where possible.
 - [x] Add focused tests for installed binary discovery and lifecycle behavior.
-- [ ] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
+- [x] Add native-runner GitHub Actions workflow(s) that compile all Phase 1
       executables for the initial platform matrix.
 - [ ] Add bundle assembly steps so each platform artifact includes the required
       sibling executables and metadata.
@@ -238,3 +271,18 @@ dead end:
 - [ ] Add packaged-bundle smoke checks for daemon lifecycle and web lifecycle.
 - [ ] Update [[dev.release-runbook]] once the implementation shape is proven by
       a real binary build and smoke pass.
+
+Current implementation note:
+
+- `.github/workflows/release-manual.yml` now builds and uploads manual
+  per-platform binary artifacts on the native runner matrix for:
+  - Windows x64
+  - macOS arm64
+  - macOS x64
+  - Linux x64
+- it also runs a lightweight smoke slice on each runner:
+  - `kato --version`
+  - `kato-web --host 127.0.0.1 --port 45177`
+  - HTTP probe of `/login`
+- the workflow file is implemented and YAML-validated locally, but it has not
+  yet been exercised in GitHub in this task
