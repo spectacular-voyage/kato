@@ -14,8 +14,8 @@ the user machine, and preserves the current `kato` CLI surface.
 
 ## Summary
 
-- npm should be a convenience install/update channel, not a separate runtime
-  architecture.
+- npm should be the primary user-facing install/update channel, not a separate
+  runtime architecture.
 - The npm channel should reuse the native binaries already produced by the
   binary-distribution pipeline in
   [[task.2026.2026-03-11-binary-distributions]].
@@ -31,7 +31,7 @@ the user machine, and preserves the current `kato` CLI surface.
 ## Discussion
 
 Lots of likely Kato users already have Node/npm but not Deno. That makes npm a
-good secondary distribution channel once the native binary story exists.
+strong primary install channel once the native binary story exists.
 
 The important constraint is to keep npm from becoming a second build system.
 The correct relationship is:
@@ -47,8 +47,7 @@ The correct relationship is:
 Recommended package set:
 
 - top-level package:
-  - preferred name: `kato`, if available
-  - fallback: scoped package such as `@spectacular-voyage/kato`
+  - final public name: `kato`
 - platform packages, for example:
   - `@spectacular-voyage/kato-win32-x64`
   - `@spectacular-voyage/kato-darwin-x64`
@@ -169,8 +168,6 @@ Why this order matters:
 
 ## Open Issues
 
-- Is the unscoped `kato` package name available, or do we need a scoped public
-  package name?
 - Should the platform packages be published as fully public implementation
   details, or documented only indirectly through the top-level install command?
 - Do we want npm global install as the primary documented npm path, or also
@@ -184,12 +181,14 @@ Why this order matters:
 
 ## Decisions
 
-- npm is a secondary convenience channel, not the primary distribution channel.
+- npm is the intended primary user-facing distribution channel.
 - npm packaging should reuse the native binary outputs; it should not compile
   or download runtime artifacts during install.
 - The preferred npm architecture is:
   - one top-level wrapper package
   - one platform package per supported target
+- The public wrapper package name is `kato`.
+- The default platform package prefix is `@spectacular-voyage/kato`.
 - Platform packages should include `kato`, `kato-daemon`, and `kato-web`.
 - The public npm entrypoint remains `kato`; `kato-daemon` and `kato-web` remain
   implementation details of the installed bundle.
@@ -244,15 +243,17 @@ Why this order matters:
 
 ## Implementation Plan
 
-- [ ] Confirm the publish names for the top-level package and all platform
-      packages.
-- [ ] Add a script that assembles npm package directories from the existing
+- [x] Confirm the publish names for the top-level package and all platform
+      packages:
+      `kato` plus scoped platform packages under
+      `@spectacular-voyage/kato-*`.
+- [x] Add a script that assembles npm package directories from the existing
       packaged binary outputs.
-- [ ] Add the top-level wrapper package with:
+- [x] Add the generated top-level wrapper package with:
       `package.json`, `bin`, `optionalDependencies`, and Node launcher script.
-- [ ] Add platform package templates with `os`, `cpu`, and where needed `libc`
-      metadata.
-- [ ] Make each platform package include `kato`, `kato-daemon`, `kato-web`, and
+- [x] Add generated platform package templates with `os`, `cpu`, and where
+      needed `libc` metadata.
+- [x] Make each platform package include `kato`, `kato-daemon`, `kato-web`, and
       release metadata.
 - [ ] Add local `npm pack` and temp-install smoke checks for at least one
       supported platform package plus the wrapper package.

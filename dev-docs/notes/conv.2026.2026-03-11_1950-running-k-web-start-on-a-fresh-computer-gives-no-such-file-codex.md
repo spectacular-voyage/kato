@@ -2002,3 +2002,191 @@ Merge that, let it register once, then check whether:
 starts working. If it does, you can decide whether to keep `push:` or remove it after registration.
 
 So my read is: not obviously a syntax problem, more likely “GitHub hasn’t registered this dispatch-only workflow yet.” If you want, I can patch in that temporary `push.paths` trigger now.
+
+# djradon_2026-03-11_2327_51
+
+Action works, and all builds completed. One warning:
+
+ Build Binaries (macos-arm64)
+Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: denoland/setup-deno@v2. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+
+Action works, and all builds completed. One warning:
+
+ Build Binaries (macos-arm64)
+Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: denoland/setup-deno@v2. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+
+# gpt-5.4_2026-03-11_2327_55
+
+I’m checking the current `setup-deno` action status so I can tell you whether this is just a warning to note or whether we should actually change the workflow now.
+
+# gpt-5.4_2026-03-11_2328_31
+
+I checked it. The warning is real, but it’s upstream, not a Kato workflow bug.
+
+Current status:
+- `denoland/setup-deno@v2` is still the documented/latest major in the repo README: https://github.com/denoland/setup-deno
+- the latest visible release is `v2.0.3` from May 15, 2025: https://github.com/denoland/setup-deno/releases
+- the action metadata on `main` still declares `runs.using: "node20"`: https://raw.githubusercontent.com/denoland/setup-deno/main/action.yml
+
+So there does not appear to be a Node 24-ready `setup-deno` release yet.
+
+My recommendation:
+- Do nothing immediately. The workflow succeeded, and this is only a deprecation warning right now.
+- Add a short follow-up todo to either:
+  - update `denoland/setup-deno` when they ship a Node 24-compatible release, or
+  - replace it with explicit Deno install steps if they don’t.
+
+I would not force Node 24 yet unless you want an early failure test, because the action itself still advertises Node 20. If you want, I can add a note to the binary task or runbook so this doesn’t get lost before the June 2, 2026 cutoff.
+
+# djradon_2026-03-11_2330_17
+
+OK, so... congrats us! Next steps? Also, do we use GitHub Packages? It has npm support I see.
+
+# gpt-5.4_2026-03-11_2330_27
+
+I’m checking two things before I answer: whether this repo already uses GitHub Packages anywhere, and what the current GitHub Packages npm behavior implies for a public Kato install channel. Then I’ll give you a concrete next-step sequence.
+
+# gpt-5.4_2026-03-11_2331_01
+
+The binary pipeline is real now. I’d shift focus to npm as the primary user-facing channel.
+
+Next steps I’d take:
+- Build the npm wrapper/package assembly path on top of the finished binary bundles.
+- Add local `npm pack` smoke tests: install the wrapper + one platform package in a temp dir, then run `kato --version` and `kato web start`.
+- Expand workflow smoke from `/login` only to real lifecycle coverage: `kato start/status/stop` and `kato web init/start/status/stop`.
+- Update docs/runbook so the primary install story is npm, with archive download as the fallback/manual path.
+- Keep web-password/init interactive on first run or `kato web init`, not in `npm postinstall`.
+
+On GitHub Packages: I would not use it as the primary public npm channel.
+
+Why:
+- GitHub Packages npm only supports scoped package names, so you’d be looking at something like `@spectacular-voyage/kato`, not plain `kato`: [GitHub npm registry docs](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
+- GitHub’s docs say installs from GitHub Packages require authentication token access, even for public packages, which is bad friction for a public CLI installer: [npm registry docs](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-npm-registry), [package permissions docs](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages), [access/visibility docs](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+
+So my recommendation is:
+- `npmjs.com` as the primary public install channel
+- GitHub Releases for raw bundles
+- GitHub Packages only if you want a private/internal or prerelease distribution lane
+
+If you want, the next concrete implementation slice should be: “assemble wrapper + platform npm packages from the existing bundle output.”
+
+# djradon_2026-03-11_2337_07
+
+yes, proceed
+
+# gpt-5.4_2026-03-11_2337_17
+
+I’m taking the next implementation slice, not just more planning: assemble npm install packages from the existing binary bundle output. I’ll inspect the current note/code surface first, then wire a concrete package builder and smoke it locally if the environment allows.
+
+# gpt-5.4_2026-03-11_2337_30
+
+I have enough context now. I’m going to implement the package-assembly layer as its own script and keep names configurable so we don’t block on the final npm registry name decision. That gives us real output to inspect without hard-coding ourselves into `kato` vs `@spectacular-voyage/kato` yet.
+
+# gpt-5.4_2026-03-11_2338_37
+
+I’m at the package-shape details now. I’m checking the repo license and then I’ll write the generator so the package metadata is accurate instead of guessed.
+
+# gpt-5.4_2026-03-11_2339_21
+
+I’ve settled the shape: generate package directories, not packed tarballs yet, with one wrapper package and one platform package per bundle input. I’m editing now and I’ll keep the package names configurable so this slice stays useful even before the final npm registry name is locked.
+
+# djradon_2026-03-11_2340_52
+
+The final npm name should be "kato". I'm lucky it's available.
+
+# gpt-5.4_2026-03-11_2341_04
+
+I’ll lock the wrapper package name to `kato` now and keep the platform packages scoped by default so the public command is settled without turning every platform artifact into another top-level npm name. I’m also validating the new assembly script at the same time, because there are a couple of likely test nits in that first pass.
+
+# gpt-5.4_2026-03-11_2341_25
+
+The wrapper default is now `kato`, while the platform packages remain scoped. I’m running the new assembly slice end to end against the existing Linux bundle so we can see the actual generated package shape before I touch the notes.
+
+# gpt-5.4_2026-03-11_2341_44
+
+The generator works; the only failure was my ad hoc test command missing `--allow-write=.test-tmp`, not the code. I’m fixing the validation command, then I’ll update the npm task note so it records the now-set public package name `kato` and the implementation boxes we actually completed.
+
+# gpt-5.4_2026-03-11_2341_53
+
+I’ve got a real generated package shape now, so I’m updating the npm task note from “proposal” to “current direction”: wrapper name fixed to `kato`, platform packages still scoped, and the assembly/generator work marked done.
+
+# gpt-5.4_2026-03-11_2342_10
+
+The code slice is stable. I’m doing one last quick pass on the new generator and the note update, then I’ll summarize exactly what landed and what still blocks the first real npm install smoke.
+
+# gpt-5.4_2026-03-11_2342_26
+
+Locked the public wrapper package name to `kato` and implemented the first real npm assembly slice.
+
+New work:
+- [assemble-npm-packages.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) generates:
+  - a wrapper package named `kato`
+  - scoped platform packages like `@spectacular-voyage/kato-linux-x64-gnu`
+  - `package-map.json` and a Node launcher that spawns the packaged native `kato` binary
+  - `npm-packages-metadata.json` for later workflow/publish steps
+- [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) now exposes `deno task assemble:npm-packages`
+- [npm-package-assembly_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/npm-package-assembly_test.ts) covers successful assembly and version-mismatch rejection
+- [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) now reflects that `kato` is the final public package name and marks the assembly/generator steps done
+
+Validated:
+- `deno task fmt:check`
+- `deno lint scripts/assemble-npm-packages.ts tests/npm-package-assembly_test.ts`
+- `deno check scripts/assemble-npm-packages.ts tests/npm-package-assembly_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts`
+- `deno task assemble:npm-packages -- --input-dir .test-tmp/bundles/package-smoke --output-dir .test-tmp/npm-packages/package-smoke`
+
+That produced a real generated wrapper at [wrapper/package.json](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/npm-packages/package-smoke/wrapper/package.json) and a Linux platform package at [platform package.json](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/npm-packages/package-smoke/platforms/linux-x64-gnu/package.json).
+
+The next blocker is not assembly anymore, it’s actual npm smoke:
+- `npm pack`
+- temp install
+- run `kato --version` / `kato web start`
+
+I couldn’t do that here because this machine currently has no `node` or `npm`.
+
+# gpt-5.4_2026-03-11_2342_28
+
+Locked the public wrapper package name to `kato` and implemented the first real npm assembly slice.
+
+New work:
+- [assemble-npm-packages.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/assemble-npm-packages.ts) generates:
+  - a wrapper package named `kato`
+  - scoped platform packages like `@spectacular-voyage/kato-linux-x64-gnu`
+  - `package-map.json` and a Node launcher that spawns the packaged native `kato` binary
+  - `npm-packages-metadata.json` for later workflow/publish steps
+- [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json) now exposes `deno task assemble:npm-packages`
+- [npm-package-assembly_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/npm-package-assembly_test.ts) covers successful assembly and version-mismatch rejection
+- [task.2026.2026-03-11-npmjs-install.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-npmjs-install.md) now reflects that `kato` is the final public package name and marks the assembly/generator steps done
+
+Validated:
+- `deno task fmt:check`
+- `deno lint scripts/assemble-npm-packages.ts tests/npm-package-assembly_test.ts`
+- `deno check scripts/assemble-npm-packages.ts tests/npm-package-assembly_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp tests/npm-package-assembly_test.ts`
+- `deno task assemble:npm-packages -- --input-dir .test-tmp/bundles/package-smoke --output-dir .test-tmp/npm-packages/package-smoke`
+
+That produced a real generated wrapper at [wrapper/package.json](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/npm-packages/package-smoke/wrapper/package.json) and a Linux platform package at [platform package.json](/home/djradon/hub/spectacular-voyage/kato/.test-tmp/npm-packages/package-smoke/platforms/linux-x64-gnu/package.json).
+
+The next blocker is not assembly anymore, it’s actual npm smoke:
+- `npm pack`
+- temp install
+- run `kato --version` / `kato web start`
+
+I couldn’t do that here because this machine currently has no `node` or `npm`.
+
+# djradon_2026-03-11_2344_39
+
+node is now installed.
+
+commit message please.
+
+# gpt-5.4_2026-03-11_2344_45
+
+`build: add npm package assembly for binary releases`
+
+- add `assemble:npm-packages` generator for wrapper and platform packages
+- lock public npm wrapper name to `kato`
+- keep native platform packages scoped under `@spectacular-voyage/kato-*`
+- generate Node launcher, package map, and npm package metadata from bundle outputs
+- add focused tests for npm package assembly and version mismatch rejection
+- update npm install task note to reflect current package shape and completed steps
