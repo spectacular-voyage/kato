@@ -18,6 +18,16 @@ import {
 import { CLI_APP_VERSION } from "../apps/cli/src/version.ts";
 import { toStatusViewModel } from "../apps/web/src/main.ts";
 
+const ANSI_ESCAPE = String.fromCharCode(0x1b);
+const ANSI_OSC_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
+  "g",
+);
+const ANSI_CSI_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
+  "g",
+);
+
 // ─── Parser tests ─────────────────────────────────────────────────────────────
 
 Deno.test("cli parser: status --all parses all=true live=false", () => {
@@ -792,8 +802,8 @@ Deno.test("renderStatusText: memory summary column shares a left edge", () => {
     },
   });
   const stripAnsi = (line: string): string =>
-    line.replace(/\x1B\][^\u0007]*(?:\u0007|\x1B\\)/g, "").replace(
-      /\x1B\[[0-?]*[ -/]*[@-~]/g,
+    line.replace(ANSI_OSC_PATTERN, "").replace(
+      ANSI_CSI_PATTERN,
       "",
     );
   const summaryLines = out.split("\n").filter((line) => {

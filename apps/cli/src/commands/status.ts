@@ -61,9 +61,15 @@ const ANSI_OSC_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
   "g",
 );
+const ANSI_OSC_PREFIX_PATTERN = new RegExp(
+  `^${ANSI_ESCAPE}\\][^\\u0007]*(?:\\u0007|${ANSI_ESCAPE}\\\\)`,
+);
 const ANSI_CSI_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
   "g",
+);
+const ANSI_CSI_PREFIX_PATTERN = new RegExp(
+  `^${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
 );
 
 export interface StatusRecentError {
@@ -151,13 +157,11 @@ function matchAnsiSequence(text: string, index: number): string | undefined {
     return undefined;
   }
   const remainder = text.slice(index);
-  const oscMatch = remainder.match(
-    /^\x1B\][^\u0007]*(?:\u0007|\x1B\\)/,
-  );
+  const oscMatch = remainder.match(ANSI_OSC_PREFIX_PATTERN);
   if (oscMatch) {
     return oscMatch[0];
   }
-  const csiMatch = remainder.match(/^\x1B\[[0-?]*[ -/]*[@-~]/);
+  const csiMatch = remainder.match(ANSI_CSI_PREFIX_PATTERN);
   if (csiMatch) {
     return csiMatch[0];
   }

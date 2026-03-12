@@ -4235,3 +4235,51 @@ If you want, the next small step is to add one smoke like:
 npx @spectacular-voyage/kato@latest --version
 ```
 and then document it in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
+
+# djradon_2026-03-12_0834_11
+
+So I'm going to v0.2.5 - But I didn't bump it before the Release Manual. Do I have have to re-run Release Manual?
+
+# gpt-5.4_2026-03-12_0834_36
+
+Yes. If you want a real `v0.2.5` release, you should rerun `Release Manual`.
+
+Reason:
+- the previous `Release Manual` artifacts were built from the `0.2.4` app versions
+- `build-metadata.json`, `bundle-metadata.json`, npm package metadata, and tarball names are all versioned at build/assembly time
+- bumping the repo to `0.2.5` afterward does not update those already-built artifacts
+
+So the safe path is:
+
+1. bump to `0.2.5`
+2. commit/push that version bump
+3. rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) from the `0.2.5` commit
+4. use the new artifacts for publish
+
+Given that at least one `0.2.4` platform package appears to have already been published, I would treat the old `0.2.4` workflow output as burned for release purposes. Don’t mix:
+- old `0.2.4` artifacts
+- new `0.2.5` version files
+
+If you only cared about a local Linux-only smoke, you could rebuild locally. But for the real multi-platform npm release, yes: rerun `Release Manual`.
+
+# gpt-5.4_2026-03-12_0834_38
+
+Yes. If you want a real `v0.2.5` release, you should rerun `Release Manual`.
+
+Reason:
+- the previous `Release Manual` artifacts were built from the `0.2.4` app versions
+- `build-metadata.json`, `bundle-metadata.json`, npm package metadata, and tarball names are all versioned at build/assembly time
+- bumping the repo to `0.2.5` afterward does not update those already-built artifacts
+
+So the safe path is:
+
+1. bump to `0.2.5`
+2. commit/push that version bump
+3. rerun [`release-manual.yml`](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml) from the `0.2.5` commit
+4. use the new artifacts for publish
+
+Given that at least one `0.2.4` platform package appears to have already been published, I would treat the old `0.2.4` workflow output as burned for release purposes. Don’t mix:
+- old `0.2.4` artifacts
+- new `0.2.5` version files
+
+If you only cared about a local Linux-only smoke, you could rebuild locally. But for the real multi-platform npm release, yes: rerun `Release Manual`.

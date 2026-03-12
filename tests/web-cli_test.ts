@@ -164,9 +164,9 @@ Deno.test("resolveWebInitPassword prefers --password-stdin over env or prompt", 
   const password = await resolveWebInitPassword(
     { passwordFromStdin: true },
     {
-      readPasswordFromStdin: async () => {
+      readPasswordFromStdin: () => {
         calls.push("stdin");
-        return "stdin-pass";
+        return Promise.resolve("stdin-pass");
       },
       readPasswordFromEnv: () => {
         calls.push("env");
@@ -176,9 +176,9 @@ Deno.test("resolveWebInitPassword prefers --password-stdin over env or prompt", 
         calls.push("tty");
         return true;
       },
-      promptForPassword: async () => {
+      promptForPassword: () => {
         calls.push("prompt");
-        return "prompt-pass";
+        return Promise.resolve("prompt-pass");
       },
     },
   );
@@ -200,9 +200,9 @@ Deno.test("resolveWebInitPassword prefers env before interactive prompt", async 
         calls.push("tty");
         return true;
       },
-      promptForPassword: async () => {
+      promptForPassword: () => {
         calls.push("prompt");
-        return "prompt-pass";
+        return Promise.resolve("prompt-pass");
       },
     },
   );
@@ -224,9 +224,9 @@ Deno.test("resolveWebInitPassword falls back to interactive prompt on a TTY", as
         calls.push("tty");
         return true;
       },
-      promptForPassword: async () => {
+      promptForPassword: () => {
         calls.push("prompt");
-        return "prompt-pass";
+        return Promise.resolve("prompt-pass");
       },
     },
   );
@@ -243,7 +243,7 @@ Deno.test("resolveWebInitPassword fails closed without a password source or TTY"
         {
           readPasswordFromEnv: () => undefined,
           isInteractiveTerminal: () => false,
-          promptForPassword: async () => "prompt-pass",
+          promptForPassword: () => Promise.resolve("prompt-pass"),
         },
       ),
     Error,
