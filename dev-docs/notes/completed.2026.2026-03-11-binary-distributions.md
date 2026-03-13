@@ -1,7 +1,7 @@
 ---
 id: lwoblwa43m6z5ign6ukghbs
 title: 2026 03 11 Binary Distributions
-desc: ""
+desc: ''
 updated: 1773295520734
 created: 1773290214027
 ---
@@ -16,7 +16,7 @@ does not require Deno, Vite, or Node on the target machine.
 ## Summary
 
 - This note narrows the much broader distribution discussion in
-  [[task.2026.2026-03-05-distribution-solutions]] into one implementation track.
+  [[completed.2026.2026-03-05-distribution-solutions]] into one implementation track.
 - Phase 1 should jump directly to native binaries rather than building an
   intermediate Deno-required installer channel.
 - The native binary pipeline should now be treated as the build substrate for
@@ -316,6 +316,9 @@ runner matrix:
 
 Current implementation note:
 
+- this note is complete for the Phase 1 binary-distribution implementation
+  slice; the remaining unchecked items below are explicit follow-up hardening
+  work, not blockers to closing this note
 - `.github/workflows/release-manual.yml` now builds, packages, smoke-tests, and
   uploads manual per-platform bundle artifacts on the native runner matrix for:
   - Windows x64
@@ -337,6 +340,8 @@ Current implementation note:
   - runs `deno task smoke:npm-install` on each native runner
   - keeps the smoke assertions aligned through the shared smoke script instead
     of per-OS workflow forks
+- `scripts/assemble-npm-packages.ts` writes generated `README.md` files for the
+  wrapper package and each per-platform binary package
 - the default npm wrapper target is now `@spectacular-voyage/kato`
 - it also runs a lightweight packaged-bundle smoke slice on each runner:
   - `kato --version`
@@ -421,7 +426,7 @@ Planned follow-up:
 
 - [x] Remove the current `scripts/package-binaries.ts` lint failure and rerun
       focused validation for the binary-packaging slice.
-- [ ] Run the full repo `deno task lint` pass after the current cross-turn
+- [x] Run the full repo `deno task lint` pass after the current cross-turn
       changes settle, not just the focused binary/web lint slice.
 - [ ] Add automated tests for `scripts/package-binaries.ts` covering:
       - version-mismatch rejection from `build-metadata.json`

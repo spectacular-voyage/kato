@@ -18,7 +18,7 @@ the user machine, and preserves the current `kato` CLI surface.
   runtime architecture.
 - The npm channel should reuse the native binaries already produced by the
   binary-distribution pipeline in
-  [[task.2026.2026-03-11-binary-distributions]].
+  [[completed.2026.2026-03-11-binary-distributions]].
 - Recommended package shape:
   - one thin top-level wrapper package
   - one platform package per supported OS/arch target

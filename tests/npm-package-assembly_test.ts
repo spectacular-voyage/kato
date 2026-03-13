@@ -166,6 +166,24 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   );
   assert(wrapperLauncher.includes("package-map.json"));
 
+  const wrapperReadme = await Deno.readTextFile(
+    join(outputDir, "wrapper", "README.md"),
+  );
+  assert(wrapperReadme.includes("# @spectacular-voyage/kato"));
+  assert(
+    wrapperReadme.includes(
+      "platform-native Kato binary package selected by npm optional dependencies.",
+    ),
+  );
+
+  const platformReadme = await Deno.readTextFile(
+    join(outputDir, "platforms", "linux-x64-gnu", "README.md"),
+  );
+  assert(
+    platformReadme.includes("# @spectacular-voyage/kato-linux-x64-gnu"),
+  );
+  assert(platformReadme.includes("Generated native binary package for Kato"));
+
   for (const fileName of ["kato", "kato-daemon", "kato-web"]) {
     const stat = await Deno.stat(
       join(outputDir, "platforms", "linux-x64-gnu", "bin", fileName),

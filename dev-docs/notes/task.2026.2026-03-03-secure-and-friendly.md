@@ -8,9 +8,11 @@ created: 1772561704531
 
 ## Goal
 
-Maintain "secure and private" by default, but support "--easy" flag for "kato init" that uses djradon's preferred configuration
+Maintain "secure and private" by default, but support "--guided-secure" and "--guided-relaxed" flag for "kato init" 
 
 ## Discussion
 
-- Point out we try "secure and private" by default
-- maybe add a "kato init" switch for "recommended" configuration
+- --dry-run switch for "kato init" that shows what would be written
+- Point out we try "secure and private" by default in the "usage" text
+- right now the web 
+- Things we want to prompt for:

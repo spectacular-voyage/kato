@@ -2,17 +2,19 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1773349004708
+updated: 1773375733364
 created: 1771812869620
 ---
 
-## v0.2.0 Curation Status (2026-03-03)
+## Backlog Status (2026-03-12)
 
-This backlog is curated for source-only `v0.2.0` with low code churn.
+This backlog is now post-`v0.2.x` curation rather than the earlier
+source-only `v0.2.0` list.
 
 - Completed stale items are explicitly closed.
-- Medium/high-churn items are explicitly deferred with rationale.
-- Follow-up hardening remains in place for post-`v0.2.0`.
+- Active near-term binary distribution hardening is tracked here.
+- Longer-range distribution ideas live in
+  [[dev.feature-ideas.distribution-phase-2]].
 
 ## Event Schema Follow-ups (v2)
 
@@ -67,20 +69,28 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
 - [ ] Add sensitive-field redaction tests for log sinks.
 - [ ] Add audit-completeness tests for critical allow/deny decisions.
 
+## Binary Distribution Follow-Ups
+
+- [ ] Finalize least-privilege compile permissions for `kato`, `kato-daemon`,
+      and `kato-web`, with launcher-only spawning power where possible.
+- [ ] Expand packaged-bundle smoke checks to full daemon lifecycle and full web
+      lifecycle coverage.
+- [ ] Add downloadable-archive smoke checks that extract the real `.tar.gz` or
+      `.zip` and rerun the core binary/web assertions.
+- [ ] Add automated tests for `scripts/package-binaries.ts` covering bundle
+      contents, emitted metadata, and archive/checksum output.
+- [ ] Add permission regression checks proving compiled binaries still honor
+      app-level path policy outside configured roots.
+- [ ] Add signing/notarization steps required before direct binary installs are
+      documented as the default path.
+
 ## Testing And Packaging
 
-- [ ] Add production packaging guidance/scripts for `deno compile` with
-      least-privilege permissions. Deferred for post-`v0.2.0`: first release is
-      intentionally source-only.
-- [ ] Add permission-profile smoke coverage for compiled/binary-style runtime.
-      Deferred for post-`v0.2.0`: binary release work is deferred.
 - [ ] Add migration tests for config evolution scenarios (older/newer config
       compatibility).
 
 ## Deferred Post-MVP Tracks
 
-- [ ] Service-manager integration evaluation (`systemd`, launchd, Windows
-      Service).
 - [ ] Re-evaluate additional CLI framework features (Cliffy) only if command UX
       outgrows current router.
 - [ ] Re-evaluate `zod` adoption only if boundary validation complexity
