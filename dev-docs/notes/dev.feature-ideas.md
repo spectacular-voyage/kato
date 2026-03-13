@@ -30,6 +30,8 @@ created: 1771724652182
   toggle (CLI flag or config key) to enable silent failure behavior for
   unexpected aliases
 - real (OS-aware) liveness check
+- workspace alias mapping stored in config
+
 
 ## Interoperability
 

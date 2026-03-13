@@ -1,4 +1,5 @@
 import { define } from "../utils.ts";
+import { BRAND_ASSET_PUBLIC_PATHS } from "../src/brand_assets.ts";
 
 export default define.page(function App({ Component, state }) {
   return (
@@ -20,7 +21,7 @@ export default define.page(function App({ Component, state }) {
             ? (
               <img
                 class="footer-wordmark"
-                src="/brand/wordmark"
+                src={BRAND_ASSET_PUBLIC_PATHS.wordmark}
                 alt="Kato"
                 width="240"
                 height="48"

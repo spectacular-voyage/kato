@@ -126,3 +126,5 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
 - [ ] interactive  prompt "kato init" (e.g. defaultUsername, etc) 
 - [ ] auto-restart on workspace registration
 - [ ] mac error for workspace alias
+- list workspaces in CLI status
+- recording alias mapping in kato-user-config (better to use path than ID?)

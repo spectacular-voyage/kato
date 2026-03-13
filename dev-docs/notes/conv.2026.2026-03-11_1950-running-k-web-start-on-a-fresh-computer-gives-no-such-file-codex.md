@@ -4846,3 +4846,489 @@ I’m deciding between the GitHub CLI and a release action for the new upload jo
 # gpt-5.4_2026-03-12_1017_06
 
 I’m patching the workflow now. The release job will stay independent of npm publish so you can still use it when npm publication is manual, but it will only run on `workflow_dispatch` and will create/update the versioned GitHub Release from the built bundle artifacts.
+
+# gpt-5.4_2026-03-13_1327_03
+
+The workflow and notes are patched. I’m doing a quick validation pass now: YAML parse, then a sanity read of the new release job so I can catch any obvious quoting or asset-selection mistakes before I hand it back.
+
+The YAML parses cleanly. I’m making one small cleanup to the `v0.2.6` note now so its `updated` stamp matches the content change, then I’ll give you the exact new workflow behavior.
+
+I found one subtle workflow hazard before wrapping up: the new release job was broad enough to also see the `kato-npm-packages` artifact if it exists. I’m tightening the file search so the GitHub Release job only ever reads the top-level binary bundle artifacts, not anything nested under the npm assembly artifact.
+
+Added GitHub Release handling to [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). The workflow now has a `github_release_mode` input with `skip`, `draft`, and `publish`, and a new `Manage GitHub Release` job that downloads the packaged binary bundle artifacts, derives the version from `bundle-metadata.json`, strips front matter from the matching release-notes file, and creates or updates the GitHub Release with the per-platform archives and `.sha256` assets. On reruns it uses `gh release upload --clobber`, so the assets can be refreshed in place.
+
+I also filled in [release-notes.v0.2.6.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.6.md) with the actual `v0.2.6` story: scoped npm install via `@spectacular-voyage/kato`, cross-platform npm smoke coverage, the Windows packaged `kato start` fix, and GitHub Release asset publishing.
+
+Verified:
+- workflow YAML parses cleanly
+- I did not run the workflow itself end to end
+
+Next sensible run is `Release Manual` with `github_release_mode=draft` first, then `publish` once the draft release looks right.
+
+# djradon_2026-03-13_1327_03
+
+can we do the windows smoketest locally. 
+
+I tried to start the web app from source on windows, and got : 
+
+djradon — 10:21 AM
+PS C:\Users\drich\hub\spectacular-voyage\kato> k web start
+Command failed: PowerShell Start-Process did not return a valid PID: 'vite v7.3.1 building client environment for production...
+transforming...
+✓ 2 modules transformed.
+29284'
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m reproducing the Windows launcher path in the source-based web start flow. First I’m reading the Windows PowerShell launch helper and the existing web launcher tests to see why build output is being mixed into PID parsing.
+
+I found the likely failure mode: the Windows source-launch path does a synchronous `vite build` before the detached start, and the helper is apparently treating mixed command output as the PID. I’m reading just that part of `web/mod.ts` now so I can patch the parsing precisely and add a regression test for the exact output shape you saw.
+
+I can’t execute a native Windows process from this Linux machine, so I can’t do a true local Windows smoke here. But I can fix the parser against the exact PowerShell output shape you hit and add a regression test that preserves the behavior locally.
+
+I’m patching `web/mod.ts` to extract the PID from the last numeric output line instead of trying to parse the entire captured stdout. Then I’m adding a regression test that feeds it the exact Vite-build-plus-PID output pattern from your Windows run.
+
+The fix is in. I’m running the focused web launcher test file and a type check on the touched module now. That should tell us whether the regression is covered cleanly before you retry on Windows.
+
+Not from this Linux workspace. I can’t execute a true native Windows smoke locally here.
+
+I did fix the Windows source-launch bug you hit in [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts). The problem was that the PowerShell source path captured Vite build output and then tried to parse the entire stdout as a PID. Your output shape:
+
+```text
+vite ...
+transforming...
+✓ 2 modules transformed.
+29284
+```
+
+is now handled correctly by extracting the last numeric line. I also added a regression for that exact pattern in [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts).
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/web/mod.ts tests/web-launcher_test.ts`
+
+The next real smoke is on your Windows machine:
+```powershell
+k web start
+k web status
+```
+
+If you want, I can also add a release-workflow smoke that exercises the source-based Windows `k web start` path explicitly, but the immediate bug should be fixed now.
+
+# djradon_2026-03-13_1327_03
+
+If you want to generate a prompt, I can feed it into a new chat on windows.
+
+# gpt-5.4_2026-03-13_1327_03
+
+Use this in the Windows chat:
+
+```text
+I need a focused Windows smoke test and fix, if needed, for Kato in this repo.
+
+Context:
+- Repo: spectacular-voyage/kato
+- We recently changed the Windows web launcher parsing on the source-based path.
+- The bug we saw was:
+  `k web start`
+  failed with:
+  `PowerShell Start-Process did not return a valid PID: 'vite ... 29284'`
+- A Linux-side fix is already in source:
+  - `apps/runtime/src/web/mod.ts`
+  - `tests/web-launcher_test.ts`
+- That fix changes PID parsing to accept noisy stdout and extract the last numeric line.
+- I need native Windows verification now.
+
+Please do this:
+
+1. Inspect the current launcher code and relevant tests:
+- `apps/runtime/src/web/mod.ts`
+- `apps/runtime/src/orchestrator/launcher.ts`
+- `tests/web-launcher_test.ts`
+- `tests/daemon-launcher_test.ts`
+
+2. Run focused verification on Windows:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-launcher_test.ts tests/daemon-launcher_test.ts`
+- `deno check apps/runtime/src/web/mod.ts apps/runtime/src/orchestrator/launcher.ts tests/web-launcher_test.ts tests/daemon-launcher_test.ts`
+
+3. Run real Windows smoke from source:
+- `k web start`
+- confirm it starts successfully
+- `k web status`
+- hit `/login`
+- `k web stop`
+
+4. If possible, also test the packaged/npm-installed Windows path:
+- installed `@spectacular-voyage/kato`
+- `kato --version`
+- `kato start`
+- `kato status`
+- `kato stop`
+- `kato web init`
+- `kato web start`
+- probe `/login`
+- `kato web stop`
+
+5. If anything still fails on Windows, fix it in code, add/adjust regression tests, and report exactly what was changed.
+
+Constraints:
+- use `apply_patch` for edits
+- do not revert unrelated worktree changes
+- prefer focused tests over full-suite runs unless needed
+- findings first if reviewing; otherwise implement/fix directly
+
+Please end with:
+- whether source-based Windows `k web start` now works
+- whether packaged/npm-installed Windows daemon+web flows work
+- exact commands run
+- any remaining Windows-specific risks
+```
+
+If you want, I can also make a shorter version just for the source-based `k web start` path.
+
+# djradon_2026-03-13_1327_03
+
+Just generate a prompt, and I'll have you do it from Windows.
+
+Can you update checkboxes in the task note?
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m checking the task note against the current implemented state so I only mark items that are actually done. Then I’ll patch just the checkbox sections that are stale.
+
+I’ve got the stale sections. I’m updating the note in two places: the npm smoke plan, which is now mostly implemented, and the GitHub Release plan, where part of the job exists but one sequencing expectation is still only partially true.
+
+The task note is patched. I’m doing one quick readback of the touched sections so I don’t leave any checkbox status inconsistent with the surrounding prose.
+
+Updated the checkboxes in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+I marked done:
+- the post-assembly native-runner npm smoke matrix
+- artifact download + shared `smoke:npm-install` usage
+- aligned cross-platform smoke assertions
+- the workflow-side GitHub Release upload job
+- versioned-only GitHub Release asset policy
+- release-notes inclusion on the GitHub Release page
+
+I left open or partial:
+- treating npm as fully release-hardened until that matrix is green on real native runners
+- actual per-release asset upload as a proven release fact
+- the stricter “draft first, publish only after npm publish succeeds” sequencing, because the workflow now supports draft/publish modes but does not enforce npm-publish gating
+
+I also updated the current implementation note so it mentions the native npm smoke matrix and the new GitHub Release job. No tests were needed since this was doc-only.
+
+# djradon_2026-03-13_1327_03
+
+OK, so I'm going to trigger Release Manual. with "draft" for the GitHub release. And then do I re-run the whole thing to publish?
+
+# gpt-5.4_2026-03-13_1327_03
+
+Yes, with the current workflow design.
+
+Use the first run as:
+- `github_release_mode=draft`
+- `npm_publish_mode=dry-run` or `publish`, depending on where you are in the release flow
+
+Then, if everything looks good, run `Release Manual` again with:
+- `github_release_mode=publish`
+
+That second run will rebuild, repackage, re-smoke, and then update the existing release from draft to published.
+
+One important nuance: the workflow currently supports the “draft first, publish later” pattern, but it does not persist prior artifacts or skip rebuilds. So yes, publish currently means rerunning the whole workflow.
+
+If you want to avoid that later, the follow-up would be a separate lightweight “publish existing draft release” workflow or stronger gating inside the current one.
+
+# djradon_2026-03-13_1327_03
+
+Does [dev.release-runbook.md](dev-docs/notes/dev.release-runbook.md) need updating? "Planned Release Steps" seem more oriented to manual work, and the current automated workflow isn't really covereed. You can add a a "TODO" item for publish existing draft release.
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m updating the runbook to reflect the actual workflow-driven release path, not just the original manual sequence. I’m reading the release section around `Planned Release Steps` so I can tighten it without duplicating the task note.
+
+I’m rewriting that runbook section now. The goal is to make `Release Manual` the primary documented path and leave the script-by-script commands as fallback/reference, not the main storyline.
+
+The runbook rewrite is in. I’m doing a quick readback of the updated section to make sure the workflow inputs, caveats, and new TODO are clear and don’t contradict the current `release-manual.yml`.
+
+Yes. I updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so it now treats `Release Manual` as the primary release path instead of centering the old manual script-by-script flow.
+
+The release section now covers:
+- the actual `workflow_dispatch` inputs: `npm_publish_mode`, `npm_tag`, and `github_release_mode`
+- the real workflow stages: binary matrix, packaged-bundle smoke, npm assembly, native npm smoke, optional npm publish, optional GitHub Release update
+- the current caveat that publishing a draft release still requires rerunning the full workflow
+- a manual fallback section for debugging/bootstrap work
+- an updated verification checklist tied to the current workflow
+
+I also added the TODO you asked for:
+- add a lightweight workflow path to publish an existing draft GitHub Release without rerunning the full release pipeline
+
+I didn’t run tests since this was a doc-only update.
+
+# djradon_2026-03-13_1327_03
+
+The draft/dry-run finished green, are we ready to do publish/publish?
+
+# gpt-5.4_2026-03-13_1327_03
+
+Yes, if you are publishing the same commit that just passed `draft`/`dry-run`.
+
+Go ahead with:
+- `npm_publish_mode=publish`
+- `github_release_mode=publish`
+- `npm_tag=latest`
+
+A few checks before you click it:
+- do not change code, version, or release notes between the green dry-run and the publish run
+- make sure `0.2.6` has not already been published to npm
+- make sure npm auth is ready:
+  either trusted publishing is configured for `@spectacular-voyage/kato` and all `@spectacular-voyage/kato-*` packages, or `NPM_TOKEN` is available
+- confirm the draft GitHub Release looks right: assets, checksums, notes body
+
+Given your current workflow, the publish run will rerun the whole pipeline and then update the existing draft release to published. After it finishes, I’d verify:
+- `npm view @spectacular-voyage/kato version`
+- the 4 platform packages exist on npm
+- the GitHub Release is published and has all archives plus `.sha256` files
+
+If you want, after the publish run I can help do the post-release verification checklist.
+
+The workflow and notes are patched. I’m doing a quick validation pass now: YAML parse, then a sanity read of the new release job so I can catch any obvious quoting or asset-selection mistakes before I hand it back.
+
+The YAML parses cleanly. I’m making one small cleanup to the `v0.2.6` note now so its `updated` stamp matches the content change, then I’ll give you the exact new workflow behavior.
+
+I found one subtle workflow hazard before wrapping up: the new release job was broad enough to also see the `kato-npm-packages` artifact if it exists. I’m tightening the file search so the GitHub Release job only ever reads the top-level binary bundle artifacts, not anything nested under the npm assembly artifact.
+
+Added GitHub Release handling to [release-manual.yml](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml). The workflow now has a `github_release_mode` input with `skip`, `draft`, and `publish`, and a new `Manage GitHub Release` job that downloads the packaged binary bundle artifacts, derives the version from `bundle-metadata.json`, strips front matter from the matching release-notes file, and creates or updates the GitHub Release with the per-platform archives and `.sha256` assets. On reruns it uses `gh release upload --clobber`, so the assets can be refreshed in place.
+
+I also filled in [release-notes.v0.2.6.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.6.md) with the actual `v0.2.6` story: scoped npm install via `@spectacular-voyage/kato`, cross-platform npm smoke coverage, the Windows packaged `kato start` fix, and GitHub Release asset publishing.
+
+Verified:
+- workflow YAML parses cleanly
+- I did not run the workflow itself end to end
+
+Next sensible run is `Release Manual` with `github_release_mode=draft` first, then `publish` once the draft release looks right.
+
+# djradon_2026-03-13_1327_03
+
+can we do the windows smoketest locally. 
+
+I tried to start the web app from source on windows, and got : 
+
+djradon — 10:21 AM
+PS C:\Users\drich\hub\spectacular-voyage\kato> k web start
+Command failed: PowerShell Start-Process did not return a valid PID: 'vite v7.3.1 building client environment for production...
+transforming...
+✓ 2 modules transformed.
+29284'
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m reproducing the Windows launcher path in the source-based web start flow. First I’m reading the Windows PowerShell launch helper and the existing web launcher tests to see why build output is being mixed into PID parsing.
+
+I found the likely failure mode: the Windows source-launch path does a synchronous `vite build` before the detached start, and the helper is apparently treating mixed command output as the PID. I’m reading just that part of `web/mod.ts` now so I can patch the parsing precisely and add a regression test for the exact output shape you saw.
+
+I can’t execute a native Windows process from this Linux machine, so I can’t do a true local Windows smoke here. But I can fix the parser against the exact PowerShell output shape you hit and add a regression test that preserves the behavior locally.
+
+I’m patching `web/mod.ts` to extract the PID from the last numeric output line instead of trying to parse the entire captured stdout. Then I’m adding a regression test that feeds it the exact Vite-build-plus-PID output pattern from your Windows run.
+
+The fix is in. I’m running the focused web launcher test file and a type check on the touched module now. That should tell us whether the regression is covered cleanly before you retry on Windows.
+
+Not from this Linux workspace. I can’t execute a true native Windows smoke locally here.
+
+I did fix the Windows source-launch bug you hit in [mod.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/web/mod.ts). The problem was that the PowerShell source path captured Vite build output and then tried to parse the entire stdout as a PID. Your output shape:
+
+```text
+vite ...
+transforming...
+✓ 2 modules transformed.
+29284
+```
+
+is now handled correctly by extracting the last numeric line. I also added a regression for that exact pattern in [web-launcher_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-launcher_test.ts).
+
+Verified:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-launcher_test.ts`
+- `deno check apps/runtime/src/web/mod.ts tests/web-launcher_test.ts`
+
+The next real smoke is on your Windows machine:
+```powershell
+k web start
+k web status
+```
+
+If you want, I can also add a release-workflow smoke that exercises the source-based Windows `k web start` path explicitly, but the immediate bug should be fixed now.
+
+# djradon_2026-03-13_1327_03
+
+If you want to generate a prompt, I can feed it into a new chat on windows.
+
+# gpt-5.4_2026-03-13_1327_03
+
+Use this in the Windows chat:
+
+```text
+I need a focused Windows smoke test and fix, if needed, for Kato in this repo.
+
+Context:
+- Repo: spectacular-voyage/kato
+- We recently changed the Windows web launcher parsing on the source-based path.
+- The bug we saw was:
+  `k web start`
+  failed with:
+  `PowerShell Start-Process did not return a valid PID: 'vite ... 29284'`
+- A Linux-side fix is already in source:
+  - `apps/runtime/src/web/mod.ts`
+  - `tests/web-launcher_test.ts`
+- That fix changes PID parsing to accept noisy stdout and extract the last numeric line.
+- I need native Windows verification now.
+
+Please do this:
+
+1. Inspect the current launcher code and relevant tests:
+- `apps/runtime/src/web/mod.ts`
+- `apps/runtime/src/orchestrator/launcher.ts`
+- `tests/web-launcher_test.ts`
+- `tests/daemon-launcher_test.ts`
+
+2. Run focused verification on Windows:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-launcher_test.ts tests/daemon-launcher_test.ts`
+- `deno check apps/runtime/src/web/mod.ts apps/runtime/src/orchestrator/launcher.ts tests/web-launcher_test.ts tests/daemon-launcher_test.ts`
+
+3. Run real Windows smoke from source:
+- `k web start`
+- confirm it starts successfully
+- `k web status`
+- hit `/login`
+- `k web stop`
+
+4. If possible, also test the packaged/npm-installed Windows path:
+- installed `@spectacular-voyage/kato`
+- `kato --version`
+- `kato start`
+- `kato status`
+- `kato stop`
+- `kato web init`
+- `kato web start`
+- probe `/login`
+- `kato web stop`
+
+5. If anything still fails on Windows, fix it in code, add/adjust regression tests, and report exactly what was changed.
+
+Constraints:
+- use `apply_patch` for edits
+- do not revert unrelated worktree changes
+- prefer focused tests over full-suite runs unless needed
+- findings first if reviewing; otherwise implement/fix directly
+
+Please end with:
+- whether source-based Windows `k web start` now works
+- whether packaged/npm-installed Windows daemon+web flows work
+- exact commands run
+- any remaining Windows-specific risks
+```
+
+If you want, I can also make a shorter version just for the source-based `k web start` path.
+
+# djradon_2026-03-13_1327_03
+
+Just generate a prompt, and I'll have you do it from Windows.
+
+Can you update checkboxes in the task note?
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m checking the task note against the current implemented state so I only mark items that are actually done. Then I’ll patch just the checkbox sections that are stale.
+
+I’ve got the stale sections. I’m updating the note in two places: the npm smoke plan, which is now mostly implemented, and the GitHub Release plan, where part of the job exists but one sequencing expectation is still only partially true.
+
+The task note is patched. I’m doing one quick readback of the touched sections so I don’t leave any checkbox status inconsistent with the surrounding prose.
+
+Updated the checkboxes in [task.2026.2026-03-11-binary-distributions.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-11-binary-distributions.md).
+
+I marked done:
+- the post-assembly native-runner npm smoke matrix
+- artifact download + shared `smoke:npm-install` usage
+- aligned cross-platform smoke assertions
+- the workflow-side GitHub Release upload job
+- versioned-only GitHub Release asset policy
+- release-notes inclusion on the GitHub Release page
+
+I left open or partial:
+- treating npm as fully release-hardened until that matrix is green on real native runners
+- actual per-release asset upload as a proven release fact
+- the stricter “draft first, publish only after npm publish succeeds” sequencing, because the workflow now supports draft/publish modes but does not enforce npm-publish gating
+
+I also updated the current implementation note so it mentions the native npm smoke matrix and the new GitHub Release job. No tests were needed since this was doc-only.
+
+# djradon_2026-03-13_1327_03
+
+OK, so I'm going to trigger Release Manual. with "draft" for the GitHub release. And then do I re-run the whole thing to publish?
+
+# gpt-5.4_2026-03-13_1327_03
+
+Yes, with the current workflow design.
+
+Use the first run as:
+- `github_release_mode=draft`
+- `npm_publish_mode=dry-run` or `publish`, depending on where you are in the release flow
+
+Then, if everything looks good, run `Release Manual` again with:
+- `github_release_mode=publish`
+
+That second run will rebuild, repackage, re-smoke, and then update the existing release from draft to published.
+
+One important nuance: the workflow currently supports the “draft first, publish later” pattern, but it does not persist prior artifacts or skip rebuilds. So yes, publish currently means rerunning the whole workflow.
+
+If you want to avoid that later, the follow-up would be a separate lightweight “publish existing draft release” workflow or stronger gating inside the current one.
+
+# djradon_2026-03-13_1327_03
+
+Does [dev.release-runbook.md](dev-docs/notes/dev.release-runbook.md) need updating? "Planned Release Steps" seem more oriented to manual work, and the current automated workflow isn't really covereed. You can add a a "TODO" item for publish existing draft release.
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m updating the runbook to reflect the actual workflow-driven release path, not just the original manual sequence. I’m reading the release section around `Planned Release Steps` so I can tighten it without duplicating the task note.
+
+I’m rewriting that runbook section now. The goal is to make `Release Manual` the primary documented path and leave the script-by-script commands as fallback/reference, not the main storyline.
+
+The runbook rewrite is in. I’m doing a quick readback of the updated section to make sure the workflow inputs, caveats, and new TODO are clear and don’t contradict the current `release-manual.yml`.
+
+Yes. I updated [dev.release-runbook.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.release-runbook.md) so it now treats `Release Manual` as the primary release path instead of centering the old manual script-by-script flow.
+
+The release section now covers:
+- the actual `workflow_dispatch` inputs: `npm_publish_mode`, `npm_tag`, and `github_release_mode`
+- the real workflow stages: binary matrix, packaged-bundle smoke, npm assembly, native npm smoke, optional npm publish, optional GitHub Release update
+- the current caveat that publishing a draft release still requires rerunning the full workflow
+- a manual fallback section for debugging/bootstrap work
+- an updated verification checklist tied to the current workflow
+
+I also added the TODO you asked for:
+- add a lightweight workflow path to publish an existing draft GitHub Release without rerunning the full release pipeline
+
+I didn’t run tests since this was a doc-only update.
+
+# djradon_2026-03-13_1327_03
+
+The draft/dry-run finished green, are we ready to do publish/publish?
+
+# gpt-5.4_2026-03-13_1327_03
+
+Yes, if you are publishing the same commit that just passed `draft`/`dry-run`.
+
+Go ahead with:
+- `npm_publish_mode=publish`
+- `github_release_mode=publish`
+- `npm_tag=latest`
+
+A few checks before you click it:
+- do not change code, version, or release notes between the green dry-run and the publish run
+- make sure `0.2.6` has not already been published to npm
+- make sure npm auth is ready:
+  either trusted publishing is configured for `@spectacular-voyage/kato` and all `@spectacular-voyage/kato-*` packages, or `NPM_TOKEN` is available
+- confirm the draft GitHub Release looks right: assets, checksums, notes body
+
+Given your current workflow, the publish run will rerun the whole pipeline and then update the existing draft release to published. After it finishes, I’d verify:
+- `npm view @spectacular-voyage/kato version`
+- the 4 platform packages exist on npm
+- the GitHub Release is published and has all archives plus `.sha256` files
+
+If you want, after the publish run I can help do the post-release verification checklist.

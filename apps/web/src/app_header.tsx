@@ -1,5 +1,6 @@
 import type { AppChromeStatus } from "./loaders/status.ts";
 import HeaderStatusLive from "../islands/HeaderStatusLive.tsx";
+import { BRAND_ASSET_PUBLIC_PATHS } from "./brand_assets.ts";
 import { HeaderStatusStack } from "./header_status.tsx";
 
 interface AppHeaderProps {
@@ -40,7 +41,7 @@ export default function AppHeader(props: AppHeaderProps) {
               <a class="brand-link" href="/" aria-label="Kato Web home">
                 <img
                   class="brand-logo"
-                  src="/brand/logo"
+                  src={BRAND_ASSET_PUBLIC_PATHS.logo}
                   alt="Kato logo"
                   width="56"
                   height="56"

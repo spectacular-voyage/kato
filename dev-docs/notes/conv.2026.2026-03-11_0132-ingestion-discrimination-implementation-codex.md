@@ -1415,3 +1415,87 @@ Drafted [`release-notes.v0.2.3.md`](/home/djradon/hub/spectacular-voyage/kato/de
 The note covers the main shipped themes: the session/twin split, moving twin management into `Maintenance`, on-demand snippet reveal, `clean --twins` plus `--delete-metadata`, and the config rename to `*AutoGenerateTwins` with no backward-compatibility.
 
 I didn’t run tests since this was a docs-only change.
+
+# djradon_2026-03-13_1327_03
+
+"kato web init --username djradon --password-stdin" is giving "requires piped stdin input" -- what's the usage supposed to look like?
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m checking the CLI implementation and usage text for `kato web init` so I can give you the exact invocation the current parser expects, not a guess.
+
+I found the exact guard: `--password-stdin` only works when stdin is non-interactive. I’m opening that command handler so I can tell you precisely what succeeds and why your direct invocation failed.
+
+`--password-stdin` means the password must be piped into the command. Running this directly in a terminal:
+
+```sh
+kato web init --username djradon --password-stdin
+```
+
+fails by design because stdin is still a TTY, and the handler explicitly rejects that in [web.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/web.ts).
+
+Use one of these instead:
+
+```sh
+printf '%s' 'your-password' | kato web init --username djradon --password-stdin
+```
+
+```sh
+secret-tool read kato/web | kato web init --username djradon --password-stdin
+```
+
+Or skip stdin and use the env var path documented in [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts):
+
+```sh
+KATO_WEB_PASSWORD='your-password' kato web init --username djradon
+```
+
+Optional flags still work the same way:
+
+```sh
+printf '%s' 'your-password' | kato web init --username djradon --password-stdin --host 127.0.0.1 --port 3173
+```
+
+There is no interactive password prompt and no `--password <value>` flag in the current CLI.
+
+# djradon_2026-03-13_1327_03
+
+"kato web init --username djradon --password-stdin" is giving "requires piped stdin input" -- what's the usage supposed to look like?
+
+# gpt-5.4_2026-03-13_1327_03
+
+I’m checking the CLI implementation and usage text for `kato web init` so I can give you the exact invocation the current parser expects, not a guess.
+
+I found the exact guard: `--password-stdin` only works when stdin is non-interactive. I’m opening that command handler so I can tell you precisely what succeeds and why your direct invocation failed.
+
+`--password-stdin` means the password must be piped into the command. Running this directly in a terminal:
+
+```sh
+kato web init --username djradon --password-stdin
+```
+
+fails by design because stdin is still a TTY, and the handler explicitly rejects that in [web.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/web.ts).
+
+Use one of these instead:
+
+```sh
+printf '%s' 'your-password' | kato web init --username djradon --password-stdin
+```
+
+```sh
+secret-tool read kato/web | kato web init --username djradon --password-stdin
+```
+
+Or skip stdin and use the env var path documented in [usage.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts):
+
+```sh
+KATO_WEB_PASSWORD='your-password' kato web init --username djradon
+```
+
+Optional flags still work the same way:
+
+```sh
+printf '%s' 'your-password' | kato web init --username djradon --password-stdin --host 127.0.0.1 --port 3173
+```
+
+There is no interactive password prompt and no `--password <value>` flag in the current CLI.
