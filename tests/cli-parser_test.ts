@@ -96,6 +96,37 @@ Deno.test("cli parser supports workspace register with optional alias", () => {
   });
 });
 
+Deno.test("cli parser accepts workspace register alias=value compatibility syntax", () => {
+  assertEquals(
+    parseCommand(["workspace", "register", "alias=docs"]),
+    {
+      name: "workspace-register",
+      alias: "docs",
+    },
+  );
+
+  assertEquals(
+    parseCommand(["workspace", "register", "./notes", "alias=docs"]),
+    {
+      name: "workspace-register",
+      alias: "docs",
+      dirPath: "./notes",
+    },
+  );
+
+  assertThrows(
+    () =>
+      parseDaemonCliArgs([
+        "workspace",
+        "register",
+        "--alias",
+        "docs",
+        "alias=other",
+      ]),
+    CliUsageError,
+  );
+});
+
 Deno.test("cli parser validates workspace list and unregister usage", () => {
   assertHelpTopic(["workspace", "list", "-h"], "workspace-list");
   assertThrows(

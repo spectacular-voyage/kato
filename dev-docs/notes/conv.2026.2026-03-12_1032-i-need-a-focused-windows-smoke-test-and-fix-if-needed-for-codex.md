@@ -1062,3 +1062,69 @@ The test harness now forces `isStdinTerminal: () => false`, so that test should 
 So:
 - In real CLI usage: prompting is intentional on an interactive terminal.
 - In that test: prompting was the bug.
+
+# User_2026-03-12_1238_32
+
+On Mac, Una is trying "kato workspace register alias=u" and it's treating "alias=u" as the destination path
+
+# gpt-5.4_2026-03-12_1238_42
+
+I’m tracing the `workspace register` parser and command wiring first. The symptom suggests `alias=u` is being consumed as the positional directory instead of a flag, so I want the exact argument-handling path before patching it.
+
+# gpt-5.4_2026-03-12_1239_20
+
+I’ve confirmed the current parser only recognizes `--alias`/`-a`. A bare `alias=u` token is just a positional today, so the CLI is behaving exactly as coded. I’m deciding between a compatibility parse and a fail-loud usage error; for this specific command, I’m leaning toward accepting `alias=u` so it stops silently behaving like a path.
+
+# gpt-5.4_2026-03-12_1239_34
+
+The current help text only documents `--alias`, so the existing behavior is internally consistent but user-hostile. I’m going to add a narrow compatibility parse for `alias=<value>` in `workspace register` and cover it with parser tests, rather than trying to generalize `key=value` parsing across the whole CLI.
+
+# gpt-5.4_2026-03-12_1240_13
+
+I’m implementing a narrow compatibility parse in `workspace register` only: `alias=<value>` will be treated as the alias token instead of silently becoming the destination path. I’m also adding parser coverage and a small help-text note so the behavior is explicit.
+
+# gpt-5.4_2026-03-12_1240_31
+
+The parser change is in. I’m running the light validation slice on the parser and usage files now to make sure the compatibility case and the conflict case both type-check cleanly.
+
+# gpt-5.4_2026-03-12_1240_51
+
+Yes. I fixed that in the parser.
+
+[kato parser](/c:/Users/drich/hub/spectacular-voyage/kato/apps/cli/src/parser.ts) now treats a bare `alias=<value>` token as the workspace alias for `kato workspace register`, instead of silently consuming it as the optional `<dir>` positional. That means:
+
+- `kato workspace register alias=u` now parses as alias-only register
+- `kato workspace register ./notes alias=u` now parses as dir + alias
+- mixing `--alias ...` and `alias=...` now fails loudly instead of guessing
+
+I also updated the help text in [usage.ts](/c:/Users/drich/hub/spectacular-voyage/kato/apps/cli/src/usage.ts) and added parser coverage in [tests/cli-parser_test.ts](/c:/Users/drich/hub/spectacular-voyage/kato/tests/cli-parser_test.ts).
+
+Validated with:
+```powershell
+deno fmt --check apps/cli/src/parser.ts apps/cli/src/usage.ts tests/cli-parser_test.ts
+deno check apps/cli/src/parser.ts apps/cli/src/usage.ts tests/cli-parser_test.ts
+deno test --no-run --quiet tests/cli-parser_test.ts tests/daemon-cli_test.ts
+```
+
+I did not run the full suite from this shell, but the parser slice type-checks cleanly.
+
+# gpt-5.4_2026-03-12_1241_03
+
+Yes. I fixed that in the parser.
+
+[kato parser](/c:/Users/drich/hub/spectacular-voyage/kato/apps/cli/src/parser.ts) now treats a bare `alias=<value>` token as the workspace alias for `kato workspace register`, instead of silently consuming it as the optional `<dir>` positional. That means:
+
+- `kato workspace register alias=u` now parses as alias-only register
+- `kato workspace register ./notes alias=u` now parses as dir + alias
+- mixing `--alias ...` and `alias=...` now fails loudly instead of guessing
+
+I also updated the help text in [usage.ts](/c:/Users/drich/hub/spectacular-voyage/kato/apps/cli/src/usage.ts) and added parser coverage in [tests/cli-parser_test.ts](/c:/Users/drich/hub/spectacular-voyage/kato/tests/cli-parser_test.ts).
+
+Validated with:
+```powershell
+deno fmt --check apps/cli/src/parser.ts apps/cli/src/usage.ts tests/cli-parser_test.ts
+deno check apps/cli/src/parser.ts apps/cli/src/usage.ts tests/cli-parser_test.ts
+deno test --no-run --quiet tests/cli-parser_test.ts tests/daemon-cli_test.ts
+```
+
+I did not run the full suite from this shell, but the parser slice type-checks cleanly.

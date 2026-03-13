@@ -138,16 +138,36 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
     return { kind: "help", topic: "workspace-register" };
   }
 
-  const positionals = toPositionals(parsed);
+  let alias = typeof parsed.alias === "string"
+    ? parsed.alias.trim() || undefined
+    : undefined;
+  const positionals: string[] = [];
+  for (const raw of toPositionals(parsed)) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("alias=")) {
+      const inlineAlias = trimmed.slice("alias=".length).trim();
+      if (inlineAlias.length === 0) {
+        throw new CliUsageError(
+          "Command 'workspace register' requires a non-empty alias value",
+        );
+      }
+      if (alias !== undefined) {
+        throw new CliUsageError(
+          "Command 'workspace register' accepts only one alias source; use either --alias <alias> or alias=<alias>",
+        );
+      }
+      alias = inlineAlias;
+      continue;
+    }
+    positionals.push(raw);
+  }
+
   if (positionals.length > 1) {
     throw new CliUsageError(
       "Command 'workspace register' accepts at most one optional <dir> positional argument",
     );
   }
 
-  const alias = typeof parsed.alias === "string"
-    ? parsed.alias.trim() || undefined
-    : undefined;
   return {
     kind: "command",
     command: {

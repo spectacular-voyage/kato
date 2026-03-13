@@ -2,7 +2,7 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1773256282140
+updated: 1773349004708
 created: 1771812869620
 ---
 
@@ -113,4 +113,6 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
 
 - [ ] update cli based on new web summary functionality and tightened session/ingest differentiation
 
-- [ ] interactive password prompt for web init
+- [ ] interactive  prompt "kato init" (e.g. defaultUsername, etc) 
+- [ ] auto-restart on workspace registration
+- [ ] mac error for workspace alias
