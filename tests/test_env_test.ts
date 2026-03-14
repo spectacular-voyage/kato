@@ -18,7 +18,7 @@ Deno.test("withLockedEnvironment clears a stale env lock before running", async 
     );
 
     let callCount = 0;
-    await withLockedEnvironment(async () => {
+    await withLockedEnvironment(() => {
       callCount += 1;
     });
 

@@ -14,6 +14,8 @@ import type { DaemonCliRuntime } from "../apps/cli/src/types.ts";
 import type { RuntimeConfig, SharedBehaviorConfig } from "@kato/shared";
 import {
   createInitializedWebConfig,
+  isProcessAlive,
+  terminateProcess,
   WebConfigFileStore,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
@@ -44,6 +46,29 @@ function makeRuntimeHarness(runtimeDir: string): {
     stdout,
     stderr,
   };
+}
+
+function spawnLongRunningProcess(): Deno.ChildProcess {
+  if (Deno.build.os === "windows") {
+    return new Deno.Command("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Start-Sleep -Seconds 3600",
+      ],
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).spawn();
+  }
+
+  return new Deno.Command("sleep", {
+    args: ["3600"],
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
 }
 
 function makeDefaultRuntimeConfig(
@@ -156,6 +181,12 @@ Deno.test("cli parser parses web subcommands", () => {
     throw new Error("expected web-status command");
   }
   assertEquals(status.command.asJson, true);
+
+  const restart = parseDaemonCliArgs(["web", "restart"]);
+  assertEquals(restart.kind, "command");
+  if (restart.kind !== "command" || restart.command.name !== "web-restart") {
+    throw new Error("expected web-restart command");
+  }
 
   assertThrows(() => parseDaemonCliArgs(["web", "init", "--port", "0"]));
 });
@@ -556,6 +587,95 @@ Deno.test(
         assertEquals(statusPayload.configured, true);
         assertEquals(["running", "stale"].includes(statusPayload.state), true);
         assertEquals(statusPayload.port, 3187);
+      });
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli web restart stops a running web process and starts it again",
+  async () => {
+    await withWebPasswordEnv("secret-pass", async () => {
+      await withTestTempDir("web-cli-restart-", async (rootDir) => {
+        const runtimeDir = join(rootDir, "daemon");
+        await Deno.mkdir(runtimeDir, { recursive: true });
+        const webConfigStore = new WebConfigFileStore(
+          join(rootDir, "web", "kato-web-config.yaml"),
+        );
+        const webStatusStore = new WebServerStatusFileStore(
+          join(rootDir, "web", "kato-web-status.json"),
+          () => new Date("2026-03-07T20:00:00.000Z"),
+        );
+        await webConfigStore.ensureInitialized(
+          await createInitializedWebConfig({
+            hostname: "127.0.0.1",
+            port: 3187,
+            username: "dj",
+            password: "secret-pass",
+          }),
+        );
+
+        const runningChild = spawnLongRunningProcess();
+
+        try {
+          await webStatusStore.save({
+            schemaVersion: 1,
+            running: true,
+            hostname: "127.0.0.1",
+            port: 3187,
+            pid: runningChild.pid,
+            startedAt: "2026-03-07T20:00:00.000Z",
+            heartbeatAt: "2026-03-07T20:00:00.000Z",
+            url: "http://127.0.0.1:3187/",
+            version: "test-build",
+          });
+
+          const webLauncher: WebProcessLauncherLike = {
+            async launchDetached({ hostname, port }) {
+              await webStatusStore.save({
+                schemaVersion: 1,
+                running: true,
+                hostname,
+                port,
+                pid: Deno.pid,
+                startedAt: "2026-03-07T20:00:01.000Z",
+                heartbeatAt: "2026-03-07T20:00:01.000Z",
+                url: `http://${hostname}:${port}/`,
+                version: "test-build",
+              });
+              return Deno.pid;
+            },
+          };
+
+          const harness = makeRuntimeHarness(runtimeDir);
+          const code = await runDaemonCli(["web", "restart"], {
+            runtime: harness.runtime,
+            defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+            defaultSharedConfig: makeDefaultSharedConfig(),
+            webConfigStore,
+            webStatusStore,
+            webLauncher,
+          });
+
+          assertEquals(code, 0);
+          assertStringIncludes(
+            harness.stdout.join(""),
+            `kato web stopped (pid: ${runningChild.pid})`,
+          );
+          assertStringIncludes(
+            harness.stdout.join(""),
+            "kato web started in background",
+          );
+          assertEquals(isProcessAlive(runningChild.pid), false);
+          const savedStatus = await webStatusStore.load();
+          assertEquals(savedStatus.running, true);
+          assertEquals(savedStatus.pid, Deno.pid);
+        } finally {
+          if (isProcessAlive(runningChild.pid)) {
+            terminateProcess(runningChild.pid, true);
+          }
+          await runningChild.status;
+        }
       });
     });
   },

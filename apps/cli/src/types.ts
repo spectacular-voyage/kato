@@ -29,10 +29,16 @@ export type DaemonCliCommand =
     passwordFromStdin?: boolean;
   }
   | { name: "web-start" }
+  | { name: "web-restart" }
   | { name: "web-stop" }
   | { name: "web-status"; asJson: boolean }
   | { name: "workspace-init"; dirPath?: string }
-  | { name: "workspace-register"; alias?: string; dirPath?: string }
+  | {
+    name: "workspace-register";
+    alias?: string;
+    dirPath?: string;
+    noRestart?: boolean;
+  }
   | { name: "workspace-list" }
   | { name: "workspace-unregister"; selector: string }
   | {

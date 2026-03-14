@@ -6,7 +6,7 @@ updated: 1772864549538
 created: 1771724652182
 ---
 
-- thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overrids, maybe by adding flags to the '::' commands
+- thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overides, maybe by adding flags to the '::' commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present
 - support for kimi, copilot, roo, cline, opencode, etc.
@@ -30,6 +30,8 @@ created: 1771724652182
   toggle (CLI flag or config key) to enable silent failure behavior for
   unexpected aliases
 - real (OS-aware) liveness check
+- workspace alias mapping stored in config
+
 
 ## Interoperability
 

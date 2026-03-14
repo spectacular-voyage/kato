@@ -22,6 +22,7 @@ import {
 import type { DaemonCliCommandContext } from "../apps/cli/src/commands/context.ts";
 import { runExportCommand } from "../apps/cli/src/commands/export.ts";
 import { runStartCommand } from "../apps/cli/src/commands/start.ts";
+import { runWebRestartCommand } from "../apps/cli/src/commands/web.ts";
 import { runWorkspaceInitCommand } from "../apps/cli/src/commands/workspace_init.ts";
 import { withLockedEnvironment } from "./test_env.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
@@ -418,6 +419,61 @@ Deno.test("runStartCommand retries transient ack failures and preserves stale-be
   });
 });
 
+Deno.test("runWebRestartCommand does not log a start-only restart when startup fails", async () => {
+  await withCommandTestRoot("cli-command-web-restart-fail-", async (root) => {
+    const { ctx, sink } = makeCommandContext(root, {
+      statusSteps: [
+        makeStatusSnapshot("2026-03-06T11:59:59.000Z", {
+          daemonRunning: false,
+        }),
+      ],
+    });
+
+    ctx.webConfig = createDefaultWebConfig({
+      hostname: "127.0.0.1",
+      port: 3187,
+    });
+    ctx.webStatusStore = {
+      load() {
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          running: false,
+          heartbeatAt: NOW.toISOString(),
+          hostname: "127.0.0.1",
+          port: 3187,
+          url: "http://127.0.0.1:3187/",
+        });
+      },
+      save() {
+        return Promise.resolve();
+      },
+    };
+    ctx.webLauncher = {
+      launchDetached() {
+        return Promise.reject(new Error("launch failed"));
+      },
+    };
+
+    await assertRejects(
+      () => runWebRestartCommand(ctx),
+      Error,
+      "launch failed",
+    );
+
+    assertEquals(
+      sink.records.some((record) => record.event === "web.restart.start_only"),
+      false,
+    );
+    assertEquals(
+      sink.records.some((record) =>
+        record.event === "cli.command" &&
+        record.attributes?.["commandName"] === "web.restart"
+      ),
+      false,
+    );
+  });
+});
+
 Deno.test("runWorkspaceInitCommand creates a workspace config at an explicit directory", async () => {
   await withCommandTestRoot(
     "cli-command-workspace-init-create-",
@@ -432,6 +488,9 @@ Deno.test("runWorkspaceInitCommand creates a workspace config at an explicit dir
 
       const configPath = join(workspaceDir, ".kato-workspace-config.yaml");
       const written = await Deno.readTextFile(configPath);
+      const workspaceIdMatch = written.match(/^workspaceId:\s+([^\n]+)$/m);
+      assertExists(workspaceIdMatch);
+      assertExists(workspaceIdMatch[1]);
       assertStringIncludes(written, "defaultOutputDir:");
       assertEquals(stdout, [`created workspace config at ${configPath}\n`]);
 
@@ -441,6 +500,10 @@ Deno.test("runWorkspaceInitCommand creates a workspace config at an explicit dir
       assertExists(infoRecord);
       assertEquals(infoRecord.attributes?.["created"], true);
       assertEquals(infoRecord.attributes?.["configPath"], configPath);
+      assertEquals(
+        infoRecord.attributes?.["workspaceId"],
+        workspaceIdMatch[1],
+      );
     },
   );
 });

@@ -2,17 +2,9 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1773349004708
+updated: 1773494366165
 created: 1771812869620
 ---
-
-## v0.2.0 Curation Status (2026-03-03)
-
-This backlog is curated for source-only `v0.2.0` with low code churn.
-
-- Completed stale items are explicitly closed.
-- Medium/high-churn items are explicitly deferred with rationale.
-- Follow-up hardening remains in place for post-`v0.2.0`.
 
 ## Event Schema Follow-ups (v2)
 
@@ -67,20 +59,28 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
 - [ ] Add sensitive-field redaction tests for log sinks.
 - [ ] Add audit-completeness tests for critical allow/deny decisions.
 
+## Binary Distribution Follow-Ups
+
+- [ ] Finalize least-privilege compile permissions for `kato`, `kato-daemon`,
+      and `kato-web`, with launcher-only spawning power where possible.
+- [ ] Expand packaged-bundle smoke checks to full daemon lifecycle and full web
+      lifecycle coverage.
+- [ ] Add downloadable-archive smoke checks that extract the real `.tar.gz` or
+      `.zip` and rerun the core binary/web assertions.
+- [ ] Add automated tests for `scripts/package-binaries.ts` covering bundle
+      contents, emitted metadata, and archive/checksum output.
+- [ ] Add permission regression checks proving compiled binaries still honor
+      app-level path policy outside configured roots.
+- [ ] Add signing/notarization steps required before direct binary installs are
+      documented as the default path.
+
 ## Testing And Packaging
 
-- [ ] Add production packaging guidance/scripts for `deno compile` with
-      least-privilege permissions. Deferred for post-`v0.2.0`: first release is
-      intentionally source-only.
-- [ ] Add permission-profile smoke coverage for compiled/binary-style runtime.
-      Deferred for post-`v0.2.0`: binary release work is deferred.
 - [ ] Add migration tests for config evolution scenarios (older/newer config
       compatibility).
 
 ## Deferred Post-MVP Tracks
 
-- [ ] Service-manager integration evaluation (`systemd`, launchd, Windows
-      Service).
 - [ ] Re-evaluate additional CLI framework features (Cliffy) only if command UX
       outgrows current router.
 - [ ] Re-evaluate `zod` adoption only if boundary validation complexity
@@ -88,10 +88,7 @@ This backlog is curated for source-only `v0.2.0` with low code churn.
 
 ## workspaceID Risks
 
-Biggest shared-repo risk is when workspaceId is missing and different users run register: each machine may generate a different UUID, causing noisy diffs until one wins and is committed (workspace_register.ts, registry.ts).
-Another risk is duplicate workspaceId across two different workspace roots on one user’s machine; register logic treats that as a conflict (workspace_register.ts).
-In this repo, .kato-workspace-config.yaml is not gitignored globally (only .kato/ is), so it can be committed and cause merge churn if edited often (.gitignore).
-If you want to minimize team friction: keep workspaceId committed and stable, and avoid machine-specific settings in that file.
+(very remote) risk is duplicate workspaceId across two different workspace roots on one user’s machine; register logic treats that as a conflict (workspace_register.ts).
 
 ## Other
 
@@ -106,13 +103,7 @@ If you want to minimize team friction: keep workspaceId committed and stable, an
       note is published in dev docs, README wording is updated if approved, and
       a PR is opened (or linked) for code/string renames when required. Owner:
       @djradon. Target: 2026-03-15.
-- [ ] Decide terminology: sessions -> chats. Acceptance: decision is documented
-      with scope boundaries (UI/docs/internal IDs), impacted code surfaces are
-      enumerated, and an implementation PR is opened (or explicitly deferred).
-      Owner: @djradon. Target: 2026-03-15.
 
 - [ ] update cli based on new web summary functionality and tightened session/ingest differentiation
 
 - [ ] interactive  prompt "kato init" (e.g. defaultUsername, etc) 
-- [ ] auto-restart on workspace registration
-- [ ] mac error for workspace alias

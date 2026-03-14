@@ -5,8 +5,10 @@ import {
   createWorkspaceConfigScaffold,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   DefaultWorkspaceConfigFileStore,
+  ensureWorkspaceConfigWorkspaceId,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
+  readWorkspaceConfigWorkspaceId,
   type RegisteredWorkspace,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
@@ -128,11 +130,11 @@ export async function resolveWorkspaceInitPath(
 export async function ensureWorkspaceConfigInitialized(
   configPath: string,
   content: string = createWorkspaceConfigScaffold(),
-): Promise<boolean> {
+): Promise<{ created: boolean; workspaceId?: string }> {
   try {
     const stat = await Deno.stat(configPath);
     if (stat.isFile) {
-      return false;
+      return { created: false };
     }
     throw new Error(`Config path exists and is not a file: ${configPath}`);
   } catch (error) {
@@ -142,7 +144,11 @@ export async function ensureWorkspaceConfigInitialized(
   }
   await Deno.mkdir(dirname(configPath), { recursive: true });
   await Deno.writeTextFile(configPath, content);
-  return true;
+  const workspaceId = await readWorkspaceConfigWorkspaceId(configPath, {
+    allowMissing: true,
+  }) ?? crypto.randomUUID();
+  await ensureWorkspaceConfigWorkspaceId(configPath, workspaceId);
+  return { created: true, workspaceId };
 }
 
 export function findWorkspaceByRoot(

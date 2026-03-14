@@ -129,7 +129,7 @@ function parseWorkspaceInit(rest: string[]): DaemonCliIntent {
 
 function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
-    boolean: ["help"],
+    boolean: ["help", "no-restart"],
     string: ["alias"],
     alias: { h: "help", a: "alias" },
   });
@@ -174,6 +174,7 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
       name: "workspace-register",
       ...(alias ? { alias } : {}),
       ...(positionals[0] ? { dirPath: positionals[0] } : {}),
+      ...(parsed["no-restart"] === true ? { noRestart: true } : {}),
     },
   };
 }
@@ -322,6 +323,20 @@ function parseWebStop(rest: string[]): DaemonCliIntent {
   return { kind: "command", command: { name: "web-stop" } };
 }
 
+function parseWebRestart(rest: string[]): DaemonCliIntent {
+  const parsed = parseStrictArgs(rest, {
+    boolean: ["help"],
+    alias: { h: "help" },
+  });
+
+  if (parsed.help === true) {
+    return { kind: "help", topic: "web" };
+  }
+
+  requireNoPositionals("web-restart", toPositionals(parsed));
+  return { kind: "command", command: { name: "web-restart" } };
+}
+
 function parseWebStatus(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help", "json"],
@@ -341,7 +356,7 @@ function parseWebStatus(rest: string[]): DaemonCliIntent {
 
 function parseWeb(rest: string[]): DaemonCliIntent {
   const [subcommand, ...subRest] = rest;
-  const usage = "Usage: kato web <init|start|stop|status> [options]";
+  const usage = "Usage: kato web <init|start|restart|stop|status> [options]";
   if (!subcommand) {
     throw new CliUsageError(usage);
   }
@@ -358,6 +373,9 @@ function parseWeb(rest: string[]): DaemonCliIntent {
   }
   if (subcommand === "start") {
     return parseWebStart(subRest);
+  }
+  if (subcommand === "restart") {
+    return parseWebRestart(subRest);
   }
   if (subcommand === "stop") {
     return parseWebStop(subRest);

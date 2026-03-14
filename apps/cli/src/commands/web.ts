@@ -360,6 +360,51 @@ export async function runWebStartCommand(
   );
 }
 
+export async function runWebRestartCommand(
+  ctx: DaemonCliCommandContext,
+): Promise<void> {
+  const status = await ctx.webStatusStore.load();
+  const alive = status.running && isProcessAlive(status.pid);
+
+  if (!alive) {
+    await runWebStartCommand(ctx);
+
+    await ctx.operationalLogger.info(
+      "web.restart.start_only",
+      "Web restart used start-only path because web status was stopped or stale",
+      {
+        running: status.running,
+        previousPid: status.pid,
+        url: status.url,
+      },
+    );
+    await ctx.auditLogger.command("web.restart", {
+      restartMode: "start-only",
+      running: status.running,
+      previousPid: status.pid,
+      url: status.url,
+    });
+    return;
+  }
+
+  await runWebStopCommand(ctx);
+  await runWebStartCommand(ctx);
+
+  await ctx.operationalLogger.info(
+    "web.restart",
+    "Web server restart completed (stop then start)",
+    {
+      previousPid: status.pid,
+      url: status.url,
+    },
+  );
+  await ctx.auditLogger.command("web.restart", {
+    restartMode: "stop-then-start",
+    previousPid: status.pid,
+    url: status.url,
+  });
+}
+
 export async function runWebStatusCommand(
   ctx: DaemonCliCommandContext,
   asJson: boolean,

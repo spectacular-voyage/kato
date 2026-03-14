@@ -1,6 +1,6 @@
 {
-  "version": "0.2.6",
-  "nodeModulesDir": "manual",
+  "version": "0.2.7",
+  "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts routes/**/*.tsx src/**/*.ts",
     "dev": "vite",
