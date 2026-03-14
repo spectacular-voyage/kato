@@ -925,28 +925,35 @@ Deno.test(
         initHarness.stdout.join(""),
         `created workspace config at ${configPath}`,
       );
+      const initializedConfig = await Deno.readTextFile(configPath);
+      const initializedWorkspaceIdMatch = initializedConfig.match(
+        /^workspaceId:\s+([^\n]+)$/m,
+      );
+      assertExists(initializedWorkspaceIdMatch);
+      const initializedWorkspaceId = initializedWorkspaceIdMatch[1];
+      assertExists(initializedWorkspaceId);
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         'defaultOutputDir: "."',
       );
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         "writerIncludeToolResults: false",
       );
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         "writerIncludeDecisionPrompt: true",
       );
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         "includeSessionIds: false",
       );
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         "includeWorkspaceIds: false",
       );
       assertStringIncludes(
-        await Deno.readTextFile(configPath),
+        initializedConfig,
         "includeRecordingIds: false",
       );
 
@@ -957,6 +964,7 @@ Deno.test(
             "register",
             "--alias",
             "My.Proj",
+            "--no-restart",
           ],
           runtimeDir,
           {
@@ -983,6 +991,7 @@ Deno.test(
       const registeredWorkspaceId = registeredRegistry.workspaces?.[0]
         ?.workspaceId;
       assertExists(registeredWorkspaceId);
+      assertEquals(registeredWorkspaceId, initializedWorkspaceId);
       assertStringIncludes(
         await Deno.readTextFile(configPath),
         `workspaceId: ${registeredWorkspaceId}`,
@@ -1006,7 +1015,7 @@ Deno.test(
 
       const { code: reRegisterCode, harness: reRegisterHarness } =
         await runDaemonCliWithHarness(
-          ["workspace", "register", "--alias", "Moved.Proj"],
+          ["workspace", "register", "--alias", "Moved.Proj", "--no-restart"],
           runtimeDir,
           {
             cwdPath: movedWorkspaceDir,
@@ -1104,6 +1113,7 @@ Deno.test(
               "explicit-target",
               "--alias",
               "Explicit.Target",
+              "--no-restart",
             ],
             runtimeDir,
             {
@@ -1161,7 +1171,7 @@ Deno.test(
 
         const { code: registerCode, harness: registerHarness } =
           await runDaemonCliWithHarness(
-            ["workspace", "register"],
+            ["workspace", "register", "--no-restart"],
             runtimeDir,
             {
               cwdPath: workspaceDir,
@@ -1713,6 +1723,7 @@ Deno.test(
           "register",
           "--alias",
           "workspace-one",
+          "--no-restart",
         ], {
           runtime: firstRegisterHarness.runtime,
           defaultRuntimeConfig,
@@ -1806,7 +1817,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonCli workspace register warns when workspace root is outside current allowedWriteRoots",
+  "runDaemonCli workspace register restarts by default when workspace root is outside current allowedWriteRoots",
   async () => {
     await withTestTempDir("daemon-cli-workspace-warning-", async (tempDir) => {
       const runtimeDir = join(tempDir, "runtime");
@@ -1830,6 +1841,12 @@ Deno.test(
         0,
       );
 
+      const statusStore = makeInMemoryStatusStore();
+      const controlStore = makeInMemoryControlStore();
+      const daemonLauncher = makeDaemonLauncher(
+        31337,
+        makeStartupAckCallback(statusStore, 31337),
+      );
       const registerHarness = makeRuntimeHarness(runtimeDir);
       registerHarness.runtime.cwdPath = workspaceDir;
       const registerCode = await runDaemonCli([
@@ -1840,15 +1857,24 @@ Deno.test(
       ], {
         runtime: registerHarness.runtime,
         defaultRuntimeConfig,
+        statusStore,
+        controlStore: controlStore.store,
+        daemonLauncher: daemonLauncher.launcher,
       });
       assertEquals(registerCode, 0);
+      assertEquals(daemonLauncher.launchedCount.value, 1);
+      assertEquals(controlStore.requests.length, 0);
       assertStringIncludes(
         registerHarness.stdout.join(""),
         "updated shared config: added workspace root to allowedWriteRoots",
       );
       assertStringIncludes(
         registerHarness.stdout.join(""),
-        "warning: the running daemon may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
+        "restarting daemon to reload shared allowedWriteRoots",
+      );
+      assertStringIncludes(
+        registerHarness.stdout.join(""),
+        "kato daemon started in background (pid: 31337).",
       );
       const sharedConfigPath = join(
         katoDir,
@@ -1860,6 +1886,70 @@ Deno.test(
         workspaceDir,
       );
     });
+  },
+);
+
+Deno.test(
+  "runDaemonCli workspace register --no-restart skips the default daemon restart",
+  async () => {
+    await withTestTempDir(
+      "daemon-cli-workspace-no-restart-",
+      async (tempDir) => {
+        const runtimeDir = join(tempDir, "runtime");
+        const katoDir = join(tempDir, ".kato");
+        const workspaceDir = join(tempDir, "warn-me");
+        await Deno.mkdir(workspaceDir, { recursive: true });
+
+        const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+          ...makeDefaultRuntimeConfig(runtimeDir),
+          katoDir,
+          allowedWriteRoots: [katoDir],
+        };
+
+        const initHarness = makeRuntimeHarness(runtimeDir);
+        initHarness.runtime.cwdPath = workspaceDir;
+        assertEquals(
+          await runDaemonCli(["workspace", "init"], {
+            runtime: initHarness.runtime,
+            defaultRuntimeConfig,
+          }),
+          0,
+        );
+
+        const statusStore = makeInMemoryStatusStore();
+        const controlStore = makeInMemoryControlStore();
+        const daemonLauncher = makeDaemonLauncher(
+          31337,
+          makeStartupAckCallback(statusStore, 31337),
+        );
+        const registerHarness = makeRuntimeHarness(runtimeDir);
+        registerHarness.runtime.cwdPath = workspaceDir;
+        const registerCode = await runDaemonCli([
+          "workspace",
+          "register",
+          "--alias",
+          "warn-me",
+          "--no-restart",
+        ], {
+          runtime: registerHarness.runtime,
+          defaultRuntimeConfig,
+          statusStore,
+          controlStore: controlStore.store,
+          daemonLauncher: daemonLauncher.launcher,
+        });
+        assertEquals(registerCode, 0);
+        assertEquals(daemonLauncher.launchedCount.value, 0);
+        assertEquals(controlStore.requests.length, 0);
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "updated shared config: added workspace root to allowedWriteRoots",
+        );
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "skipped daemon restart (--no-restart); daemon processes launched before this registration may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
+        );
+      },
+    );
   },
 );
 
@@ -1906,6 +1996,7 @@ Deno.test(
           "register",
           "--alias",
           "config-backed",
+          "--no-restart",
         ], {
           runtime: registerHarness.runtime,
           defaultRuntimeConfig,

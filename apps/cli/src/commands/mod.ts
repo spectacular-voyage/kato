@@ -11,6 +11,7 @@ export { runStatusCommand } from "./status.ts";
 export { runStopCommand } from "./stop.ts";
 export {
   runWebInitCommand,
+  runWebRestartCommand,
   runWebStartCommand,
   runWebStatusCommand,
   runWebStopCommand,

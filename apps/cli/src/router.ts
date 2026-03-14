@@ -76,6 +76,7 @@ import {
   runUserMapListCommand,
   runUserMapSetCommand,
   runWebInitCommand,
+  runWebRestartCommand,
   runWebStartCommand,
   runWebStatusCommand,
   runWebStopCommand,
@@ -425,6 +426,7 @@ export async function runDaemonCli(
   const commandAllowsMissingRuntimeConfig = intent.command.name === "init" ||
     intent.command.name === "web-init" ||
     intent.command.name === "web-start" ||
+    intent.command.name === "web-restart" ||
     intent.command.name === "web-stop" ||
     intent.command.name === "web-status" ||
     intent.command.name === "workspace-init" ||
@@ -556,6 +558,7 @@ export async function runDaemonCli(
 
   const commandShouldTryLoadingWebConfig = intent.command.name === "status" ||
     intent.command.name === "web-start" ||
+    intent.command.name === "web-restart" ||
     intent.command.name === "web-status";
   if (commandShouldTryLoadingWebConfig) {
     try {
@@ -728,6 +731,9 @@ export async function runDaemonCli(
       case "web-start":
         await runWebStartCommand(commandContext);
         return 0;
+      case "web-restart":
+        await runWebRestartCommand(commandContext);
+        return 0;
       case "web-stop":
         await runWebStopCommand(commandContext);
         return 0;
@@ -742,6 +748,7 @@ export async function runDaemonCli(
           commandContext,
           intent.command.alias,
           intent.command.dirPath,
+          intent.command.noRestart,
         );
         return 0;
       case "workspace-list":

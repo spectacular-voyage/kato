@@ -432,6 +432,9 @@ Deno.test("runWorkspaceInitCommand creates a workspace config at an explicit dir
 
       const configPath = join(workspaceDir, ".kato-workspace-config.yaml");
       const written = await Deno.readTextFile(configPath);
+      const workspaceIdMatch = written.match(/^workspaceId:\s+([^\n]+)$/m);
+      assertExists(workspaceIdMatch);
+      assertExists(workspaceIdMatch[1]);
       assertStringIncludes(written, "defaultOutputDir:");
       assertEquals(stdout, [`created workspace config at ${configPath}\n`]);
 
@@ -441,6 +444,10 @@ Deno.test("runWorkspaceInitCommand creates a workspace config at an explicit dir
       assertExists(infoRecord);
       assertEquals(infoRecord.attributes?.["created"], true);
       assertEquals(infoRecord.attributes?.["configPath"], configPath);
+      assertEquals(
+        infoRecord.attributes?.["workspaceId"],
+        workspaceIdMatch[1],
+      );
     },
   );
 });

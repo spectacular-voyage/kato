@@ -1,11 +1,13 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import { registerWorkspace } from "@kato/runtime";
 import { formatWorkspaceEntry } from "./workspace_shared.ts";
+import { runRestartCommand } from "./restart.ts";
 
 export async function runWorkspaceRegisterCommand(
   ctx: DaemonCliCommandContext,
   alias?: string,
   dirPath?: string,
+  noRestart = false,
 ): Promise<void> {
   const result = await registerWorkspace({
     alias,
@@ -22,6 +24,7 @@ export async function runWorkspaceRegisterCommand(
   ctx.sharedConfig = result.sharedConfig;
   ctx.runtime.allowedWriteRoots = [...result.sharedConfig.allowedWriteRoots];
 
+  const shouldAutoRestart = result.runningDaemonMayDenyWrites && !noRestart;
   const lines = [
     `${
       result.created
@@ -31,7 +34,7 @@ export async function runWorkspaceRegisterCommand(
         : "workspace already registered"
     }: ${formatWorkspaceEntry(result.entry)}`,
   ];
-  if (result.restartRequired) {
+  if (result.restartRequired && !shouldAutoRestart) {
     lines.push(
       "restart required before alias/root/config-path changes are used by the running daemon",
     );
@@ -41,10 +44,16 @@ export async function runWorkspaceRegisterCommand(
       "updated shared config: added workspace root to allowedWriteRoots",
     );
   }
-  if (result.runningDaemonMayDenyWrites) {
+  if (shouldAutoRestart) {
+    lines.push("restarting daemon to reload shared allowedWriteRoots");
+  } else if (result.runningDaemonMayDenyWrites) {
     lines.push(
-      "warning: the running daemon may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
+      "skipped daemon restart (--no-restart); daemon processes launched before this registration may still deny writes for this workspace until `kato restart` reloads shared allowedWriteRoots",
     );
   }
   ctx.runtime.writeStdout(`${lines.join("\n")}\n`);
+
+  if (shouldAutoRestart) {
+    await runRestartCommand(ctx);
+  }
 }

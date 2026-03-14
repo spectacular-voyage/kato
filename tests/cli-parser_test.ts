@@ -94,6 +94,18 @@ Deno.test("cli parser supports workspace register with optional alias", () => {
     name: "workspace-register",
     alias: "docs",
   });
+
+  const noRestart = parseCommand([
+    "workspace",
+    "register",
+    "./notes",
+    "--no-restart",
+  ]);
+  assertEquals(noRestart, {
+    name: "workspace-register",
+    dirPath: "./notes",
+    noRestart: true,
+  });
 });
 
 Deno.test("cli parser accepts workspace register alias=value compatibility syntax", () => {

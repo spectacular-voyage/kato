@@ -1,5 +1,8 @@
 import type { SummaryPageData } from "../src/loaders/status.ts";
-import { buildSessionInventorySessionHref } from "../src/session_routes.ts";
+import {
+  buildSessionInventoryHref,
+  buildSessionInventorySessionHref,
+} from "../src/session_routes.ts";
 import {
   formatRelativeTimestamp,
   formatTimestamp,
@@ -95,6 +98,9 @@ export default function SummaryLive(
   const workspacePrimaryState = data.workspaceSummary.unavailableReason
     ? "neutral"
     : "active";
+  const sessionsHref = buildSessionInventoryHref();
+  const recordingsHref = "/recordings";
+  const workspacesHref = "/workspaces";
   const activeSessionRows = data.summarySessions
     .filter((session) => session.state === "active")
     .slice(0, 10);
@@ -105,7 +111,11 @@ export default function SummaryLive(
       <article class="card span-7">
         <h2>Activity</h2>
         <div class="metrics">
-          <div class="metric">
+          <a
+            class="metric metric-link"
+            href={sessionsHref}
+            aria-label="Open Sessions page"
+          >
             <span class="label">Sessions</span>
             <span class={metricPrimaryStateClass("active")}>
               <span class="metric-primary-count mono">
@@ -119,8 +129,12 @@ export default function SummaryLive(
             <span class="metric-note mono">
               {data.inactiveSessionCount} not generating
             </span>
-          </div>
-          <div class="metric">
+          </a>
+          <a
+            class="metric metric-link"
+            href={recordingsHref}
+            aria-label="Open Recordings page"
+          >
             <span class="label">Recordings</span>
             <span class={metricPrimaryStateClass("active")}>
               <span class="metric-primary-count mono">
@@ -134,8 +148,12 @@ export default function SummaryLive(
             <span class="metric-note mono">
               {data.stoppedRecordingCount} stopped
             </span>
-          </div>
-          <div class="metric">
+          </a>
+          <a
+            class="metric metric-link"
+            href={workspacesHref}
+            aria-label="Open Workspaces page"
+          >
             <span class="label">Workspaces</span>
             <span class={metricPrimaryStateClass(workspacePrimaryState)}>
               <span class="metric-primary-count mono">{workspaceCount}</span>
@@ -157,7 +175,7 @@ export default function SummaryLive(
                   {data.workspaceSummary.invalidCount} invalid
                 </span>
               )}
-          </div>
+          </a>
         </div>
       </article>
 

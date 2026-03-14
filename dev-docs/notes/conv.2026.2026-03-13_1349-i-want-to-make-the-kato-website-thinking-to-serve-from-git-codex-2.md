@@ -189,3 +189,19 @@ Sources: https://lume.land/docs/advanced/plugins/ , https://lume.land/plugins/re
 ::capture-k
 
 ::capture-k
+
+# djradon_2026-03-13_1413_01
+
+Aside from parsing Dendron-flavored markdown, we need to extract the hierarchical content embedded in Dendron markdown filenames with dots, e.g. proj.weave or release-notes.v0.2.6.md, to support page navigation
+
+Another concern is integrating different sources. I'd actually gone fairly far down the road of writing a utility called "weave" (based on an earlier project called lume-multisource) for "remixing static sites", see https://github.com/semantic-flow/weave/blob/main/documentation/weave/index.md
+
+I can't remember why I really gave up on that...but I think partially because the spaghetti code was spiralling out of control. AI assistants weren't as capable as you back in 2024. But the capabilities it was intended to cover are direclty relevant to both Semantic Flow (where combining multiple semantic meshes is important) and Stagecraft (where generating role-playing experience sites from multiple semantic meshes is important), and to my workflows in general where a site should be able to combine multiple sources.
+
+# gpt-5.4_2026-03-13_1413_09
+
+I’m gathering the local note context and the old `weave` design note you linked so I can give you a concrete take on the filename hierarchy and multi-source architecture, not just generalities.
+
+# gpt-5.4_2026-03-13_1413_20
+
+The files from your editor aren’t in the current `kato` checkout, so I’m using the linked `weave` note as the source of truth and I’m checking whether those notes live elsewhere on disk before I anchor the recommendation to local files.
