@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import { join } from "@std/path";
 import {
   createDefaultWebServerStatus,
@@ -423,4 +428,34 @@ Deno.test("WebServerStatusFileStore saves status and isProcessAlive handles live
     assertEquals(isProcessAlive(0), false);
     assertEquals(isProcessAlive(-1), false);
   });
+});
+
+Deno.test("isProcessAlive treats permission denied as alive and rethrows unexpected probe failures", () => {
+  if (Deno.build.os === "windows") {
+    return;
+  }
+
+  const originalKill = Deno.kill;
+  try {
+    Deno.kill = ((_: number, __?: Deno.Signal) => {
+      throw new Deno.errors.PermissionDenied("probe blocked");
+    }) as typeof Deno.kill;
+    assertEquals(isProcessAlive(1234), true);
+
+    Deno.kill = ((_: number, __?: Deno.Signal) => {
+      throw new Deno.errors.NotFound("missing");
+    }) as typeof Deno.kill;
+    assertEquals(isProcessAlive(1234), false);
+
+    Deno.kill = ((_: number, __?: Deno.Signal) => {
+      throw new Error("unexpected probe failure");
+    }) as typeof Deno.kill;
+    assertThrows(
+      () => isProcessAlive(1234),
+      Error,
+      "unexpected probe failure",
+    );
+  } finally {
+    Deno.kill = originalKill;
+  }
 });

@@ -157,8 +157,14 @@ export function isProcessAlive(pid: number | undefined): boolean {
   try {
     Deno.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    if (error instanceof Deno.errors.PermissionDenied) {
+      return true;
+    }
+    throw error;
   }
 }
 

@@ -2,9 +2,8 @@
 
 ## Own your AI conversations.
 
-Kato captures AI conversations from supported IDEs and CLIs into files you
-control. It records to Markdown or JSONL, runs a local daemon, can serve a
-local web console, and ships as prebuilt binaries for normal use.
+Kato captures AI conversations from supported IDEs, CLIs, and local apps into files you
+control. A local daemon creates vendor-agnostic chat "twins" and monitors chats for kato commands like "record" or "stop". It can serve a local web console, and also has a terminal-based status console.
 
 ## Supported Today
 

@@ -48,6 +48,29 @@ function makeRuntimeHarness(runtimeDir: string): {
   };
 }
 
+function spawnLongRunningProcess(): Deno.ChildProcess {
+  if (Deno.build.os === "windows") {
+    return new Deno.Command("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Start-Sleep -Seconds 3600",
+      ],
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).spawn();
+  }
+
+  return new Deno.Command("sleep", {
+    args: ["3600"],
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
+}
+
 function makeDefaultRuntimeConfig(
   runtimeDir: string,
   katoDir: string,
@@ -592,12 +615,7 @@ Deno.test(
           }),
         );
 
-        const runningChild = new Deno.Command(Deno.execPath(), {
-          args: ["eval", "setInterval(() => {}, 1000)"],
-          stdin: "null",
-          stdout: "null",
-          stderr: "null",
-        }).spawn();
+        const runningChild = spawnLongRunningProcess();
 
         try {
           await webStatusStore.save({

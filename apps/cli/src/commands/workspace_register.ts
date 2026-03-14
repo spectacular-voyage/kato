@@ -54,6 +54,14 @@ export async function runWorkspaceRegisterCommand(
   ctx.runtime.writeStdout(`${lines.join("\n")}\n`);
 
   if (shouldAutoRestart) {
-    await runRestartCommand(ctx);
+    try {
+      await runRestartCommand(ctx);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Workspace registered successfully but automatic restart failed: ${detail}`,
+        { cause: error },
+      );
+    }
   }
 }

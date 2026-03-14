@@ -109,7 +109,7 @@ cd chats-default
 
 # Initialize your new workspace, and register it with an alias
 kato workspace init
-kato workspace register alias=default
+kato workspace register --alias default
 ```
 
 Then start a new LLM chat (suggestion: the first line should be a good title for

@@ -1954,6 +1954,90 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli workspace register preserves registration when the automatic restart fails",
+  async () => {
+    await withTestTempDir(
+      "daemon-cli-workspace-restart-failure-",
+      async (tempDir) => {
+        const runtimeDir = join(tempDir, "runtime");
+        const katoDir = join(tempDir, ".kato");
+        const workspaceDir = join(tempDir, "warn-me");
+        await Deno.mkdir(workspaceDir, { recursive: true });
+
+        const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+          ...makeDefaultRuntimeConfig(runtimeDir),
+          katoDir,
+          allowedWriteRoots: [katoDir],
+        };
+
+        const initHarness = makeRuntimeHarness(runtimeDir);
+        initHarness.runtime.cwdPath = workspaceDir;
+        assertEquals(
+          await runDaemonCli(["workspace", "init"], {
+            runtime: initHarness.runtime,
+            defaultRuntimeConfig,
+          }),
+          0,
+        );
+
+        const statusStore = makeInMemoryStatusStore();
+        const controlStore = makeInMemoryControlStore();
+        const daemonLauncher = makeDaemonLauncher(
+          31337,
+          () => {
+            throw new Error("daemon launch failed");
+          },
+        );
+        const registerHarness = makeRuntimeHarness(runtimeDir);
+        registerHarness.runtime.cwdPath = workspaceDir;
+        const registerCode = await runDaemonCli([
+          "workspace",
+          "register",
+          "--alias",
+          "warn-me",
+        ], {
+          runtime: registerHarness.runtime,
+          defaultRuntimeConfig,
+          statusStore,
+          controlStore: controlStore.store,
+          daemonLauncher: daemonLauncher.launcher,
+        });
+
+        assertEquals(registerCode, 1);
+        assertEquals(daemonLauncher.launchedCount.value, 1);
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "workspace registered: warn-me (",
+        );
+        assertStringIncludes(
+          registerHarness.stdout.join(""),
+          "restarting daemon to reload shared allowedWriteRoots",
+        );
+        assertStringIncludes(
+          registerHarness.stderr.join(""),
+          "Command failed: Workspace registered successfully but automatic restart failed: daemon launch failed",
+        );
+
+        const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+        assertStringIncludes(
+          await Deno.readTextFile(registryPath),
+          '"alias": "warn-me"',
+        );
+        const sharedConfigPath = join(
+          katoDir,
+          "shared",
+          "kato-shared-config.yaml",
+        );
+        assertStringIncludes(
+          await Deno.readTextFile(sharedConfigPath),
+          workspaceDir,
+        );
+      },
+    );
+  },
+);
+
+Deno.test(
   "runDaemonCli workspace commands use the persisted runtime config when it exists",
   async () => {
     await withTestTempDir("daemon-cli-workspace-config-", async (tempDir) => {

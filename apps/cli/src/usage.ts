@@ -99,7 +99,6 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "If <dir> is omitted, uses the nearest ancestor workspace config from the current directory.",
     "If --alias is omitted, uses the leaf workspace folder name as the alias.",
     "By default, restarts the daemon when registration expands allowedWriteRoots.",
-    "Compatibility: also accepts a bare alias=<alias> token.",
   ].join("\n"),
   "workspace-list": [
     "Usage: kato workspace list",

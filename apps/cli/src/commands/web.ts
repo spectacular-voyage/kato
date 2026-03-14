@@ -367,6 +367,8 @@ export async function runWebRestartCommand(
   const alive = status.running && isProcessAlive(status.pid);
 
   if (!alive) {
+    await runWebStartCommand(ctx);
+
     await ctx.operationalLogger.info(
       "web.restart.start_only",
       "Web restart used start-only path because web status was stopped or stale",
@@ -382,7 +384,6 @@ export async function runWebRestartCommand(
       previousPid: status.pid,
       url: status.url,
     });
-    await runWebStartCommand(ctx);
     return;
   }
 

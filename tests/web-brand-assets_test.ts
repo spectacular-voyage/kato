@@ -1,8 +1,8 @@
 import { assertEquals } from "@std/assert";
 import {
   BRAND_ASSET_PUBLIC_PATHS,
-  redirectLegacyBrandAsset,
   isBrandAsset,
+  redirectLegacyBrandAsset,
   resolveBrandAssetPublicPath,
 } from "../apps/web/src/brand_assets.ts";
 
