@@ -21,10 +21,6 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Install web app npm dependencies
-        run: deno install --frozen
-        working-directory: apps/web
-
       - name: Run dependency audit
         run: deno task audit
 
