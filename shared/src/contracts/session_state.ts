@@ -21,6 +21,8 @@ export interface SessionWorkspaceRecordingCycleV1 {
 
 export interface SessionWorkspaceOutputDestinationV1 {
   kind: SessionWorkspaceOutputDestinationKindV1;
+  // Path hints are optional snapshots; `kind` controls rerooting semantics and
+  // `currentResolvedPath` remains the authoritative resolved target.
   relativePathFromWorkspaceRoot?: string;
   absolutePath?: string;
 }
