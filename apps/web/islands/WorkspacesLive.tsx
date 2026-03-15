@@ -1,7 +1,8 @@
 import { type ActivityState, activityStateDot } from "../src/activity_state.ts";
 import type { WorkspacesPageData } from "../src/loaders/workspaces.ts";
 import { buildSessionInventoryHref } from "../src/session_routes.ts";
-import { formatTimestamp } from "../src/time.ts";
+import { TimestampText } from "../src/TimestampText.tsx";
+import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function recordingState(
@@ -33,6 +34,7 @@ export default function WorkspacesLive(
     endpoint: props.endpoint,
     intervalMs: LIVE_POLL_INTERVAL_MS,
   });
+  const timeZone = useBrowserTimeZone();
 
   return (
     <section class="grid">
@@ -138,9 +140,15 @@ export default function WorkspacesLive(
                       </summary>
                       <div class="muted workspace-recording-note">
                         {row.latestRecordingAt
-                          ? `Latest recording activity ${
-                            formatTimestamp(row.latestRecordingAt)
-                          }`
+                          ? (
+                            <>
+                              Latest recording activity{" "}
+                              <TimestampText
+                                value={row.latestRecordingAt}
+                                timeZone={timeZone}
+                              />
+                            </>
+                          )
                           : "No recordings associated with this workspace yet."}
                       </div>
                       {row.recordings.length > 0

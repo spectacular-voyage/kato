@@ -4,8 +4,9 @@ import type {
   MaintenanceTwinsData,
 } from "../src/loaders/maintenance_twins.ts";
 import { buildMaintenanceHref } from "../src/session_routes.ts";
-import { formatTimestamp } from "../src/time.ts";
+import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
+import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 interface MaintenanceTwinsLiveProps {
@@ -79,6 +80,7 @@ export default function MaintenanceTwinsLive(props: MaintenanceTwinsLiveProps) {
     pageData.workspaceFilterAlias,
     pageData.workspaceFilterId,
   );
+  const timeZone = useBrowserTimeZone();
 
   return (
     <article class="card span-12">
@@ -280,8 +282,10 @@ export default function MaintenanceTwinsLive(props: MaintenanceTwinsLiveProps) {
               </div>
 
               <div class="muted session-activity-details">
-                Updated {formatTimestamp(row.updatedAt)} · Last event{" "}
-                {formatTimestamp(row.lastEventAt)}
+                Updated{" "}
+                <TimestampText value={row.updatedAt} timeZone={timeZone} />
+                · Last event{" "}
+                <TimestampText value={row.lastEventAt} timeZone={timeZone} />
               </div>
               <div class="muted session-activity-details mono">
                 Twin: {row.twinPath}

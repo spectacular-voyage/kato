@@ -5,7 +5,7 @@ import type {
   LogPageData,
   LogScopeFilter,
 } from "./loaders/logs.ts";
-import { formatTimestamp } from "./time.ts";
+import { TimestampText } from "./TimestampText.tsx";
 
 function relativeTimestamp(value: string): string {
   const timestamp = Date.parse(value);
@@ -58,6 +58,7 @@ export function buildLogHref(options: {
 export function LogResults(props: {
   currentPath: string;
   pageData: LogPageData;
+  timeZone?: string;
 }) {
   return (
     <article class="card span-12">
@@ -76,7 +77,11 @@ export function LogResults(props: {
             >
               <div class="log-entry-top">
                 <div class="mono">
-                  {formatTimestamp(row.timestamp)} ·{" "}
+                  <TimestampText
+                    value={row.timestamp}
+                    timeZone={props.timeZone}
+                  />
+                  {" · "}
                   {relativeTimestamp(row.timestamp)}
                 </div>
                 <div class="log-entry-badges">

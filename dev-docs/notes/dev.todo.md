@@ -2,9 +2,17 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1773494366165
+updated: 1773602423514
 created: 1771812869620
 ---
+
+## TUI/GUI Timestamps
+
+- should display in user's local time, in friendlier format, e.g. on Recordings, sessions, and maintenance/logs pages
+
+
+
+
 
 ## Event Schema Follow-ups (v2)
 

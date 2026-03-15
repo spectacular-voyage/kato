@@ -7,8 +7,9 @@ import type {
   RecordingsPageData,
   RecordingStateFilter,
 } from "../src/loaders/recordings.ts";
-import { formatTimestamp } from "../src/time.ts";
+import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
+import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function buildRecordingsHref(
@@ -48,6 +49,7 @@ export default function RecordingsLive(
     endpoint: props.endpoint,
     intervalMs: LIVE_POLL_INTERVAL_MS,
   });
+  const timeZone = useBrowserTimeZone();
   const workspaceLabel = pageData.workspaceFilterAlias ??
     pageData.workspaceFilterId;
 
@@ -179,10 +181,27 @@ export default function RecordingsLive(
                     />
                   </div>
                   <div class="muted">
-                    Started {formatTimestamp(row.startedAt)}
+                    Started{" "}
+                    <TimestampText value={row.startedAt} timeZone={timeZone} />
                     {uiState === "inactive"
-                      ? ` · Stopped ${formatTimestamp(row.stoppedAt)}`
-                      : ` · Last write ${formatTimestamp(row.lastWriteAt)}`}
+                      ? (
+                        <>
+                          {" · "}Stopped{" "}
+                          <TimestampText
+                            value={row.stoppedAt}
+                            timeZone={timeZone}
+                          />
+                        </>
+                      )
+                      : (
+                        <>
+                          {" · "}Last write{" "}
+                          <TimestampText
+                            value={row.lastWriteAt}
+                            timeZone={timeZone}
+                          />
+                        </>
+                      )}
                   </div>
                 </li>
               );

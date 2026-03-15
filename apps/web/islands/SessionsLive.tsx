@@ -4,8 +4,9 @@ import type {
   SessionsPageData,
 } from "../src/loaders/sessions.ts";
 import { buildSessionInventoryHref } from "../src/session_routes.ts";
-import { formatTimestamp } from "../src/time.ts";
+import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
+import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
 function buildSessionListStateLabel(row: SessionActivityRow): string {
@@ -53,6 +54,7 @@ export default function SessionsLive(
     staleSessionCount: pageData.staleSessionCount,
     inactiveSessionCount: pageData.inactiveSessionCount,
   });
+  const timeZone = useBrowserTimeZone();
 
   return (
     <section class="grid">
@@ -136,7 +138,8 @@ export default function SessionsLive(
                     <span class="mono">({row.sessionShortId})</span>
                   </span>{" "}
                   <span class="muted mono session-list-updated">
-                    Updated {formatTimestamp(row.updatedAt)}
+                    Updated{" "}
+                    <TimestampText value={row.updatedAt} timeZone={timeZone} />
                   </span>
                 </span>
                 <div class="session-list-right" />
