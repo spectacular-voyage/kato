@@ -20,11 +20,17 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
-import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
+import {
+  makeTestTempPath,
+  makeTestTempDir,
+  removePathIfPresent,
+} from "./test_temp.ts";
 
 type RuntimeConfig = DaemonRuntimeConfig;
 
-function makeRuntimeConfig(runtimeDir = ".kato/runtime"): RuntimeConfig {
+function makeRuntimeConfig(
+  runtimeDir = makeTestTempPath("daemon-main-runtime-"),
+): RuntimeConfig {
   return {
     schemaVersion: 1,
     runtimeDir,
