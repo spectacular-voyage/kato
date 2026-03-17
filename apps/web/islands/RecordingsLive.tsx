@@ -167,18 +167,19 @@ export default function RecordingsLive(
                       {recordingActivityStateLabel(uiState)}
                     </div>
                   </div>
-                  <div>
-                    <a
-                      class="workspace-session-link"
-                      href={row.sessionHref}
-                    >
-                      {row.provider}: {row.sessionShortId}
-                    </a>{" "}
-                    ·{" "}
+                  <div class="session-list-primary">
+                    <span class="mono">{row.provider}:</span>{" "}
                     <SessionSnippet
                       sessionId={row.sessionId}
                       snippet={row.snippet}
-                    />
+                      snippetClass="session-list-snippet"
+                    />{" "}
+                    <a
+                      class="workspace-session-link mono"
+                      href={row.sessionHref}
+                    >
+                      ({row.sessionShortId})
+                    </a>
                   </div>
                   <div class="muted">
                     Started{" "}

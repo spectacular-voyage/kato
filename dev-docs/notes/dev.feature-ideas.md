@@ -2,9 +2,11 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ""
-updated: 1772864549538
+updated: 1773727808053
 created: 1771724652182
 ---
+
+- web-based capture/record/stop controls, with workspace selector
 
 - thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overides, maybe by adding flags to the '::' commands
 - scan recent folders more recently, scan older folders (much) less frequency
