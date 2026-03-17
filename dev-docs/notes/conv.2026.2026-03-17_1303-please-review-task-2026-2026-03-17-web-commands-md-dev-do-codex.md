@@ -228,3 +228,179 @@ The styling change is in. I’m doing a quick format pass on the JSX file so we 
 Updated the Sessions stop controls styling in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
 
 `[stop all]` is now a bit smaller, and both `[stop all]` and `[stop]` use the danger red instead of the neutral inline-link color. I only did a formatting pass for this change, not a test run, since it’s CSS/markup-only.
+
+# djradon_2026-03-17_1332_55
+
+Can we add the tooltips for the "New capture/recording" buttons? "Capture will write the entire session to the selected workspace and keep recording further conversation." and "Record will create the recording output file and capture subsequent conversation."
+
+# gpt-5.4_2026-03-17_1333_03
+
+I’m adding those as actual button tooltips on the Sessions page so the meaning is visible before the popover opens, and I’m checking the current button component first to keep the copy wired in one place.
+
+# gpt-5.4_2026-03-17_1333_06
+
+I found the button component. I’m adding the tooltip strings in one helper so the copy stays easy to tweak later, then I’ll format the file and wrap.
+
+# gpt-5.4_2026-03-17_1333_15
+
+Added. `New capture` and `New recording` now have `title` tooltips in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) with the exact copy you gave.
+
+I only ran `deno fmt` on that file since this was a tiny UI-copy change.
+
+# djradon_2026-03-17_1334_35
+
+ok, what's next?
+
+# gpt-5.4_2026-03-17_1334_48
+
+I would not jump to workspace names yet. The better next step is to stabilize and ship this slice.
+
+Recommended order:
+1. Do a quick browser smoke pass on `/sessions`.
+2. Update [release-notes.v0.2.8.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.8.md) with the new Sessions controls.
+3. Run `deno task ci`.
+4. Commit.
+
+Why this order: we just changed both behavior and UI on the Sessions page, and the only thing still missing is a real click-through check for `New capture`, `New recording`, `[stop]`, `[stop all]`, deep links, and the tooltips. After that, release notes are the clean next move.
+
+If you want more feature work instead of ship work, my next recommendation would be workspace display names. But I’d personally finish the release/check/commit cycle first.
+
+# djradon_2026-03-17_1336_25
+
+OK, update release notes if you want. stop appears to work,  but maybe we should have it change to [stopping...] when clicked.
+
+# gpt-5.4_2026-03-17_1336_49
+
+I’m taking the small UX follow-up and the release note update together: I’ll wire a pending label for stop submissions on the Sessions page, then add a short release note entry for the new web recording controls.
+
+# gpt-5.4_2026-03-17_1336_54
+
+I’ve confirmed the release note file is still blank, so I can write a concise first pass there. For the stop UX, I’m going to keep it lightweight: local pending state in the Sessions island, with the clicked stop control flipping to a disabled `[stopping...]` before the form submits.
+
+# gpt-5.4_2026-03-17_1337_12
+
+I’m editing the Sessions island now. I’m going with a tiny progressive-enhancement approach: when a stop form submits in the hydrated UI, we swap the clicked label to `[stopping...]` and then let the normal POST continue.
+
+# gpt-5.4_2026-03-17_1337_23
+
+I’ve got the pending label logic in. I’m giving the inline stop actions a disabled style too so they don’t look clickable once a stop is in flight.
+
+# gpt-5.4_2026-03-17_1337_27
+
+I’m filling in `v0.2.8` now with a short note focused on the new web-side recording controls, since that’s the main operator-facing change we just finished.
+
+# gpt-5.4_2026-03-17_1337_38
+
+I’m running a quick format and targeted test pass now. The only code risk here is the little submit-intercept in the Sessions island, so I want to make sure I didn’t introduce a TSX or event-handler issue.
+
+# gpt-5.4_2026-03-17_1337_40
+
+The formatter is clean and the targeted suite is underway. I’m polling the remainder now.
+
+# gpt-5.4_2026-03-17_1337_46
+
+Done in two places.
+
+The Sessions stop controls now switch to a pending label on submit in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx): individual controls show `[stopping...]`, and the session-level control shows `[stopping all...]`. I also added a disabled visual state in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) so the stop link looks busy once clicked.
+
+I filled in [release-notes.v0.2.8.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.8.md) with the Sessions-page recording/capture/stop work.
+
+Verification:
+```bash
+deno test -A tests/web-session-actions_test.ts tests/web-session-routes_test.ts tests/web-activity-loader_test.ts tests/web-live-routes_test.ts tests/daemon-workspace-output-state_test.ts
+```
+
+Next best step is probably `deno task ci`, then a commit.
+
+# djradon_2026-03-17_1344_55
+
+Sorry, should've been more specific. I wanted the indicator because the stopped recording didn't get cleaned up right away. Now it switches to [stopping...] and then back to [stop] before the recording line gets removed. Can we just leave it at "[stopping...]" longer/indefinitely, or whatever fix you suggest.
+
+# gpt-5.4_2026-03-17_1345_11
+
+I’m tracing the stale row all the way through the live model before changing anything. My hunch is the stop mutation is updating persisted state correctly, but the Sessions loader is still rehydrating an “engaged” row from a lagging live snapshot.
+
+# gpt-5.4_2026-03-17_1345_17
+
+I found the root cause. The Sessions loader is still willing to show an engaged row from `liveRecordings` even after the persisted output has been marked `desiredState: off`, so the UI briefly “re-engages” the row from stale live status. I’m fixing that at the data layer instead of trying to hold the `[stopping...]` label forever.
+
+# gpt-5.4_2026-03-17_1345_40
+
+I’m fixing this where it actually comes from: the loader should not resurrect an engaged row from lagging live status when we already have a persisted stopped output for the same path. Then I’ll add a regression test so it stays fixed.
+
+# gpt-5.4_2026-03-17_1345_45
+
+The loader change is small but important: once a persisted row exists for an output path, we stop letting stale live status create a second “engaged” row for that same path. I’m adding a focused regression test for exactly your scenario now.
+
+# gpt-5.4_2026-03-17_1345_54
+
+I’ve got the test shape. It’s a persisted stopped output plus a lagging live recording on the same path; the correct result is a stopped row, not a rebound engaged row.
+
+# gpt-5.4_2026-03-17_1346_12
+
+The regression test is in. I’m formatting and rerunning the focused suite now; if this passes, the stop row should disappear immediately after the redirect instead of bouncing back to `[stop]`.
+
+# gpt-5.4_2026-03-17_1346_15
+
+The loader/test pass is running now. I’m polling for the result.
+
+# gpt-5.4_2026-03-17_1346_20
+
+The new test caught one more place where the stale live status still leaks through: the counts layer, not just the row list. I’m reading the failing assertion location and then I’ll tighten the loader logic one more notch so the counts match the visible rows.
+
+# gpt-5.4_2026-03-17_1346_28
+
+I found the remaining leak: the per-output row builder itself still upgraded a stopped output to “engaged” whenever a stale live recording existed on the same path. I’m reordering that logic now so persisted stop state wins.
+
+# gpt-5.4_2026-03-17_1346_40
+
+The precedence fix is in place now. I’m rerunning the same focused suite to make sure the stale-live regression test passes and nothing else changed shape unexpectedly.
+
+# gpt-5.4_2026-03-17_1346_42
+
+The regression test is green now. I’m polling the tail of the suite, but the fix is behaving the way we wanted: persisted stop state is winning over lagging live status.
+
+# gpt-5.4_2026-03-17_1346_49
+
+I fixed it the better way.
+
+The problem wasn’t really the label timing. The Sessions loader was briefly re-adding an engaged recording row from stale live status even after the persisted output had been stopped. So `[stopping...]` would show, then the page reload would bring back `[stop]` until the live snapshot caught up.
+
+I changed [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts) so persisted stopped outputs win over lagging live recording status for the same path, and added a regression test in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts). The pending label logic is still there, but now the row should disappear right away instead of bouncing back.
+
+Verified with:
+```bash
+deno test -A tests/web-activity-loader_test.ts tests/web-session-actions_test.ts tests/web-session-routes_test.ts tests/web-live-routes_test.ts tests/daemon-workspace-output-state_test.ts
+```
+
+That should feel much more solid now.
+
+# djradon_2026-03-17_1353_22
+
+looks good. I've been committing as we go.
+
+error[prefer-const]: `noOp` is never reassigned
+   --> /home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts:540:7
+    | 
+540 |   let noOp = false;
+    |       ^^^^
+    = hint: Use `const` instead
+
+  docs: https://docs.deno.com/lint/rules/prefer-const
+
+# gpt-5.4_2026-03-17_1353_31
+
+I’m fixing that lint issue directly in the action file and then I’ll run a focused lint/check on the file so we don’t leave a stray warning behind.
+
+# gpt-5.4_2026-03-17_1353_38
+
+`noOp` really is constant there, so I’m making that tiny edit and checking the file with lint right after.
+
+# gpt-5.4_2026-03-17_1353_45
+
+Fixed in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts): `noOp` is now a `const`.
+
+Verified with:
+```bash
+deno lint apps/web/src/session_recording_actions.ts
+```

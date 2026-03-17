@@ -537,7 +537,7 @@ export async function runSessionRecordingAction(
     entry.workspaceId === workspace.workspaceId
   );
   let targetPath: string;
-  let noOp = false;
+  const noOp = false;
 
   if (options.action === "new-recording") {
     const resolved = await resolveWorkspaceCommandDestination({

@@ -21,8 +21,8 @@ import {
   withLockedEnvironment,
 } from "./test_env.ts";
 import {
-  makeTestTempPath,
   makeTestTempDir,
+  makeTestTempPath,
   removePathIfPresent,
 } from "./test_temp.ts";
 

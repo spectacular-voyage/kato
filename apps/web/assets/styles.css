@@ -798,6 +798,11 @@ a {
   font-size: 0.68rem;
 }
 
+.session-inline-action:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
 .session-recording-actions {
   position: relative;
   display: flex;

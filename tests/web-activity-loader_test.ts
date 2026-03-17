@@ -310,6 +310,141 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
   });
 });
 
+Deno.test("loadSessionsPageData prefers persisted stopped outputs over lagging live recording status for the same path", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir(
+        "web-activity-stop-precedence-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const katoDir = join(homeDir, ".kato");
+          const statusPath = join(katoDir, "shared", "status.json");
+          const alphaRoot = join(homeDir, "alpha");
+          const alphaConfigPath = join(
+            alphaRoot,
+            DEFAULT_WORKSPACE_CONFIG_FILENAME,
+          );
+          const sessionPath = join(homeDir, "session-stop-precedence.jsonl");
+
+          await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+          await Deno.mkdir(alphaRoot, { recursive: true });
+          await Deno.mkdir(join(alphaRoot, "notes"), { recursive: true });
+          await Deno.writeTextFile(alphaConfigPath, "workspaceId: ws-alpha\n");
+          await Deno.writeTextFile(sessionPath, "");
+
+          const registry = new WorkspaceRegistryFileStore(
+            resolveDefaultWorkspaceRegistryPath(katoDir),
+          );
+          await registry.save([{
+            workspaceId: "ws-alpha",
+            alias: "alpha",
+            workspaceRoot: alphaRoot,
+            configPath: alphaConfigPath,
+            registeredAt: "2026-03-07T15:00:00.000Z",
+          }]);
+
+          const sharedConfigStore = new SharedBehaviorConfigFileStore(
+            resolveDefaultSharedConfigPath(katoDir),
+          );
+          await sharedConfigStore.save(
+            createDefaultSharedBehaviorConfig({
+              allowedWriteRoots: [alphaRoot],
+            }),
+          );
+          const userConfigStore = new UserConfigFileStore(
+            resolveDefaultUserConfigPath(katoDir),
+          );
+          await userConfigStore.save(createDefaultUserConfig());
+
+          const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-stop-precedence",
+            providerSessionId: "provider-stop-precedence",
+            snippet: "stopped session",
+            updatedAt: "2026-03-07T15:59:30.000Z",
+            sourceFilePath: sessionPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: alphaOutputPath,
+                desiredState: "off",
+                recordingCycles: [{
+                  recordingCycleId: "cycle-stopped",
+                  startedCursor: 1,
+                  stoppedCursor: 3,
+                  startedAt: "2026-03-07T15:00:00.000Z",
+                  stoppedAt: "2026-03-07T15:55:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 3,
+                }],
+              }),
+            ],
+          });
+
+          await Deno.writeTextFile(
+            statusPath,
+            JSON.stringify({
+              schemaVersion: 2,
+              generatedAt: "2026-03-07T16:00:00.000Z",
+              heartbeatAt: "2026-03-07T16:00:00.000Z",
+              daemonRunning: true,
+              providers: [{
+                provider: "codex",
+                activeSessions: 1,
+                lastEventAt: "2026-03-07T15:59:30.000Z",
+              }],
+              recordings: {
+                activeRecordings: 1,
+                destinations: 1,
+              },
+              sessions: [{
+                provider: "codex",
+                sessionId: "sess-stop-precedence",
+                providerSessionId: "provider-stop-precedence",
+                updatedAt: "2026-03-07T15:59:30.000Z",
+                lastEventAt: "2026-03-07T15:59:30.000Z",
+                stale: false,
+                snippet: "stopped session",
+                recordings: [{
+                  workspaceAlias: "alpha",
+                  outputPath: alphaOutputPath,
+                  startedAt: "2026-03-07T15:00:00.000Z",
+                  lastWriteAt: "2026-03-07T15:59:30.000Z",
+                }],
+              }],
+            }),
+          );
+
+          const data = await loadSessionsPageData();
+
+          assertEquals(data.activeRecordingCount, 0);
+          assertEquals(data.staleRecordingCount, 0);
+          assertEquals(data.stoppedRecordingCount, 1);
+          assertEquals(data.rows[0]?.recordings.length, 1);
+          assertEquals(data.rows[0]?.recordings[0]?.state, "stopped");
+          assertEquals(
+            data.rows[0]?.recordings[0]?.outputPath,
+            alphaOutputPath,
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
 Deno.test("loadWorkspacesPageData groups recordings by workspace and links back to sessions", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();

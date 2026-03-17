@@ -307,7 +307,7 @@ function buildRecordingRowsForOutput(
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
 
-  if (activeCycle || output.desiredState === "on" || liveRecording) {
+  if (activeCycle || output.desiredState === "on") {
     return [{
       key: [
         output.workspaceId,
@@ -328,7 +328,26 @@ function buildRecordingRowsForOutput(
   }
 
   const latestStoppedCycle = findLatestStoppedCycle(output);
-  if (!latestStoppedCycle) {
+  if (latestStoppedCycle) {
+    return [{
+      key: [
+        output.workspaceId,
+        output.currentResolvedPath,
+        latestStoppedCycle.recordingCycleId,
+      ].join(":"),
+      state: "stopped",
+      workspaceId: output.workspaceId,
+      workspaceAlias: output.workspaceAliasSnapshot,
+      workspaceHref: buildWorkspaceHref(output.workspaceId),
+      outputPath: output.currentResolvedPath,
+      displayOutputPath,
+      startedAt: latestStoppedCycle.startedAt,
+      stoppedAt: latestStoppedCycle.stoppedAt,
+      recordingCycleId: latestStoppedCycle.recordingCycleId,
+    }];
+  }
+
+  if (!liveRecording) {
     return [];
   }
 
@@ -336,17 +355,18 @@ function buildRecordingRowsForOutput(
     key: [
       output.workspaceId,
       output.currentResolvedPath,
-      latestStoppedCycle.recordingCycleId,
+      liveRecording.recordingId ?? "active",
     ].join(":"),
-    state: "stopped",
+    state: sessionStale ? "engaged-stale" : "engaged-active",
     workspaceId: output.workspaceId,
-    workspaceAlias: output.workspaceAliasSnapshot,
+    workspaceAlias: output.workspaceAliasSnapshot ??
+      liveRecording.workspaceAlias,
     workspaceHref: buildWorkspaceHref(output.workspaceId),
     outputPath: output.currentResolvedPath,
     displayOutputPath,
-    startedAt: latestStoppedCycle.startedAt,
-    stoppedAt: latestStoppedCycle.stoppedAt,
-    recordingCycleId: latestStoppedCycle.recordingCycleId,
+    startedAt: liveRecording.startedAt,
+    lastWriteAt: liveRecording.lastWriteAt,
+    recordingCycleId: liveRecording.recordingId,
   }];
 }
 
@@ -392,7 +412,10 @@ function buildAllRecordingRowsForOutput(
   }
 
   const hasActiveRow = rows.some((row) => row.state !== "stopped");
-  if (!hasActiveRow && (output.desiredState === "on" || liveRecording)) {
+  if (
+    !hasActiveRow &&
+    (output.desiredState === "on" || (rows.length === 0 && liveRecording))
+  ) {
     rows.push({
       key: [
         output.workspaceId,
@@ -423,7 +446,7 @@ function buildRecordingRows(
 ): SessionRecordingActivityRow[] {
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
-  const seenActiveOutputs = new Set<string>();
+  const seenOutputPaths = new Set<string>();
   const sessionStale = live?.stale ?? true;
 
   for (const output of session.workspaceOutputs ?? []) {
@@ -440,14 +463,12 @@ function buildRecordingRows(
       );
     for (const row of outputRows) {
       rows.push(row);
-      if (row.state !== "stopped") {
-        seenActiveOutputs.add(row.outputPath);
-      }
+      seenOutputPaths.add(row.outputPath);
     }
   }
 
   for (const liveRecording of liveRecordings) {
-    if (seenActiveOutputs.has(liveRecording.outputPath)) {
+    if (seenOutputPaths.has(liveRecording.outputPath)) {
       continue;
     }
     rows.push({
