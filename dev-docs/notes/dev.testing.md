@@ -68,6 +68,24 @@ GitHub CI uses a split gate:
 This keeps local `deno task ci` as the full pre-PR gate while avoiding running
 the full test suite twice in GitHub Actions.
 
+## Contract-First Test Strategy
+
+For behavior changes, contract changes, and persisted-state changes, prefer:
+
+1. Lock the contract first.
+   - Update the task note's `Contract Changes`, `Decisions`, and `Testing`
+     sections before implementation if the behavior is still moving.
+2. Add the key substantive tests next.
+   - Prefer regression tests for route/mutation behavior, loader projections,
+     state-machine transitions, path resolution, persistence, and other
+     operator-visible outcomes.
+3. Then implement to green.
+
+Do not force strict red-green TDD for every detail. Copy tweaks, styling,
+layout polish, tooltip wording, and similar presentation-only adjustments can
+be validated with focused manual smoke checks instead of mandatory test-first
+coverage.
+
 ## Test File Selection
 
 The root `deno task test` and `deno task test:coverage` commands intentionally

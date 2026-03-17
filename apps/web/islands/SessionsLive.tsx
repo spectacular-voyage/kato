@@ -293,7 +293,6 @@ function SessionRecordingActions(
                 class="form-input session-recording-select"
                 name="workspaceSelector"
                 aria-labelledby={buildWorkspaceSelectorIds(openAction).titleId}
-                disabled={pendingCreateAction !== null}
                 value={selectedWorkspace}
                 onInput={(event) =>
                   setSelectedWorkspace(
