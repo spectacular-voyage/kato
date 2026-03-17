@@ -22,9 +22,21 @@ export function findWorkspaceOutput(
   metadata: SessionMetadataV1,
   workspaceId: string,
 ): WorkspaceOutputState | undefined {
-  return readWorkspaceOutputs(metadata).find((entry) =>
-    entry.workspaceId === workspaceId
-  );
+  let latestMatch: WorkspaceOutputState | undefined;
+  const outputs = readWorkspaceOutputs(metadata);
+  for (let i = outputs.length - 1; i >= 0; i -= 1) {
+    const entry = outputs[i];
+    if (!entry || entry.workspaceId !== workspaceId) {
+      continue;
+    }
+    if (!latestMatch) {
+      latestMatch = entry;
+    }
+    if (entry.desiredState === "on") {
+      return entry;
+    }
+  }
+  return latestMatch;
 }
 
 export function activeWorkspaceOutputs(

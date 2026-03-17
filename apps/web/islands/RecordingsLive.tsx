@@ -7,26 +7,14 @@ import type {
   RecordingsPageData,
   RecordingStateFilter,
 } from "../src/loaders/recordings.ts";
+import {
+  buildRecordingRowAnchorId,
+  buildRecordingsHref,
+} from "../src/session_routes.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
 import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
-
-function buildRecordingsHref(
-  options: {
-    stateFilter: RecordingStateFilter;
-    workspaceFilter?: string;
-  },
-): string {
-  const url = new URL("http://kato.local/recordings");
-  if (options.stateFilter !== "all") {
-    url.searchParams.set("state", options.stateFilter);
-  }
-  if (options.workspaceFilter) {
-    url.searchParams.set("workspace", options.workspaceFilter);
-  }
-  return `${url.pathname}${url.search}`;
-}
 
 function recordingState(
   state: "engaged-active" | "engaged-stale" | "stopped",
@@ -71,7 +59,7 @@ export default function RecordingsLive(
               )
               : null}
             <p class="page-toolbar-summary muted mono">
-              Active: {pageData.activeRecordingCount}, Idle:{" "}
+              Recording: {pageData.activeRecordingCount}, Ready to record:{" "}
               {pageData.staleRecordingCount}, Stopped:{" "}
               {pageData.stoppedRecordingCount}
             </p>
@@ -97,7 +85,7 @@ export default function RecordingsLive(
                 workspaceFilter: pageData.workspaceFilter,
               })}
             >
-              Active
+              Recording
             </a>
             <a
               class={pageData.stateFilter === "engaged-stale"
@@ -108,7 +96,7 @@ export default function RecordingsLive(
                 workspaceFilter: pageData.workspaceFilter,
               })}
             >
-              Idle
+              Ready to record
             </a>
             <a
               class={pageData.stateFilter === "stopped"
@@ -145,7 +133,14 @@ export default function RecordingsLive(
                 row.workspaceId ??
                 "workspace";
               return (
-                <li key={row.key} class="session-activity-row">
+                <li
+                  key={row.key}
+                  class="session-activity-row"
+                  id={buildRecordingRowAnchorId({
+                    recordingCycleId: row.recordingCycleId,
+                    rowKey: row.key,
+                  })}
+                >
                   <div class="recording-row-top">
                     <div class="mono recording-state-line">
                       <span

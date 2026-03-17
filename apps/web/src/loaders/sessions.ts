@@ -57,6 +57,10 @@ export interface SessionsPageData {
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
+  workspaceOptions: Array<{
+    workspaceId: string;
+    alias: string;
+  }>;
   sessionCount: number;
   activeSessionCount: number;
   staleSessionCount: number;
@@ -649,13 +653,32 @@ export async function loadSessionsPageData(
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
-  const [rows, resolvedWorkspaceFilter] = await Promise.all([
+  const [rows, resolvedWorkspaceFilter, workspaceOptions] = await Promise.all([
     loadSessionActivityRows({
       ...options,
       includeStale,
       katoDir,
     }),
     resolveWorkspaceFilter(options.workspaceFilter, katoDir),
+    (async () => {
+      try {
+        const store = new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        );
+        const entries = await store.load();
+        return entries
+          .map((entry) => ({
+            workspaceId: entry.workspaceId,
+            alias: entry.alias,
+          }))
+          .sort((a, b) =>
+            a.alias.localeCompare(b.alias) ||
+            a.workspaceId.localeCompare(b.workspaceId)
+          );
+      } catch {
+        return [];
+      }
+    })(),
   ]);
 
   return {
@@ -663,6 +686,7 @@ export async function loadSessionsPageData(
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
+    workspaceOptions,
     sessionCount: rows.length,
     activeSessionCount: rows.filter((row) => row.state === "active").length,
     staleSessionCount: rows.filter((row) => row.state === "stale").length,

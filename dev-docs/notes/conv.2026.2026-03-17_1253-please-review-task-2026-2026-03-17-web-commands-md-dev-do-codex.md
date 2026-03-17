@@ -1,13 +1,13 @@
 ---
-id: please-review-task202620-89fd6c9a
+id: please-review-task202620-8f4714f1
 title: 'Please review [task.2026.2026-03-17-web-commands.md](dev-do…'
 desc: ''
-created: 1773770456317
-updated: 1773770456317
+created: 1773777196514
+updated: 1773777196514
 participants: [djradon, codex.gpt-5.4]
 kato-sessionIds: [019cfcb4-56a1-7fa3-b310-d8adeabbc7b4]
 kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [89fd6c9a-3fc6-4d6d-a161-8b666917b1e7]
+kato-recordingIds: [8f4714f1-a47e-4fd8-bb45-99dc20054260]
 conversationEventKinds: [message.assistant, message.user, tool.call, tool.result]
 ---
 
@@ -153,11 +153,7 @@ Yes please update
 
 I’m updating the task note to lock the UI wording around engaged recordings, while keeping the underlying code terminology separate.
 
-# gpt-5.4_2026-03-17_1105_12
-
 I’m making the note explicit that UI labels should read `recording`, `ready to record`, and `stopped`, while the internal state names stay as they are.
-
-# gpt-5.4_2026-03-17_1105_23
 
 I updated [dev-docs/notes/task.2026.2026-03-17-web-commands.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands.md) to make that explicit.
 
@@ -194,11 +190,7 @@ If the recordings don't already have a stable anchor (I thought they did) you ca
 
 I’m checking the current Recordings row shape so I can answer the anchor question precisely instead of guessing.
 
-# gpt-5.4_2026-03-17_1110_36
-
 I found the relevant bit: the Recordings rows don’t currently render an `id`, but the data already carries a stable-ish recording identifier we can anchor with.
-
-# gpt-5.4_2026-03-17_1110_48
 
 Continue in this one. We already have the scope, terminology, and task note aligned, so a new chat would mostly just throw away useful context.
 
@@ -219,15 +211,11 @@ OK, begin
 
 I’m starting implementation by tracing the existing Sessions route, the web mutation patterns, and the runtime entry points for `capture`/`record`, then I’ll wire the smallest clean version through tests first.
 
-# gpt-5.4_2026-03-17_1111_56
-
 I’ve confirmed the Sessions route is read-only today. Next I’m tracing the runtime helpers around workspace output state so we can implement this as a real control mutation, not a fake UI-only action.
 
 # djradon_2026-03-17_1144_12
 
 continue
-
-# djradon_2026-03-17_1146_22
 
 continue. When would recordingCycleId not be present?
 
@@ -235,143 +223,73 @@ continue. When would recordingCycleId not be present?
 
 I’m continuing from the runtime side first, because the big implementation question is whether web-triggered `capture`/`record` can reuse the daemon’s real recording machinery or if we need a smaller web-specific mutation path. I’ll answer the `recordingCycleId` question precisely as I trace that.
 
-# gpt-5.4_2026-03-17_1146_58
-
 I’ve narrowed the problem: `record` can be a clean metadata mutation, but `capture` needs the real snapshot-writing pipeline. I’m checking which daemon helpers are already reusable so we don’t duplicate that logic in a web-only one-off.
-
-# gpt-5.4_2026-03-17_1147_14
 
 I found a cleaner path for the web actions: web-triggered `record` doesn’t need fake command text at all, and web-triggered `capture` can be modeled as “export the current full conversation, then arm future recording.” I’m now tracing the read-path for “full conversation so far” so we can do that without cloning daemon-runtime logic.
 
-# gpt-5.4_2026-03-17_1147_19
-
 I found an even better seam: the runtime already exports `loadPersistedSessionHistoryEvents`, which should let the web route get the full conversation history without re-implementing source/twin replay. I’m opening that next.
-
-# gpt-5.4_2026-03-17_1147_31
 
 I have enough to design the mutation cleanly now. There’s already a history loader, destination resolver, workspace profile resolver, and recording pipeline. I’m tracing the last couple of helper dependencies so I can put the write path in one reusable place instead of scattering daemon internals through the route.
 
-# gpt-5.4_2026-03-17_1147_38
-
 I’m checking the recording pipeline constructor now. If it’s lightweight enough to stand up inside a web mutation, we can keep the implementation small and avoid inventing a second write path.
-
-# gpt-5.4_2026-03-17_1147_49
 
 `recordingCycleId` can be missing when a row is synthesized from `desiredState/live status` without a persisted active cycle, or if a live recording exists but its `recordingId` is absent. I’m going to use `recordingCycleId` when present and fall back to the row’s stable `key` for anchors so we don’t block on that edge case.
 
-# gpt-5.4_2026-03-17_1147_53
-
 I’m looking at the existing web-route test style before I write the new coverage, so the additions fit the repo instead of inventing a new harness.
-
-# gpt-5.4_2026-03-17_1148_22
 
 I’ve got the route/UI shape mostly mapped. The last important bit is choosing the right cursor when we arm a recording outside the chat stream, so I’m tracing how `writeCursor` is used during daemon append/replay before I patch anything.
 
-# gpt-5.4_2026-03-17_1149_20
-
 I’m splitting the work into two test seams: one for the new session-action mutation helper, and one for the small routing/link helpers so we don’t have to snapshot a whole page just to verify anchors.
-
-# gpt-5.4_2026-03-17_1149_28
 
 I’m checking the workspace catalog/store constructors and the shared-config loader now so the new mutation helper can stay inside the normal runtime abstractions instead of manually poking files.
 
-# gpt-5.4_2026-03-17_1149_43
-
 I’ve got the runtime pieces lined up. I’m filling in the mutation helper now, including the fallback behavior for alias/id selection and the cursor semantics for “start from now” vs “capture full snapshot then continue.”
-
-# gpt-5.4_2026-03-17_1149_52
 
 I’m checking the shared-config default constructor signature before I write the helper, just to avoid a silly initialization mismatch in the tests.
 
-# gpt-5.4_2026-03-17_1150_05
-
 I’m on the loader/UI side now. I need the Sessions page to know the available workspaces for the selector, so I’m opening that loader before patching the helper and tests together.
-
-# gpt-5.4_2026-03-17_1150_15
 
 I’m checking the existing Sessions CSS hooks before I touch the component. If there’s a good place to put the selector and buttons without inventing a whole new layout system, I want to reuse it.
 
-# gpt-5.4_2026-03-17_1151_24
-
 I’m checking one export edge before I write the new module: whether the runtime barrel already exposes the config stores I need, so I can keep imports clean and avoid brittle deep paths.
-
-# gpt-5.4_2026-03-17_1152_33
 
 I’m continuing the phase-1 implementation and first checking the repo guidance plus the current sessions/recordings code paths so we can wire this in cleanly. On `recordingCycleId`: it’s missing when a row is synthesized from live or desired-state data without a persisted cycle id, so I’m planning to anchor by `recordingCycleId` when present and fall back to the row key.
 
-# gpt-5.4_2026-03-17_1152_41
-
 I’ve confirmed the current seam: Sessions has no POST action yet, the right-hand column is effectively empty, and the recordings rows already carry almost everything we need for status and linking. I’m moving into tests first so we can lock the behavior before touching the UI wiring.
-
-# gpt-5.4_2026-03-17_1152_45
 
 I’ve got the current route and island shapes in hand. Next I’m reading the existing mutation patterns and route helpers so the new Sessions action follows the same redirect, notice, and test conventions as the rest of the web app.
 
-# gpt-5.4_2026-03-17_1152_57
-
 I’ve confirmed the data model side too: session rows already carry per-recording state, but `SessionsPageData` doesn’t yet expose selectable workspaces, and the recording anchors still need a real DOM target. I’m reading the runtime helpers now so the new mutations reuse the existing destination/path-policy logic instead of inventing a parallel path.
-
-# gpt-5.4_2026-03-17_1154_00
 
 I’ve reached the implementation seam cleanly: the new work is a small web mutation helper plus route/island plumbing, not a daemon change. I’m checking the task note too so we can keep its checkbox plan honest as code lands, instead of letting it drift from what we actually built.
 
-# gpt-5.4_2026-03-17_1155_36
-
 I’m at the point where the remaining choices are implementation details, not product decisions. I’m wiring the new action helper to match existing command semantics closely, with one deliberate web-specific behavior: `New recording` arms future writes only, while `New capture` writes the full snapshot immediately and then stays engaged.
-
-# gpt-5.4_2026-03-17_1156_04
 
 I’ve got enough context to start writing code. I’m beginning with failing tests for two pieces: the recordings deep-link helpers and the new session recording mutation helper, then I’ll wire the route and UI to satisfy them.
 
-# gpt-5.4_2026-03-17_1156_34
-
 I’m editing the test files now. The first pass will intentionally outrun the implementation a bit so we can see exactly what contracts the new helper and route utilities need to satisfy.
-
-# gpt-5.4_2026-03-17_1157_21
 
 The tests are in. I’m running the focused subset now to let the failures tell us exactly which interfaces we still need to add, instead of guessing and backfilling later.
 
-# gpt-5.4_2026-03-17_1158_21
-
 I’m adding the actual helper and shared route builders now. After that, the next test run should move us from “missing modules” into real behavior mismatches, which is usually where the useful refinement starts.
-
-# gpt-5.4_2026-03-17_1159_16
 
 The core helper is in place. I’m running the same focused tests again now; this pass should expose any type/runtime mismatches in the actual behavior rather than just missing files.
 
-# gpt-5.4_2026-03-17_1159_24
-
 The first test run did its job: one route-helper expectation just needed the real hash value, and the action helper exposed a bad import seam for preferred usernames. I’m tightening that helper now so the next run exercises the actual mutation behavior.
-
-# gpt-5.4_2026-03-17_1159_38
 
 The helper itself is loading now; the failures are just Deno permission noise from the test harness. I’m rerunning the focused subset with the normal repo-style test permissions so we can see real behavioral failures next.
 
-# gpt-5.4_2026-03-17_1159_47
-
 The behavior is already close. The last failing test turned out to be my fixture, not the helper: I gave the old recording cycle an invalid `startedBySeq: 0`, so the metadata loader quite reasonably treated it as malformed. I’m fixing that fixture and rerunning.
-
-# gpt-5.4_2026-03-17_1200_24
 
 I’m moving from the backend helper into the visible surface now: Sessions POST handling, workspace options in the loader, the engaged-recordings list, and the recordings anchors. I’m also folding in the friendlier status labels while I’m in the web UI so we don’t leave the internal `engaged-*` language peeking through.
 
-# gpt-5.4_2026-03-17_1201_19
-
 The visible pieces are wired now. I’m running a slightly broader web-focused test slice next so we catch any integration fallout from the new loader field, route helpers, and status-label changes before I touch anything else.
-
-# gpt-5.4_2026-03-17_1201_29
 
 The broader web test slice is green. I’m doing one cleanup pass now with the formatter and a final rerun, so the implementation lands in a stable state rather than “works, but scruffy.”
 
-# gpt-5.4_2026-03-17_1201_42
-
 I’ve got the code and tests green. I’m making one last documentation pass on the task note so the implementation checklist reflects reality and the anchor decision doesn’t stay listed as an unresolved question after we’ve already shipped it.
 
-# gpt-5.4_2026-03-17_1201_55
-
 One small honesty fix: I haven’t done a browser click-through smoke pass, only automated verification. I’m correcting the task note so it distinguishes “tests are done” from “manual UI smoke pass is still pending.”
-
-# gpt-5.4_2026-03-17_1202_15
 
 Implemented the phase-1 Sessions workflow.
 
@@ -394,23 +312,13 @@ what's next? Maybe you just haven't gotten to it, but I wanted to implement the 
 
 I’ve reached the functional version, but you’re right: I took the fast, simple path with an inline `<select>` instead of the popover chooser you asked for. I’m checking for any existing dialog/popover patterns in the web app now so we can implement that in a way that fits the repo instead of improvising UI behavior.
 
-# gpt-5.4_2026-03-17_1235_41
-
 There isn’t an existing popover pattern in `apps/web`, so this is a judgment call rather than a straight reuse. I think the best fit is: keep `New capture` and `New recording` as the visible actions, and have each one open a small anchored chooser panel with the workspace selector plus a confirm button. That matches what you asked for better than the inline `<select>`, so I’m switching the Sessions UI over to that now.
-
-# gpt-5.4_2026-03-17_1235_59
 
 I’m swapping the inline control for a small client-side chooser panel now. I’m keeping the backend and tests intact; this is a UI-only refinement on top of the working behavior, so the verification goal is “same POST contract, better interaction.”
 
-# gpt-5.4_2026-03-17_1236_31
-
 The chooser is converted to a real click-open panel now. I’m formatting and rerunning the same web-focused test slice to make sure this UI refinement didn’t disturb any of the already-green behavior underneath it.
 
-# gpt-5.4_2026-03-17_1236_37
-
 The popover chooser is now in the code too. I’m making one tiny note update so the task doc matches the actual interaction: the action buttons now open the chooser instead of showing an inline select.
-
-# gpt-5.4_2026-03-17_1236_47
 
 The chooser is now a click-open popover instead of an always-visible `<select>`. In [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx), `New capture` and `New recording` each open a small chooser panel with the workspace selector plus a confirm button, and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) has the positioning/styling for that panel. I also updated the task note in [task.2026.2026-03-17-web-commands.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands.md) so it matches the implemented interaction.
 
@@ -429,19 +337,11 @@ When the session went active, the title got all scrnched up:
 
 I can see what happened: the engaged-recording link in the right column is forcing that whole column wider, so the session title column gets squeezed. I’m going straight at the layout and link-wrapping CSS now so the active row keeps its shape even when there’s a long recording filename.
 
-# gpt-5.4_2026-03-17_1238_28
-
 I found the culprit: the right column still has a large minimum width, and the engaged filename link isn’t constrained, so that whole side can bully the title column. I’m tightening the right column width and making the engaged link wrap inside it instead of expanding the grid.
-
-# gpt-5.4_2026-03-17_1238_38
 
 I’m making this a CSS-only fix first, because the underlying behavior is fine and the screenshot points to sizing rather than logic. The goal is: the action column gets a stable width, and the engaged-recording line wraps inside that box instead of stealing width from the session title.
 
-# gpt-5.4_2026-03-17_1238_45
-
 I’ve applied the layout fix. I’m running the same web-focused test slice once more just to make sure nothing else drifted while I touched the Sessions styling.
-
-# gpt-5.4_2026-03-17_1238_53
 
 The scrunching was the right-hand action column expanding to fit the long engaged-recording link. I fixed that in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css): the Sessions row now gives the action column a stable width, top-aligns the row, and lets the engaged-recording line wrap inside its own box instead of squeezing the title/snippet column.
 
@@ -460,15 +360,9 @@ Better, but now the recording line is scrunched. Probably should put it on the l
 
 I agree. The engaged list reads more like session metadata than an action-panel detail, so putting it under the session title is the cleaner layout. I’m moving that block to the left side now and simplifying the right column back down to just the action chooser.
 
-# gpt-5.4_2026-03-17_1239_51
-
 I’m editing the Sessions row markup and its CSS together so the structure and spacing stay in sync. The right side will become action-only, and the left side will gain a compact recordings block under the updated timestamp.
 
-# gpt-5.4_2026-03-17_1240_14
-
 The recordings block is moved. I’m formatting and rerunning the same web-focused tests now so we preserve the working behavior while improving the layout.
-
-# gpt-5.4_2026-03-17_1240_21
 
 I moved the engaged recordings list to the left side in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx), under a small `Recordings` subheading, and left the right column for the action chooser only. I also updated the related styling in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) so the recordings block reads like session metadata instead of a squeezed sidebar detail.
 
@@ -487,19 +381,11 @@ could the recordings line span the full container, i.e. fill into the space unde
 
 Yes, that’s a better layout. I’m changing the Sessions row so the recordings block becomes its own full-width row beneath the title and action controls, instead of being trapped inside the left text column.
 
-# gpt-5.4_2026-03-17_1241_42
-
 I’ve got a clean way to do it: keep the main row as title plus actions, then make the recordings block a second grid row that spans across both the text and action area. I’m patching that structure now and tightening the row gap so it feels attached instead of floating.
-
-# gpt-5.4_2026-03-17_1242_01
 
 The first patch missed because the JSX got reformatted a bit differently than I expected. I’m grabbing the exact current block and patching it precisely.
 
-# gpt-5.4_2026-03-17_1242_18
-
 The recordings block now spans the row underneath the buttons. I’m formatting and rerunning the web test slice one more time so we keep the interaction stable while changing the layout grid.
-
-# gpt-5.4_2026-03-17_1242_28
 
 Yes. I changed the Sessions row so the `Recordings` block is now its own full-width row beneath the title and buttons in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx), and updated the grid spacing in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css) so it fills the space under the action area instead of staying boxed into the left column.
 
@@ -518,19 +404,11 @@ Let's move the session short id (e.g. "(9f0b0ada)") to a tooltip when you mouse 
 
 I’m making this a small Sessions-only UI tweak: remove the visible short id from the row and put it on the snippet/title hover target instead. I’m checking the snippet component first so we can add the tooltip in the right place without disturbing the click-to-expand behavior.
 
-# gpt-5.4_2026-03-17_1243_53
-
 I’m doing this as a focused UI tweak: remove the visible short id from the Sessions row and attach it to the hover target for the snippet/name instead. I’m threading that through `SessionSnippet` so it works whether the snippet is already shown or still in the `show snippet` button state.
-
-# gpt-5.4_2026-03-17_1244_02
 
 I found the exact JSX shape. I’m patching the snippet component and the Sessions row precisely now.
 
-# gpt-5.4_2026-03-17_1244_11
-
 The visible short id is gone and the hover title is wired through the snippet component now. I’m formatting and running the same web test slice one more time so we keep the page stable.
-
-# gpt-5.4_2026-03-17_1244_19
 
 Done. The visible short id is removed from the Sessions row, and hovering the session snippet/name now shows it as a tooltip via [SessionSnippet.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionSnippet.tsx) and [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx).
 
@@ -547,11 +425,7 @@ OK, what's next? Should we do the workspace names? That will require updates to 
 
 I’m checking the current workspace contract and where alias is surfaced in the web UI so I can give you a concrete recommendation, not a hand-wave. The key question is whether you mean a display-only name or an alias rename, because those have very different blast radii.
 
-# gpt-5.4_2026-03-17_1250_38
-
 I want to give you a concrete scope recommendation here, so I’m grabbing the exact contract points that would change. The big distinction is whether we add a display name or actually rename aliases and their snapshots.
-
-# gpt-5.4_2026-03-17_1250_56
 
 Yes, but only if we mean `workspace name` as display metadata, not alias replacement.
 
@@ -575,8 +449,6 @@ detailed commit message please
 # gpt-5.4_2026-03-17_1251_20
 
 I’m pulling the current change set into a concise summary first so the commit message matches what actually landed, including the UI refinements after the initial Sessions implementation.
-
-# gpt-5.4_2026-03-17_1251_35
 
 I’d use this, and I would keep it scoped to the web commands work plus the task note. The conversation log and `dev.todo`/feature-ideas edits look separate enough that I would not bundle them unless you meant to.
 
@@ -617,3 +489,84 @@ feat(web): add session recording controls and recordings deep links
 ```
 
 If you want, I can also give you a shorter one-paragraph version for `git commit -m` plus body lines.
+
+# djradon_2026-03-17_1255_40
+
+Hmmm, when I "Start capture" it seemed to start a new file, and it showed an additional recording. But then when I clicked start recording the first capture disappeared, and no new recording was started. I might've confused the spec, but "New recording" is supposed to create a new file an start recording with the next event.
+
+# gpt-5.4_2026-03-17_1255_51
+
+I’m tracing the current `New recording` flow against what you just described. The likely issue is that I made it reuse an existing workspace output instead of always minting a fresh destination, which would be wrong for the Sessions-page action you want.
+
+# gpt-5.4_2026-03-17_1256_14
+
+I found the core mismatch, and it’s a real one: I implemented `New recording` like “arm the current workspace output,” but your intended behavior is “mint a new destination and arm that new file for future writes.” I’m tracing the state helpers now, because that likely means we should create a fresh workspace-output entry rather than reuse the existing one.
+
+# gpt-5.4_2026-03-17_1256_40
+
+I’m going a little deeper than just the visible no-op, because the current helper also retargets the same workspace-output entry. That means even repeated captures would smear history across one slot. I’m fixing both Sessions actions so they close any currently engaged output for that workspace and create a fresh output entry with its own path.
+
+# gpt-5.4_2026-03-17_1257_11
+
+I’ve got the fix path. I’m updating the helper so both Sessions actions create a fresh workspace-output entry, and I’m also making the shared workspace lookup prefer the latest active output so later stop/record flows don’t get stuck on an older stopped entry.
+
+# gpt-5.4_2026-03-17_1257_48
+
+The behavioral change is in place. I’m running the targeted state and web tests now, because this touches both the web helper and the shared workspace-output lookup semantics.
+
+# gpt-5.4_2026-03-17_1257_52
+
+I found one leftover from the old retargeting path: the capture retry callback was still referencing an `output` variable that no longer exists. I’m cleaning that up now and rerunning the focused tests.
+
+# gpt-5.4_2026-03-17_1258_04
+
+The targeted behavior tests are green now. I’m doing the broader web slice too so we catch any downstream assumptions in loaders or live routes before we call this fixed.
+
+# gpt-5.4_2026-03-17_1258_16
+
+I fixed the behavior, and I’m also tightening the task note so it records the clarified rule instead of leaving `New recording` ambiguous.
+
+# gpt-5.4_2026-03-17_1258_37
+
+I fixed the wrong part of the behavior first: `New recording` was reusing the current workspace output, which is why the prior capture could disappear and the new recording could no-op. The Sessions actions now both create a fresh destination entry, and the previous engaged output is preserved as stopped history instead of being overwritten.
+
+# gpt-5.4_2026-03-17_1259_47
+
+I’m checking the current implementation against the behavior you described and the recent fix, starting with the repo guidance and the session-recording code paths so we can see whether anything still needs adjusting.
+
+# gpt-5.4_2026-03-17_1259_53
+
+I’ve confirmed the working tree has the web-session changes plus a follow-up fix in progress. Next I’m reading the action logic and tests together so we can tell whether the current behavior now matches your intended “fresh file, then start writing on next event” flow or if there’s still a gap.
+
+# gpt-5.4_2026-03-17_1300_00
+
+The current code now creates a fresh output entry for both actions, which fixes the “capture disappears / recording hijacks it” problem. I’m checking the actual command semantics next so I don’t overstate whether `New recording` should also create an empty file immediately or just reserve a fresh destination until the next event arrives.
+
+# gpt-5.4_2026-03-17_1300_17
+
+I found the important semantic detail: the existing `::record-<alias>` path in the daemon does not create an empty file on activation. It opens a new recording cycle and the file appears once there are events to append, so the web action should mirror that instead of inventing a different file-creation rule.
+
+# gpt-5.4_2026-03-17_1300_22
+
+I’ve confirmed the existing daemon contract: `record` arms a destination immediately, but the file itself only appears once there’s something to append. That means the bug here was the reuse/overwrite behavior, not the delayed file creation, so I’m running the targeted test set now to make sure the corrected flow is solid before I summarize it back to you.
+
+# gpt-5.4_2026-03-17_1300_35
+
+I found one doc mismatch while checking this: the task note still said “creates a fresh file” for `New recording`, but the real contract is “creates a fresh destination and starts writing on the next event,” which is how `::record` already behaves. I’m tightening that wording so the note matches the implementation and the existing daemon behavior.
+
+# gpt-5.4_2026-03-17_1300_40
+
+I tightened the task wording, but there’s one awkward phrase in that sentence. I’m smoothing that out before I wrap this up so the note reads cleanly.
+
+# gpt-5.4_2026-03-17_1301_08
+
+You were right: the earlier behavior was wrong. The Sessions actions were effectively reusing a workspace output slot, so `New capture` could be replaced by a later `New recording` instead of being preserved as stopped history. I fixed that in [session_recording_actions.ts:367](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L367) so both actions create a fresh output entry, and in [runtime_workspace_output_state.ts:21](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_workspace_output_state.ts#L21) so lookups prefer the latest active output, then the latest historical one.
+
+The current behavior is now:
+- `New capture`: creates a new file immediately and keeps it engaged.
+- `New recording`: creates a new recording destination immediately, but the file itself appears on the next event, matching existing `::record-<alias>` semantics rather than inventing a different web-only rule.
+- Starting a new recording no longer makes the prior capture disappear; the prior output is preserved as stopped history.
+
+I locked that down with tests in [web-session-actions_test.ts:148](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts#L148), [web-session-actions_test.ts:223](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts#L223), and [daemon-workspace-output-state_test.ts:132](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-workspace-output-state_test.ts#L132), and reran the targeted suite: 20 passed, 0 failed. I also corrected the task note wording in [task.2026.2026-03-17-web-commands.md:21](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands.md#L21).
+
+If you want `New recording` to touch an empty file immediately on click, we can do that next, but I’d treat it as a deliberate parity change from the current CLI contract rather than a bug fix.

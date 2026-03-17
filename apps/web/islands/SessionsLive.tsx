@@ -1,13 +1,18 @@
 import { activityStateDot, activityStateLabel } from "../src/activity_state.ts";
 import type {
   SessionActivityRow,
+  SessionRecordingActivityRow,
   SessionsPageData,
 } from "../src/loaders/sessions.ts";
-import { buildSessionInventoryHref } from "../src/session_routes.ts";
+import {
+  buildRecordingsRecordingHref,
+  buildSessionInventoryHref,
+} from "../src/session_routes.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
 import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 function buildSessionListStateLabel(row: SessionActivityRow): string {
   return activityStateLabel(row.state);
@@ -33,10 +38,214 @@ function buildCountSummary(options: {
   return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Inactive: ${options.inactiveSessionCount}`;
 }
 
+function resolveDefaultWorkspaceSelectorValue(
+  pageData: SessionsPageData,
+): string | undefined {
+  if (pageData.workspaceFilterId) {
+    return pageData.workspaceFilterId;
+  }
+  if (pageData.workspaceFilter) {
+    const matchingOption = pageData.workspaceOptions.find((option) =>
+      option.workspaceId === pageData.workspaceFilter ||
+      option.alias === pageData.workspaceFilter
+    );
+    if (matchingOption) {
+      return matchingOption.workspaceId;
+    }
+  }
+  return pageData.workspaceOptions[0]?.workspaceId;
+}
+
+function buildRecordingFilename(path: string): string {
+  const parts = path.split(/[\\/]+/).filter((part) => part.length > 0);
+  return parts.at(-1) ?? path;
+}
+
+function buildWorkspaceLabel(recording: SessionRecordingActivityRow): string {
+  return recording.workspaceAlias ?? recording.workspaceId ?? "workspace";
+}
+
+function resolveRecordingWorkspaceFilter(
+  recording: SessionRecordingActivityRow,
+): string | undefined {
+  return recording.workspaceId ?? recording.workspaceAlias;
+}
+
+type SessionRecordingAction = "new-capture" | "new-recording";
+
+function buildPopoverTitle(action: SessionRecordingAction): string {
+  return action === "new-capture"
+    ? "Choose workspace for new capture"
+    : "Choose workspace for new recording";
+}
+
+function buildPopoverDescription(action: SessionRecordingAction): string {
+  return action === "new-capture"
+    ? "From the start, then stay engaged."
+    : "Future activity only.";
+}
+
+function buildSubmitLabel(action: SessionRecordingAction): string {
+  return action === "new-capture" ? "Start capture" : "Start recording";
+}
+
+function SessionRecordingActions(
+  props: {
+    sessionId: string;
+    includeStale: boolean;
+    workspaceFilter?: string;
+    csrfToken?: string;
+    workspaceOptions: SessionsPageData["workspaceOptions"];
+    defaultWorkspaceSelectorValue?: string;
+  },
+) {
+  const [openAction, setOpenAction] = useState<SessionRecordingAction | null>(
+    null,
+  );
+  const [selectedWorkspace, setSelectedWorkspace] = useState(
+    props.defaultWorkspaceSelectorValue ??
+      props.workspaceOptions[0]?.workspaceId ??
+      "",
+  );
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (
+      props.defaultWorkspaceSelectorValue &&
+      !props.workspaceOptions.some((option) =>
+        option.workspaceId === selectedWorkspace
+      )
+    ) {
+      setSelectedWorkspace(props.defaultWorkspaceSelectorValue);
+    }
+  }, [
+    props.defaultWorkspaceSelectorValue,
+    props.workspaceOptions,
+    selectedWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (!openAction) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) {
+        return;
+      }
+      if (!rootRef.current?.contains(event.target)) {
+        setOpenAction(null);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenAction(null);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openAction]);
+
+  if (props.workspaceOptions.length === 0) {
+    return (
+      <div class="muted mono session-recording-empty">
+        Register a workspace to enable recording actions.
+      </div>
+    );
+  }
+
+  const toggleAction = (action: SessionRecordingAction) => {
+    setOpenAction((current) => current === action ? null : action);
+  };
+
+  return (
+    <div ref={rootRef} class="session-recording-actions">
+      <button
+        class={openAction === "new-capture"
+          ? "secondary-button current-filter"
+          : "secondary-button"}
+        type="button"
+        onClick={() => toggleAction("new-capture")}
+      >
+        New capture
+      </button>
+      <button
+        class={openAction === "new-recording"
+          ? "secondary-button current-filter"
+          : "secondary-button"}
+        type="button"
+        onClick={() => toggleAction("new-recording")}
+      >
+        New recording
+      </button>
+      {openAction
+        ? (
+          <div class="session-recording-popover">
+            <form method="post" class="session-recording-popover-form">
+              <input type="hidden" name="sessionId" value={props.sessionId} />
+              <input
+                type="hidden"
+                name="includeStale"
+                value={String(props.includeStale)}
+              />
+              <input
+                type="hidden"
+                name="workspaceFilter"
+                value={props.workspaceFilter ?? ""}
+              />
+              <input
+                type="hidden"
+                name="csrfToken"
+                value={props.csrfToken ?? ""}
+              />
+              <input type="hidden" name="action" value={openAction} />
+              <div class="session-recording-popover-copy">
+                <strong>{buildPopoverTitle(openAction)}</strong>
+                <span>{buildPopoverDescription(openAction)}</span>
+              </div>
+              <select
+                class="form-input session-recording-select"
+                name="workspaceSelector"
+                value={selectedWorkspace}
+                onInput={(event) =>
+                  setSelectedWorkspace(
+                    (event.currentTarget as HTMLSelectElement).value,
+                  )}
+              >
+                {props.workspaceOptions.map((option) => (
+                  <option key={option.workspaceId} value={option.workspaceId}>
+                    {option.alias}
+                  </option>
+                ))}
+              </select>
+              <div class="session-recording-popover-actions">
+                <button class="secondary-button" type="submit">
+                  {buildSubmitLabel(openAction)}
+                </button>
+                <button
+                  class="secondary-button"
+                  type="button"
+                  onClick={() => setOpenAction(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )
+        : null}
+    </div>
+  );
+}
+
 export default function SessionsLive(
   props: {
     initialData: SessionsPageData;
     endpoint: string;
+    csrfToken?: string;
   },
 ) {
   const pageData = usePolledJson({
@@ -55,6 +264,9 @@ export default function SessionsLive(
     inactiveSessionCount: pageData.inactiveSessionCount,
   });
   const timeZone = useBrowserTimeZone();
+  const defaultWorkspaceSelectorValue = resolveDefaultWorkspaceSelectorValue(
+    pageData,
+  );
 
   return (
     <section class="grid">
@@ -109,42 +321,97 @@ export default function SessionsLive(
           </div>
         </div>
 
+        <hr class="sessions-header-divider" />
+
         <ul class="session-list-rows">
           {pageData.rows.length === 0
             ? <li class="muted">No sessions match the current filters.</li>
-            : pageData.rows.map((row) => (
-              <li
-                key={row.sessionKey}
-                class={`session-list-row ${row.state}`}
-                id={`session-${row.sessionId}`}
-              >
-                <div class="session-list-action">
-                  <span
-                    class={`activity-state-dot session-list-dot ${row.state}`}
-                    aria-label={buildSessionListStateLabel(row)}
-                    title={buildSessionListStateLabel(row)}
-                  >
-                    {activityStateDot(row.state)}
+            : pageData.rows.map((row) => {
+              const engagedRecordings = row.recordings.filter((recording) =>
+                recording.state !== "stopped"
+              );
+              return (
+                <li
+                  key={row.sessionKey}
+                  class={`session-list-row ${row.state}`}
+                  id={`session-${row.sessionId}`}
+                >
+                  <div class="session-list-action">
+                    <span
+                      class={`activity-state-dot session-list-dot ${row.state}`}
+                      aria-label={buildSessionListStateLabel(row)}
+                      title={buildSessionListStateLabel(row)}
+                    >
+                      {activityStateDot(row.state)}
+                    </span>
+                  </div>
+                  <span class="session-list-copy">
+                    <span class="session-list-primary">
+                      <span class="mono">{row.provider}:</span>{" "}
+                      <SessionSnippet
+                        sessionId={row.sessionId}
+                        snippet={row.snippet}
+                        snippetClass="session-list-snippet"
+                        title={`Session ${row.sessionShortId}`}
+                      />
+                    </span>{" "}
+                    <span class="muted mono session-list-updated">
+                      Updated{" "}
+                      <TimestampText
+                        value={row.updatedAt}
+                        timeZone={timeZone}
+                      />
+                    </span>
                   </span>
-                </div>
-                <span class="session-list-copy">
-                  <span class="session-list-primary">
-                    <span class="mono">{row.provider}:</span>{" "}
-                    <SessionSnippet
+                  <div class="session-list-right">
+                    <SessionRecordingActions
                       sessionId={row.sessionId}
-                      snippet={row.snippet}
-                      snippetClass="session-list-snippet"
-                    />{" "}
-                    <span class="mono">({row.sessionShortId})</span>
-                  </span>{" "}
-                  <span class="muted mono session-list-updated">
-                    Updated{" "}
-                    <TimestampText value={row.updatedAt} timeZone={timeZone} />
-                  </span>
-                </span>
-                <div class="session-list-right" />
-              </li>
-            ))}
+                      includeStale={pageData.includeStale}
+                      workspaceFilter={pageData.workspaceFilter}
+                      csrfToken={props.csrfToken}
+                      workspaceOptions={pageData.workspaceOptions}
+                      defaultWorkspaceSelectorValue={defaultWorkspaceSelectorValue}
+                    />
+                  </div>
+                  {engagedRecordings.length > 0
+                    ? (
+                      <div class="session-recordings-block session-recordings-wide">
+                        <div class="session-recordings-heading muted mono">
+                          Recordings
+                        </div>
+                        <div class="session-engaged-recordings muted mono">
+                          {engagedRecordings.map((recording) => (
+                            <div
+                              key={recording.key}
+                              class="session-engaged-line"
+                            >
+                              <a href={recording.workspaceHref}>
+                                {buildWorkspaceLabel(recording)}
+                              </a>
+                              <span>:</span>
+                              <a
+                                href={buildRecordingsRecordingHref({
+                                  workspaceFilter:
+                                    resolveRecordingWorkspaceFilter(
+                                      recording,
+                                    ),
+                                  recordingCycleId: recording.recordingCycleId,
+                                  rowKey: recording.key,
+                                })}
+                              >
+                                {buildRecordingFilename(
+                                  recording.displayOutputPath,
+                                )}
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                    : null}
+                </li>
+              );
+            })}
         </ul>
       </article>
     </section>

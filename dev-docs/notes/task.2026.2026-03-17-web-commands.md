@@ -1,8 +1,8 @@
 ---
 id: x7ta7m4ble1z6785j71c73f
 title: 2026 03 17 Web Commands
-desc: ''
-updated: 1773770713331
+desc: ""
+updated: 1773777010765
 created: 1773763652587
 ---
 
@@ -15,16 +15,19 @@ from the web client.
 
 - From the Sessions page:
   - I would like to be able to trigger "New capture" and "New recording"
-    - if we go with link-buttons, a mouseover pops up a tooltip explaining the
-      difference: "from start" vs "moving forward"
-    - we'll need to be able to select a workspace, so maybe clicking on the
-      action buttons pops up a selector menu
+    - clicking either action button opens a small workspace-chooser popover
+    - the chooser copy explains the difference: "from start" vs
+      "moving forward"
+    - `New capture` creates a fresh recording file from the full session history and
+      keeps that file engaged for future writes
+    - `New recording` creates a fresh recording file immediately, including
+      frontmatter when enabled, and starts appending conversation content on
+      the next event
   - list any engaged recordings for the session in small font, one per line, in
     the form `<workspace alias>: <filename>`
     - workspace alias links to the workspace page
     - filename links to the corresponding recording on the Recordings page
   - existing recordings are read-only from the Sessions page in this phase
-
 
 ## Discussion
 
@@ -38,20 +41,25 @@ from the web client.
 
 ## Open Issues
 
-- Do we need stable recording-row anchors or a different URL shape so the
-  Sessions page can link to a specific recording on the Recordings page?
+- none for phase 1
 
 ## Decisions
 
 - Leave `Export` out of phase 1
 - Leave explicit path entry out of phase 1
 - The Sessions page actions are `New capture` and `New recording`
+- Both Sessions page actions create a fresh destination path rather than
+  reusing the previously engaged workspace output
+- `New recording` touches its fresh destination immediately so the new file is
+  visible before the next conversation event arrives
 - Existing engaged recordings are listed on the Sessions page, but not directly
   controlled there
 - Keep internal state naming as-is, but map UI labels as:
   `engaged-active` -> `recording`
   `engaged-stale` -> `ready to record`
   `stopped` -> `stopped`
+- Recording deep links use `recordingCycleId` when present, with a stable
+  hashed row-key fallback for synthesized rows
 
 ## Contract Changes
 
@@ -61,8 +69,8 @@ from the web client.
   workspace and recording links
 - UI copy for recording state should use the operator-facing labels above,
   rather than exposing `engaged-*` terminology directly
-- The Recordings page may need stable anchors or other deep-link support if we
-  want filename links to target a specific recording row
+- The Recordings page uses stable anchors so filename links can target a
+  specific recording row
 
 ## Testing
 
@@ -85,9 +93,10 @@ from the web client.
 
 ## Implementation Plan
 
-- [ ] Define the mutation surface for Session page `New capture` / `New
+- [x] Define the mutation surface for Session page `New capture` / `New
       recording` controls
-- [ ] Define how engaged recordings are rendered and linked from the Sessions
+- [x] Define how engaged recordings are rendered and linked from the Sessions
       page
-- [ ] Implement the UI and route wiring
-- [ ] Add tests plus a manual smoke pass
+- [x] Implement the UI and route wiring
+- [x] Add tests for the new mutation, linking, and loader behavior
+- [x] Do a manual browser smoke pass for selector and deep-link flows
