@@ -627,3 +627,80 @@ Deno.test("runSessionRecordingStopAction stops all engaged recordings for the se
     }
   });
 });
+
+Deno.test("runSessionRecordingAction keeps the output-dir snapshot aligned with the generated recording path", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-record-output-dir-action-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          await Deno.writeTextFile(
+            alphaConfigPath,
+            [
+              'defaultOutputDir: "notes/{HH}"',
+              'filenameTemplate: "{provider}-{sessionShortId}.md"',
+              'workspaceTimezone: "UTC"',
+            ].join("\n") + "\n",
+          );
+          await Deno.mkdir(join(alphaRoot, "notes", "17"), {
+            recursive: true,
+          });
+          await Deno.mkdir(join(alphaRoot, "notes", "18"), {
+            recursive: true,
+          });
+
+          const sessionFilePath = join(homeDir, "provider-session.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-004",
+            providerSessionId: "provider-session-004",
+            sourceFilePath: sessionFilePath,
+          });
+
+          const timeline = [
+            new Date("2026-03-17T17:59:00.000Z"),
+            new Date("2026-03-17T18:00:00.000Z"),
+            new Date("2026-03-17T18:00:00.000Z"),
+          ];
+          let timelineIndex = 0;
+          const now = () =>
+            timeline[Math.min(timelineIndex++, timeline.length - 1)];
+
+          const result = await runSessionRecordingAction({
+            action: "new-recording",
+            sessionId: "sess-web-004",
+            workspaceSelector: "alpha",
+            katoDir,
+            now,
+          });
+
+          const sessionStore = new PersistentSessionStateStore({
+            katoDir,
+            now,
+          });
+          const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+          assertExists(metadataAfter);
+          const output = metadataAfter.workspaceOutputs?.[0];
+          assertExists(output);
+          assertEquals(
+            dirname(result.targetPath),
+            output.resolvedDefaultOutputDir,
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});

@@ -595,3 +595,135 @@ If you’re not ready for a real release, I’d still do the same structurally:
 - start a fresh phase-2 task/branch of thought afterward
 
 I would not keep piling phase-2 work into this same slice unless you already know you don’t want `v0.2.8` yet.
+
+# djradon_2026-03-17_1435_56
+
+I added coderabbit suggestions to the "completed" task. Please add markdown checkboxes to each, and those note worth doing can be marked as [c] for cancelled
+
+# gpt-5.4_2026-03-17_1436_08
+
+I’m opening the completed task note and the CodeRabbit suggestions section now so I can turn those items into a proper checklist and mark the clearly non-actionable ones as cancelled.
+
+# gpt-5.4_2026-03-17_1436_18
+
+I’m checking the few CodeRabbit items against the current code so I can mark the completed note accurately instead of guessing which ones are still worth carrying forward.
+
+# gpt-5.4_2026-03-17_1436_28
+
+I checked the suggestions against current code. I’m updating the completed note now with checklist markers, leaving the still-plausible follow-ups open and marking the low-value nitpick as cancelled.
+
+# gpt-5.4_2026-03-17_1436_39
+
+The note has a few wrapped lines in slightly different spots than I expected. I’m reopening just the suggestion block and patching against the exact text so we don’t churn anything else.
+
+# gpt-5.4_2026-03-17_1436_44
+
+I’ve got the exact block now. Patching the checklist markers against the live text.
+
+# gpt-5.4_2026-03-17_1436_56
+
+I’ve added the checkbox markers. I’m giving the updated section one quick readback so we can make sure the statuses look sensible in context.
+
+# gpt-5.4_2026-03-17_1437_02
+
+Updated [completed.2026.2026-03-17-web-commands.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/completed.2026.2026-03-17-web-commands.md) so each CodeRabbit suggestion is now a checklist item.
+
+I marked the follow-ups that still look worth considering as `[ ]`, and the low-value `log_results.tsx` nitpick as `[c]`. If you want, I can also do a second pass and mark any of the open ones as `[c]` if you already know you don’t want to pursue them.
+
+# djradon_2026-03-17_1440_04
+
+ok, please implement.
+
+# gpt-5.4_2026-03-17_1440_16
+
+I’m treating that as “implement the worthwhile open CodeRabbit items from the completed note.” I’m reading the current Sessions and recording-action code together with the relevant tests first so we can land the fixes cleanly, especially the create-action latch and the session-scoped mutation lock.
+
+# gpt-5.4_2026-03-17_1441_32
+
+I’m picking up the open CodeRabbit items from the completed note and tightening the Sessions flow and mutation safety next. I’ll update the UI controls first, then harden the session mutation path, and finish with focused tests so we know the fixes hold together.
+
+# gpt-5.4_2026-03-17_1441_36
+
+I’ve confirmed the open items are all in the Sessions island and the session mutation helper, which is a nice contained follow-up. Next I’m patching the create popover so it behaves more like the stop controls: cleaner accessibility, less double-submit risk, and stricter stop eligibility.
+
+# gpt-5.4_2026-03-17_1441_41
+
+I’ve got the code surfaces open now. Before I edit, I’m checking the completed note itself so I match the exact suggestions you wanted rather than solving a slightly different problem.
+
+# gpt-5.4_2026-03-17_1442_19
+
+I found the subtle mutation issue too: the new-recording path was snapshotting one default output dir value and binding another. I’m fixing that together with a lightweight per-session lock so start/stop requests can’t step on each other.
+
+# gpt-5.4_2026-03-17_1443_49
+
+I’m at the edit point now. I’m splitting the change into three small patches so it stays easy to review: a tiny lock helper, the Sessions UI adjustments, and the focused tests plus checklist updates.
+
+# gpt-5.4_2026-03-17_1445_49
+
+I’ve got the code changes in place. I’m finishing with small targeted tests: one around the output-dir consistency regression, one for the new session lock helper, and one tiny Sessions helper test so the stop gating doesn’t drift again.
+
+# gpt-5.4_2026-03-17_1446_25
+
+The implementation changes are in. I’m doing the cleanup pass now: a couple of focused tests and then I’ll mark the completed note so the checklist matches the code.
+
+# gpt-5.4_2026-03-17_1447_00
+
+The only snag was test infrastructure: root tests can’t import the Fresh island directly because that file depends on the web app’s import map. I’m untangling that cleanly by moving the tiny pure helpers into a plain `.ts` module so they’re testable without dragging in Preact.
+
+# gpt-5.4_2026-03-17_1448_09
+
+The lint pass is clean. The targeted test run is mid-flight now; I’ve seen the recording-action cases go green so far, and I’m waiting on the rest of the suite to finish before I wrap this up.
+
+# gpt-5.4_2026-03-17_1448_27
+
+Implemented the remaining worthwhile CodeRabbit follow-ups.
+
+On the UI side, [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) now latches `New capture` / `New recording` submissions so rapid double-clicks won’t double-submit, disables the popover controls while the request is in flight, and gives the workspace `<select>` a stable accessible label via ids from [session_recording_view_model.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_view_model.ts). I also tightened stop eligibility so inline stop controls only render when a row has both `workspaceId` and `recordingCycleId`.
+
+On the mutation side, [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts) now uses a per-session critical section from [session_mutation_lock.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_mutation_lock.ts), and the new-recording path now keeps the persisted `resolvedDefaultOutputDir` aligned with the destination resolver output. I marked those checklist items done in [completed.2026.2026-03-17-web-commands.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/completed.2026.2026-03-17-web-commands.md).
+
+Verified with:
+```bash
+deno lint apps/web/islands/SessionsLive.tsx apps/web/src/session_recording_actions.ts apps/web/src/session_mutation_lock.ts apps/web/src/session_recording_view_model.ts tests/web-session-actions_test.ts tests/web-session-mutation-lock_test.ts tests/web-sessions-live_test.ts
+deno test -A tests/web-session-actions_test.ts tests/web-session-mutation-lock_test.ts tests/web-sessions-live_test.ts tests/web-session-routes_test.ts tests/web-activity-loader_test.ts tests/web-live-routes_test.ts tests/daemon-workspace-output-state_test.ts
+```
+
+I didn’t run a fresh browser smoke pass after this round.
+
+# djradon_2026-03-17_1450_41
+
+commit message please
+
+# gpt-5.4_2026-03-17_1450_46
+
+```text
+fix(web): harden session recording controls and mutations
+
+- latch Sessions popover create actions so new capture/recording requests
+  cannot be double-submitted
+- disable create controls while a session recording mutation is pending
+- give the Sessions workspace selector a stable accessible label/id pairing
+- only render inline stop controls for recordings with both workspaceId and
+  recordingCycleId
+
+- add a lightweight per-session mutation lock for web recording start/stop
+  actions to serialize read-mutate-save flows
+- use the destination resolver's resolvedDefaultOutputDir consistently in the
+  new-recording path so persisted output snapshots stay aligned with the
+  generated target path
+
+- add focused tests for the session mutation lock, Sessions helper logic, and
+  output-dir snapshot consistency
+- mark the completed task note's remaining CodeRabbit follow-ups as done
+```
+
+If you want a shorter subject/body version too:
+
+```text
+fix(web): harden session recording controls
+
+Latch Sessions create actions, tighten stop gating, add a per-session mutation
+lock for start/stop flows, and keep new-recording output-dir snapshots aligned
+with the resolved destination. Also add focused regression tests and update the
+completed task note checklist.
+```

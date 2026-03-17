@@ -8,6 +8,11 @@ import {
   buildRecordingsRecordingHref,
   buildSessionInventoryHref,
 } from "../src/session_routes.ts";
+import {
+  buildWorkspaceSelectorIds,
+  canStopSessionRecording,
+  type SessionRecordingAction,
+} from "../src/session_recording_view_model.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
 import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
@@ -71,12 +76,6 @@ function resolveRecordingWorkspaceFilter(
   return recording.workspaceId ?? recording.workspaceAlias;
 }
 
-function canStopRecording(recording: SessionRecordingActivityRow): boolean {
-  return !!recording.workspaceId;
-}
-
-type SessionRecordingAction = "new-capture" | "new-recording";
-
 function SessionPageActionFields(
   props: {
     sessionId: string;
@@ -129,6 +128,12 @@ function buildActionTooltip(action: SessionRecordingAction): string {
     : "Record will create the recording output file and capture subsequent conversation.";
 }
 
+function buildPendingSubmitLabel(action: SessionRecordingAction): string {
+  return action === "new-capture"
+    ? "Starting capture..."
+    : "Starting recording...";
+}
+
 function buildStopAllActionKey(sessionId: string): string {
   return `stop-all:${sessionId}`;
 }
@@ -153,6 +158,9 @@ function SessionRecordingActions(
   const [openAction, setOpenAction] = useState<SessionRecordingAction | null>(
     null,
   );
+  const [pendingCreateAction, setPendingCreateAction] = useState<
+    SessionRecordingAction | null
+  >(null);
   const [selectedWorkspace, setSelectedWorkspace] = useState(
     props.defaultWorkspaceSelectorValue ??
       props.workspaceOptions[0]?.workspaceId ??
@@ -176,7 +184,7 @@ function SessionRecordingActions(
   ]);
 
   useEffect(() => {
-    if (!openAction) {
+    if (!openAction || pendingCreateAction !== null) {
       return;
     }
     const handlePointerDown = (event: PointerEvent) => {
@@ -198,7 +206,7 @@ function SessionRecordingActions(
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [openAction]);
+  }, [openAction, pendingCreateAction]);
 
   if (props.workspaceOptions.length === 0) {
     return (
@@ -209,8 +217,30 @@ function SessionRecordingActions(
   }
 
   const toggleAction = (action: SessionRecordingAction) => {
+    if (pendingCreateAction !== null) {
+      return;
+    }
     setOpenAction((current) => current === action ? null : action);
   };
+
+  const handleCreateSubmit =
+    (action: SessionRecordingAction) => (event: Event) => {
+      if (!(event.currentTarget instanceof HTMLFormElement)) {
+        return;
+      }
+      if (pendingCreateAction !== null) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      const form = event.currentTarget;
+      setPendingCreateAction(action);
+      if ("requestAnimationFrame" in globalThis) {
+        globalThis.requestAnimationFrame(() => form.submit());
+        return;
+      }
+      globalThis.setTimeout(() => form.submit(), 0);
+    };
 
   return (
     <div ref={rootRef} class="session-recording-actions">
@@ -220,6 +250,7 @@ function SessionRecordingActions(
           : "secondary-button"}
         type="button"
         title={buildActionTooltip("new-capture")}
+        disabled={pendingCreateAction !== null}
         onClick={() => toggleAction("new-capture")}
       >
         New capture
@@ -230,6 +261,7 @@ function SessionRecordingActions(
           : "secondary-button"}
         type="button"
         title={buildActionTooltip("new-recording")}
+        disabled={pendingCreateAction !== null}
         onClick={() => toggleAction("new-recording")}
       >
         New recording
@@ -237,7 +269,12 @@ function SessionRecordingActions(
       {openAction
         ? (
           <div class="session-recording-popover">
-            <form method="post" class="session-recording-popover-form">
+            <form
+              method="post"
+              class="session-recording-popover-form"
+              aria-busy={pendingCreateAction === openAction}
+              onSubmit={handleCreateSubmit(openAction)}
+            >
               <SessionPageActionFields
                 sessionId={props.sessionId}
                 includeStale={props.includeStale}
@@ -246,12 +283,17 @@ function SessionRecordingActions(
               />
               <input type="hidden" name="action" value={openAction} />
               <div class="session-recording-popover-copy">
-                <strong>{buildPopoverTitle(openAction)}</strong>
+                <strong id={buildWorkspaceSelectorIds(openAction).titleId}>
+                  {buildPopoverTitle(openAction)}
+                </strong>
                 <span>{buildPopoverDescription(openAction)}</span>
               </div>
               <select
+                id={buildWorkspaceSelectorIds(openAction).selectId}
                 class="form-input session-recording-select"
                 name="workspaceSelector"
+                aria-labelledby={buildWorkspaceSelectorIds(openAction).titleId}
+                disabled={pendingCreateAction !== null}
                 value={selectedWorkspace}
                 onInput={(event) =>
                   setSelectedWorkspace(
@@ -265,12 +307,19 @@ function SessionRecordingActions(
                 ))}
               </select>
               <div class="session-recording-popover-actions">
-                <button class="secondary-button" type="submit">
-                  {buildSubmitLabel(openAction)}
+                <button
+                  class="secondary-button"
+                  type="submit"
+                  disabled={pendingCreateAction !== null}
+                >
+                  {pendingCreateAction === openAction
+                    ? buildPendingSubmitLabel(openAction)
+                    : buildSubmitLabel(openAction)}
                 </button>
                 <button
                   class="secondary-button"
                   type="button"
+                  disabled={pendingCreateAction !== null}
                   onClick={() => setOpenAction(null)}
                 >
                   Cancel
@@ -395,7 +444,7 @@ export default function SessionsLive(
                 recording.state !== "stopped"
               );
               const stoppableRecordings = engagedRecordings.filter(
-                canStopRecording,
+                canStopSessionRecording,
               );
               const stopAllActionKey = buildStopAllActionKey(row.sessionId);
               return (
@@ -514,7 +563,7 @@ export default function SessionsLive(
                                         )}
                                       </a>
                                     </span>
-                                    {canStopRecording(recording)
+                                    {canStopSessionRecording(recording)
                                       ? (
                                         <form
                                           method="post"
