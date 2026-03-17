@@ -5,6 +5,7 @@ interface SessionSnippetProps {
   snippet?: string;
   allowSourceReplay?: boolean;
   snippetClass?: string;
+  title?: string;
 }
 
 interface SessionSnippetResponse {
@@ -74,15 +75,27 @@ export default function SessionSnippet(props: SessionSnippetProps) {
   }, [props.sessionId, props.snippet]);
 
   if (state.status === "ready") {
-    return <span class={props.snippetClass}>{state.snippet}</span>;
+    return (
+      <span class={props.snippetClass} title={props.title}>
+        {state.snippet}
+      </span>
+    );
   }
 
   if (state.status === "loading") {
-    return <span class="muted mono">loading snippet...</span>;
+    return (
+      <span class="muted mono" title={props.title}>
+        loading snippet...
+      </span>
+    );
   }
 
   if (state.status === "unavailable") {
-    return <span class="muted mono">snippet unavailable</span>;
+    return (
+      <span class="muted mono" title={props.title}>
+        snippet unavailable
+      </span>
+    );
   }
 
   const loadSnippet = async () => {
@@ -125,6 +138,7 @@ export default function SessionSnippet(props: SessionSnippetProps) {
     <button
       type="button"
       class="mono session-inline-action"
+      title={props.title}
       onClick={() => void loadSnippet()}
     >
       show snippet

@@ -24,9 +24,9 @@ export function activityStateLabel(state: ActivityState): string {
 export function recordingActivityStateLabel(state: ActivityState): string {
   switch (state) {
     case "active":
-      return "active";
+      return "recording";
     case "stale":
-      return "idle";
+      return "ready to record";
     case "inactive":
       return "stopped";
   }

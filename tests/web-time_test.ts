@@ -1,17 +1,42 @@
 import { assertEquals } from "@std/assert";
 import {
+  canonicalTimestamp,
   formatRelativeTimestamp,
   formatTimestamp,
   parseTimestampMs,
 } from "../apps/web/src/time.ts";
 
-Deno.test("formatTimestamp returns stable ISO output", () => {
+Deno.test("formatTimestamp returns stable ISO fallback when no time zone is provided", () => {
   assertEquals(
     formatTimestamp("2026-03-12T04:45:00.123-07:00"),
     "2026-03-12T11:45:00.123Z",
   );
   assertEquals(formatTimestamp(undefined), "n/a");
   assertEquals(formatTimestamp("not-a-timestamp"), "not-a-timestamp");
+});
+
+Deno.test("formatTimestamp renders fixed-width local time when a time zone is provided", () => {
+  assertEquals(
+    formatTimestamp("2026-03-12T04:45:00.123-07:00", {
+      timeZone: "America/Los_Angeles",
+    }),
+    "2026-03-12 04:45:00",
+  );
+  assertEquals(
+    formatTimestamp("2026-03-12T04:45:00.123-07:00", {
+      timeZone: "UTC",
+    }),
+    "2026-03-12 11:45:00",
+  );
+});
+
+Deno.test("canonicalTimestamp returns normalized ISO strings", () => {
+  assertEquals(
+    canonicalTimestamp("2026-03-12T04:45:00.123-07:00"),
+    "2026-03-12T11:45:00.123Z",
+  );
+  assertEquals(canonicalTimestamp("not-a-timestamp"), undefined);
+  assertEquals(canonicalTimestamp(undefined), undefined);
 });
 
 Deno.test("parseTimestampMs returns milliseconds for valid timestamps", () => {

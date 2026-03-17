@@ -492,7 +492,18 @@ a {
 
 .page-toolbar-summary {
   margin-top: 2px;
+  margin-bottom: 0;
   font-size: 0.86rem;
+}
+
+.page-toolbar h2 {
+  margin-bottom: 0;
+}
+
+.sessions-header-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 14px 0 14px;
 }
 
 .page-actions {
@@ -665,16 +676,16 @@ a {
 
 .session-list-row {
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
+  grid-template-columns: 1.25rem minmax(0, 1fr) clamp(18rem, 24vw, 23rem);
+  column-gap: 16px;
+  row-gap: 8px;
+  align-items: start;
   padding: 14px 0;
   border-top: 1px solid var(--line);
 }
 
 .session-list-row:first-child {
   border-top: 0;
-  padding-top: 0;
 }
 
 .session-list-row:last-child {
@@ -685,6 +696,8 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
+  margin-top: -6px;
 }
 
 .session-list-dot {
@@ -692,7 +705,12 @@ a {
 }
 
 .session-list-right {
-  justify-self: end;
+  justify-self: stretch;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  justify-items: end;
 }
 
 .session-list-link {
@@ -727,8 +745,37 @@ a {
   line-height: 1.15;
 }
 
+.session-recordings-block {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.session-recordings-wide {
+  grid-column: 2 / -1;
+  margin-top: 0;
+}
+
+.session-recordings-heading {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.session-recordings-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .session-list-action-form {
   margin: 0;
+}
+
+.session-inline-action-form {
+  display: inline;
 }
 
 .session-inline-action {
@@ -741,6 +788,106 @@ a {
   text-decoration: underline;
   text-underline-offset: 0.18em;
   cursor: pointer;
+}
+
+.session-inline-action-danger {
+  color: var(--danger);
+}
+
+.session-inline-action-small {
+  font-size: 0.68rem;
+}
+
+.session-inline-action:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.session-recording-actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.session-recording-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: min(18rem, 80vw);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 252, 247, 0.98);
+  box-shadow: 0 18px 36px rgba(21, 21, 21, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+.session-recording-popover-form {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+}
+
+.session-recording-popover-copy {
+  display: grid;
+  gap: 2px;
+  font-size: 0.82rem;
+}
+
+.session-recording-popover-copy strong {
+  font-size: 0.9rem;
+}
+
+.session-recording-popover-copy span {
+  color: var(--muted);
+}
+
+.session-recording-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.session-recording-popover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.session-engaged-recordings {
+  display: grid;
+  gap: 4px;
+  font-size: 0.76rem;
+  justify-items: start;
+  max-width: 100%;
+}
+
+.session-engaged-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.session-engaged-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.session-engaged-line a {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+.session-recording-empty {
+  font-size: 0.76rem;
 }
 
 .session-activity-top {
@@ -1149,6 +1296,22 @@ a {
   .session-list-right {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .session-recording-actions,
+  .session-engaged-recordings {
+    justify-content: flex-start;
+    justify-items: start;
+  }
+
+  .session-recording-popover {
+    left: 0;
+    right: auto;
+    width: min(20rem, calc(100vw - 4rem));
+  }
+
+  .session-recording-popover-actions {
+    justify-content: flex-start;
   }
 
   .card-split,

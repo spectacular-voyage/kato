@@ -1,12 +1,68 @@
-export function formatTimestamp(value: string | undefined): string {
+const timestampFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function parseTimestampDate(value: string | undefined): Date | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function getTimestampFormatter(timeZone: string): Intl.DateTimeFormat {
+  const existing = timestampFormatters.get(timeZone);
+  if (existing) {
+    return existing;
+  }
+  const created = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    hour12: false,
+  });
+  timestampFormatters.set(timeZone, created);
+  return created;
+}
+
+function formatTimestampParts(date: Date, timeZone: string): string {
+  const formatter = getTimestampFormatter(timeZone);
+  const parts = formatter.formatToParts(date);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")} ${
+    values.get("hour")
+  }:${values.get("minute")}:${values.get("second")}`;
+}
+
+export function canonicalTimestamp(
+  value: string | undefined,
+): string | undefined {
+  const parsed = parseTimestampDate(value);
+  return parsed?.toISOString();
+}
+
+export function formatTimestamp(
+  value: string | undefined,
+  options: { timeZone?: string } = {},
+): string {
   if (!value) {
     return "n/a";
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseTimestampDate(value);
+  if (!parsed) {
     return value;
   }
-  return parsed.toISOString();
+  if (!options.timeZone) {
+    return parsed.toISOString();
+  }
+  try {
+    return formatTimestampParts(parsed, options.timeZone);
+  } catch {
+    return parsed.toISOString();
+  }
 }
 
 export function parseTimestampMs(

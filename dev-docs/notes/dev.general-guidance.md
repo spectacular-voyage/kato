@@ -2,13 +2,13 @@
 id: cta3nbz9egelrjz5ec86wxm
 title: General Guidance
 desc: ''
-updated: 1772901113251
+updated: 1773627167506
 created: 1771724621833
 ---
 
 ## Purpose
 
-This note defines day-to-day developer guidance for Kato.
+This note defines day-to-day development guidance for Kato.
 
 IMPORTANT: This project must use modern Deno best practices and, whenever
 possible, Deno-native or Deno-first libraries. LLMs often try to use Node

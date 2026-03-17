@@ -130,6 +130,51 @@ Deno.test(
 );
 
 Deno.test(
+  "findWorkspaceOutput prefers the latest active output for a workspace and otherwise returns the latest historical output",
+  () => {
+    const alpha = makeProfile({ alias: "alpha" });
+    const metadata = makeMetadata();
+    const outputs = readWorkspaceOutputs(metadata);
+
+    outputs.push(makeOutputState(alpha, {
+      currentResolvedPath: resolve(alpha.workspaceRoot, "notes", "older.md"),
+      desiredState: "off",
+    }));
+    outputs.push(makeOutputState(alpha, {
+      currentResolvedPath: resolve(alpha.workspaceRoot, "notes", "active.md"),
+      desiredState: "on",
+      activeRecordingCycleId: "cycle-active",
+      recordingCycles: [{
+        recordingCycleId: "cycle-active",
+        startedCursor: 3,
+        startedAt: "2026-02-22T10:03:00.000Z",
+        startedBySeq: 3,
+      }],
+    }));
+    outputs.push(makeOutputState(alpha, {
+      currentResolvedPath: resolve(
+        alpha.workspaceRoot,
+        "notes",
+        "newest-off.md",
+      ),
+      desiredState: "off",
+    }));
+
+    assertEquals(
+      findWorkspaceOutput(metadata, alpha.workspaceId)?.currentResolvedPath,
+      resolve(alpha.workspaceRoot, "notes", "active.md"),
+    );
+
+    closeWorkspaceOutputCycle(outputs[1]!, 5, "2026-02-22T10:05:00.000Z");
+
+    assertEquals(
+      findWorkspaceOutput(metadata, alpha.workspaceId)?.currentResolvedPath,
+      resolve(alpha.workspaceRoot, "notes", "newest-off.md"),
+    );
+  },
+);
+
+Deno.test(
   "workspace destination binding keeps workspace-relative paths and preserves explicit absolute retargets",
   () => {
     const profile = makeProfile();

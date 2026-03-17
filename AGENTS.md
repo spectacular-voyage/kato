@@ -1,7 +1,12 @@
-# CODEX
+# AGENTS
 
 - The README.md file is for user-facing documentation. Keep anything developer-targeted in the dev-docs/notes/.
-- 
+
+- `dev-docs/notes/` is a Dendron vault that uses wikilinks-style links (i.e., double square brackets, no '.md' extension) and a standardized YAML frontmatter
+  - you do not need to update the "updated" field in Dendron note frontmatter; Dendron does that automatically
+  - Keep any developer-targeting notes in `dev-docs/notes/dev*`
+  - release notes are in (`dev-docs/notes/release-notes.*`)
+
 - Primary developer guidance for this repository is in: `dev-docs/notes/dev.general-guidance.md`
   - Read that note before proposing or applying changes.
 

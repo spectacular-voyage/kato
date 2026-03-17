@@ -131,7 +131,7 @@ export function isSessionTwinEventV1(
   }
   if (
     source["providerEventId"] !== undefined &&
-    typeof source["providerEventId"] !== "string"
+    !isNonEmptyString(source["providerEventId"])
   ) {
     return false;
   }
@@ -153,21 +153,22 @@ export function isSessionTwinEventV1(
     }
     if (
       time["providerTimestamp"] !== undefined &&
-      typeof time["providerTimestamp"] !== "string"
+      !isNonEmptyString(time["providerTimestamp"])
     ) {
       return false;
     }
     if (
-      time["capturedAt"] !== undefined && typeof time["capturedAt"] !== "string"
+      time["capturedAt"] !== undefined &&
+      !isNonEmptyString(time["capturedAt"])
     ) {
       return false;
     }
   }
 
-  if (value["turnId"] !== undefined && typeof value["turnId"] !== "string") {
+  if (value["turnId"] !== undefined && !isNonEmptyString(value["turnId"])) {
     return false;
   }
-  if (value["model"] !== undefined && typeof value["model"] !== "string") {
+  if (value["model"] !== undefined && !isNonEmptyString(value["model"])) {
     return false;
   }
 

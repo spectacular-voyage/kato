@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import {
@@ -357,6 +357,67 @@ Deno.test("RecordingPipeline capture keeps existing recording target unchanged",
     italicizeUserMessages: undefined,
   });
 });
+
+Deno.test(
+  "RecordingPipeline appendToDestination creates a frontmatter-only file when no events are provided",
+  async () => {
+    const tempDir = await makeTestTempDir(
+      "recording-pipeline-frontmatter-touch-",
+    );
+    try {
+      const gate: WritePathPolicyGateLike = {
+        evaluateWritePath(targetPath: string) {
+          return Promise.resolve({
+            decision: "allow" as const,
+            targetPath,
+            reason: "allowed-for-test",
+            canonicalTargetPath: join(tempDir, targetPath),
+            matchedRoot: tempDir,
+          });
+        },
+      };
+      const pipeline = new RecordingPipeline({
+        pathPolicyGate: gate,
+        now: () => new Date("2026-02-22T10:00:00.000Z"),
+      });
+
+      const writeResult = await pipeline.appendToDestination({
+        provider: "codex",
+        sessionId: "session-frontmatter-touch",
+        targetPath: "notes/touched.md",
+        events: [],
+        title: "Touched Recording",
+        recordingId: "cycle-frontmatter-touch",
+        workspaceIds: ["workspace-alpha"],
+      });
+
+      assertEquals(writeResult.mode, "create");
+      assertEquals(writeResult.wrote, true);
+      const written = await Deno.readTextFile(
+        join(tempDir, "notes", "touched.md"),
+      );
+      assertStringIncludes(written, "---");
+      assertStringIncludes(
+        written,
+        "title: 'Touched Recording'",
+      );
+      assertStringIncludes(
+        written,
+        "kato-sessionIds: [session-frontmatter-touch]",
+      );
+      assertStringIncludes(
+        written,
+        "kato-workspaceIds: [workspace-alpha]",
+      );
+      assertStringIncludes(
+        written,
+        "kato-recordingIds: [cycle-frontmatter-touch]",
+      );
+    } finally {
+      await removePathIfPresent(tempDir);
+    }
+  },
+);
 
 Deno.test(
   "RecordingPipeline capture rejects when destination already exists",

@@ -3,11 +3,9 @@ import {
   buildSessionInventoryHref,
   buildSessionInventorySessionHref,
 } from "../src/session_routes.ts";
-import {
-  formatRelativeTimestamp,
-  formatTimestamp,
-  parseTimestampMs,
-} from "../src/time.ts";
+import { formatRelativeTimestamp, parseTimestampMs } from "../src/time.ts";
+import { TimestampText } from "../src/TimestampText.tsx";
+import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 import { useEffect, useState } from "preact/hooks";
 
@@ -105,6 +103,7 @@ export default function SummaryLive(
     .filter((session) => session.state === "active")
     .slice(0, 10);
   const heartbeatAge = formatRelativeTimestamp(data.heartbeatAt, nowMs);
+  const timeZone = useBrowserTimeZone();
 
   return (
     <section class="grid">
@@ -186,7 +185,10 @@ export default function SummaryLive(
             ? "Snapshot is stale or daemon heartbeat is unavailable."
             : "Snapshot heartbeat is current."}
         </p>
-        <p class="mono">Heartbeat: {formatTimestamp(data.heartbeatAt)}</p>
+        <p class="mono">
+          Heartbeat:{" "}
+          <TimestampText value={data.heartbeatAt} timeZone={timeZone} />
+        </p>
         <p class={data.stale ? "mono stale" : "mono muted"}>
           Age: {heartbeatAge}
         </p>
@@ -288,7 +290,8 @@ export default function SummaryLive(
                 </a>
                 <div>{error.message}</div>
                 <div class="muted">
-                  {formatTimestamp(error.timestamp)} ·{" "}
+                  <TimestampText value={error.timestamp} timeZone={timeZone} />
+                  {" · "}
                   {formatRelativeTimestamp(error.timestamp, nowMs)}
                 </div>
               </li>

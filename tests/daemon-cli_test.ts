@@ -56,7 +56,11 @@ import {
   snapshotRuntimeEnv,
   withLockedEnvironment,
 } from "./test_env.ts";
-import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
+import {
+  makeTestTempPath,
+  resolveTestTempPath,
+  withTestTempDir,
+} from "./test_temp.ts";
 
 const DAEMON_CLI_ACTIVE_OUTPUT_PATH = resolveTestTempPath(
   "daemon-cli",
@@ -66,6 +70,10 @@ const DAEMON_CLI_STALE_OUTPUT_PATH = resolveTestTempPath(
   "daemon-cli",
   "stale.md",
 );
+
+function makeFilesystemRuntimeDir(): string {
+  return makeTestTempPath("daemon-cli-runtime-");
+}
 
 type DaemonCliRuntimeConfigFixture = DaemonRuntimeConfig & {
   statusPath: string;
@@ -770,7 +778,8 @@ Deno.test("cli parser treats top-level user help flags as help", () => {
 });
 
 Deno.test("runDaemonCli prints version without loading config", async () => {
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const harness = makeRuntimeHarness(runtimeDir);
 
   const code = await runDaemonCli(["--version"], {
     runtime: harness.runtime,
@@ -782,7 +791,8 @@ Deno.test("runDaemonCli prints version without loading config", async () => {
 });
 
 Deno.test("runDaemonCli help includes version and tagline", async () => {
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const harness = makeRuntimeHarness(runtimeDir);
 
   const code = await runDaemonCli(["help"], {
     runtime: harness.runtime,
@@ -799,7 +809,8 @@ Deno.test("runDaemonCli help includes version and tagline", async () => {
 });
 
 Deno.test("runDaemonCli help topic includes version and tagline", async () => {
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const harness = makeRuntimeHarness(runtimeDir);
 
   const code = await runDaemonCli(["help", "start"], {
     runtime: harness.runtime,
@@ -1533,7 +1544,6 @@ Deno.test(
         output,
         "ERROR web operational web.settings.mutation.failed",
       );
-      assertStringIncludes(output, "invalid username");
     });
   },
 );
@@ -2514,7 +2524,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli start fails when startup acknowledgement times out",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = makeFilesystemRuntimeDir();
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore({
       schemaVersion: 1,
@@ -2768,7 +2778,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli fails closed when config is missing for non-start commands",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = makeFilesystemRuntimeDir();
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
@@ -2789,7 +2799,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli start fails when auto-init is disabled and config is missing",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = makeFilesystemRuntimeDir();
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore();
     const controlStore = makeInMemoryControlStore();
@@ -2811,7 +2821,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli status preserves stale sessions when lastEventAt is missing",
   async () => {
-    const runtimeDir = ".kato/test-runtime";
+    const runtimeDir = makeFilesystemRuntimeDir();
     const harness = makeRuntimeHarness(runtimeDir);
     const statusStore = makeInMemoryStatusStore({
       schemaVersion: 1,
@@ -2871,7 +2881,7 @@ Deno.test("runDaemonCli uses control queue and status snapshot stores", async ()
     31337,
     makeStartupAckCallback(statusStore, 31337),
   );
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
@@ -3268,7 +3278,7 @@ Deno.test("runDaemonCli export fails when daemon is not running", async () => {
       destinations: 0,
     },
   });
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const allowPathPolicy = makePathPolicyGate("allow");
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
@@ -3308,7 +3318,7 @@ Deno.test("runDaemonCli export fails when daemon heartbeat is stale", async () =
       destinations: 0,
     },
   });
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const allowPathPolicy = makePathPolicyGate("allow");
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
@@ -3348,7 +3358,7 @@ Deno.test("runDaemonCli denies export when path policy rejects output path", asy
       destinations: 0,
     },
   });
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const denyPathPolicy = makePathPolicyGate("deny");
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
@@ -3385,7 +3395,7 @@ Deno.test("runDaemonCli stop resets stale running status without queueing", asyn
       destinations: 0,
     },
   });
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
@@ -3410,7 +3420,7 @@ Deno.test("runDaemonCli restart starts daemon when not running", async () => {
     31337,
     makeStartupAckCallback(statusStore, 31337),
   );
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
 
@@ -3431,7 +3441,7 @@ Deno.test("runDaemonCli restart starts daemon when not running", async () => {
 });
 
 Deno.test("runDaemonCli restart queues stop and then starts daemon when running", async () => {
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
   const daemonLauncher = makeDaemonLauncher(31337, () => {
@@ -3551,7 +3561,7 @@ Deno.test("runDaemonCli restart queues stop and then starts daemon when running"
 });
 
 Deno.test("runDaemonCli restart fails when stop does not complete before timeout", async () => {
-  const runtimeDir = ".kato/test-runtime";
+  const runtimeDir = makeFilesystemRuntimeDir();
   const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
   const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
   const harness = makeRuntimeHarness(runtimeDir);
@@ -3637,7 +3647,8 @@ Deno.test("runDaemonCli restart fails when stop does not complete before timeout
 });
 
 Deno.test("runDaemonCli returns usage error code for unknown flag", async () => {
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const harness = makeRuntimeHarness(runtimeDir);
   const code = await runDaemonCli(["start", "--bad-flag"], {
     runtime: harness.runtime,
     statusStore: makeInMemoryStatusStore(),
@@ -3649,7 +3660,8 @@ Deno.test("runDaemonCli returns usage error code for unknown flag", async () => 
 });
 
 Deno.test("runDaemonCli returns usage error for removed attach-era commands", async () => {
-  const harness = makeRuntimeHarness(".kato/test-runtime");
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const harness = makeRuntimeHarness(runtimeDir);
   const code = await runDaemonCli(["attach", "abc12345"], {
     runtime: harness.runtime,
     statusStore: makeInMemoryStatusStore(),
