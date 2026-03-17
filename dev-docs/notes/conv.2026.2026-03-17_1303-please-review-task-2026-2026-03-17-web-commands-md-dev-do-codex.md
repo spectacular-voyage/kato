@@ -161,3 +161,70 @@ I’m editing the action layer first so the UI can stay thin. The goal is a smal
 # gpt-5.4_2026-03-17_1323_49
 
 I’ve added the stop mutation logic. Next I’m wiring the Sessions route so it accepts the two new stop actions and produces sane notices instead of treating them like recording-creation actions.
+
+# gpt-5.4_2026-03-17_1324_02
+
+I’m editing the Sessions UI now. I’m keeping the creation popover as-is, then adding small inline stop forms into the recordings block so the controls stay close to the thing they affect.
+
+# gpt-5.4_2026-03-17_1324_22
+
+I’ve wired the markup. I’m smoothing the CSS next so the bracketed stop links sit inline without breaking the filename wrapping behavior we already tuned.
+
+# gpt-5.4_2026-03-17_1324_33
+
+I’m locking down the stop behavior with focused tests now: one for stopping a specific engaged recording row, and one for stop-all across a session. I’m intentionally making the single-stop test identify the row by workspace, cycle, and path so we don’t accidentally implement something overly loose.
+
+# gpt-5.4_2026-03-17_1325_03
+
+I’ve got the stop controls wired through the mutation layer, route, UI, and focused tests. I’m formatting and running the targeted suite now so we can catch any type mismatches or form/selector issues before I touch the task note.
+
+# gpt-5.4_2026-03-17_1325_06
+
+The new stop tests are already green so far. I’m polling the rest of the suite now to make sure the Sessions loader/live-route code still agrees with the expanded action set.
+
+# gpt-5.4_2026-03-17_1325_11
+
+I’m updating the task note last so it matches the code we actually have now: per-recording stop, session-level stop-all, and no more “read-only” wording for engaged recordings on Sessions.
+
+# gpt-5.4_2026-03-17_1325_21
+
+The code is green, and I’ve updated the task note to match the new scope. I’m doing one quick formatting pass on the note so the write-up stays clean too.
+
+# gpt-5.4_2026-03-17_1325_27
+
+`deno fmt` didn’t pick up the markdown file with the plain path invocation, so I’m re-running it with an explicit markdown extension flag and then I’ll wrap this up.
+
+# gpt-5.4_2026-03-17_1325_58
+
+Implemented. The Sessions page now shows inline `[stop]` buttons next to each engaged recording and a `[stop all]` link next to the `Recordings` heading in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx). The route accepts the new stop actions in [sessions.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/sessions.tsx), and the mutation logic in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts) stops either one targeted engaged output or all engaged outputs for the session.
+
+I also added focused tests for single-stop and stop-all in [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts) and updated [task.2026.2026-03-17-web-commands.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands.md) so it no longer says the Sessions recordings are read-only. One small caveat: the inline `[stop]` only renders for recordings backed by persisted workspace metadata, which is the right constraint for this phase.
+
+Verified with:
+```bash
+deno test -A tests/web-session-actions_test.ts tests/web-session-routes_test.ts tests/web-activity-loader_test.ts tests/web-live-routes_test.ts tests/daemon-workspace-output-state_test.ts
+```
+
+I haven’t done a browser smoke pass on the new stop controls yet.
+
+# djradon_2026-03-17_1328_14
+
+can you make [stop all] smaller and all the stop links red?
+
+# gpt-5.4_2026-03-17_1328_22
+
+I’m making a small styling pass on the Sessions inline stop controls now: shrinking `[stop all]` a bit relative to the heading and pushing both stop actions into the danger color so they read as destructive affordances.
+
+# gpt-5.4_2026-03-17_1328_27
+
+I’ve got the exact spots. I’m making the stop actions use dedicated modifier classes so only the destructive controls go red, and `[stop all]` can shrink a touch without affecting the per-row stop buttons.
+
+# gpt-5.4_2026-03-17_1328_35
+
+The styling change is in. I’m doing a quick format pass on the JSX file so we don’t leave behind noisy whitespace or line-wrap churn.
+
+# gpt-5.4_2026-03-17_1328_39
+
+Updated the Sessions stop controls styling in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx) and [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css).
+
+`[stop all]` is now a bit smaller, and both `[stop all]` and `[stop]` use the danger red instead of the neutral inline-link color. I only did a formatting pass for this change, not a test run, since it’s CSS/markup-only.

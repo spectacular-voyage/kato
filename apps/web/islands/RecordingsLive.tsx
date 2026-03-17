@@ -124,6 +124,8 @@ export default function RecordingsLive(
           </div>
         </div>
 
+        <hr class="sessions-header-divider" />
+
         <ul class="session-activity-list">
           {pageData.rows.length === 0
             ? <li class="muted">No recordings match the current filters.</li>

@@ -71,7 +71,41 @@ function resolveRecordingWorkspaceFilter(
   return recording.workspaceId ?? recording.workspaceAlias;
 }
 
+function canStopRecording(recording: SessionRecordingActivityRow): boolean {
+  return !!recording.workspaceId;
+}
+
 type SessionRecordingAction = "new-capture" | "new-recording";
+
+function SessionPageActionFields(
+  props: {
+    sessionId: string;
+    includeStale: boolean;
+    workspaceFilter?: string;
+    csrfToken?: string;
+  },
+) {
+  return (
+    <>
+      <input type="hidden" name="sessionId" value={props.sessionId} />
+      <input
+        type="hidden"
+        name="includeStale"
+        value={String(props.includeStale)}
+      />
+      <input
+        type="hidden"
+        name="workspaceFilter"
+        value={props.workspaceFilter ?? ""}
+      />
+      <input
+        type="hidden"
+        name="csrfToken"
+        value={props.csrfToken ?? ""}
+      />
+    </>
+  );
+}
 
 function buildPopoverTitle(action: SessionRecordingAction): string {
   return action === "new-capture"
@@ -185,21 +219,11 @@ function SessionRecordingActions(
         ? (
           <div class="session-recording-popover">
             <form method="post" class="session-recording-popover-form">
-              <input type="hidden" name="sessionId" value={props.sessionId} />
-              <input
-                type="hidden"
-                name="includeStale"
-                value={String(props.includeStale)}
-              />
-              <input
-                type="hidden"
-                name="workspaceFilter"
-                value={props.workspaceFilter ?? ""}
-              />
-              <input
-                type="hidden"
-                name="csrfToken"
-                value={props.csrfToken ?? ""}
+              <SessionPageActionFields
+                sessionId={props.sessionId}
+                includeStale={props.includeStale}
+                workspaceFilter={props.workspaceFilter}
+                csrfToken={props.csrfToken}
               />
               <input type="hidden" name="action" value={openAction} />
               <div class="session-recording-popover-copy">
@@ -330,6 +354,9 @@ export default function SessionsLive(
               const engagedRecordings = row.recordings.filter((recording) =>
                 recording.state !== "stopped"
               );
+              const stoppableRecordings = engagedRecordings.filter(
+                canStopRecording,
+              );
               return (
                 <li
                   key={row.sessionKey}
@@ -376,8 +403,36 @@ export default function SessionsLive(
                   {engagedRecordings.length > 0
                     ? (
                       <div class="session-recordings-block session-recordings-wide">
-                        <div class="session-recordings-heading muted mono">
-                          Recordings
+                        <div class="session-recordings-heading-row">
+                          <div class="session-recordings-heading muted mono">
+                            Recordings
+                          </div>
+                          {stoppableRecordings.length > 0
+                            ? (
+                              <form
+                                method="post"
+                                class="session-list-action-form session-inline-action-form"
+                              >
+                                <SessionPageActionFields
+                                  sessionId={row.sessionId}
+                                  includeStale={pageData.includeStale}
+                                  workspaceFilter={pageData.workspaceFilter}
+                                  csrfToken={props.csrfToken}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="action"
+                                  value="stop-all-recordings"
+                                />
+                                <button
+                                  class="session-inline-action session-inline-action-danger session-inline-action-small mono"
+                                  type="submit"
+                                >
+                                  [stop all]
+                                </button>
+                              </form>
+                            )
+                            : null}
                         </div>
                         <div class="session-engaged-recordings muted mono">
                           {engagedRecordings.map((recording) => (
@@ -385,24 +440,68 @@ export default function SessionsLive(
                               key={recording.key}
                               class="session-engaged-line"
                             >
-                              <a href={recording.workspaceHref}>
-                                {buildWorkspaceLabel(recording)}
-                              </a>
-                              <span>:</span>
-                              <a
-                                href={buildRecordingsRecordingHref({
-                                  workspaceFilter:
-                                    resolveRecordingWorkspaceFilter(
-                                      recording,
-                                    ),
-                                  recordingCycleId: recording.recordingCycleId,
-                                  rowKey: recording.key,
-                                })}
-                              >
-                                {buildRecordingFilename(
-                                  recording.displayOutputPath,
-                                )}
-                              </a>
+                              <span class="session-engaged-copy">
+                                <a href={recording.workspaceHref}>
+                                  {buildWorkspaceLabel(recording)}
+                                </a>
+                                <span>:</span>
+                                <a
+                                  href={buildRecordingsRecordingHref({
+                                    workspaceFilter:
+                                      resolveRecordingWorkspaceFilter(
+                                        recording,
+                                      ),
+                                    recordingCycleId:
+                                      recording.recordingCycleId,
+                                    rowKey: recording.key,
+                                  })}
+                                >
+                                  {buildRecordingFilename(
+                                    recording.displayOutputPath,
+                                  )}
+                                </a>
+                              </span>
+                              {canStopRecording(recording)
+                                ? (
+                                  <form
+                                    method="post"
+                                    class="session-list-action-form session-inline-action-form"
+                                  >
+                                    <SessionPageActionFields
+                                      sessionId={row.sessionId}
+                                      includeStale={pageData.includeStale}
+                                      workspaceFilter={pageData.workspaceFilter}
+                                      csrfToken={props.csrfToken}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="action"
+                                      value="stop-recording"
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="workspaceId"
+                                      value={recording.workspaceId ?? ""}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="recordingCycleId"
+                                      value={recording.recordingCycleId ?? ""}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="outputPath"
+                                      value={recording.outputPath}
+                                    />
+                                    <button
+                                      class="session-inline-action session-inline-action-danger mono"
+                                      type="submit"
+                                    >
+                                      [stop]
+                                    </button>
+                                  </form>
+                                )
+                                : null}
                             </div>
                           ))}
                         </div>

@@ -14,7 +14,10 @@ import {
   UserConfigFileStore,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
-import { runSessionRecordingAction } from "../apps/web/src/session_recording_actions.ts";
+import {
+  runSessionRecordingAction,
+  runSessionRecordingStopAction,
+} from "../apps/web/src/session_recording_actions.ts";
 import {
   restoreRuntimeEnv,
   setRuntimeEnv,
@@ -412,6 +415,212 @@ Deno.test("runSessionRecordingAction capture creates a fresh destination and pre
           nextOutput.activeRecordingCycleId,
           nextOutput.recordingCycles[0]?.recordingCycleId,
         );
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingStopAction stops the targeted engaged recording", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir("web-session-stop-action-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const { katoDir, alphaRoot, alphaConfigPath } =
+          await setupWorkspaceFixture(homeDir);
+        const sessionFilePath = join(homeDir, "provider-session.jsonl");
+        await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+        const firstOutputPath = join(alphaRoot, "notes", "first.md");
+        const secondOutputPath = join(alphaRoot, "notes", "second.md");
+
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-web-stop-001",
+          providerSessionId: "provider-session-stop-001",
+          sourceFilePath: sessionFilePath,
+          workspaceOutputs: [
+            makeWorkspaceOutput({
+              workspaceId: "ws-alpha",
+              workspaceAlias: "alpha",
+              workspaceRoot: alphaRoot,
+              configPath: alphaConfigPath,
+              resolvedPath: firstOutputPath,
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-first",
+              writeCursor: 4,
+              recordingCycles: [{
+                recordingCycleId: "cycle-first",
+                startedCursor: 4,
+                startedAt: "2026-03-17T17:00:00.000Z",
+                startedBySeq: 4,
+              }],
+            }),
+            makeWorkspaceOutput({
+              workspaceId: "ws-alpha",
+              workspaceAlias: "alpha",
+              workspaceRoot: alphaRoot,
+              configPath: alphaConfigPath,
+              resolvedPath: secondOutputPath,
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-second",
+              writeCursor: 6,
+              recordingCycles: [{
+                recordingCycleId: "cycle-second",
+                startedCursor: 6,
+                startedAt: "2026-03-17T17:02:00.000Z",
+                startedBySeq: 6,
+              }],
+            }),
+          ],
+        });
+
+        const sessionStore = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-17T17:05:00.000Z"),
+        });
+        const metadataBefore = (await sessionStore.listSessionMetadata())[0];
+        assertExists(metadataBefore);
+        const history = await loadPersistedSessionHistoryEvents(
+          metadataBefore,
+          sessionStore,
+        );
+
+        const result = await runSessionRecordingStopAction({
+          action: "stop-recording",
+          sessionId: "sess-web-stop-001",
+          workspaceId: "ws-alpha",
+          recordingCycleId: "cycle-second",
+          outputPath: secondOutputPath,
+          katoDir,
+          now: () => new Date("2026-03-17T17:05:00.000Z"),
+        });
+
+        assertEquals(result.noOp, false);
+        assertEquals(result.stoppedCount, 1);
+        assertEquals(result.workspaceId, "ws-alpha");
+        assertEquals(result.recordingCycleId, "cycle-second");
+        assertEquals(result.outputPath, secondOutputPath);
+
+        const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+        assertExists(metadataAfter);
+        assertEquals(metadataAfter.workspaceOutputs?.length, 2);
+        const firstOutput = metadataAfter.workspaceOutputs?.[0];
+        const secondOutput = metadataAfter.workspaceOutputs?.[1];
+        assertExists(firstOutput);
+        assertExists(secondOutput);
+        assertEquals(firstOutput.desiredState, "on");
+        assertEquals(firstOutput.activeRecordingCycleId, "cycle-first");
+        assertEquals(secondOutput.desiredState, "off");
+        assertEquals(secondOutput.activeRecordingCycleId, undefined);
+        assertEquals(
+          secondOutput.recordingCycles[0]?.stoppedCursor,
+          history.events.length,
+        );
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingStopAction stops all engaged recordings for the session", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir("web-session-stop-all-action-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const { katoDir, alphaRoot, alphaConfigPath } =
+          await setupWorkspaceFixture(homeDir);
+        const sessionFilePath = join(homeDir, "provider-session.jsonl");
+        await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+        const firstOutputPath = join(alphaRoot, "notes", "first.md");
+        const secondOutputPath = join(alphaRoot, "notes", "second.md");
+
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-web-stop-002",
+          providerSessionId: "provider-session-stop-002",
+          sourceFilePath: sessionFilePath,
+          workspaceOutputs: [
+            makeWorkspaceOutput({
+              workspaceId: "ws-alpha",
+              workspaceAlias: "alpha",
+              workspaceRoot: alphaRoot,
+              configPath: alphaConfigPath,
+              resolvedPath: firstOutputPath,
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-first",
+              writeCursor: 2,
+              recordingCycles: [{
+                recordingCycleId: "cycle-first",
+                startedCursor: 2,
+                startedAt: "2026-03-17T17:00:00.000Z",
+                startedBySeq: 2,
+              }],
+            }),
+            makeWorkspaceOutput({
+              workspaceId: "ws-alpha",
+              workspaceAlias: "alpha",
+              workspaceRoot: alphaRoot,
+              configPath: alphaConfigPath,
+              resolvedPath: secondOutputPath,
+              desiredState: "on",
+              activeRecordingCycleId: "cycle-second",
+              writeCursor: 5,
+              recordingCycles: [{
+                recordingCycleId: "cycle-second",
+                startedCursor: 5,
+                startedAt: "2026-03-17T17:03:00.000Z",
+                startedBySeq: 5,
+              }],
+            }),
+          ],
+        });
+
+        const sessionStore = new PersistentSessionStateStore({
+          katoDir,
+          now: () => new Date("2026-03-17T17:05:00.000Z"),
+        });
+        const metadataBefore = (await sessionStore.listSessionMetadata())[0];
+        assertExists(metadataBefore);
+        const history = await loadPersistedSessionHistoryEvents(
+          metadataBefore,
+          sessionStore,
+        );
+
+        const result = await runSessionRecordingStopAction({
+          action: "stop-all-recordings",
+          sessionId: "sess-web-stop-002",
+          katoDir,
+          now: () => new Date("2026-03-17T17:05:00.000Z"),
+        });
+
+        assertEquals(result.noOp, false);
+        assertEquals(result.stoppedCount, 2);
+
+        const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+        assertExists(metadataAfter);
+        assertEquals(metadataAfter.workspaceOutputs?.length, 2);
+        for (const output of metadataAfter.workspaceOutputs ?? []) {
+          assertEquals(output.desiredState, "off");
+          assertEquals(output.activeRecordingCycleId, undefined);
+          assertEquals(
+            output.recordingCycles[0]?.stoppedCursor,
+            history.events.length,
+          );
+        }
       });
     } finally {
       restoreRuntimeEnv(env);

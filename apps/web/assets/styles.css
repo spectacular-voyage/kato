@@ -503,7 +503,7 @@ a {
 .sessions-header-divider {
   border: none;
   border-top: 1px solid var(--line);
-  margin: 14px 0 0;
+  margin: 14px 0 14px;
 }
 
 .page-actions {
@@ -763,8 +763,19 @@ a {
   text-transform: uppercase;
 }
 
+.session-recordings-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .session-list-action-form {
   margin: 0;
+}
+
+.session-inline-action-form {
+  display: inline;
 }
 
 .session-inline-action {
@@ -777,6 +788,14 @@ a {
   text-decoration: underline;
   text-underline-offset: 0.18em;
   cursor: pointer;
+}
+
+.session-inline-action-danger {
+  color: var(--danger);
+}
+
+.session-inline-action-small {
+  font-size: 0.68rem;
 }
 
 .session-recording-actions {
@@ -842,8 +861,17 @@ a {
 }
 
 .session-engaged-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   max-width: 100%;
   text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.session-engaged-copy {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

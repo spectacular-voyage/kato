@@ -352,7 +352,9 @@ function findActiveWorkspaceOutputForStop(
     if (workspaceId && output.workspaceId !== workspaceId) {
       continue;
     }
-    if (recordingCycleId && output.activeRecordingCycleId !== recordingCycleId) {
+    if (
+      recordingCycleId && output.activeRecordingCycleId !== recordingCycleId
+    ) {
       continue;
     }
     if (outputPath && output.currentResolvedPath !== outputPath) {
@@ -390,7 +392,8 @@ export async function runSessionRecordingStopAction(
     );
     stoppedWorkspaceIds = activeOutputs.map((output) => output.workspaceId);
     stoppedWorkspaceAliases = activeOutputs.map(resolveWorkspaceAliasForOutput);
-    stoppedCount = stopAllWorkspaceOutputs(metadata, writeCursor, nowIso).length;
+    stoppedCount =
+      stopAllWorkspaceOutputs(metadata, writeCursor, nowIso).length;
   } else {
     const output = findActiveWorkspaceOutputForStop(metadata, {
       workspaceId: options.workspaceId,
@@ -427,7 +430,9 @@ export async function runSessionRecordingStopAction(
     ...(options.recordingCycleId?.trim()
       ? { recordingCycleId: options.recordingCycleId.trim() }
       : {}),
-    ...(options.outputPath?.trim() ? { outputPath: options.outputPath.trim() } : {}),
+    ...(options.outputPath?.trim()
+      ? { outputPath: options.outputPath.trim() }
+      : {}),
     source: history.source,
   };
 
