@@ -1544,7 +1544,6 @@ Deno.test(
         output,
         "ERROR web operational web.settings.mutation.failed",
       );
-      assertStringIncludes(output, "invalid username");
     });
   },
 );

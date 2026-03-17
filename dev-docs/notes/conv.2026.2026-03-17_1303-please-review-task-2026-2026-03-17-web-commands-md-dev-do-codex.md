@@ -404,3 +404,194 @@ Verified with:
 ```bash
 deno lint apps/web/src/session_recording_actions.ts
 ```
+
+# djradon_2026-03-17_1405_53
+
+Checked 68 files
+error[no-unused-vars]: `RecordingStateFilter` is never used
+ --> /home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx:8:3
+  | 
+8 |   RecordingStateFilter,
+  |   ^^^^^^^^^^^^^^^^^^^^
+  = hint: If this is intentional, alias it with an underscore like `RecordingStateFilter as _RecordingStateFilter`
+
+  docs: https://docs.deno.com/lint/rules/no-unused-vars
+
+# gpt-5.4_2026-03-17_1405_58
+
+I’m cleaning up that unused import in the Recordings island and then I’ll lint just that file to make sure there isn’t a second warning hiding behind it.
+
+# gpt-5.4_2026-03-17_1406_00
+
+That one’s straightforward. I’m removing the unused type import and checking the file with lint.
+
+# gpt-5.4_2026-03-17_1406_08
+
+Removed the unused `RecordingStateFilter` import from [RecordingsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx).
+
+Verified with:
+```bash
+deno lint apps/web/islands/RecordingsLive.tsx
+```
+
+# djradon_2026-03-17_1407_21
+
+" to contain: "invalid username".
+  throw new AssertionError(msg);
+        ^
+    at assertStringIncludes (https://jsr.io/@std/assert/1.0.13/string_includes.ts:29:9)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1547:7
+    at async withTestTempDir (file:///home/djradon/hub/spectacular-voyage/kato/tests/test_temp.ts:60:12)
+    at async file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1438:5
+
+ FAILURES 
+
+runDaemonCli status reports Kato Web runstate and recent web errors => ./tests/daemon-cli_test.ts:1435:6
+
+FAILED | 686 passed | 1 failed (15s)
+
+# gpt-5.4_2026-03-17_1407_27
+
+I’m checking the failing CLI status test and the code that formats recent web errors so we can fix the mismatch at the source instead of just papering over the assertion.
+
+# gpt-5.4_2026-03-17_1407_35
+
+I’ve got the failing assertion. Next I’m checking the status formatter and recent-log parsing path to see whether the message text is being dropped, truncated, or rewritten before it hits CLI output.
+
+# gpt-5.4_2026-03-17_1407_43
+
+I’ve confirmed the tests still expect the raw message text, so this isn’t a test drift. I’m reading the CLI status error-loading path now to see why that web log record is getting reformatted before render.
+
+# gpt-5.4_2026-03-17_1407_54
+
+I’m not guessing here. I’m running the exact failing CLI test in isolation so we can see the current rendered status output and whether this is a truncation issue or a real regression in recent-error loading.
+
+# gpt-5.4_2026-03-17_1408_01
+
+The exact test is green in isolation right now, so I want to check whether this is an order-dependent failure somewhere else in `tests/daemon-cli_test.ts` rather than a persistent bug in the web-error path itself.
+
+# gpt-5.4_2026-03-17_1408_12
+
+I checked this one and couldn’t reproduce it.
+
+Both of these are green now:
+```bash
+deno test -A tests/daemon-cli_test.ts --filter 'runDaemonCli status reports Kato Web runstate and recent web errors'
+deno test -A tests/daemon-cli_test.ts
+```
+
+So I didn’t make a code change for that failure. It looks like either:
+- the failing run was against an older worktree state, or
+- it was a transient mismatch during the larger suite run.
+
+If you want, the next useful step is `deno task ci` to see whether anything else is still flaky across the full repo.
+
+# djradon_2026-03-17_1410_01
+
+This error must be breaking on something in my local environment, but I don't think it's very useful anyhow.
+
+Here's the full output:
+
+ ERRORS 
+
+runDaemonCli status reports Kato Web runstate and recent web errors => ./tests/daemon-cli_test.ts:1435:6
+error: AssertionError: Expected actual: "kato CLI (v0.2.8)  ·  refreshed 02:00:00
+kato daemon (vunknown): running (pid: 4242)
+kato web (v0.2.8): running (http://127.0.0.1:3173/, pid 2543408)
+────────────────────────────────────────────────────────────────────────────────────────
+daemon memory: unavailable
+session data size: unavailable
+recordings: 0 active, 0 off
+sessions: 0 active, 0 idle
+twins: 0 current, 0 behind, 0 no twin
+────────────────────────────────────────────────────────────────────────────────────────
+Workspaces (0 active, 0 invalid)
+
+  (none registered)
+────────────────────────────────────────────────────────────────────────────────────────
+Recent Errors (1)
+
+  [2026-03-02 02:01] ERROR web operational web.settings.mutation.failed · invalid use...
+────────────────────────────────────────────────────────────────────────────────────────
+Sessions
+
+  (none active — run with --all to show 0 idle)
+" to contain: "invalid username".
+  throw new AssertionError(msg);
+        ^
+    at assertStringIncludes (https://jsr.io/@std/assert/1.0.13/string_includes.ts:29:9)
+    at file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1547:7
+    at async withTestTempDir (file:///home/djradon/hub/spectacular-voyage/kato/tests/test_temp.ts:60:12)
+    at async file:///home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts:1438:5
+
+ FAILURES 
+
+runDaemonCli status reports Kato Web runstate and recent web errors => ./tests/daemon-cli_test.ts:1435:6
+
+FAILED | 686 passed | 1 failed (14s)
+
+error: Test failed
+
+# gpt-5.4_2026-03-17_1410_10
+
+I can see what’s happening from that output: the failure isn’t the message content, it’s width-based truncation. The recent-error line is being rendered as `invalid use...`, so the test is brittle against terminal width / TTY behavior in your local environment.
+
+# gpt-5.4_2026-03-17_1410_28
+
+This is definitely a width-sensitive test, not a semantic failure. The clue is the rendered line: `invalid use...` means the CLI status renderer truncated the recent-error message to fit your local terminal width / TTY settings.
+
+# gpt-5.4_2026-03-17_1410_29
+
+The test harness lives inline in `tests/daemon-cli_test.ts`, so I’m opening that helper next. I want to see whether it’s inheriting real terminal width/TTY state from your shell instead of forcing deterministic status rendering.
+
+# gpt-5.4_2026-03-17_1410_53
+
+I agree. This particular assertion is brittle in the CLI integration test because `runStatusCommand` uses the real terminal width, so the message can be legitimately truncated on one machine and not another. The exact-message check already belongs more in the pure `renderStatusText` tests, which are deterministic.
+
+# gpt-5.4_2026-03-17_1410_57
+
+I’ve removed the width-sensitive assertion from the CLI integration test. I’m rerunning just that test file so we can confirm it stays green in this environment too.
+
+# gpt-5.4_2026-03-17_1411_01
+
+The file-wide CLI run is in progress and the previously failing test has already passed. I’m polling the rest just to close the loop cleanly.
+
+# gpt-5.4_2026-03-17_1411_04
+
+I removed that assertion from [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+Reason: the integration test goes through `runStatusCommand`, which uses the real terminal width and can legitimately truncate the recent-error message on some local setups. The exact message content is already covered by the deterministic `renderStatusText` unit tests, so keeping it in the CLI integration test was just making the suite environment-sensitive.
+
+Verified with:
+```bash
+deno test -A tests/daemon-cli_test.ts
+```
+
+# djradon_2026-03-17_1411_50
+
+OK, so you think I should do a release now? Or just pick up with phase 2?
+
+# gpt-5.4_2026-03-17_1411_58
+
+I’d release now, or at least cut a clear checkpoint.
+
+Reason: phase 1 is now a coherent user-facing slice:
+- Sessions can start capture/recording
+- recordings deep-link correctly
+- stop and stop-all work
+- the rough UX edges got cleaned up
+- release notes are already drafted
+
+Phase 2 feels meaningfully broader. If we roll straight into it, we blur the boundary and make `v0.2.8` less legible.
+
+My recommendation:
+1. Run `deno task ci`.
+2. Cut `v0.2.8` if CI is green.
+3. Start phase 2 as the next release line.
+
+If you’re not ready for a real release, I’d still do the same structurally:
+- treat this as the end of phase 1
+- update the task note as done
+- start a fresh phase-2 task/branch of thought afterward
+
+I would not keep piling phase-2 work into this same slice unless you already know you don’t want `v0.2.8` yet.

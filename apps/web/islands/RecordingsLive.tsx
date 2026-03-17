@@ -3,10 +3,7 @@ import {
   activityStateDot,
   recordingActivityStateLabel,
 } from "../src/activity_state.ts";
-import type {
-  RecordingsPageData,
-  RecordingStateFilter,
-} from "../src/loaders/recordings.ts";
+import type { RecordingsPageData } from "../src/loaders/recordings.ts";
 import {
   buildRecordingRowAnchorId,
   buildRecordingsHref,
