@@ -6532,7 +6532,7 @@ Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs wh
         return Promise.resolve(result);
       },
       getOrCreateSessionMetadata() {
-        return Promise.resolve(structuredClone(storedMetadata));
+        return Promise.resolve(structuredClone(staleMetadata));
       },
       saveSessionMetadata(next: SessionMetadataV1) {
         storedMetadata = structuredClone(next);
@@ -6636,6 +6636,209 @@ Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs wh
     assertEquals(
       storedMetadata.workspaceOutputs[0]?.activeRecordingCycleId,
       "cycle-web-capture",
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop merges daemon-updated fields into a newer web-written matching output", async () => {
+  const stateDir = await makeTestTempDir("daemon-runtime-web-race-merge-");
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    const nowIso = "2026-02-22T10:00:00.000Z";
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: nowIso,
+      heartbeatAt: nowIso,
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionKey = "codex:session-web-race-merge";
+    const staleMetadata: SessionMetadataV1 = {
+      schemaVersion: 1,
+      sessionKey,
+      provider: "codex",
+      providerSessionId: "session-web-race-merge",
+      sessionId: "kato-session-web-race-merge-1234",
+      createdAt: "2026-02-22T09:59:00.000Z",
+      updatedAt: nowIso,
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SESSION_PATH,
+      ingestCursor: { kind: "byte-offset", value: 0 },
+      twinPath: join(stateDir, "session-web-race-merge.twin.jsonl"),
+      nextTwinSeq: 1,
+      recentFingerprints: [],
+      commandCursor: 0,
+      workspaceOutputs: [
+        makeWorkspaceOutputState(workspace, {
+          currentResolvedPath: DAEMON_RUNTIME_CAPTURE_PATH,
+          desiredState: "on",
+          writeCursor: 0,
+          activeRecordingCycleId: "cycle-web-capture",
+          recordingCycles: [{
+            recordingCycleId: "cycle-web-capture",
+            startedCursor: 0,
+            startedAt: "2026-02-22T09:59:30.000Z",
+            lastWriteAt: "2026-02-22T09:59:30.000Z",
+            startedBySeq: 1,
+          }],
+        }),
+      ],
+    };
+    const webMutatedOutput = makeWorkspaceOutputState(workspace, {
+      currentResolvedPath: DAEMON_RUNTIME_CAPTURE_PATH,
+      desiredState: "on",
+      writeCursor: 0,
+      activeRecordingCycleId: "cycle-web-capture",
+      recordingCycles: [{
+        recordingCycleId: "cycle-web-capture",
+        startedCursor: 0,
+        startedAt: "2026-02-22T09:59:30.000Z",
+        lastWriteAt: "2026-02-22T09:59:45.000Z",
+        startedBySeq: 1,
+      }],
+    });
+    webMutatedOutput.workspaceAliasSnapshot = "alpha-web";
+    const webMutatedMetadata: SessionMetadataV1 = {
+      ...structuredClone(staleMetadata),
+      updatedAt: "2026-02-22T10:00:01.000Z",
+      workspaceOutputs: [webMutatedOutput],
+    };
+
+    let storedMetadata = structuredClone(staleMetadata);
+    let metadataReads = 0;
+    const sessionStateStore = {
+      listSessionMetadata() {
+        metadataReads += 1;
+        const result = [structuredClone(storedMetadata)];
+        if (metadataReads === 1) {
+          storedMetadata = structuredClone(webMutatedMetadata);
+        }
+        return Promise.resolve(result);
+      },
+      getOrCreateSessionMetadata() {
+        return Promise.resolve(structuredClone(staleMetadata));
+      },
+      saveSessionMetadata(next: SessionMetadataV1) {
+        storedMetadata = structuredClone(next);
+        return Promise.resolve();
+      },
+    } as unknown as PersistentSessionStateStore;
+
+    let pollCount = 0;
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date(nowIso),
+    });
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-web-race-merge",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [
+              makeEventForSession(
+                "session-web-race-merge",
+                "a-race-merge-1",
+                "message.assistant",
+                "assistant response",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: nowIso,
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-web-race-merge",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      recordingPipeline: new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date(nowIso),
+      }),
+      now: () => new Date(nowIso),
+      pid: 4242,
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1,
+      sessionMetadataRefreshIntervalMs: 10_000,
+    });
+
+    assertExists(storedMetadata.workspaceOutputs);
+    assertEquals(storedMetadata.workspaceOutputs.length, 1);
+    const mergedOutput = storedMetadata.workspaceOutputs[0];
+    assertExists(mergedOutput);
+    assertEquals(mergedOutput.workspaceAliasSnapshot, "alpha-web");
+    assertEquals(mergedOutput.writeCursor, 1);
+    assertEquals(
+      mergedOutput.recordingCycles[0]?.lastWriteAt,
+      nowIso,
     );
   } finally {
     await removeDirIfPresent(stateDir);

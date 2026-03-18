@@ -1061,6 +1061,156 @@ Deno.test("runSessionRecordingRestartAction fails fast when the stopped output p
   });
 });
 
+Deno.test("runSessionRecordingRestartAction does not persist conflicting-session stops if the target save fails", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-deferred-conflicts-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const sharedOutputPath = join(alphaRoot, "notes", "shared.md");
+          const sessionAPath = join(homeDir, "provider-session-a.jsonl");
+          const sessionBPath = join(homeDir, "provider-session-b.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionAPath);
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionBPath);
+          await Deno.writeTextFile(sharedOutputPath, "# existing recording\n");
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-001",
+            providerSessionId: "provider-session-restart-001",
+            sourceFilePath: sessionAPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "off",
+                writeCursor: 4,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-stopped",
+                  startedCursor: 1,
+                  stoppedCursor: 4,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 4,
+                }],
+              }),
+            ],
+          });
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-002",
+            providerSessionId: "provider-session-restart-002",
+            sourceFilePath: sessionBPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "on",
+                activeRecordingCycleId: "cycle-conflict",
+                writeCursor: 6,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-conflict",
+                  startedCursor: 6,
+                  startedAt: "2026-03-17T16:45:00.000Z",
+                  startedBySeq: 6,
+                }],
+              }),
+            ],
+          });
+
+          const originalSave = PersistentSessionStateStore.prototype
+            .saveSessionMetadata;
+          try {
+            PersistentSessionStateStore.prototype.saveSessionMetadata =
+              async function (
+                metadata,
+                options,
+              ): Promise<void> {
+                if (metadata.sessionId === "sess-web-restart-001") {
+                  throw new Error("target save failed");
+                }
+                return await originalSave.call(this, metadata, options);
+              };
+
+            await assertRejects(
+              () =>
+                runSessionRecordingRestartAction({
+                  action: "restart-recording",
+                  sessionId: "sess-web-restart-001",
+                  workspaceId: "ws-alpha",
+                  recordingCycleId: "cycle-stopped",
+                  outputPath: sharedOutputPath,
+                  katoDir,
+                  now: () => new Date("2026-03-17T17:05:00.000Z"),
+                }),
+              Error,
+              "target save failed",
+            );
+          } finally {
+            PersistentSessionStateStore.prototype.saveSessionMetadata =
+              originalSave;
+          }
+
+          const sessionStore = new PersistentSessionStateStore({
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+          const metadataAfter = await sessionStore.listSessionMetadata();
+          const restartedAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-001"
+          );
+          const conflictingAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-002"
+          );
+          assertExists(restartedAfter);
+          assertExists(conflictingAfter);
+
+          const restartedOutput = restartedAfter.workspaceOutputs?.[0];
+          const conflictingOutput = conflictingAfter.workspaceOutputs?.[0];
+          assertExists(restartedOutput);
+          assertExists(conflictingOutput);
+
+          assertEquals(restartedOutput.desiredState, "off");
+          assertEquals(restartedOutput.activeRecordingCycleId, undefined);
+          assertEquals(
+            restartedOutput.recordingCycles.length,
+            1,
+          );
+
+          assertEquals(conflictingOutput.desiredState, "on");
+          assertEquals(
+            conflictingOutput.activeRecordingCycleId,
+            "cycle-conflict",
+          );
+          assertEquals(
+            conflictingOutput.recordingCycles[0]?.stoppedCursor,
+            undefined,
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
 Deno.test("runSessionRecordingAction keeps the output-dir snapshot aligned with the generated recording path", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();

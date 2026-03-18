@@ -466,10 +466,13 @@ async function stopConflictingActiveOutputsAtPath(
   targetPath: string,
   nowIso: string,
   excludeSessionId?: string,
-): Promise<number> {
+): Promise<
+  { pendingMetadataSaves: SessionMetadataV1[]; stoppedCount: number }
+> {
   const resolvedTargetPath = resolve(targetPath);
   const metadataList = await sessionStore.listSessionMetadata();
   let stoppedCount = 0;
+  const pendingMetadataSaves: SessionMetadataV1[] = [];
 
   for (const metadata of metadataList) {
     if (excludeSessionId && metadata.sessionId === excludeSessionId) {
@@ -501,13 +504,22 @@ async function stopConflictingActiveOutputsAtPath(
     }
 
     if (changed) {
-      await sessionStore.saveSessionMetadata(metadata, {
-        touchUpdatedAt: true,
-      });
+      pendingMetadataSaves.push(metadata);
     }
   }
 
-  return stoppedCount;
+  return { pendingMetadataSaves, stoppedCount };
+}
+
+async function saveDeferredConflictingOutputStops(
+  sessionStore: PersistentSessionStateStore,
+  metadataList: SessionMetadataV1[],
+): Promise<void> {
+  for (const metadata of metadataList) {
+    await sessionStore.saveSessionMetadata(metadata, {
+      touchUpdatedAt: true,
+    });
+  }
 }
 
 export async function runSessionRecordingStopAction(
@@ -697,7 +709,7 @@ export async function runSessionRecordingRestartAction(
         }
       }
 
-      await stopConflictingActiveOutputsAtPath(
+      const { pendingMetadataSaves } = await stopConflictingActiveOutputsAtPath(
         sessionStore,
         output.currentResolvedPath,
         nowIso,
@@ -726,6 +738,10 @@ export async function runSessionRecordingRestartAction(
       await sessionStore.saveSessionMetadata(metadata, {
         touchUpdatedAt: true,
       });
+      await saveDeferredConflictingOutputStops(
+        sessionStore,
+        pendingMetadataSaves,
+      );
 
       return {
         action: options.action,
@@ -861,12 +877,13 @@ export async function runSessionRecordingAction(
           resolved.resolvedPath,
           "record",
         );
-        await stopConflictingActiveOutputsAtPath(
-          sessionStore,
-          targetPath,
-          nowIso,
-          metadata.sessionId,
-        );
+        const { pendingMetadataSaves } =
+          await stopConflictingActiveOutputsAtPath(
+            sessionStore,
+            targetPath,
+            nowIso,
+            metadata.sessionId,
+          );
         const resolvedTargetPath = resolve(targetPath);
         for (const output of outputs) {
           if (output.desiredState !== "on") {
@@ -921,6 +938,10 @@ export async function runSessionRecordingAction(
         await sessionStore.saveSessionMetadata(metadata, {
           touchUpdatedAt: true,
         });
+        await saveDeferredConflictingOutputStops(
+          sessionStore,
+          pendingMetadataSaves,
+        );
       } else {
         const resolved = await resolveWorkspaceCommandDestination({
           profile,

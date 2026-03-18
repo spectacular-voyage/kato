@@ -1,18 +1,26 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
+import type { WebConfig } from "@kato/shared";
 import {
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
+  createDefaultWebConfig,
   createDefaultWorkspaceWriterFeatureFlags,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   PersistentSessionStateStore,
   resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
+  resolveDefaultWebConfigPath,
   resolveDefaultWorkspaceRegistryPath,
   SharedBehaviorConfigFileStore,
   UserConfigFileStore,
+  WebConfigFileStore,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
+import {
+  createCsrfToken,
+  createSessionCookieValue,
+} from "../apps/web/src/auth.ts";
 import { handleRecordingsPagePost } from "../apps/web/src/recordings_page_post.ts";
 import {
   restoreRuntimeEnv,
@@ -139,16 +147,41 @@ async function createSessionFixture(options: {
   await store.saveSessionMetadata(metadata);
 }
 
-function buildPostRequest(
+async function setupWebAuthFixture(katoDir: string): Promise<WebConfig> {
+  const store = new WebConfigFileStore(resolveDefaultWebConfigPath(katoDir));
+  const result = await store.ensureInitialized(
+    createDefaultWebConfig({
+      auth: { cookieName: "kato_web_test" },
+    }),
+  );
+  return result.config;
+}
+
+async function buildAuthenticatedPostRequest(
   url: string,
   entries: Record<string, string>,
-): Request {
+  config: WebConfig,
+  options: { csrfToken?: string | null } = {},
+): Promise<Request> {
+  const sessionCookieValue = await createSessionCookieValue(config);
+  const cookieHeader = `${config.auth.cookieName}=${sessionCookieValue}`;
+  const csrfSeedRequest = new Request(url, {
+    method: "POST",
+    headers: { cookie: cookieHeader },
+  });
+  const csrfToken = options.csrfToken === undefined
+    ? await createCsrfToken(csrfSeedRequest, config)
+    : options.csrfToken;
   const form = new FormData();
   for (const [key, value] of Object.entries(entries)) {
     form.set(key, value);
   }
+  if (csrfToken) {
+    form.set("csrfToken", csrfToken);
+  }
   return new Request(url, {
     method: "POST",
+    headers: { cookie: cookieHeader },
     body: form,
   });
 }
@@ -166,6 +199,7 @@ Deno.test("handleRecordingsPagePost stops an engaged recording and redirects bac
 
         const { katoDir, alphaRoot, alphaConfigPath } =
           await setupWorkspaceFixture(homeDir);
+        const webConfig = await setupWebAuthFixture(katoDir);
         const sessionPath = join(homeDir, "provider-session-stop.jsonl");
         const outputPath = join(alphaRoot, "notes", "stop-target.md");
         await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
@@ -196,7 +230,7 @@ Deno.test("handleRecordingsPagePost stops an engaged recording and redirects bac
         });
 
         const response = await handleRecordingsPagePost(
-          buildPostRequest("http://kato.local/recordings", {
+          await buildAuthenticatedPostRequest("http://kato.local/recordings", {
             action: "stop-recording",
             sessionId: "sess-web-route-stop",
             workspaceId: "ws-alpha",
@@ -205,7 +239,7 @@ Deno.test("handleRecordingsPagePost stops an engaged recording and redirects bac
             stateFilter: "engaged-active",
             workspaceFilter: "ws-alpha",
             rowKey: "row-stop-route",
-          }),
+          }, webConfig),
         );
 
         assertEquals(response.status, 303);
@@ -253,6 +287,7 @@ Deno.test("handleRecordingsPagePost restarts a stopped recording and redirects t
 
           const { katoDir, alphaRoot, alphaConfigPath } =
             await setupWorkspaceFixture(homeDir);
+          const webConfig = await setupWebAuthFixture(katoDir);
           const sessionPath = join(homeDir, "provider-session-restart.jsonl");
           const outputPath = join(alphaRoot, "notes", "restart-target.md");
           await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
@@ -286,16 +321,20 @@ Deno.test("handleRecordingsPagePost restarts a stopped recording and redirects t
           });
 
           const response = await handleRecordingsPagePost(
-            buildPostRequest("http://kato.local/recordings", {
-              action: "restart-recording",
-              sessionId: "sess-web-route-restart",
-              workspaceId: "ws-alpha",
-              recordingCycleId: "cycle-restart-old",
-              outputPath,
-              stateFilter: "stopped",
-              workspaceFilter: "ws-alpha",
-              rowKey: "row-restart-route",
-            }),
+            await buildAuthenticatedPostRequest(
+              "http://kato.local/recordings",
+              {
+                action: "restart-recording",
+                sessionId: "sess-web-route-restart",
+                workspaceId: "ws-alpha",
+                recordingCycleId: "cycle-restart-old",
+                outputPath,
+                stateFilter: "stopped",
+                workspaceFilter: "ws-alpha",
+                rowKey: "row-restart-route",
+              },
+              webConfig,
+            ),
           );
 
           assertEquals(response.status, 303);
@@ -346,16 +385,22 @@ Deno.test("handleRecordingsPagePost redirects with an error when sessionId is mi
             USERPROFILE: undefined,
             KATO_RUNTIME_DIR: undefined,
           });
+          const katoDir = join(homeDir, ".kato");
+          const webConfig = await setupWebAuthFixture(katoDir);
 
           const response = await handleRecordingsPagePost(
-            buildPostRequest("http://kato.local/recordings", {
-              action: "restart-recording",
-              sessionId: "",
-              recordingCycleId: "cycle-missing-session",
-              stateFilter: "stopped",
-              workspaceFilter: "ws-alpha",
-              rowKey: "row-missing-session",
-            }),
+            await buildAuthenticatedPostRequest(
+              "http://kato.local/recordings",
+              {
+                action: "restart-recording",
+                sessionId: "",
+                recordingCycleId: "cycle-missing-session",
+                stateFilter: "stopped",
+                workspaceFilter: "ws-alpha",
+                rowKey: "row-missing-session",
+              },
+              webConfig,
+            ),
           );
 
           assertEquals(response.status, 303);
@@ -367,11 +412,130 @@ Deno.test("handleRecordingsPagePost redirects with an error when sessionId is mi
           assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
           assertEquals(
             redirectUrl.searchParams.get("error"),
-            "Session id is required",
+            "invalid_request",
           );
           assertEquals(
             redirectUrl.hash,
             "#recording-cycle-missing-session",
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("handleRecordingsPagePost rejects recording mutations without a valid csrf token", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir("web-recordings-post-csrf-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const webConfig = await setupWebAuthFixture(katoDir);
+        const response = await handleRecordingsPagePost(
+          await buildAuthenticatedPostRequest(
+            "http://kato.local/recordings",
+            {
+              action: "stop-recording",
+              sessionId: "sess-web-route-stop",
+            },
+            webConfig,
+            { csrfToken: null },
+          ),
+        );
+
+        assertEquals(response.status, 403);
+        assertEquals(await response.text(), "csrf token required");
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("handleRecordingsPagePost uses a safe error token for restart failures", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-recordings-post-restart-error-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const webConfig = await setupWebAuthFixture(katoDir);
+          const sessionPath = join(homeDir, "provider-session-restart.jsonl");
+          const missingOutputPath = join(alphaRoot, "notes", "missing.md");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-route-restart-error",
+            providerSessionId: "provider-session-route-restart-error",
+            sourceFilePath: sessionPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: missingOutputPath,
+                desiredState: "off",
+                writeCursor: 4,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-restart-missing",
+                  startedCursor: 1,
+                  stoppedCursor: 4,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 4,
+                }],
+              }),
+            ],
+          });
+
+          const response = await handleRecordingsPagePost(
+            await buildAuthenticatedPostRequest(
+              "http://kato.local/recordings",
+              {
+                action: "restart-recording",
+                sessionId: "sess-web-route-restart-error",
+                workspaceId: "ws-alpha",
+                recordingCycleId: "cycle-restart-missing",
+                outputPath: missingOutputPath,
+                stateFilter: "stopped",
+                workspaceFilter: "ws-alpha",
+                rowKey: "row-restart-error",
+              },
+              webConfig,
+            ),
+          );
+
+          assertEquals(response.status, 303);
+          const location = response.headers.get("location");
+          assertExists(location);
+          const redirectUrl = new URL(location, "http://kato.local");
+          assertEquals(
+            redirectUrl.searchParams.get("error"),
+            "restart_failed",
+          );
+          assertEquals(location.includes(missingOutputPath), false);
+          assertEquals(
+            location.includes("output file no longer exists"),
+            false,
           );
         },
       );
@@ -393,12 +557,18 @@ Deno.test("handleRecordingsPagePost rejects unsupported actions with a 400 respo
             USERPROFILE: undefined,
             KATO_RUNTIME_DIR: undefined,
           });
+          const katoDir = join(homeDir, ".kato");
+          const webConfig = await setupWebAuthFixture(katoDir);
 
           const response = await handleRecordingsPagePost(
-            buildPostRequest("http://kato.local/recordings", {
-              action: "not-a-real-action",
-              sessionId: "sess-unsupported",
-            }),
+            await buildAuthenticatedPostRequest(
+              "http://kato.local/recordings",
+              {
+                action: "not-a-real-action",
+                sessionId: "sess-unsupported",
+              },
+              webConfig,
+            ),
           );
 
           assertEquals(response.status, 400);

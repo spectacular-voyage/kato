@@ -1,4 +1,5 @@
 import type { RecordingStateFilter } from "./loaders/recordings.ts";
+import { loadWebConfig, verifyCsrfToken } from "./auth.ts";
 import { createWebLoggers } from "./logging.ts";
 import {
   runSessionRecordingRestartAction,
@@ -63,6 +64,22 @@ function buildRecordingRestartNotice(
     : `recording re-armed (${result.sessionShortId})`;
 }
 
+function buildRecordingsMutationErrorToken(
+  action: string,
+  error: unknown,
+): string {
+  if (error instanceof Error && error.message === "Session id is required") {
+    return "invalid_request";
+  }
+  if (action === "stop-recording") {
+    return "stop_failed";
+  }
+  if (action === "restart-recording") {
+    return "restart_failed";
+  }
+  return "internal_error";
+}
+
 export async function handleRecordingsPagePost(
   req: Request,
 ): Promise<Response> {
@@ -76,6 +93,11 @@ export async function handleRecordingsPagePost(
   const recordingCycleId = String(form.get("recordingCycleId") ?? "").trim() ||
     undefined;
   const rowKey = String(form.get("rowKey") ?? "").trim() || undefined;
+  const csrfToken = String(form.get("csrfToken") ?? "").trim() || undefined;
+  const webConfig = await loadWebConfig();
+  if (!webConfig || !(await verifyCsrfToken(req, webConfig, csrfToken))) {
+    return new Response("csrf token required", { status: 403 });
+  }
   const { operationalLogger, auditLogger } = createWebLoggers();
 
   try {
@@ -144,6 +166,9 @@ export async function handleRecordingsPagePost(
       {
         action,
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack
+          ? { errorStack: error.stack }
+          : {}),
       },
     );
     return Response.redirect(
@@ -152,7 +177,7 @@ export async function handleRecordingsPagePost(
         workspaceFilter,
         recordingCycleId,
         rowKey,
-        error: error instanceof Error ? error.message : String(error),
+        error: buildRecordingsMutationErrorToken(action, error),
       }),
       303,
     );

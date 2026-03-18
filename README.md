@@ -17,17 +17,16 @@ Primary install:
 
 ```bash
 npm install -g @spectacular-voyage/kato
-kato --version
+```
+
+Or with pnpm:
+
+```bash
+pnpm add -g @spectacular-voyage/kato
 ```
 
 The npm package installs prebuilt binaries. It does not compile Kato on your
 machine.
-
-One-off use:
-
-```bash
-npx @spectacular-voyage/kato@latest --version
-```
 
 You can also download a prebuilt bundle from
 [GitHub Releases](https://github.com/spectacular-voyage/kato/releases) and put
@@ -48,12 +47,14 @@ kato start
 mkdir chats-default
 cd chats-default
 kato workspace init
-kato workspace register --alias default
+kato workspace register --alias default --name 'My first Kato workspace'
 ```
 
 Then start a new supported AI chat and put `::capture-default` on its own line
 in a user message. It also helps to tell the model to ignore lines that start
 with `::`.
+
+You can also trigger recording from the "Sessions" page in the web UI.
 
 ## In-Chat Commands
 
@@ -65,6 +66,8 @@ with `::`.
 - `::stop-<alias>`: stop one workspace output
 
 ## Local Web
+
+From the web UI, you can start and stop recordings, and manage your Kato data and configuration. 
 
 ```bash
 kato web init --username <username>
