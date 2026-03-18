@@ -92,7 +92,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "If <dir> is omitted, uses the current working directory.",
   ].join("\n"),
   "workspace-register": [
-    "Usage: kato workspace register [<dir>] [--alias <alias>] [--name <display-name>] [--no-restart]",
+    "Usage: kato workspace register [<dir>] [--alias <alias>] [--name <display-name>|name=<display-name>] [--no-restart]",
     "",
     "Registers a workspace config under a workspace alias.",
     "If <dir> is provided, registers exactly <dir>/.kato-workspace-config.yaml.",

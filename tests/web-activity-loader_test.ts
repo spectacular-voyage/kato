@@ -349,6 +349,131 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
   });
 });
 
+Deno.test("loadSessionsPageData enriches and filters alias-only live recordings by workspace alias", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-activity-live-alias-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const statusPath = join(katoDir, "shared", "status.json");
+        const alphaRoot = join(homeDir, "alpha");
+        const alphaConfigPath = join(
+          alphaRoot,
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        );
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        await Deno.mkdir(alphaRoot, { recursive: true });
+        await Deno.writeTextFile(alphaConfigPath, "workspaceId: ws-alpha\n");
+        const registry = new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        );
+        await registry.save([{
+          workspaceId: "ws-alpha",
+          alias: "alpha",
+          displayName: "Alpha Workspace",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          registeredAt: "2026-03-07T15:00:00.000Z",
+        }]);
+
+        const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
+        const sessionFixturesDir = join(homeDir, "session-fixtures");
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-live-only",
+          providerSessionId: "provider-live-only",
+          snippet: "live only session",
+          updatedAt: "2026-03-07T15:59:00.000Z",
+          sourceFilePath: join(sessionFixturesDir, "provider-live-only.jsonl"),
+        });
+
+        await Deno.writeTextFile(
+          statusPath,
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-07T16:00:00.000Z",
+            heartbeatAt: "2026-03-07T16:00:00.000Z",
+            daemonRunning: true,
+            providers: [{
+              provider: "codex",
+              activeSessions: 1,
+              lastEventAt: "2026-03-07T15:59:30.000Z",
+            }],
+            recordings: {
+              activeRecordings: 1,
+              destinations: 1,
+            },
+            sessions: [{
+              provider: "codex",
+              sessionId: "sess-live-only",
+              providerSessionId: "provider-live-only",
+              updatedAt: "2026-03-07T15:59:30.000Z",
+              lastEventAt: "2026-03-07T15:59:30.000Z",
+              stale: false,
+              snippet: "live only session",
+              recordings: [{
+                recordingId: "rec-live-only",
+                workspaceAlias: "alpha",
+                outputPath: alphaOutputPath,
+                startedAt: "2026-03-07T15:30:00.000Z",
+                lastWriteAt: "2026-03-07T15:59:30.000Z",
+              }],
+            }],
+          }),
+        );
+
+        const data = await loadSessionsPageData();
+        assertEquals(data.sessionCount, 1);
+        assertEquals(data.rows[0]?.recordings.length, 1);
+        assertEquals(data.rows[0]?.recordings[0]?.workspaceId, undefined);
+        assertEquals(data.rows[0]?.recordings[0]?.workspaceAlias, "alpha");
+        assertEquals(
+          data.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
+
+        const filteredSessions = await loadSessionsPageData({
+          workspaceFilter: "ws-alpha",
+        });
+        assertEquals(filteredSessions.workspaceFilterAlias, "alpha");
+        assertEquals(
+          filteredSessions.workspaceFilterDisplayName,
+          "Alpha Workspace",
+        );
+        assertEquals(filteredSessions.sessionCount, 1);
+        assertEquals(filteredSessions.rows[0]?.recordings.length, 1);
+        assertEquals(
+          filteredSessions.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
+
+        const filteredRecordings = await loadRecordingsPageData({
+          workspaceFilter: "ws-alpha",
+        });
+        assertEquals(filteredRecordings.workspaceFilterAlias, "alpha");
+        assertEquals(
+          filteredRecordings.workspaceFilterDisplayName,
+          "Alpha Workspace",
+        );
+        assertEquals(filteredRecordings.rows.length, 1);
+        assertEquals(
+          filteredRecordings.rows[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
 Deno.test("loadSessionsPageData prefers persisted stopped outputs over lagging live recording status for the same path", async () => {
   await withLockedEnvironment(async () => {
     const env = snapshotRuntimeEnv();

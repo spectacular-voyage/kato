@@ -326,6 +326,7 @@ export class WorkspaceCatalog implements WorkspaceCatalogLike {
         continue;
       }
       const unchanged = fresh.alias === prior.alias &&
+        fresh.displayName === prior.displayName &&
         fresh.workspaceRoot === prior.workspaceRoot &&
         fresh.configPath === prior.configPath;
       const live = unchanged ? prior : fresh;

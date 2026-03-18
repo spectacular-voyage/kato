@@ -80,6 +80,7 @@ export interface LoadSessionActivityRowsOptions {
   katoDir?: string;
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
+  workspaceEntries?: RegisteredWorkspace[];
 }
 
 export interface ResolvedWorkspaceFilter {
@@ -222,6 +223,34 @@ function sortRecordings(
     }
     return a.outputPath.localeCompare(b.outputPath);
   });
+}
+
+function matchesWorkspaceFilter(
+  row: SessionRecordingActivityRow,
+  resolvedWorkspaceFilter: ResolvedWorkspaceFilter | undefined,
+): boolean {
+  if (!resolvedWorkspaceFilter) {
+    return true;
+  }
+  return row.workspaceId === resolvedWorkspaceFilter.workspaceId ||
+    (
+      !row.workspaceId &&
+      !!row.workspaceAlias &&
+      row.workspaceAlias === resolvedWorkspaceFilter.workspaceAlias
+    );
+}
+
+function resolveWorkspaceDisplayName(
+  row: SessionRecordingActivityRow,
+  workspaceDisplayNamesById: ReadonlyMap<string, string | undefined>,
+  workspaceDisplayNamesByAlias: ReadonlyMap<string, string | undefined>,
+): string | undefined {
+  return (row.workspaceId
+    ? workspaceDisplayNamesById.get(row.workspaceId)
+    : undefined) ??
+    (row.workspaceAlias
+      ? workspaceDisplayNamesByAlias.get(row.workspaceAlias)
+      : undefined);
 }
 
 function deriveSessionShortId(
@@ -638,12 +667,15 @@ export async function loadSessionActivityRows(
     katoDir,
     now,
   });
+  const workspaceEntriesPromise = options.workspaceEntries
+    ? Promise.resolve(options.workspaceEntries)
+    : loadRegisteredWorkspaces(katoDir);
   const [snapshot, metadataList, runtimeConfig, workspaceEntries] =
     await Promise.all([
       statusStore.load(),
       sessionStore.listSessionMetadata(),
       loadRuntimeConfigOrDefault(),
-      loadRegisteredWorkspaces(katoDir),
+      workspaceEntriesPromise,
     ]);
   const normalizedMetadataList = await Promise.all(
     metadataList.map((metadata) =>
@@ -661,6 +693,9 @@ export async function loadSessionActivityRows(
   );
   const workspaceDisplayNamesById = new Map(
     workspaceEntries.map((entry) => [entry.workspaceId, entry.displayName]),
+  );
+  const workspaceDisplayNamesByAlias = new Map(
+    workspaceEntries.map((entry) => [entry.alias, entry.displayName]),
   );
   const statusClock = (() => {
     const generatedAtMs = Date.parse(snapshot.generatedAt);
@@ -681,19 +716,22 @@ export async function loadSessionActivityRows(
     );
     const filteredRecordings = resolvedWorkspaceFilter
       ? recordings.filter((row) =>
-        row.workspaceId === resolvedWorkspaceFilter.workspaceId
+        matchesWorkspaceFilter(row, resolvedWorkspaceFilter)
       )
       : recordings;
-    const displayRecordings = filteredRecordings.map((recording) =>
-      recording.workspaceId
+    const displayRecordings = filteredRecordings.map((recording) => {
+      const workspaceDisplayName = resolveWorkspaceDisplayName(
+        recording,
+        workspaceDisplayNamesById,
+        workspaceDisplayNamesByAlias,
+      );
+      return workspaceDisplayName
         ? {
           ...recording,
-          workspaceDisplayName: workspaceDisplayNamesById.get(
-            recording.workspaceId,
-          ),
+          workspaceDisplayName,
         }
-        : recording
-    );
+        : recording;
+    });
     const activeRecordingCount = filteredRecordings.filter((row) =>
       row.state === "engaged-active"
     ).length;
@@ -760,19 +798,21 @@ export async function loadSessionsPageData(
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
-  const [rows, workspaceEntries] = await Promise.all([
+  const workspaceEntries = options.workspaceEntries ??
+    await loadRegisteredWorkspaces(katoDir);
+  const [rows, resolvedWorkspaceFilter] = await Promise.all([
     loadSessionActivityRows({
       ...options,
       includeStale,
       katoDir,
+      workspaceEntries,
     }),
-    loadRegisteredWorkspaces(katoDir),
+    resolveWorkspaceFilter(
+      options.workspaceFilter,
+      katoDir,
+      workspaceEntries,
+    ),
   ]);
-  const resolvedWorkspaceFilter = await resolveWorkspaceFilter(
-    options.workspaceFilter,
-    katoDir,
-    workspaceEntries,
-  );
   const workspaceOptions = workspaceEntries
     .map((entry) => ({
       workspaceId: entry.workspaceId,

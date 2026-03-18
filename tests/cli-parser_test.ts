@@ -1,5 +1,9 @@
-import { assertEquals, assertThrows } from "@std/assert";
-import { CliUsageError, parseDaemonCliArgs } from "../apps/cli/src/mod.ts";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  CliUsageError,
+  getCommandUsage,
+  parseDaemonCliArgs,
+} from "../apps/cli/src/mod.ts";
 
 function parseCommand(args: string[]) {
   const intent = parseDaemonCliArgs(args);
@@ -191,6 +195,13 @@ Deno.test("cli parser accepts workspace register name=value compatibility syntax
   assertThrows(
     () => parseDaemonCliArgs(["workspace", "register", "name="]),
     CliUsageError,
+  );
+});
+
+Deno.test("workspace register usage synopsis shows name=value compatibility syntax", () => {
+  assertStringIncludes(
+    getCommandUsage("workspace-register"),
+    "[--name <display-name>|name=<display-name>]",
   );
 });
 

@@ -15,6 +15,7 @@ function cloneWorkspace(entry: RegisteredWorkspace): RegisteredWorkspace {
   return {
     workspaceId: entry.workspaceId,
     alias: entry.alias,
+    ...(entry.displayName ? { displayName: entry.displayName } : {}),
     workspaceRoot: entry.workspaceRoot,
     configPath: entry.configPath,
     registeredAt: entry.registeredAt,
@@ -30,6 +31,7 @@ function makeWorkspace(
   return {
     workspaceId: overrides.workspaceId,
     alias: overrides.alias ?? overrides.workspaceId,
+    ...(overrides.displayName ? { displayName: overrides.displayName } : {}),
     workspaceRoot: overrides.workspaceRoot ??
       resolveTestTempPath("workspaces", overrides.workspaceId),
     configPath: overrides.configPath ??
@@ -119,6 +121,32 @@ Deno.test(
     const remaining = await catalog.getByAlias("New.Proj");
     assertExists(remaining);
     assertEquals(remaining.workspaceId, "ws-2");
+  },
+);
+
+Deno.test(
+  "WorkspaceCatalog refreshes displayName-only changes",
+  async () => {
+    const first = makeWorkspace({
+      workspaceId: "ws-1",
+      alias: "My.Proj",
+    });
+    const { store, setEntries } = makeInMemoryWorkspaceRegistryStore([first]);
+    const catalog = new WorkspaceCatalog(store);
+
+    const initial = await catalog.getByAlias("My.Proj");
+    assertExists(initial);
+    assertEquals(initial.displayName, undefined);
+
+    await setEntries([{
+      ...first,
+      displayName: "Docs Workspace",
+      updatedAt: "2026-03-01T10:05:00.000Z",
+    }]);
+
+    const updated = await catalog.getByAlias("My.Proj");
+    assertExists(updated);
+    assertEquals(updated.displayName, "Docs Workspace");
   },
 );
 
