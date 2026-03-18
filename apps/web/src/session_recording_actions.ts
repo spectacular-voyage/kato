@@ -33,6 +33,7 @@ import {
   readWorkspaceOutputs,
   stopAllWorkspaceOutputs,
   toWorkspaceDestinationBinding,
+  updateWorkspaceOutputCycleLastWrite,
 } from "../../daemon/src/orchestrator/runtime_workspace_output_state.ts";
 import {
   resolveUniqueNonExistingPath,
@@ -911,7 +912,7 @@ export async function runSessionRecordingAction(
           writeCursor,
           nowIso,
         );
-        await recordingPipeline.appendToDestination({
+        const writeResult = await recordingPipeline.appendToDestination({
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           targetPath,
@@ -921,6 +922,13 @@ export async function runSessionRecordingAction(
           workspaceIds: [workspace.workspaceId],
           outputOverrides,
         });
+        if (writeResult.wrote) {
+          updateWorkspaceOutputCycleLastWrite(
+            output,
+            now().toISOString(),
+            recordingCycleId,
+          );
+        }
         output.writeCursor = writeCursor;
         outputs.push(output);
         await sessionStore.saveSessionMetadata(metadata, {

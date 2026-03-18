@@ -333,7 +333,7 @@ function buildRecordingRowsForOutput(
       outputPath: output.currentResolvedPath,
       displayOutputPath,
       startedAt: activeCycle?.startedAt ?? liveRecording?.startedAt,
-      lastWriteAt: liveRecording?.lastWriteAt,
+      lastWriteAt: liveRecording?.lastWriteAt ?? activeCycle?.lastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId,
     }];
   }
@@ -353,6 +353,7 @@ function buildRecordingRowsForOutput(
       outputPath: output.currentResolvedPath,
       displayOutputPath,
       startedAt: latestStoppedCycle.startedAt,
+      lastWriteAt: latestStoppedCycle.lastWriteAt,
       stoppedAt: latestStoppedCycle.stoppedAt,
       recordingCycleId: latestStoppedCycle.recordingCycleId,
     }];
@@ -417,7 +418,9 @@ function buildAllRecordingRowsForOutput(
       startedAt: cycle.startedAt ??
         (active ? liveRecording?.startedAt : undefined),
       stoppedAt: active ? undefined : cycle.stoppedAt,
-      lastWriteAt: active ? liveRecording?.lastWriteAt : undefined,
+      lastWriteAt: active
+        ? liveRecording?.lastWriteAt ?? cycle.lastWriteAt
+        : cycle.lastWriteAt,
       recordingCycleId: cycle.recordingCycleId,
     });
   }
@@ -551,15 +554,6 @@ export function flattenSessionRecordings(
       lastEventAt: row.lastEventAt,
     }))
   ).sort((a, b) => {
-    const order = {
-      "engaged-active": 0,
-      "engaged-stale": 1,
-      "stopped": 2,
-    } as const;
-    const stateDiff = order[a.state] - order[b.state];
-    if (stateDiff !== 0) {
-      return stateDiff;
-    }
     const timeDiff = resolveActivityTimestamp(b) - resolveActivityTimestamp(a);
     if (timeDiff !== 0) {
       return timeDiff;

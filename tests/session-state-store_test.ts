@@ -427,6 +427,7 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
         recordingCycleId: "cycle-1",
         startedCursor: 5,
         startedAt: "2026-02-28T10:00:00.000Z",
+        lastWriteAt: "2026-02-28T10:03:00.000Z",
         startedBySeq: 3,
       }],
     }];
@@ -465,6 +466,10 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
     assertEquals(output.activeRecordingCycleId, "cycle-1");
     assertEquals(output.recordingCycles.length, 1);
     assertEquals(output.recordingCycles[0]?.startedCursor, 5);
+    assertEquals(
+      output.recordingCycles[0]?.lastWriteAt,
+      "2026-02-28T10:03:00.000Z",
+    );
   });
 });
 

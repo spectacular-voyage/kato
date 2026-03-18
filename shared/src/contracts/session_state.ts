@@ -14,6 +14,7 @@ export interface SessionWorkspaceRecordingCycleV1 {
   startedCursor: number;
   stoppedCursor?: number;
   startedAt?: string;
+  lastWriteAt?: string;
   stoppedAt?: string;
   startedBySeq?: number;
   stoppedBySeq?: number;
@@ -153,6 +154,12 @@ function isWorkspaceRecordingCycle(
   }
   if (
     value["startedAt"] !== undefined && typeof value["startedAt"] !== "string"
+  ) {
+    return false;
+  }
+  if (
+    value["lastWriteAt"] !== undefined &&
+    typeof value["lastWriteAt"] !== "string"
   ) {
     return false;
   }

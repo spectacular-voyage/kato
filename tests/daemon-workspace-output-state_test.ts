@@ -17,6 +17,7 @@ import {
   resolveBindingForRetargetedWorkspacePath,
   stopAllWorkspaceOutputs,
   toWorkspaceDestinationBinding,
+  updateWorkspaceOutputCycleLastWrite,
   type WorkspaceOutputState,
 } from "../apps/daemon/src/orchestrator/runtime_workspace_output_state.ts";
 
@@ -309,7 +310,7 @@ Deno.test(
 );
 
 Deno.test(
-  "openWorkspaceOutputCycle and closeWorkspaceOutputCycle record start and stop cursors",
+  "openWorkspaceOutputCycle, updateWorkspaceOutputCycleLastWrite, and closeWorkspaceOutputCycle track cycle timestamps",
   () => {
     const output = makeOutputState(makeProfile());
 
@@ -324,6 +325,22 @@ Deno.test(
     assertEquals(output.activeRecordingCycleId, "cycle-1");
     assertEquals(output.recordingCycles[0]?.startedCursor, 7);
     assertEquals(output.recordingCycles[0]?.startedBySeq, 7);
+    assertEquals(
+      output.recordingCycles[0]?.lastWriteAt,
+      "2026-02-22T10:01:00.000Z",
+    );
+    assertEquals(
+      updateWorkspaceOutputCycleLastWrite(
+        output,
+        "2026-02-22T10:01:30.000Z",
+        "cycle-1",
+      ),
+      true,
+    );
+    assertEquals(
+      output.recordingCycles[0]?.lastWriteAt,
+      "2026-02-22T10:01:30.000Z",
+    );
 
     assertEquals(
       closeWorkspaceOutputCycle(output, 9, "2026-02-22T10:02:00.000Z"),
@@ -336,6 +353,10 @@ Deno.test(
     assertEquals(
       output.recordingCycles[0]?.stoppedAt,
       "2026-02-22T10:02:00.000Z",
+    );
+    assertEquals(
+      output.recordingCycles[0]?.lastWriteAt,
+      "2026-02-22T10:01:30.000Z",
     );
   },
 );

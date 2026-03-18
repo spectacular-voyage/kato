@@ -43,6 +43,27 @@ function readWorkspaceOutputLatestStartedAt(
   return undefined;
 }
 
+function readWorkspaceOutputLastWriteAt(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string | undefined {
+  const activeCycleId = output.activeRecordingCycleId;
+  if (activeCycleId) {
+    for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+      const cycle = output.recordingCycles[i];
+      if (cycle?.recordingCycleId === activeCycleId && cycle.lastWriteAt) {
+        return cycle.lastWriteAt;
+      }
+    }
+  }
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (cycle?.lastWriteAt) {
+      return cycle.lastWriteAt;
+    }
+  }
+  return undefined;
+}
+
 export function toActiveRecordingsFromMetadata(
   entries: SessionMetadataV1[],
 ): ActiveRecording[] {
@@ -63,7 +84,8 @@ export function toActiveRecordingsFromMetadata(
         outputPath: output.currentResolvedPath,
         startedAt,
         ...(restartedAt && restartedAt !== startedAt ? { restartedAt } : {}),
-        lastWriteAt: metadata.updatedAt,
+        lastWriteAt: readWorkspaceOutputLastWriteAt(output) ??
+          metadata.updatedAt,
       });
     }
   }

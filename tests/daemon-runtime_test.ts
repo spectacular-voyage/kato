@@ -1959,6 +1959,10 @@ Deno.test(
         assertEquals(output.writeCursor, 2);
         assertEquals(output.recordingCycles.length, 1);
         assertEquals(output.recordingCycles[0]?.stoppedCursor, undefined);
+        assertEquals(
+          output.recordingCycles[0]?.lastWriteAt,
+          "2026-02-22T10:00:00.000Z",
+        );
       },
     );
   },

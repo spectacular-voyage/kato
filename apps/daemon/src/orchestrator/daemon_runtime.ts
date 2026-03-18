@@ -68,6 +68,7 @@ import {
   readWorkspaceOutputs,
   resolveBindingForRetargetedWorkspacePath,
   stopAllWorkspaceOutputs,
+  updateWorkspaceOutputCycleLastWrite,
 } from "./runtime_workspace_output_state.ts";
 import {
   type FirstSeenSourceFileFreshnessBasis,
@@ -931,7 +932,7 @@ async function applyPersistentControlCommandsForEvent(
                   "Recording pipeline does not support appendToDestination",
                 );
               }
-              await recordingPipeline.appendToDestination({
+              const writeResult = await recordingPipeline.appendToDestination({
                 provider,
                 sessionId: providerSessionId,
                 targetPath: output.currentResolvedPath,
@@ -942,6 +943,13 @@ async function applyPersistentControlCommandsForEvent(
                 workspaceIds: [workspace.workspaceId],
                 outputOverrides,
               });
+              if (writeResult.wrote) {
+                updateWorkspaceOutputCycleLastWrite(
+                  output,
+                  now().toISOString(),
+                  cycleId,
+                );
+              }
             }
             output.writeCursor = writeCursor;
             metadataChanged = true;
@@ -1061,7 +1069,7 @@ async function applyPersistentControlCommandsForEvent(
                 "Recording pipeline does not support appendToDestination",
               );
             }
-            await recordingPipeline.appendToDestination({
+            const writeResult = await recordingPipeline.appendToDestination({
               provider,
               sessionId: providerSessionId,
               targetPath,
@@ -1072,6 +1080,13 @@ async function applyPersistentControlCommandsForEvent(
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
+            if (writeResult.wrote && activeCycleId) {
+              updateWorkspaceOutputCycleLastWrite(
+                output,
+                now().toISOString(),
+                activeCycleId,
+              );
+            }
           }
           output.writeCursor = writeCursor;
           stateChanged = true;
@@ -1979,7 +1994,7 @@ async function processPersistentRecordingUpdates(
           workspaceProfileResolver,
           userConfig,
         });
-        await recordingPipeline.appendToDestination({
+        const writeResult = await recordingPipeline.appendToDestination({
           provider,
           sessionId: providerSessionId,
           targetPath: output.currentResolvedPath,
@@ -1994,6 +2009,12 @@ async function processPersistentRecordingUpdates(
           workspaceIds: [output.workspaceId],
           outputOverrides,
         });
+        if (writeResult.wrote) {
+          updateWorkspaceOutputCycleLastWrite(
+            output,
+            now().toISOString(),
+          );
+        }
         output.writeCursor = snapshot.events.length;
         metadataChanged = true;
       } catch (error) {

@@ -101,11 +101,35 @@ export function openWorkspaceOutputCycle(
     recordingCycleId,
     startedCursor: startCursor,
     startedAt: nowIso,
+    lastWriteAt: nowIso,
     startedBySeq: startCursor,
   });
   output.activeRecordingCycleId = recordingCycleId;
   output.desiredState = "on";
   return recordingCycleId;
+}
+
+export function updateWorkspaceOutputCycleLastWrite(
+  output: WorkspaceOutputState,
+  lastWriteAt: string,
+  recordingCycleId: string | undefined = output.activeRecordingCycleId,
+): boolean {
+  const cycleId = recordingCycleId?.trim();
+  if (!cycleId) {
+    return false;
+  }
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (!cycle || cycle.recordingCycleId !== cycleId) {
+      continue;
+    }
+    if (cycle.lastWriteAt === lastWriteAt) {
+      return false;
+    }
+    cycle.lastWriteAt = lastWriteAt;
+    return true;
+  }
+  return false;
 }
 
 export function applyWorkspaceProfileSnapshot(

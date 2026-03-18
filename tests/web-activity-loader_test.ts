@@ -39,6 +39,7 @@ function makeWorkspaceOutput(options: {
     startedCursor: number;
     stoppedCursor?: number;
     startedAt?: string;
+    lastWriteAt?: string;
     stoppedAt?: string;
     startedBySeq?: number;
     stoppedBySeq?: number;
@@ -212,6 +213,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
                 recordingCycleId: "cycle-stale",
                 startedCursor: 4,
                 startedAt: "2026-03-07T13:45:00.000Z",
+                lastWriteAt: "2026-03-07T16:00:00.000Z",
                 startedBySeq: 4,
               }],
             }),
@@ -318,14 +320,18 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(recordings.staleRecordingCount, 1);
         assertEquals(recordings.stoppedRecordingCount, 0);
         assertEquals(recordings.rows.length, 2);
-        assertEquals(recordings.rows[0]?.state, "engaged-active");
-        assertEquals(recordings.rows[0]?.recordingCycleId, "cycle-live");
-        assertEquals(recordings.rows[0]?.displayOutputPath, "notes/alpha.md");
-        assertEquals(recordings.rows[1]?.state, "engaged-stale");
-        assertEquals(recordings.rows[1]?.recordingCycleId, "cycle-stale");
-        assertEquals(recordings.rows[1]?.displayOutputPath, "notes/beta.md");
+        assertEquals(recordings.rows[0]?.state, "engaged-stale");
+        assertEquals(recordings.rows[0]?.recordingCycleId, "cycle-stale");
+        assertEquals(recordings.rows[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
-          recordings.rows[0]?.workspaceDisplayName,
+          recordings.rows[0]?.lastWriteAt,
+          "2026-03-07T16:00:00.000Z",
+        );
+        assertEquals(recordings.rows[1]?.state, "engaged-active");
+        assertEquals(recordings.rows[1]?.recordingCycleId, "cycle-live");
+        assertEquals(recordings.rows[1]?.displayOutputPath, "notes/alpha.md");
+        assertEquals(
+          recordings.rows[1]?.workspaceDisplayName,
           "Alpha Workspace",
         );
 

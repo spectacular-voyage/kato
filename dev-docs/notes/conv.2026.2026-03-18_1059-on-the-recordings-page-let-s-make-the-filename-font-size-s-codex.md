@@ -170,3 +170,235 @@ The failure was just the usual root-test permission issue from invoking `deno te
 # gpt-5.4_2026-03-18_1104_59
 
 Everything passed with the proper test permissions. I’m doing one last read of the session loader path that creates rows without a live daemon session so I can answer the `n/a` question accurately and not hand-wave it.
+
+# gpt-5.4_2026-03-18_1105_14
+
+I’ve got the exact reason for the `n/a` now, and it’s a real modeling nuance rather than a random bug. I’m grabbing the updated line refs so I can give you a crisp answer and note the one follow-up I’d recommend if you want the display to feel more coherent.
+
+# gpt-5.4_2026-03-18_1105_41
+
+I made both changes. The `File:` key stays at the normal detail size, and only the filename span is reduced in [styles.css](/home/djradon/hub/spectacular-voyage/kato/apps/web/assets/styles.css#L1072). Recordings now sort purely by recency in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L193), using the existing fallback chain from [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L108): `lastWriteAt`, then `stoppedAt`, then `startedAt`.
+
+`Last write` shows `n/a` because that value only comes from a live daemon recording entry. For rows built from persisted workspace-output metadata, we may still know the recording is armed and when it started, but `lastWriteAt` is only assigned from `liveRecording?.lastWriteAt` in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L321), and rows can be created even when `live?.recordings` is empty in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L458) and [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L620). So `n/a` usually means “we only have persisted state for this row, not current live write telemetry,” not “the sort is broken.”
+
+I think sorting by pure `last write` alone would be a little dishonest for those rows, so I used the fallback recency chain instead. If you want, the next good cleanup would be to rename that field to `Last activity` and show the same fallback timestamp we now sort by, so the visible timestamp matches the ordering.
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=... tests/web-activity-loader_test.ts tests/web-sessions-live_test.ts` and `deno test --config apps/web/deno.json apps/web/tests/recordings_live_test.tsx`.
+
+# djradon_2026-03-18_1107_54
+
+So "Last activity" mean last session activity?
+
+# gpt-5.4_2026-03-18_1108_09
+
+No. If we use `Last activity` on the Recordings page, I would mean last activity for that recording row, not last session activity.
+
+In this UI, the honest row-level meaning would be:
+`lastWriteAt` if we have it, otherwise `stoppedAt`, otherwise `startedAt`.
+That’s also the fallback chain now used for sorting in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L108) and [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L193).
+
+If we wanted session-wide freshness instead, I’d label it `Last session activity`, because that would be a different thing and could make a recording row look fresher than the recording itself. I’d recommend `Last activity` for the row.
+
+# djradon_2026-03-18_1110_41
+
+I'm trying to understand what "Last activity" means. 
+
+What I'm going towards is we should track last write for an output-file-per-recording persistently, and sort by that. And then trying to decide if we also include what your saying is honestly "last activity", but I don't understand how that varies from last write.
+
+# gpt-5.4_2026-03-18_1110_58
+
+I’m checking the persisted session-state contract one more time so I can answer this precisely instead of hand-waving the distinction.
+
+# gpt-5.4_2026-03-18_1111_28
+
+Yes: `last activity` is broader than `last write`.
+
+`last write` means:
+- the most recent time we actually appended content to the output file
+
+`last activity` would mean:
+- the most recent meaningful event for that recording row, even if no bytes were written
+- in practice: `lastWriteAt ?? stoppedAt ?? startedAt`
+
+Those differ in a few real cases:
+- You arm/start a recording and nothing has been written yet.
+  `lastWriteAt` = none
+  `lastActivity` = `startedAt`
+- A recording wrote at `10:05` and was stopped at `10:10`.
+  `lastWriteAt` = `10:05`
+  `lastActivity` = `10:10`
+- You re-start the same file and it hasn’t written yet.
+  `lastWriteAt` may still be none for the new cycle
+  `lastActivity` = new cycle `startedAt`
+
+In Kato today, that distinction exists because persisted session state stores cycles with `startedAt`/`stoppedAt`, but not persistent `lastWriteAt` in [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts#L30). `lastWriteAt` exists on live daemon recording status in [status.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L35), and the recordings loader only gets it when there is a live recording object to merge in in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L321). That’s why rows can have a real start/stop history but still show `last write: n/a`.
+
+My recommendation:
+- Persist `lastWriteAt` per recording cycle, not just per output file.
+- Keep `startedAt` and `stoppedAt` too.
+- Sort by `lastWriteAt ?? stoppedAt ?? startedAt`, which is basically what the page now uses for recency in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L108) and [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L193).
+- Display labels honestly:
+  `Last write` when we have it,
+  otherwise `Stopped` or `Started`.
+- I would avoid a single visible label `Last activity` unless you explicitly want a synthetic summary field.
+
+The push-back I’d give is: if files can be reused across multiple cycles, “last write per output file” is a little ambiguous. “Last write per recording cycle, then derive the row’s latest relevant timestamp” is cleaner.
+
+# djradon_2026-03-18_1113_27
+
+Sounds good, including your cleaner definition. I don't know when lastWriteAt would be undefined except for legacy recordings.
+
+# gpt-5.4_2026-03-18_1113_42
+
+It’s not just legacy recordings.
+
+Today `lastWriteAt` can be `undefined` in at least two non-legacy cases:
+
+1. Stopped rows.
+Those come from persisted cycle history, and the persisted cycle model stores `startedAt`/`stoppedAt` but not `lastWriteAt` in [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts#L30). So stopped recordings currently have no persisted write timestamp by design.
+
+2. Engaged rows that exist in persisted workspace-output state but don’t have a matching live daemon recording row.
+The loader still renders them as engaged from persisted metadata, but it only fills `lastWriteAt` from live recording status in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L321). If `liveRecording` is missing, `lastWriteAt` stays empty.
+
+So the main missing case is really “not live-backed right now,” not “legacy.”
+
+That’s why your proposed fix is the cleaner one: persist `lastWriteAt` per recording cycle, then derive row recency from that first. The current live-only `lastWriteAt` contract is in [status.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/status.ts#L35). If we move that into persisted cycle state too, the Recordings page stops depending on live daemon presence to explain recency.
+
+# djradon_2026-03-18_1114_35
+
+OK, I think we're agreed. Ready to implement?
+
+# gpt-5.4_2026-03-18_1114_48
+
+I’m implementing it. First I’m tracing the persisted cycle contract and the write/update path end to end so we can store `lastWriteAt` per cycle cleanly instead of papering over it in the loader.
+
+# gpt-5.4_2026-03-18_1114_55
+
+I’ve got the contract shape. Next I’m reading the shared workspace-output helpers and the write path so we can update `lastWriteAt` in one authoritative place instead of sprinkling it through web actions.
+
+# gpt-5.4_2026-03-18_1115_06
+
+I found the shared cycle helpers. I’m mapping the exact write touchpoints now, because the cleanest implementation is probably: add optional `lastWriteAt` to the persisted cycle contract, set it on cycle open, update it whenever a write succeeds, and leave older metadata compatible.
+
+# gpt-5.4_2026-03-18_1115_12
+
+I’ve narrowed it to the real implementation question: where to persist the write timestamp after a daemon append succeeds. I’m reading the daemon runtime append/save path now, because that’s where we can keep cycle state and live status in sync.
+
+# gpt-5.4_2026-03-18_1115_18
+
+I found the command-side writes. I’m reading the normal daemon append loop too, because that’s the path that updates live `lastWriteAt` during ongoing recording and it probably needs to persist the cycle timestamp after each successful append.
+
+# gpt-5.4_2026-03-18_1115_27
+
+I’ve found the daemon append/save loop, and that’s the right place to persist per-cycle `lastWriteAt` after successful writes. I’m checking the contract validation tests next so we can make the new field backward-compatible without breaking old metadata.
+
+# gpt-5.4_2026-03-18_1115_35
+
+I’ve got the schema and state-store tests in view. The remaining design choice is whether active-recording projection should fall back to persisted per-cycle `lastWriteAt` before `metadata.updatedAt`; I’m reading that projection helper now because it affects stale/live status correctness.
+
+# gpt-5.4_2026-03-18_1116_31
+
+I’ve reached the change points. I’m searching every place we currently advance `writeCursor` or open/close cycles so I can patch all of them consistently, then I’ll make the contract/helper changes in one pass.
+
+# gpt-5.4_2026-03-18_1116_50
+
+This crosses into persisted-state contract work, so I’m adding a dedicated task note and then I’ll wire the schema/helper/runtime/loader pieces together against it.
+
+# gpt-5.4_2026-03-18_1117_47
+
+I’ve got the test strategy: one contract/storage round-trip, one workspace-output helper test, one status-projection check, and one loader-order check that proves persisted `lastWriteAt` works even without live recording status. I’m patching those with the code changes now.
+
+# gpt-5.4_2026-03-18_1117_56
+
+I’m editing the shared contract and helper layer first, then I’ll thread the new timestamp through daemon/web writes and finish with test updates so we can verify the whole flow in one run.
+
+# gpt-5.4_2026-03-18_1118_19
+
+I’m wiring the new helper through the write paths now. This is the part that makes the persisted timestamp actually stay fresh after writes instead of just existing in the schema.
+
+# gpt-5.4_2026-03-18_1118_36
+
+I’ve finished the runtime path edits. I’m scanning for tests that compare full cycle objects so I can update only the expectations that are genuinely affected by the new persisted field.
+
+# gpt-5.4_2026-03-18_1118_43
+
+I’m in the test pass now. I’m updating the existing fixtures rather than adding a bunch of new scaffolding, so the regression coverage stays close to the behavior we already care about.
+
+# gpt-5.4_2026-03-18_1119_20
+
+I’ve covered the primary tests, and I’m doing a quick search for any route/API tests that might also assume the old recordings order before I run the suite.
+
+# gpt-5.4_2026-03-18_1119_36
+
+The code and fixture updates are in. I’m running a focused test batch across contracts, helper/state logic, projection, loader ordering, and the web action path we touched, plus the web island render test to make sure the page still composes.
+
+# gpt-5.4_2026-03-18_1119_41
+
+The web render test is green. I’m waiting on the root-side batch now; if anything fails it’ll likely be from an expectation that still assumes the old persisted cycle shape, and I’ll tighten that next.
+
+# gpt-5.4_2026-03-18_1119_48
+
+One loader assertion is still out of sync with the new behavior. I’m looking at that exact fixture now; the failure suggests the stale row’s persisted `lastWriteAt` didn’t outrank the live row the way I expected, so I want to verify the timestamps before I change the test or the loader.
+
+# gpt-5.4_2026-03-18_1119_57
+
+I found the likely culprit: the per-session recording rows are sorted by recency, but the recordings page may still be inheriting session order when it flattens them. I’m checking that flatten step now.
+
+# gpt-5.4_2026-03-18_1120_02
+
+I found it: the recordings page had a second, older state-first sort at the flatten step. I’m removing that now so the page’s actual order matches the row-level sort we intended.
+
+# gpt-5.4_2026-03-18_1120_12
+
+The duplicate state-first sort is gone. I’m rerunning the same focused root batch now; that should settle whether the page order and persisted timestamps are finally aligned end to end.
+
+# gpt-5.4_2026-03-18_1120_15
+
+The rerun is progressing cleanly through the early files. I’m waiting on the rest of the suite now, especially the loader and web action files that exercise the new persisted timestamp behavior.
+
+# gpt-5.4_2026-03-18_1120_27
+
+The focused suite is green. I’m doing one more targeted pass on daemon runtime tests, since that’s where the persisted write timestamp is actually refreshed during ongoing recording.
+
+# gpt-5.4_2026-03-18_1120_37
+
+The current suite is already green, but there’s one daemon runtime scenario that directly exercises persisted workspace-output appends. I’m adding one assertion there and running that single test so we have coverage on the exact write-refresh path too.
+
+# gpt-5.4_2026-03-18_1120_51
+
+I’m adding one daemon runtime assertion on the persisted-cycle write timestamp and then I’ll run just that scenario, so we have direct coverage on the append-refresh path without dragging the whole daemon runtime file through the loop.
+
+# gpt-5.4_2026-03-18_1121_07
+
+That targeted daemon runtime test is compiling cleanly. I’m waiting on the assertion result now, and then I’ll sync the task note checkboxes and give you the implementation summary.
+
+# gpt-5.4_2026-03-18_1121_15
+
+The code and targeted tests are green. I’m just updating the task note to reflect the work that actually landed and the focused test commands we ran.
+
+# gpt-5.4_2026-03-18_1121_43
+
+I’m grabbing the final line references now so I can hand you a clean summary of what changed and where.
+
+# gpt-5.4_2026-03-18_1121_58
+
+Implemented. `lastWriteAt` is now persisted per recording cycle as an optional backward-compatible field in [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts#L12) and validated there too. Cycle state now initializes `lastWriteAt` on open and can refresh it after successful writes via [runtime_workspace_output_state.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_workspace_output_state.ts#L94), and the daemon/web write paths now call that helper in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L935), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1072), [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L1997), and [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L910).
+
+The projection/loader side now consumes persisted cycle timestamps instead of depending on live-only status: [runtime_status_projection.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/runtime_status_projection.ts#L46) prefers cycle `lastWriteAt` for reconstructed active recordings, and [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L321) carries persisted `lastWriteAt` into Recordings rows. The Recordings page flatten step in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L541) now sorts by recency only, so the page order matches the new persisted timestamp behavior. I also added the task note at [task.2026.2026-03-18-persist-recording-last-write.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-18-persist-recording-last-write.md).
+
+Verified with focused tests:
+- `tests/session-contracts_test.ts`
+- `tests/session-state-store_test.ts`
+- `tests/daemon-workspace-output-state_test.ts`
+- `tests/daemon-status-projection_test.ts`
+- `tests/web-activity-loader_test.ts`
+- `tests/web-sessions-live_test.ts`
+- `tests/web-session-actions_test.ts`
+- filtered `tests/daemon-runtime_test.ts`
+- [recordings_live_test.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/tests/recordings_live_test.tsx)
+
+I didn’t run full `deno task ci`.
+
+# djradon_2026-03-18_1124_53
+
+Maybe instead of "[re-start]", we should use "[re-arm]"? Strictly speaking, active sessions would use "[re-start]", but the staleness is kinda arbitrary anyhow, and the recording would only "re-start" with subsequent events, so I think [re-arm] is the most accurate.
