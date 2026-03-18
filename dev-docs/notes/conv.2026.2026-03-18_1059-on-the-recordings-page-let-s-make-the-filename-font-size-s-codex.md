@@ -402,3 +402,286 @@ I didn’t run full `deno task ci`.
 # djradon_2026-03-18_1124_53
 
 Maybe instead of "[re-start]", we should use "[re-arm]"? Strictly speaking, active sessions would use "[re-start]", but the staleness is kinda arbitrary anyhow, and the recording would only "re-start" with subsequent events, so I think [re-arm] is the most accurate.
+
+# gpt-5.4_2026-03-18_1125_07
+
+I’m going to trace the `"[re-start]"` label usage and switch it to `"[re-arm]"` where it’s purely Recordings-page operator copy, then I’ll update any focused tests/docs that mention the old label so the wording stays coherent.
+
+# gpt-5.4_2026-03-18_1126_10
+
+I’m tracing the `"[re-start]"` wording through the Recordings page and related notices, then I’ll switch the user-facing copy to `"[re-arm]"` anywhere it represents “arm this recording again” rather than a literal write restart.
+
+# gpt-5.4_2026-03-18_1126_17
+
+I found two layers of copy: the button itself and the restart notices/errors behind that action. I’m tightening both so the operator language stays consistent, while leaving the internal action name alone.
+
+# gpt-5.4_2026-03-18_1126_22
+
+I’ve got the wording surface mapped now. Next I’m patching the button and the redirect/error copy together so the page doesn’t mix “re-arm” with “re-start” language.
+
+# gpt-5.4_2026-03-18_1126_28
+
+I’m applying the copy change now. I’m keeping the internal post action as `restart-recording`, but the operator-facing language will read `re-arm` consistently on the page, in notices, and in the failure messages tied to that flow.
+
+# gpt-5.4_2026-03-18_1126_48
+
+The wording swap is in. I’m doing a quick sweep for leftover user-facing `re-start` copy and then running the focused Recordings tests so we can be confident the operator flow still reads cleanly end to end.
+
+# gpt-5.4_2026-03-18_1126_51
+
+The render test already passed. The POST-route test is still running, and I’m waiting on that to make sure the redirect notice copy lines up with the new `re-arm` wording.
+
+# gpt-5.4_2026-03-18_1127_01
+
+`[re-arm]` is now the operator-facing label on the Recordings page in [RecordingsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx#L336), and I aligned the related redirect/error copy in [recordings_page_post.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/recordings_page_post.ts#L57) and [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L461). I agree with your reasoning: `re-arm` is the more honest operator verb here because the file only starts receiving new writes once subsequent events arrive.
+
+I also updated the focused route test in [web-recordings-page-post_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-recordings-page-post_test.ts#L321) plus the notes in [release-notes.v0.2.9.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.9.md#L26) and [task.2026.2026-03-18-recordings-row-polish.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-18-recordings-row-polish.md#L18). I left the internal action name as `restart-recording` so we don’t churn backend wiring for a copy-only improvement.
+
+Verified with `deno test --config apps/web/deno.json apps/web/tests/recordings_live_test.tsx` and `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=... tests/web-recordings-page-post_test.ts`.
+
+# djradon_2026-03-18_1130_18
+
+There's a bug, where if you "New Capture" from the Sessions page, it gets listed on the Recordings page as "armed for recording" instead of "recording".
+
+Also, it doesn't create the capture very quickly. Can we optimize?
+
+# gpt-5.4_2026-03-18_1130_25
+
+I’m going to trace the Sessions-page `New Capture` flow into the Recordings loader to see why those rows are being classified as idle instead of active, and I’ll look at the capture creation path at the same time to find the latency hotspot rather than guessing.
+
+# gpt-5.4_2026-03-18_1130_31
+
+I’ve confirmed this touches the Sessions-page action flow, not just presentation. I’m reading the action handler and recording-row projection next so we can fix the bad state at the source and then see whether the slowness is in the capture write path or in the subsequent status refresh.
+
+# gpt-5.4_2026-03-18_1130_36
+
+I found the likely classification seam: Recordings rows are inferred from persisted workspace-output state plus live daemon state, and a fresh capture may be missing the live write signal on the first redirect. I’m reading the Sessions action implementation now to confirm whether `new-capture` is opening a recording cycle without recording an initial write timestamp or without marking it active quickly enough.
+
+# gpt-5.4_2026-03-18_1130_44
+
+The capture path stands out already: it does a full snapshot write before persisting the new active output row, which explains why the UI can feel slow. I’m checking the state helpers now to confirm whether that also explains the wrong `armed for recording` label on the first refresh.
+
+# gpt-5.4_2026-03-18_1131_00
+
+I’ve narrowed the state bug to one specific assumption in the loader: it treats “no fresh live daemon row yet” as stale by default. That’s probably right for old metadata, but it’s too pessimistic for a capture that the web action just created itself. I’m looking at the existing loader tests now so I can pin down the expected behavior before patching it.
+
+# gpt-5.4_2026-03-18_1131_11
+
+The current `new-capture` flow is definitely doing the expensive thing inline: it writes the whole session snapshot before the page can redirect. I’m checking the writer implementation now to see whether we can shave real work off that path without making the action asynchronous or risking a half-created capture row.
+
+# gpt-5.4_2026-03-18_1131_20
+
+I’ve confirmed the capture latency is real and structural: the web action writes the entire snapshot before persisting the new output row. Before changing that, I’m checking whether we already have a safe way to present the row as active immediately from persisted state, because that would solve the visible bug even if we leave the write synchronous for now.
+
+# gpt-5.4_2026-03-18_1131_47
+
+I think the root issue is that we’re currently labeling recordings off session staleness, not recording write recency. That makes a fresh capture look idle if the session snapshot hasn’t caught up yet. I’m checking how we can reuse the existing stale threshold so the row state is driven by `lastWriteAt` instead, which matches what the operator actually cares about here.
+
+# gpt-5.4_2026-03-18_1132_30
+
+I’ve got a concrete plan now:
+
+- Fix the Recordings/Sessions row state so engaged outputs use recording-write recency, not just session staleness. That should make a freshly created capture show as `recording` immediately, even before the daemon’s live snapshot fully catches up.
+- Tighten the `new-capture` action path by removing redundant preflight file-existence work and parallelizing the config/profile loads that are currently serialized.
+- Add focused regression coverage for “recent persisted active capture with no live row” plus the capture action path, then run the relevant tests.
+
+I’m writing a small task note first so the bugfix and perf tweak are captured cleanly, then I’ll patch the loader/action code.
+
+# gpt-5.4_2026-03-18_1132_33
+
+I’m adding the task note now, then I’ll move straight into the loader/action changes so the tests describe the intended behavior instead of the current glitch.
+
+# gpt-5.4_2026-03-18_1132_48
+
+The task note is in place. I’m patching the state derivation first, because that’s the user-visible bug; then I’ll fold in the hot-path cleanup to the capture action and update the focused tests around both.
+
+# gpt-5.4_2026-03-18_1133_47
+
+I’m patching the loader now. I’m using the status snapshot’s own `generatedAt` as the recency clock so the engaged-row state stays deterministic in tests and reflects the snapshot the operator is actually looking at.
+
+# djradon_2026-03-18_1134_05
+
+FYI, "armed for recording" sticks around even after page referesh.
+
+# gpt-5.4_2026-03-18_1134_10
+
+That’s helpful, and it confirms this isn’t just a redirect race. It means the persisted row is being classified as idle on reload, which matches the loader change I’m in the middle of: I’m making the engaged state follow recording recency, not just the session’s stale flag.
+
+# gpt-5.4_2026-03-18_1134_26
+
+I’m patching the capture action now. Since your refresh note confirms this is persisted-state behavior, I’m also tightening the tests around “no live row, but recent write” so we don’t regress back to this.
+
+# gpt-5.4_2026-03-18_1135_01
+
+The state fix is in, and I’ve updated the capture action hot path a bit. I’m doing one more pass on that action to parallelize the workspace-profile lookup with the config reads, then I’ll run the focused tests and catch any fallout from the broader recency classification change.
+
+# gpt-5.4_2026-03-18_1135_17
+
+I’m at the verification step now. I’m running the activity-loader and session-action tests first, because they exercise exactly the stale-vs-active classification and the capture mutation path we changed.
+
+# gpt-5.4_2026-03-18_1135_22
+
+The first round of tests is compiling now. If anything shakes loose, it’ll probably be where other pages were implicitly relying on “session stale means recording stale,” so I’m watching for that specifically.
+
+# gpt-5.4_2026-03-18_1135_28
+
+The first compile error is a simple import mismatch, not a logic problem. I pulled the stale-threshold helpers from the wrong package surface, so I’m correcting that and then rerunning the same focused tests.
+
+# gpt-5.4_2026-03-18_1135_40
+
+I’ve fixed the import issue. I’m rerunning the loader/render tests now, and then I’ll widen the net a bit if the recency-based state change affects any route-level expectations.
+
+# gpt-5.4_2026-03-18_1135_53
+
+One workspace-level expectation shifted exactly the way I suspected: a workspace test was still assuming “stale session implies stale recording.” I’m updating that expectation to the new recency-based behavior and then rerunning the loader plus route-level checks.
+
+# gpt-5.4_2026-03-18_1136_10
+
+I found one older workspace expectation that was already out of sync with the underlying loader semantics. I’m fixing that to the honest stale state for that older beta recording, then I’ll rerun the loader test and a route-level smoke test.
+
+# gpt-5.4_2026-03-18_1136_28
+
+I’ve updated the stale beta workspace expectation. I’m rerunning the loader suite plus the live route semantics test so we know the state-filter APIs still behave the same for genuinely old engaged rows.
+
+# gpt-5.4_2026-03-18_1136_39
+
+The behavioral tests are green now. I’m doing a quick format pass on the touched files and then one last focused retest so we don’t leave any style churn or accidental formatting issues behind.
+
+# gpt-5.4_2026-03-18_1136_58
+
+I’ve got the code and tests in a good place. I’m finishing the paper trail now by checking off the task note and adding a short release-note line so this behavior change is discoverable later.
+
+# gpt-5.4_2026-03-18_1137_18
+
+The code work is done and the verification is green. I’m marking the plan complete and doing one quick status check so I can give you a clean summary of exactly what changed.
+
+# gpt-5.4_2026-03-18_1137_42
+
+I noticed one last bit of line wrapping after the import fix, so I’m doing a final format pass on the touched code files only. No behavior changes from here, just cleanup.
+
+# gpt-5.4_2026-03-18_1138_13
+
+`New Capture` now stays `recording` after a refresh. The fix is in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L127) and [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L328): engaged rows are now classified from recording recency (`lastWriteAt`, then `startedAt`) against the status snapshot clock, instead of defaulting to `armed for recording` just because the session has no fresh live daemon row yet. That means a freshly written capture can render as active immediately, while genuinely old idle outputs still stay stale.
+
+I also trimmed the capture hot path in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L179) and [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L777): removed the redundant preflight existence check before `captureSnapshot`, parallelized the profile/shared-config/user-config setup, and stamp the new capture cycle at completion time. It should feel a bit quicker, but the biggest remaining cost is still the actual full-session snapshot write, since `New Capture` is still synchronous by design.
+
+Regression coverage is in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts#L257) and [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts#L392). Verified with `tests/web-activity-loader_test.ts`, `tests/web-session-actions_test.ts`, `tests/web-live-routes_test.ts`, and [recordings_live_test.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/tests/recordings_live_test.tsx). I didn’t run full `deno task ci`.
+
+# djradon_2026-03-18_1142_14
+
+We could create the file immediately (with frontmatter) and then just populate it after the snapshot-write completes.
+
+# gpt-5.4_2026-03-18_1142_28
+
+I’m going to inspect the markdown writer and capture pipeline before I change anything, because your idea is promising but it has a subtle risk: if we pre-create the file the wrong way, the existing `capture` path may either fail on `requireCreateNew` or duplicate headings/frontmatter.
+
+# gpt-5.4_2026-03-18_1142_38
+
+I found the key constraint: `appendToDestination` can already create a frontmatter-only file when there are no events, but `captureSnapshot` still insists on `requireCreateNew`, so we can’t just preseed the file and call the existing capture path unchanged. I’m reading the append logic around that branch now so I can tell you whether the clean move is “new helper” or “teach capture to append into a preseeded file.”
+
+# gpt-5.4_2026-03-18_1143_30
+
+Yes, technically. The markdown path already supports creating a frontmatter-only file with no events, as covered in [recording-pipeline_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/recording-pipeline_test.ts#L362), and the writer can then append the body later in [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts#L705).
+
+The important catch is that this only helps latency if we stop waiting for the full snapshot write before redirecting. Right now `new-capture` still blocks on `captureSnapshotWithRetries(...)` in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L179) and [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts#L941), so “touch file first, then keep writing in the same request” won’t feel much faster.
+
+I’d also want to push back a bit on doing this as a fire-and-forget web-task. Since the row now shows `recording` based on recent recording timestamps in [sessions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/sessions.ts#L127), pre-creating the file and persisting metadata before the snapshot append completes would make the UI look done even if the body write later fails. That’s fine only if we also add a real pending/failure model.
+
+So I think the split is:
+
+- Low-value version: precreate frontmatter, still wait for the snapshot append in the request. Small code change, little UX gain.
+- Real-speed version: precreate frontmatter, persist the row immediately, and hand snapshot hydration to a durable background path, ideally the daemon rather than the web request process.
+
+I’d recommend the second one if we want this to be worth the churn. If you want, I can implement that next, but I’d want to add an explicit `capture pending` or equivalent state so we’re not lying to the operator while hydration is still in flight.
+
+# djradon_2026-03-18_1148_03
+
+We could also just update the UI to say something like "snapshot creation in progress", so people know that something is happening, and not change anything else. What do you think?
+
+# gpt-5.4_2026-03-18_1148_14
+
+I’m checking the current Sessions-page submit-state copy before I answer, because we may already have a lightweight “work in progress” affordance and I want to make sure I’m not suggesting something we effectively already do.
+
+# gpt-5.4_2026-03-18_1148_29
+
+I think that’s a good UX improvement, but only in one specific place.
+
+Right now we already show a pending label during submit in [SessionsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/SessionsLive.tsx#L141), and for capture it says `Starting capture...`. I’d support making that more explicit, like `Creating snapshot...`, because that matches the actual slow part.
+
+What I would push back on is showing `snapshot creation in progress` after the redirect or on the Recordings page without changing backend behavior. Today the request doesn’t return until the snapshot write is done, so once the new recording row appears, the snapshot is no longer “in progress.” Showing that there would be inaccurate.
+
+So my recommendation is:
+
+- Good minimal fix: rename the pending submit copy on the Sessions page to `Creating snapshot...`
+- Maybe also tweak the popover description/tooltip to warn that capture writes the whole session first
+- Not worth doing: a persisted “in progress” state unless we actually move capture hydration into background work
+
+If you want, I can make just that small copy change now.
+
+# djradon_2026-03-18_1155_29
+
+Meh, I'm leaning towards the "big fix". But I still think there's a bug... I've been staring at the Sessions page after captuing a new session, and not only does it not update with recording in-page, opening a new tab still doesn't list the recording:
+
+# gpt-5.4_2026-03-18_1155_43
+
+I’m going back to the source on this one. Since you can reproduce it across a fresh tab, I’m treating it as a real data-path bug, not just a stale client render, and I’m tracing how the Sessions page matches a live session row to persisted recording metadata.
+
+# gpt-5.4_2026-03-18_1156_03
+
+I’m looking for a more structural cause now. One strong suspect is that the daemon may be rebuilding and saving session metadata from its own cached view, which would wipe the web-added `workspaceOutputs` back out right after the capture action saves them.
+
+# gpt-5.4_2026-03-18_1156_12
+
+I think I found a very plausible real bug: the daemon loop snapshots `listSessionMetadata()` once, then may later save that stale in-memory copy back to disk. So a web-created capture can be saved correctly, then immediately clobbered by the daemon on the next append/cursor update if it loaded the old metadata just before your action ran.
+
+# gpt-5.4_2026-03-18_1156_18
+
+There’s already a strong hint in the daemon tests that metadata refresh cadence matters. I’m reading the long-interval refresh test now, because it may already model the exact “daemon keeps running with stale metadata in memory” failure mode we’re seeing.
+
+# gpt-5.4_2026-03-18_1156_46
+
+I’m checking whether the session-state store already has a “load this one session fresh from disk” path. If it does, the cleanest fix may be to rehydrate the session metadata right before the daemon mutates/saves it, instead of trusting the loop-start snapshot.
+
+# gpt-5.4_2026-03-18_1157_35
+
+I have a clean test shape for this now: make the daemon read stale metadata once, then simulate a web-side capture mutation by swapping in newer metadata before the daemon saves. If the daemon doesn’t refresh/merge, it overwrites the new capture; if it does, the capture survives. I’m wiring that regression test and the merge fix together.
+
+# gpt-5.4_2026-03-18_1157_43
+
+I’ve got the regression test scaffold. Next I’m patching the daemon save path so it reloads the latest disk metadata for that session before writing, and only keeps the daemon’s copy of `workspaceOutputs` when there hasn’t been a newer external metadata write.
+
+# gpt-5.4_2026-03-18_1158_16
+
+I’ve narrowed this to a likely daemon/web metadata race, so I’m writing a small task note before I patch it. The shape looks like: web saves the new `workspaceOutputs`, then the daemon saves an older in-memory copy for that same session and wipes them back out.
+
+# gpt-5.4_2026-03-18_1158_47
+
+I’m making the daemon save path merge-aware now. The idea is intentionally narrow: if disk metadata is newer than the daemon’s in-memory copy, keep the disk `workspaceOutputs` and only overlay the daemon-owned cursor/twin fields.
+
+# gpt-5.4_2026-03-18_1159_22
+
+I hit a small patch offset mismatch, so I’m inserting the merge helpers against the exact daemon save block now. No design change, just getting it into the right spot cleanly.
+
+# gpt-5.4_2026-03-18_1200_01
+
+I’m adding the regression test right next to the metadata-refresh cadence tests, because this bug is basically “the daemon trusted a stale metadata read for too long.” Then I’ll run the focused daemon suite plus the web tests that reproduce the symptom.
+
+# gpt-5.4_2026-03-18_1200_52
+
+The merge logic and regression test are in. I’m formatting those two files and then running the daemon regression first, because that should either prove the race or show me exactly where the merge still isn’t right.
+
+# gpt-5.4_2026-03-18_1201_06
+
+The web-side checks are still happy. I’m waiting on the daemon regression now; that one is the real signal for whether we actually fixed the overwrite rather than just masking it in the loader.
+
+# gpt-5.4_2026-03-18_1201_14
+
+The daemon regression passed, which is a very good sign. I’m checking off the task note and adding one release-note line so we have a breadcrumb for the “new capture disappeared” bugfix.
+
+# gpt-5.4_2026-03-18_1201_48
+
+This was a real bug. The daemon loop could load an older copy of a session’s metadata, then later save that stale in-memory copy back to disk after the web had already persisted a new capture. That would wipe out the fresh `workspaceOutputs`, which matches the “capture disappears even in a new tab” behavior you saw.
+
+The fix is in [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2046) and [daemon_runtime.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/orchestrator/daemon_runtime.ts#L2102): before the daemon saves session metadata, it now reloads the latest disk copy and, if that disk copy is newer, preserves its `workspaceOutputs` while still keeping the daemon’s cursor/twin updates. I added a regression test that simulates a web capture landing between the daemon’s metadata read and save in [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts#L6455).
+
+Verified with the new filtered daemon runtime test plus `tests/web-activity-loader_test.ts`, `tests/web-session-actions_test.ts`, and `tests/web-live-routes_test.ts`. I didn’t run full `deno task ci`.

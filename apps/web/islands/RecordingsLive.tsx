@@ -333,7 +333,7 @@ export default function RecordingsLive(
                               class="session-inline-action mono"
                               type="submit"
                             >
-                              [re-start]
+                              [re-arm]
                             </button>
                           </form>
                         )

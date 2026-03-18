@@ -418,6 +418,10 @@ Deno.test("runSessionRecordingAction capture creates a fresh destination and pre
           history.events.length,
         );
         assertEquals(
+          nextOutput.recordingCycles[0]?.lastWriteAt,
+          "2026-03-17T17:05:00.000Z",
+        );
+        assertEquals(
           nextOutput.activeRecordingCycleId,
           nextOutput.recordingCycles[0]?.recordingCycleId,
         );

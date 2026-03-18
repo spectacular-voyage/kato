@@ -260,8 +260,8 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(data.activeSessionCount, 1);
         assertEquals(data.staleSessionCount, 1);
         assertEquals(data.inactiveSessionCount, 0);
-        assertEquals(data.activeRecordingCount, 1);
-        assertEquals(data.staleRecordingCount, 1);
+        assertEquals(data.activeRecordingCount, 2);
+        assertEquals(data.staleRecordingCount, 0);
         assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.rows[0]?.sessionId, "sess-live");
         assertEquals(data.rows[0]?.state, "active");
@@ -281,7 +281,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(data.rows[1]?.sessionId, "sess-stale");
         assertEquals(data.rows[1]?.state, "stale");
         assertEquals(data.rows[1]?.recordings.length, 1);
-        assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-stale");
+        assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-active");
         assertEquals(
           data.rows[1]?.recordings[0]?.displayOutputPath,
           "notes/beta.md",
@@ -300,12 +300,12 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         });
         assertEquals(filtered.sessionCount, 1);
         assertEquals(filtered.workspaceFilterDisplayName, "Beta Project");
-        assertEquals(filtered.activeRecordingCount, 0);
-        assertEquals(filtered.staleRecordingCount, 1);
+        assertEquals(filtered.activeRecordingCount, 1);
+        assertEquals(filtered.staleRecordingCount, 0);
         assertEquals(filtered.stoppedRecordingCount, 0);
         assertEquals(filtered.rows[0]?.sessionId, "sess-stale");
-        assertEquals(filtered.rows[0]?.activeRecordingCount, 0);
-        assertEquals(filtered.rows[0]?.staleRecordingCount, 1);
+        assertEquals(filtered.rows[0]?.activeRecordingCount, 1);
+        assertEquals(filtered.rows[0]?.staleRecordingCount, 0);
         assertEquals(filtered.rows[0]?.stoppedRecordingCount, 0);
         assertEquals(filtered.rows[0]?.recordings.length, 1);
         assertEquals(
@@ -316,11 +316,11 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         );
 
         const recordings = await loadRecordingsPageData();
-        assertEquals(recordings.activeRecordingCount, 1);
-        assertEquals(recordings.staleRecordingCount, 1);
+        assertEquals(recordings.activeRecordingCount, 2);
+        assertEquals(recordings.staleRecordingCount, 0);
         assertEquals(recordings.stoppedRecordingCount, 0);
         assertEquals(recordings.rows.length, 2);
-        assertEquals(recordings.rows[0]?.state, "engaged-stale");
+        assertEquals(recordings.rows[0]?.state, "engaged-active");
         assertEquals(recordings.rows[0]?.recordingCycleId, "cycle-stale");
         assertEquals(recordings.rows[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
@@ -338,14 +338,10 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         const staleRecordings = await loadRecordingsPageData({
           stateFilter: "engaged-stale",
         });
-        assertEquals(staleRecordings.activeRecordingCount, 1);
-        assertEquals(staleRecordings.staleRecordingCount, 1);
+        assertEquals(staleRecordings.activeRecordingCount, 2);
+        assertEquals(staleRecordings.staleRecordingCount, 0);
         assertEquals(staleRecordings.stoppedRecordingCount, 0);
-        assertEquals(staleRecordings.rows.length, 1);
-        assertEquals(
-          staleRecordings.rows[0]?.displayOutputPath,
-          "notes/beta.md",
-        );
+        assertEquals(staleRecordings.rows.length, 0);
       });
     } finally {
       restoreRuntimeEnv(env);
@@ -663,13 +659,13 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           alphaRow.recordings[0]?.displayOutputPath,
           "notes/alpha.md",
         );
-        assertEquals(betaRow.activeRecordingCount, 1);
-        assertEquals(betaRow.staleRecordingCount, 0);
+        assertEquals(betaRow.activeRecordingCount, 0);
+        assertEquals(betaRow.staleRecordingCount, 1);
         assertEquals(betaRow.stoppedRecordingCount, 0);
         assertEquals(betaRow.writePathCovered, true);
         assertEquals(betaRow.workspaceUsername, "beta-user");
         assertEquals(alphaRow.recordings[0]?.sessionId, "sess-mixed");
-        assertEquals(betaRow.recordings[0]?.state, "engaged-active");
+        assertEquals(betaRow.recordings[0]?.state, "engaged-stale");
         assertEquals(betaRow.recordings.length, 1);
         assertEquals(betaRow.recordings[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(

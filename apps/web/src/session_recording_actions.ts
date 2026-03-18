@@ -157,22 +157,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function assertCaptureDestinationDoesNotExist(
-  targetPath: string,
-): Promise<void> {
-  try {
-    await Deno.stat(targetPath);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return;
-    }
-    throw error;
-  }
-  throw new Deno.errors.AlreadyExists(
-    `Capture destination already exists: ${targetPath}`,
-  );
-}
-
 function isAlreadyExistsError(error: unknown): boolean {
   if (error instanceof Deno.errors.AlreadyExists) {
     return true;
@@ -209,7 +193,6 @@ async function captureSnapshotWithRetries(options: {
   while (true) {
     const cycleIdForAttempt = options.resolveCycleIdForAttempt(targetPath);
     try {
-      await assertCaptureDestinationDoesNotExist(targetPath);
       await options.recordingPipeline.captureSnapshot({
         provider: options.provider,
         sessionId: options.sessionId,
@@ -465,13 +448,13 @@ async function assertRestartTargetExists(targetPath: string): Promise<void> {
     const stat = await Deno.stat(targetPath);
     if (!stat.isFile) {
       throw new Error(
-        `Cannot re-start recording because the output target is not a file: ${targetPath}`,
+        `Cannot re-arm recording because the output target is not a file: ${targetPath}`,
       );
     }
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       throw new Error(
-        `Cannot re-start recording because the output file no longer exists: ${targetPath}`,
+        `Cannot re-arm recording because the output file no longer exists: ${targetPath}`,
       );
     }
     throw error;
@@ -803,19 +786,23 @@ export async function runSessionRecordingAction(
       options.workspaceSelector,
     );
     const workspaceProfileResolver = new WorkspaceProfileResolver();
-    const profile = await workspaceProfileResolver.resolveForCommand(workspace);
     const sharedConfigStore = new SharedBehaviorConfigFileStore(
       resolveDefaultSharedConfigPath(katoDir),
     );
-    const sharedConfig = (await sharedConfigStore.ensureInitialized(
-      createDefaultSharedBehaviorConfig({ allowedWriteRoots: [] }),
-    )).config;
     const userConfigStore = new UserConfigFileStore(
       resolveDefaultUserConfigPath(katoDir),
     );
-    const userConfig = (await userConfigStore.ensureInitialized(
-      createDefaultUserConfig(),
-    )).config;
+    const [profile, sharedConfigResult, userConfigResult] = await Promise.all([
+      workspaceProfileResolver.resolveForCommand(workspace),
+      sharedConfigStore.ensureInitialized(
+        createDefaultSharedBehaviorConfig({ allowedWriteRoots: [] }),
+      ),
+      userConfigStore.ensureInitialized(
+        createDefaultUserConfig(),
+      ),
+    ]);
+    const sharedConfig = sharedConfigResult.config;
+    const userConfig = userConfigResult.config;
     const recordingPipeline = new RecordingPipeline({
       pathPolicyGate: new WritePathPolicyGate({
         allowedRoots: sharedConfig.allowedWriteRoots,
@@ -965,6 +952,7 @@ export async function runSessionRecordingAction(
         });
         targetPath = captureResult.targetPath;
         const captureCycleId = captureResult.captureCycleId;
+        const captureActivatedAtIso = now().toISOString();
         for (const output of matchingOutputs) {
           if (output.desiredState === "on") {
             closeWorkspaceOutputCycle(output, writeCursor, nowIso);
@@ -977,7 +965,7 @@ export async function runSessionRecordingAction(
           resolvedDefaultOutputDir: resolved.resolvedDefaultOutputDir,
           desiredState: "off",
           writeCursor,
-          nowIso,
+          nowIso: captureActivatedAtIso,
         });
         applyWorkspaceProfileSnapshot(
           output,
@@ -987,7 +975,7 @@ export async function runSessionRecordingAction(
         openWorkspaceOutputCycle(
           output,
           writeCursor,
-          nowIso,
+          captureActivatedAtIso,
           captureCycleId,
         );
         output.writeCursor = writeCursor;

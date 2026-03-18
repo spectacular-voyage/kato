@@ -6452,6 +6452,196 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
   assertEquals(metadataReads, 3);
 });
 
+Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs when saving stale session metadata", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-preserve-web-recording-mutations-",
+  );
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    const nowIso = "2026-02-22T10:00:00.000Z";
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: nowIso,
+      heartbeatAt: nowIso,
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionKey = "codex:session-web-race";
+    const staleMetadata: SessionMetadataV1 = {
+      schemaVersion: 1,
+      sessionKey,
+      provider: "codex",
+      providerSessionId: "session-web-race",
+      sessionId: "kato-session-web-race-1234",
+      createdAt: "2026-02-22T09:59:00.000Z",
+      updatedAt: nowIso,
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SESSION_PATH,
+      ingestCursor: { kind: "byte-offset", value: 0 },
+      twinPath: join(stateDir, "session-web-race.twin.jsonl"),
+      nextTwinSeq: 1,
+      recentFingerprints: [],
+      commandCursor: 0,
+    };
+    const webCaptureOutput = makeWorkspaceOutputState(workspace, {
+      currentResolvedPath: DAEMON_RUNTIME_CAPTURE_PATH,
+      desiredState: "on",
+      writeCursor: 1,
+      activeRecordingCycleId: "cycle-web-capture",
+      recordingCycles: [{
+        recordingCycleId: "cycle-web-capture",
+        startedCursor: 1,
+        startedAt: "2026-02-22T10:00:01.000Z",
+        lastWriteAt: "2026-02-22T10:00:01.000Z",
+        startedBySeq: 1,
+      }],
+    });
+    const webMutatedMetadata: SessionMetadataV1 = {
+      ...structuredClone(staleMetadata),
+      updatedAt: "2026-02-22T10:00:01.000Z",
+      workspaceOutputs: [structuredClone(webCaptureOutput)],
+    };
+
+    let storedMetadata = structuredClone(staleMetadata);
+    let metadataReads = 0;
+    const sessionStateStore = {
+      listSessionMetadata() {
+        metadataReads += 1;
+        const result = [structuredClone(storedMetadata)];
+        if (metadataReads === 1) {
+          storedMetadata = structuredClone(webMutatedMetadata);
+        }
+        return Promise.resolve(result);
+      },
+      getOrCreateSessionMetadata() {
+        return Promise.resolve(structuredClone(storedMetadata));
+      },
+      saveSessionMetadata(next: SessionMetadataV1) {
+        storedMetadata = structuredClone(next);
+        return Promise.resolve();
+      },
+    } as unknown as PersistentSessionStateStore;
+
+    let pollCount = 0;
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date(nowIso),
+    });
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-web-race",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [
+              makeEventForSession(
+                "session-web-race",
+                "a-race-1",
+                "message.assistant",
+                "assistant response",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: nowIso,
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-web-race",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      recordingPipeline: new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date(nowIso),
+      }),
+      now: () => new Date(nowIso),
+      pid: 4242,
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1,
+      sessionMetadataRefreshIntervalMs: 10_000,
+    });
+
+    assertEquals(storedMetadata.commandCursor, 1);
+    assertExists(storedMetadata.workspaceOutputs);
+    assertEquals(storedMetadata.workspaceOutputs.length, 1);
+    assertEquals(
+      storedMetadata.workspaceOutputs[0]?.currentResolvedPath,
+      DAEMON_RUNTIME_CAPTURE_PATH,
+    );
+    assertEquals(
+      storedMetadata.workspaceOutputs[0]?.activeRecordingCycleId,
+      "cycle-web-capture",
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
+});
+
 Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error and leaves state unchanged", async () => {
   const stateDir = await makeTestTempDir("daemon-runtime-ambiguous-stop-");
   try {

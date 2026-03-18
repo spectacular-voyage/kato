@@ -295,5 +295,5 @@ Why this order matters:
       bundle packaging.
 - [x] Add npm publish automation with a manual `skip` / `dry-run` / `publish`
       control in `.github/workflows/release-manual.yml`.
-- [ ] Update README/install docs and [[dev.release-runbook]] once the npm
+- [x] Update README/install docs and [[dev.release-runbook]] once the npm
       package shape is proven.

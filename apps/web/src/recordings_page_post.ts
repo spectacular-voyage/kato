@@ -59,8 +59,8 @@ function buildRecordingRestartNotice(
   return result.noOp
     ? `recording already engaged (${result.sessionShortId})`
     : result.workspaceAlias
-    ? `recording re-started: ${result.workspaceAlias} (${result.sessionShortId})`
-    : `recording re-started (${result.sessionShortId})`;
+    ? `recording re-armed: ${result.workspaceAlias} (${result.sessionShortId})`
+    : `recording re-armed (${result.sessionShortId})`;
 }
 
 export async function handleRecordingsPagePost(

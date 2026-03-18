@@ -320,7 +320,7 @@ Deno.test("handleRecordingsPagePost restarts a stopped recording and redirects t
           assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
           assertEquals(
             redirectUrl.searchParams.get("notice"),
-            "recording re-started: alpha (sess-web)",
+            "recording re-armed: alpha (sess-web)",
           );
           assertEquals(
             redirectUrl.hash,

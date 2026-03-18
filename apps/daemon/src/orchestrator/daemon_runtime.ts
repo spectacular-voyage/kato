@@ -2044,11 +2044,117 @@ async function processPersistentRecordingUpdates(
     }
 
     if (metadataChanged) {
+      metadata = await mergeLatestSessionMetadataBeforeSave(
+        sessionStateStore,
+        metadata,
+      );
       await sessionStateStore.saveSessionMetadata(metadata);
+      metadataBySessionKey.set(sessionKey, metadata);
       anyMetadataChanged = true;
     }
   }
   return anyMetadataChanged;
+}
+
+function readMetadataUpdatedAtMs(
+  metadata: Pick<SessionMetadataV1, "updatedAt">,
+): number {
+  const parsed = Date.parse(metadata.updatedAt);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function buildWorkspaceOutputMergeKey(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string {
+  return `${output.workspaceId}\u0000${output.currentResolvedPath}`;
+}
+
+function mergeWorkspaceOutputsPreferringLatest(
+  latest: SessionMetadataV1["workspaceOutputs"],
+  current: SessionMetadataV1["workspaceOutputs"],
+): SessionMetadataV1["workspaceOutputs"] {
+  const merged = latest ? structuredClone(latest) : [];
+  const seenKeys = new Set(
+    merged?.map(buildWorkspaceOutputMergeKey) ?? [],
+  );
+  for (const output of current ?? []) {
+    const key = buildWorkspaceOutputMergeKey(output);
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    merged.push(structuredClone(output));
+    seenKeys.add(key);
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+async function loadLatestSessionMetadataForMerge(
+  sessionStateStore: PersistentSessionStateStore,
+  metadata: SessionMetadataV1,
+): Promise<SessionMetadataV1 | undefined> {
+  return (await sessionStateStore.listSessionMetadata()).find((entry) =>
+    entry.sessionKey === metadata.sessionKey ||
+    entry.providerSessionId === metadata.providerSessionId ||
+    entry.sessionId === metadata.sessionId
+  ) as SessionMetadataV1 | undefined;
+}
+
+async function mergeLatestSessionMetadataBeforeSave(
+  sessionStateStore: PersistentSessionStateStore,
+  metadata: SessionMetadataV1,
+): Promise<SessionMetadataV1> {
+  const latest = await loadLatestSessionMetadataForMerge(
+    sessionStateStore,
+    metadata,
+  );
+  if (!latest || latest.sessionKey !== metadata.sessionKey) {
+    return metadata;
+  }
+
+  const merged = structuredClone(latest) as SessionMetadataV1;
+  merged.ingestCursor = structuredClone(metadata.ingestCursor);
+  merged.nextTwinSeq = metadata.nextTwinSeq;
+  merged.recentFingerprints = [...metadata.recentFingerprints];
+  if (metadata.lastObservedMtimeMs !== undefined) {
+    merged.lastObservedMtimeMs = metadata.lastObservedMtimeMs;
+  } else {
+    delete merged.lastObservedMtimeMs;
+  }
+  if (metadata.ingestionActivatedAt !== undefined) {
+    merged.ingestionActivatedAt = metadata.ingestionActivatedAt;
+  } else {
+    delete merged.ingestionActivatedAt;
+  }
+  if (metadata.commandCursor !== undefined) {
+    merged.commandCursor = metadata.commandCursor;
+  } else {
+    delete merged.commandCursor;
+  }
+  if (metadata.commandCursorAnchor !== undefined) {
+    merged.commandCursorAnchor = structuredClone(metadata.commandCursorAnchor);
+  } else {
+    delete merged.commandCursorAnchor;
+  }
+
+  if (readMetadataUpdatedAtMs(latest) <= readMetadataUpdatedAtMs(metadata)) {
+    if (metadata.workspaceOutputs) {
+      merged.workspaceOutputs = structuredClone(metadata.workspaceOutputs);
+    } else {
+      delete merged.workspaceOutputs;
+    }
+    return merged;
+  }
+
+  const preservedWorkspaceOutputs = mergeWorkspaceOutputsPreferringLatest(
+    latest.workspaceOutputs,
+    metadata.workspaceOutputs,
+  );
+  if (preservedWorkspaceOutputs) {
+    merged.workspaceOutputs = preservedWorkspaceOutputs;
+  } else {
+    delete merged.workspaceOutputs;
+  }
+  return merged;
 }
 
 function summarizeControlCommands(

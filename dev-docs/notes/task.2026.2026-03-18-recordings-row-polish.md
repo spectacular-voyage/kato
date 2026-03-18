@@ -19,6 +19,7 @@ details onto distinct lines and tightening the idle-state copy.
 - make both the session title and short id link back to the Sessions page
 - replace the idle row wording with `armed for recording` and use `disarm`
   for the idle stop action label
+- label stopped-row re-engagement as `re-arm` instead of `re-start`
 - sort Recordings rows by recency instead of grouping by state first
 
 ## Discussion
@@ -42,6 +43,8 @@ details onto distinct lines and tightening the idle-state copy.
 - keep the page scoped to per-file rows and only polish the row presentation
 - use `armed for recording` for the engaged-idle state on the Recordings page
 - use `disarm` only for engaged-idle rows; actively writing rows keep `stop`
+- use `re-arm` for stopped-row re-engagement copy while keeping the underlying
+  restart action name unchanged
 - sort Recordings rows by recency using `lastWriteAt`, then `stoppedAt`, then
   `startedAt` as fallback
 
@@ -52,6 +55,7 @@ details onto distinct lines and tightening the idle-state copy.
   separate labeled lines
 - ready-state Recordings rows now label the idle engaged state as
   `armed for recording`
+- stopped-row Recordings controls now say `re-arm`
 - Recordings rows now sort by recency instead of activity-state buckets
 
 ## Testing
