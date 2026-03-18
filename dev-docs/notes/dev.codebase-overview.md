@@ -75,8 +75,9 @@ Current top-level web routes are:
 - `/sessions`: primary discovered chat-session inventory, backed by
   `loadSessionsPageData()` and `/api/sessions`, with live activity,
   recording state, and on-demand snippet reveal.
-- `/recordings`: flattened recording history across sessions and workspaces,
-  backed by `loadRecordingsPageData()` and `/api/recordings`.
+- `/recordings`: latest recording-output state across sessions and workspaces
+  (one row per output file, with stop / same-path `Re-start` for persisted
+  rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label
   editing, registration-time display-label entry, per-workspace
   preferred-username overrides, plus workspace-level recording rollups, backed
@@ -93,6 +94,9 @@ Supporting web files worth knowing:
 
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
+- `apps/web/src/session_recording_actions.ts`: shared web mutation flows for
+  Sessions and Recordings recording/capture start-stop-`Re-start` actions,
+  including same-file exclusivity guards.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/maintenance`, `/sessions`, and session anchor links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for

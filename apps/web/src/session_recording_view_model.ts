@@ -8,6 +8,15 @@ export function canStopSessionRecording(
   return !!recording.workspaceId && !!recording.recordingCycleId;
 }
 
+export function canRestartSessionRecording(
+  recording: SessionRecordingActivityRow,
+): boolean {
+  return recording.state === "stopped" &&
+    !!recording.workspaceId &&
+    !!recording.recordingCycleId &&
+    !!recording.outputPath;
+}
+
 export function buildWorkspaceSelectorIds(action: SessionRecordingAction): {
   titleId: string;
   selectId: string;

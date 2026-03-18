@@ -316,11 +316,11 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         const recordings = await loadRecordingsPageData();
         assertEquals(recordings.activeRecordingCount, 1);
         assertEquals(recordings.staleRecordingCount, 1);
-        assertEquals(recordings.stoppedRecordingCount, 1);
-        assertEquals(recordings.rows.length, 3);
-        assertEquals(recordings.rows[2]?.state, "stopped");
-        assertEquals(recordings.rows[2]?.recordingCycleId, "cycle-old");
-        assertEquals(recordings.rows[2]?.displayOutputPath, "notes/beta.md");
+        assertEquals(recordings.stoppedRecordingCount, 0);
+        assertEquals(recordings.rows.length, 2);
+        assertEquals(recordings.rows[1]?.state, "engaged-stale");
+        assertEquals(recordings.rows[1]?.recordingCycleId, "cycle-stale");
+        assertEquals(recordings.rows[1]?.displayOutputPath, "notes/beta.md");
         assertEquals(
           recordings.rows[0]?.workspaceDisplayName,
           "Alpha Workspace",
@@ -331,7 +331,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         });
         assertEquals(staleRecordings.activeRecordingCount, 1);
         assertEquals(staleRecordings.staleRecordingCount, 1);
-        assertEquals(staleRecordings.stoppedRecordingCount, 1);
+        assertEquals(staleRecordings.stoppedRecordingCount, 0);
         assertEquals(staleRecordings.rows.length, 1);
         assertEquals(
           staleRecordings.rows[0]?.displayOutputPath,
@@ -883,20 +883,20 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         });
         assertEquals(recordings.activeRecordingCount, 0);
         assertEquals(recordings.staleRecordingCount, 1);
-        assertEquals(recordings.stoppedRecordingCount, 3);
+        assertEquals(recordings.stoppedRecordingCount, 1);
         assertEquals(recordings.workspaceFilterDisplayName, "Gamma Workspace");
-        assertEquals(recordings.rows.length, 4);
+        assertEquals(recordings.rows.length, 2);
         assertEquals(
           recordings.rows
             .filter((row) => row.sessionId === "sess-continue")
             .map((row) => row.state),
-          ["engaged-stale", "stopped"],
+          ["engaged-stale"],
         );
         assertEquals(
           recordings.rows
             .filter((row) => row.sessionId === "sess-stopped")
             .map((row) => row.recordingCycleId),
-          ["cycle-newest", "cycle-oldest"],
+          ["cycle-newest"],
         );
       });
     } finally {

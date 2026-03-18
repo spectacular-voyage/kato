@@ -6,6 +6,10 @@ import {
 } from "../src/activity_state.ts";
 import type { RecordingsPageData } from "../src/loaders/recordings.ts";
 import {
+  canRestartSessionRecording,
+  canStopSessionRecording,
+} from "../src/session_recording_view_model.ts";
+import {
   buildRecordingRowAnchorId,
   buildRecordingsHref,
 } from "../src/session_routes.ts";
@@ -28,7 +32,11 @@ function recordingState(
 }
 
 export default function RecordingsLive(
-  props: { initialData: RecordingsPageData; endpoint: string },
+  props: {
+    initialData: RecordingsPageData;
+    endpoint: string;
+    csrfToken?: string;
+  },
 ) {
   const pageData = usePolledJson({
     initialData: props.initialData,
@@ -42,6 +50,53 @@ export default function RecordingsLive(
       pageData.workspaceFilterDisplayName,
     )
     : pageData.workspaceFilterId;
+
+  function RecordingsPageActionFields(
+    actionProps: {
+      sessionId: string;
+      recordingCycleId?: string;
+      rowKey: string;
+      workspaceId?: string;
+      outputPath: string;
+    },
+  ) {
+    return (
+      <>
+        <input type="hidden" name="sessionId" value={actionProps.sessionId} />
+        <input
+          type="hidden"
+          name="stateFilter"
+          value={pageData.stateFilter}
+        />
+        <input
+          type="hidden"
+          name="workspaceFilter"
+          value={pageData.workspaceFilter ?? ""}
+        />
+        <input
+          type="hidden"
+          name="recordingCycleId"
+          value={actionProps.recordingCycleId ?? ""}
+        />
+        <input type="hidden" name="rowKey" value={actionProps.rowKey} />
+        <input
+          type="hidden"
+          name="workspaceId"
+          value={actionProps.workspaceId ?? ""}
+        />
+        <input
+          type="hidden"
+          name="outputPath"
+          value={actionProps.outputPath}
+        />
+        <input
+          type="hidden"
+          name="csrfToken"
+          value={props.csrfToken ?? ""}
+        />
+      </>
+    );
+  }
 
   return (
     <section class="grid">
@@ -165,8 +220,65 @@ export default function RecordingsLive(
                       <span>:</span>
                       <span>{row.displayOutputPath}</span>
                     </div>
-                    <div class={`mono activity-state-text ${uiState}`}>
-                      {recordingActivityStateLabel(uiState)}
+                    <div class="session-activity-meta">
+                      <div class={`mono activity-state-text ${uiState}`}>
+                        {recordingActivityStateLabel(uiState)}
+                      </div>
+                      {row.state !== "stopped" &&
+                          canStopSessionRecording(row)
+                        ? (
+                          <form
+                            method="post"
+                            class="session-list-action-form session-inline-action-form"
+                          >
+                            <RecordingsPageActionFields
+                              sessionId={row.sessionId}
+                              recordingCycleId={row.recordingCycleId}
+                              rowKey={row.key}
+                              workspaceId={row.workspaceId}
+                              outputPath={row.outputPath}
+                            />
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="stop-recording"
+                            />
+                            <button
+                              class="session-inline-action session-inline-action-danger mono"
+                              type="submit"
+                            >
+                              [stop]
+                            </button>
+                          </form>
+                        )
+                        : null}
+                      {canRestartSessionRecording(row)
+                        ? (
+                          <form
+                            method="post"
+                            class="session-list-action-form session-inline-action-form"
+                          >
+                            <RecordingsPageActionFields
+                              sessionId={row.sessionId}
+                              recordingCycleId={row.recordingCycleId}
+                              rowKey={row.key}
+                              workspaceId={row.workspaceId}
+                              outputPath={row.outputPath}
+                            />
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="restart-recording"
+                            />
+                            <button
+                              class="session-inline-action mono"
+                              type="submit"
+                            >
+                              [re-start]
+                            </button>
+                          </form>
+                        )
+                        : null}
                     </div>
                   </div>
                   <div class="session-list-primary">

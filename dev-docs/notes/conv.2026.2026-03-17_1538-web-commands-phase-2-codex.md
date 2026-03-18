@@ -672,3 +672,329 @@ config=/path/to/beta/.kato-workspace-config.yaml
 ```
 
 Verified with `deno fmt`, `deno lint`, and `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=... tests/daemon-cli_test.ts`. Unrelated pre-existing worktree changes were left alone.
+
+# djradon_2026-03-18_1007_15
+
+OK, more work on phase 2?
+
+# gpt-5.4_2026-03-18_1007_30
+
+Phase 2 still has meaningful work left, and the next slice is the Recordings-page controls: `Stop` for engaged rows, then same-path `Re-start` for stopped rows with fail-fast errors for missing or disallowed paths. I’m checking the phase-2 note against the current recordings route/action model now so we can wire the smallest safe slice first instead of guessing at the state transitions.
+
+# gpt-5.4_2026-03-18_1007_35
+
+The Recordings page is still read-only today, which is a good boundary: we only need to add actions for rows that already have enough persisted identity. I’m reading the existing Sessions-page stop action plumbing next so we can reuse the same control-plane path instead of inventing a second recording-state mutation stack.
+
+# gpt-5.4_2026-03-18_1007_42
+
+I’ve confirmed there’s already a solid Sessions-page stop action with session/workspace/cycle/path identity, so phase 2 doesn’t need a brand-new backend model. The next thing I’m checking is whether the Recordings loader already exposes enough row identity to drive both `Stop` and same-path `Re-start`, or whether we need one narrow loader contract extension first.
+
+# gpt-5.4_2026-03-18_1007_48
+
+The loader already gives us the core row identity we need: `sessionId`, `workspaceId`, `recordingCycleId`, `outputPath`, and state. That means we can keep this slice pretty tight and focus on one new web action plus clear fail-fast validation for same-path `Re-start`.
+
+# gpt-5.4_2026-03-18_1007_57
+
+The backend has exactly the primitives we need for restarting an existing output cycle: reopen the same workspace output, validate the same destination path, and refuse if the file is gone. I’m looking at the writer/path-policy error shape now so the Recordings page can give the user a specific “missing file” vs “policy denied” message instead of a generic failure.
+
+# gpt-5.4_2026-03-18_1008_06
+
+I’ve got the validation shape now. Policy denial already comes through with a stable “Path denied by policy…” error, so for `Re-start` we mainly need to add one explicit missing-file guard before we reopen the cycle. Next I’m reading the existing “new recording” mutation path so the restart action can reuse its profile/user-config logic without accidentally creating a new destination.
+
+# gpt-5.4_2026-03-18_1008_16
+
+I’m down to the main design choice now: when we `Re-start`, do we just reopen the exact saved output path and leave its binding snapshot alone, or do we also refresh the workspace profile snapshot around it. I’m checking how the loader reads stopped outputs so we preserve the semantics the page is already showing rather than quietly changing destination meaning under the hood.
+
+# gpt-5.4_2026-03-18_1008_23
+
+I’ve got enough context now to sketch the safe slice: reuse the existing stop mutation for engaged rows, add one restart mutation for stopped rows with exact-path validation, and only expose buttons when the row has persisted workspace/cycle identity. I’m looking for the best existing web-route test style before I patch that so we don’t end up with orphaned route behavior and no coverage.
+
+# gpt-5.4_2026-03-18_1008_30
+
+I’m leaning toward testing this at two levels: action-level behavior for the state machine, and one route-level POST test for the Recordings page notices/errors. I’m checking the Fresh route test harness shape next so we can cover the user-facing redirects without a bunch of brittle UI rendering tests.
+
+# gpt-5.4_2026-03-18_1008_37
+
+I’m at the redirect/details polish now. Before I edit the route, I’m checking the recordings URL helpers so `Stop`/`Re-start` can bounce back to the same filtered view with a stable anchor instead of dumping the operator at the top of the page after every action.
+
+# gpt-5.4_2026-03-18_1009_03
+
+I found one subtlety worth calling out before I patch: the Recordings page is showing all recording cycles, so a single output can have several old stopped rows plus one live row. That means “show `Re-start` on every stopped row” would be misleading. I’m going to encode eligibility in the loader so we only show `Re-start` when that stopped row actually represents a currently-off output we can reopen, and otherwise keep old history rows read-only.
+
+# gpt-5.4_2026-03-18_1009_06
+
+The Sessions page already has the right pattern for guarded inline actions, so I’m going to mirror that rather than invent a new control style. Next I’m patching the shared recording row model with explicit `canStop` / `canRestart` flags so the Recordings page only renders actions for truly actionable rows.
+
+# gpt-5.4_2026-03-18_1010_22
+
+I’ve settled the action model: only the active row gets `Stop`, and only the latest stopped cycle of a currently-off output gets `Re-start`. That avoids the weird case where old historical stopped rows on an already-active path would all advertise restart buttons that do the same thing. I’m patching the row model, route, and island together so the UI and backend stay in sync.
+
+# djradon_2026-03-18_1010_22
+
+can you explain "I’m down to the main design choice now: when we Re-start, do we just reopen the exact saved output path and leave its binding snapshot alone, or do we also refresh the workspace profile snapshot around it. I"
+
+# gpt-5.4_2026-03-18_1010_58
+
+Yes. The confusing part is that a stopped recording stores two different kinds of state in session metadata:
+
+- The actual file we would write to again:
+  [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts)
+  `currentResolvedPath`
+- The workspace-derived snapshot around that file:
+  [session_state.ts](/home/djradon/hub/spectacular-voyage/kato/shared/src/contracts/session_state.ts)
+  `currentDestination`, `workspaceAliasSnapshot`, `workspaceRootSnapshot`, `sourceConfigPath`, `resolvedDefaultOutputDir`, `filenameTemplate`, `writerFeatureFlags`
+
+So “Re-start” can mean two slightly different things.
+
+1. Reopen the exact saved path and leave the snapshot alone.
+   That means we just take the existing stopped output, open a new cycle on it, and keep all its old metadata as-is. This is the strictest interpretation of “same path.” It is also the safest, because nothing about the old recording’s identity silently changes.
+
+2. Reopen the exact saved path, but refresh the workspace snapshot first.
+   That means the file path stays the same, but we reload the current workspace registration/config and update things like alias snapshot, config path, and writer flags before reopening. This makes restarted recordings reflect current workspace settings, but it mixes “old path” with “new workspace metadata.”
+
+Why I paused there: if a workspace moved or its config changed, option 2 can create a weird hybrid state. Example: the old recording is still at `/old-root/notes/a.md`, but the workspace now points at `/new-root`. Re-starting “same path” while refreshing the workspace snapshot means the metadata now partly describes the new workspace even though the file is still the old one.
+
+For phase 2, my recommendation is:
+- keep `currentResolvedPath` and `currentDestination` unchanged
+- fail fast if that exact file is missing or policy-denied
+- only reopen a new recording cycle on that existing output
+
+That matches the product rule you set: `Re-start` means “use the same path,” not “reinterpret this recording under today’s workspace settings.”
+
+# djradon_2026-03-18_1015_00
+
+As for the subtlety, we should probably not show each recording cycle... just "per file recordings". We might need better domain terminology there.
+
+Also, I think we can target the same output file with multiple recordings, but we might need a guard to ensure that only one session can be recording to a file at a time. If you start or restart a recording, it stops the previously-recording output. And capture should probably not be allowed over existing output files.
+
+I accept your recommendations.
+
+# gpt-5.4_2026-03-18_1015_22
+
+Those are good decisions, and they tighten the phase-2 slice in a helpful way. I’m translating them into the implementation boundary now: Recordings becomes “per output file” instead of “per cycle history,” restart stays same-path only, and I’ll add a guard so starting or restarting on a file first stops any currently engaged writer already targeting that file.
+
+# gpt-5.4_2026-03-18_1017_15
+
+I’m at the implementation boundary now. The safe version of your decision is: the Recordings page becomes “one row per output file,” not per cycle, and `Re-start` means “re-arm that stopped output file,” while internally preserving the old file/binding and stopping any conflicting active writer already targeting that same file.
+
+# gpt-5.4_2026-03-18_1017_53
+
+I’ve got the patch shape. I’m checking the recordings query parser once so the POST redirects preserve the current `state` filter cleanly instead of carrying through arbitrary strings.
+
+# gpt-5.4_2026-03-18_1018_09
+
+I’m editing the mutation layer now. First step is a small recording-mutation lock, because the new same-file exclusivity rule can touch more than one session at once and I don’t want to bolt cross-session stops onto a session-local lock by accident.
+
+# gpt-5.4_2026-03-18_1018_15
+
+The locking primitive is in. I’m patching the recording action module next so `Re-start` is same-path only, missing-file and policy failures stay distinct, and same-file conflicts get stopped before we reopen a writer.
+
+# gpt-5.4_2026-03-18_1019_57
+
+The mutation layer is in progress. I’m switching the Recordings data model from “all cycles” to “latest row per output file” next, because that’s what makes the page-level `Re-start` button honest instead of ambiguous.
+
+# gpt-5.4_2026-03-18_1020_09
+
+I’m wiring the Recordings route itself now: POST handler, redirect notices, and filtered-anchor redirects back to the same row. That keeps the new actions feeling local to the row you clicked instead of bouncing you to a fresh page state.
+
+# gpt-5.4_2026-03-18_1020_37
+
+The route is wired. I’m doing the island now, and I’m keeping the action UI deliberately parallel to Sessions: a compact inline `[stop]` or `[re-start]` on actionable rows, nothing on historical/read-only rows.
+
+# gpt-5.4_2026-03-18_1021_08
+
+I’m adding the substantive tests first here: one for successful same-path restart with a conflicting active writer on the same file, and one each for the two fail-fast branches you asked to preserve, missing file and policy denial.
+
+# gpt-5.4_2026-03-18_1021_50
+
+The restart action tests are in. I’m updating the recordings loader expectations now, because the page is intentionally no longer “all cycles” after your terminology call; it’s “one row per output file with its latest state.”
+
+# gpt-5.4_2026-03-18_1022_12
+
+I’ve updated the loader semantics, so I’m doing one small copy pass too: the Recordings page shouldn’t keep calling itself “full history” if it now intentionally shows one row per output file.
+
+# gpt-5.4_2026-03-18_1022_29
+
+I found one important cross-session edge while thinking through the restart save path: the same-file conflict helper can’t write the target session behind the back of the in-memory mutation, or we risk reviving a stale active output when we save. I’m tightening that now by excluding the target session from the global helper and handling local same-file/same-workspace stops inside the target session’s in-memory metadata.
+
+# gpt-5.4_2026-03-18_1023_44
+
+I’m picking up the Recordings slice with your new rules: per-file rows, same-file exclusivity, and same-path `Re-start`. First I’m checking the current action/loader code so I can tighten the state handling before I edit anything.
+
+# gpt-5.4_2026-03-18_1023_48
+
+I’ve confirmed the new Recordings UI hooks are already in place. The next thing I’m fixing is the mutation safety around same-file exclusivity, because that’s where we could otherwise clobber session metadata when a restart stops another active writer.
+
+# gpt-5.4_2026-03-18_1023_53
+
+I’ve got the loader/UI side confirmed: the page is already effectively “one row per output file,” which matches your direction. I’m drilling into the action code now to make same-file restarts deterministic and to avoid cross-session save races.
+
+# gpt-5.4_2026-03-18_1024_03
+
+I’m at the point where the product semantics are coherent. I’m going to patch the action layer now so the same-file rule is enforced without stale in-memory session saves, then I’ll add route coverage and update the phase-2 note/decision log to reflect the “per file recordings” terminology.
+
+# gpt-5.4_2026-03-18_1024_46
+
+I’ve narrowed the risky part to one helper, so I’m patching that now instead of layering more behavior on top of a race. After that I’ll run the focused web action tests and do the small docs pass to lock the terminology.
+
+# gpt-5.4_2026-03-18_1025_20
+
+I’ve got the race fix in. I’m adding one regression test that specifically recreates the “same session, same file, different output entry” case, because that’s the one that would have silently undone the stop when we saved stale metadata back out.
+
+# gpt-5.4_2026-03-18_1025_42
+
+The mutation/test changes are in. I’m running format and the focused checks next so we can see whether there are any contract mismatches before I touch the notes.
+
+# gpt-5.4_2026-03-18_1025_48
+
+The code is formatted. I’m running the focused test/check trio now: action tests, loader tests, and the web-type/lint pass for the recordings surfaces.
+
+# gpt-5.4_2026-03-18_1025_52
+
+The typecheck and lint pass are clean. The action/loader tests are still running, and if those come back green I’ll do the note updates with the now-verified semantics instead of documenting a maybe-state.
+
+# gpt-5.4_2026-03-18_1025_59
+
+The state-machine side is green, including the new same-session conflict regression. I’m doing one extra web-route/API sweep now so the Recordings page changes are checked against the broader live data flow before I finalize the docs.
+
+# gpt-5.4_2026-03-18_1026_22
+
+The implementation is behaving the way we wanted, so I’m doing the last pass on the dev notes now: tightening phase 2 to “per output file,” recording the single-writer-per-file rule, and updating the codebase overview so it no longer describes the Recordings page as full cycle history.
+
+# gpt-5.4_2026-03-18_1026_46
+
+The behavior notes are patched. I’m doing a quick format pass on the markdown too, then I’ll summarize what changed and call out the next clean slice if you want to keep moving.
+
+# gpt-5.4_2026-03-18_1027_04
+
+Recordings phase 2 is now aligned with the product decisions.
+
+The core behavior lives in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts), [recordings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/recordings.ts), [recordings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/recordings.tsx), and [RecordingsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx). The Recordings page is now one row per output file, not per cycle. `Re-start` reuses the exact saved file, fails fast if that file is missing or policy-denied, and starting or restarting a recording now stops any other active writer already targeting that same file so only one session owns a file at a time. Capture behavior remains fresh-file-only.
+
+I also added regression coverage in [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts) and updated loader expectations in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts). The dev notes now reflect the new semantics in [task.2026.2026-03-17-web-commands-phase2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands-phase2.md), [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md), and [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-session-actions_test.ts tests/web-activity-loader_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-live-routes_test.ts`
+- `deno check --config apps/web/deno.json ...`
+- `deno lint ...`
+
+One small note: `deno fmt` worked for the TypeScript files, but the direct markdown-note paths weren’t picked up by this repo’s `deno fmt` invocation, so I left those notes manually formatted.
+
+# gpt-5.4_2026-03-18_1027_06
+
+Recordings phase 2 is now aligned with the product decisions.
+
+The core behavior lives in [session_recording_actions.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/session_recording_actions.ts), [recordings.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/recordings.ts), [recordings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/recordings.tsx), and [RecordingsLive.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/islands/RecordingsLive.tsx). The Recordings page is now one row per output file, not per cycle. `Re-start` reuses the exact saved file, fails fast if that file is missing or policy-denied, and starting or restarting a recording now stops any other active writer already targeting that same file so only one session owns a file at a time. Capture behavior remains fresh-file-only.
+
+I also added regression coverage in [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts) and updated loader expectations in [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts). The dev notes now reflect the new semantics in [task.2026.2026-03-17-web-commands-phase2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands-phase2.md), [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md), and [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md).
+
+Verified with:
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-session-actions_test.ts tests/web-activity-loader_test.ts`
+- `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=HOME,USERPROFILE,KATO_RUNTIME_DIR tests/web-live-routes_test.ts`
+- `deno check --config apps/web/deno.json ...`
+- `deno lint ...`
+
+One small note: `deno fmt` worked for the TypeScript files, but the direct markdown-note paths weren’t picked up by this repo’s `deno fmt` invocation, so I left those notes manually formatted.
+
+# djradon_2026-03-18_1039_50
+
+detailed commit message please
+
+# gpt-5.4_2026-03-18_1040_10
+
+Assuming you want one commit for the current phase-2 work, excluding unrelated version/release-note changes, I’d use:
+
+```text
+feat(web): finish phase 2 workspace labels and recording controls
+
+Add operator-facing workspace display labels across the CLI and web UI.
+
+This introduces optional workspace `displayName` support in shared registry
+metadata, propagates `alias (displayName)` formatting through the web loaders
+and views, and lets operators set labels during workspace registration from
+both the CLI and the Workspaces page. The Workspaces page now also exposes the
+narrow per-workspace settings slice for `displayName` and preferred username,
+while keeping username persistence in user config. CLI `workspace list` output
+is reformatted into clearer per-workspace blocks and now includes display
+labels.
+
+Expand Recordings page actions from read-only status into bounded lifecycle
+controls.
+
+The Recordings page now shows one row per output file instead of every
+recording cycle, adds inline `stop` and same-path `Re-start` actions for
+persisted rows, and redirects back with row-local notices/errors. `Re-start`
+reopens the exact saved file, fails fast if the file is missing or no longer
+allowed by write-path policy, and does not create a fresh destination. Starting
+or restarting a recording now enforces single-writer-per-file behavior by
+stopping any other engaged output already targeting that same path, including
+same-session conflicts. Capture behavior remains fresh-file-only and does not
+reuse existing files.
+
+Update tests and developer notes to lock in the new semantics.
+
+Add and update focused coverage for registration-time display labels, workspace
+mutation flows, recording restart behavior, same-file exclusivity, and
+Recordings loader semantics. Refresh the phase-2 task note, decision log, and
+codebase overview to document the latest-state-per-output Recordings model and
+the shared workspace-label conventions.
+```
+
+If you want, I can also give you:
+- a shorter subject/body version
+- a 2-commit split version
+- a release-notes-friendly version
+
+# djradon_2026-03-18_1040_38
+
+Sorry, just for these latest (unstaged) changes, I've been committing as we go.
+
+# gpt-5.4_2026-03-18_1040_44
+
+I’m checking the current unstaged diff so I can tailor the message to just the latest changes, not the earlier commits.
+
+# gpt-5.4_2026-03-18_1040_51
+
+I’ve narrowed it down: the unstaged functional changes are the Recordings page restart/stop slice plus the note updates. I’m checking the two smaller support files so the message covers the full latest slice cleanly.
+
+# gpt-5.4_2026-03-18_1041_06
+
+Assuming this commit is just the latest Recordings/web-action slice and note updates, I’d use:
+
+```text
+feat(web): add per-file recordings stop and restart controls
+
+Turn the Recordings page into a per-output-file surface instead of a
+recording-cycle history view.
+
+The loader now uses the latest persisted state for each output path, so the
+page shows one row per file rather than expanding every stopped cycle. Update
+the page copy and activity counts to match that model, and keep row actions
+available only when the row has enough persisted identity to be actionable.
+
+Add Recordings-page POST actions for stop and same-path restart.
+
+Wire inline `[stop]` and `[re-start]` controls into the Recordings island and
+route them through a dedicated POST handler with filtered redirect notices and
+errors. `Re-start` reopens the exact saved file on the existing workspace
+output, fails fast when the file no longer exists, and preserves write-path
+policy failures as distinct user-facing errors.
+
+Enforce single-writer-per-file behavior across recording mutations.
+
+Introduce a recording-wide mutation lock so same-file actions can safely touch
+more than one session at a time. Before starting or restarting a recording,
+stop any other engaged output already targeting that same file, including
+same-session conflicts, without reviving stale in-memory metadata on save.
+
+Add focused regression coverage and lock the new semantics in docs.
+
+Cover successful same-path restart, cross-session and same-session file
+conflicts, missing-file failure, policy-denied failure, and the updated
+Recordings loader expectations. Update the phase-2 task note, decision log, and
+codebase overview to reflect the per-file Recordings model and exclusive
+file-ownership rule.
+```
+
+One caveat: your current unstaged set also includes the `0.2.9` version bumps and the conversation note file. If those are going in a different commit, I’d leave them unstaged for this one.

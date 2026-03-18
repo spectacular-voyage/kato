@@ -47,7 +47,6 @@ export async function loadRecordingsPageData(
     loadSessionActivityRows({
       ...options,
       includeStale,
-      recordingsMode: "all",
       katoDir,
     }),
     resolveWorkspaceFilter(options.workspaceFilter, katoDir),

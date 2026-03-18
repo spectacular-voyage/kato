@@ -102,6 +102,40 @@ created: 1771779490894
   - Decide whether stopped-recording `Re-start` and future per-session twin
     controls should surface the richer workspace label everywhere.
 
+### Recordings Page Tracks Output Files, Not Cycle History
+
+- Decision:
+  - Treat the `/recordings` page as a latest-state-per-output-file surface
+    rather than a full recording-cycle history view.
+  - `Re-start` reopens the exact saved output file on the same workspace output
+    entry; it does not create a new destination or reinterpret the stopped row
+    under refreshed workspace settings.
+  - Only one active recording may target a given file at a time. Starting or
+    `Re-start`ing a recording first stops any other engaged output already
+    writing to that file.
+  - Capture keeps fresh-file semantics and must not reuse or overwrite an
+    existing output file.
+- Owner: Kato engineering
+- Date: 2026-03-18
+- Why:
+  - Per-file rows make Recordings-page actions honest and legible; showing
+    every historical cycle would make `Re-start` ambiguous.
+  - Same-path `Re-start` matches the operator expectation of “resume this file”
+    rather than “make a nearby new file.”
+  - Single-writer-per-file behavior avoids two sessions appending to the same
+    markdown target at once.
+- Tradeoffs:
+  - Old recording cycles remain persisted but are no longer individually
+    visible on the main Recordings page.
+  - `Re-start` intentionally fails when the saved file is gone or policy no
+    longer allows it, instead of trying to repair or recreate the path.
+- Follow-up tasks:
+  - Revisit whether deeper per-cycle history needs a separate view later.
+  - Keep Sessions and Recordings copy aligned around “recording outputs” vs
+    deeper historical cycles.
+  - Revisit manual per-session twin suppression separately from the recording
+    lifecycle controls.
+
 ### CLI Framework
 
 - Decision: Use Deno standard-library argument parsing (`@std/cli`) with a small

@@ -14,8 +14,10 @@ controls in the web client after the basic Session page command entry lands.
 ## Summary
 
 - For Recordings Page:
-  - add per-recording stop controls for engaged rows
-  - add per-recording `Re-start` controls for stopped rows
+  - show the latest recording state per output file rather than every recorded
+    cycle
+  - add per-output stop controls for engaged rows
+  - add per-output `Re-start` controls for stopped rows
   - `Re-start` means reuse the same output path; creating a fresh recording or
     capture remains Sessions-page only
 - For Workspaces Page:
@@ -44,6 +46,13 @@ controls in the web client after the basic Session page command entry lands.
   [[task.2026.2026-03-17-web-commands-phase3]]
 - new recordings/captures stay on Sessions; the Recordings page only stops an
   engaged row or `Re-start`s a stopped row on the same path
+- the Recordings page is a per-output-file surface, not a cycle-history view;
+  old cycles stay in persisted metadata but do not each get their own row
+- only one active recording may target a given file at a time; starting or
+  `Re-start`ing a recording first stops any currently engaged writer already
+  using that path
+- capture remains fresh-destination-only behavior; it should not append to or
+  overwrite an existing file
 - when a workspace UI label shows both selector and operator-facing label, use
   `<alias> (<displayName>)`; if there is no meaningful display name, show alias
   alone
@@ -53,7 +62,8 @@ controls in the web client after the basic Session page command entry lands.
 | Scenario | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes |
 | --- | --- | --- | --- | --- |
 | Stop engaged recording from Sessions or Recordings | Yes | No | No | Only rows backed by persisted workspace-output metadata are actionable |
-| `Re-start` stopped recording from Recordings | Yes | No | No | Reuses the same path and opens a new cycle on the same workspace output |
+| `Re-start` stopped recording from Recordings | Yes | No | No | Reuses the same path, opens a new cycle on the same workspace output, and fails fast if the file is missing or policy-denied |
+| Start or `Re-start` recording onto a file already being recorded elsewhere | Yes | No | No | Stop the previously engaged writer first so only one active recording owns a file |
 | Start a fresh recording or capture | Yes | Yes | Yes | Remains Sessions-page only; Recordings does not create new destinations |
 | Recording row missing workspace metadata or `recordingCycleId` | No | Yes | No | Render as read-only; do not offer stop or `Re-start` |
 
@@ -75,13 +85,19 @@ controls in the web client after the basic Session page command entry lands.
 - All workspace-file settings beyond `displayName` and preferred username are
   deferred to [[task.2026.2026-03-17-web-commands-phase3]].
 - The Recordings page uses `Re-start` for stopped rows.
+- The Recordings page is a latest-state-per-output-file surface, not a
+  recording-cycle history view.
 - `Re-start` means reuse the same output path and open a new recording cycle on
   the same workspace output; it does not create a new destination.
 - If the same-path `Re-start` target no longer passes write policy, fail fast
   with an error message.
 - If the same-path `Re-start` target no longer exists, fail fast with an error
   message rather than recreating it.
+- Starting or `Re-start`ing a recording stops any other active recording that
+  is currently targeting the same file so file ownership stays exclusive.
 - Creating a fresh recording or capture remains Sessions-page only.
+- Capture keeps fresh-file semantics and should not reuse or overwrite an
+  existing output file.
 - Session-page workspace selectors should render as
   `<alias> (<displayName>)` when a display name is present, with the display
   name truncated as needed.
@@ -104,6 +120,10 @@ controls in the web client after the basic Session page command entry lands.
   `displayName` plus user-config-backed preferred username
 - add Recordings-page mutation surface for `stop-recording` on engaged rows and
   `restart-recording` on stopped rows using existing workspace/path identity
+- change the Recordings loader/view-model contract to latest-state-per-output
+  rows rather than full recording-cycle expansion
+- starting or `restart-recording` must enforce single-active-writer-per-file
+  behavior by stopping conflicting engaged outputs before opening the target
 - `restart-recording` failure responses should clearly distinguish write-policy
   rejection from missing-path refusal
 - Summary page only needs workspace label fields for the workspace card in
@@ -114,6 +134,7 @@ controls in the web client after the basic Session page command entry lands.
 - route/loader tests for Recordings-page stop / `Re-start` lifecycle mutations
 - mutation tests for same-path `Re-start` behavior and clear failure handling
   when a stopped row cannot be restarted
+- regression tests for same-file exclusivity, including same-session conflicts
 - validation tests for `displayName` and preferred-username editing across
   registry / user-config boundaries
 - parser and mutation tests for registration-time `displayName` support in CLI
@@ -139,7 +160,7 @@ controls in the web client after the basic Session page command entry lands.
 ## Implementation Plan
 
 - [x] Add `displayName` contract updates and shared workspace-label view-models
-- [ ] Define the Recordings-page stop / `Re-start` contract, including
+- [x] Define the Recordings-page stop / `Re-start` contract, including
       same-path failure behavior
 - [x] Define the narrow per-workspace settings surface for `displayName` and
       preferred username
@@ -148,5 +169,5 @@ controls in the web client after the basic Session page command entry lands.
       workspace-filter headings
 - [x] Extend workspace registration entry points so CLI `workspace register`
       and the Workspaces-page register tile can set an initial `displayName`
-- [ ] Split concrete follow-up implementation tasks once the contracts above
+- [x] Split concrete follow-up implementation tasks once the contracts above
       are locked
