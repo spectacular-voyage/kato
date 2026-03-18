@@ -1,7 +1,7 @@
 ---
 id: 3n9iaw5m5tf3nuim7fcjmeu
 title: 2026 03 18 V0 2 9 Review Coderabbit
-desc: ""
+desc: ''
 updated: 1773862637970
 created: 1773859198247
 ---
@@ -77,7 +77,7 @@ Verify each finding against the current code and only fix it if needed.
 Current triage: 7 follow-ups look actionable, 2 comments should stay
 cancelled (1 duplicate of the handler-level CSRF fix, 1 conflicts with the
 explicit `lastWriteAt` decision in
-[[task.2026.2026-03-18-persist-recording-last-write]]).
+[[completed.2026.2026-03-18-persist-recording-last-write]]).
 
 In `@apps/daemon/src/orchestrator/daemon_runtime.ts`:
 - [x] Around line 2072-2088: mergeWorkspaceOutputsPreferringLatest currently skips
@@ -175,7 +175,7 @@ only set by updateWorkspaceOutputCycleLastWrite() after a successful write; keep
 startedAt/restartedAt as the source of "armed since" information and ensure any
 tests/consumers expect lastWriteAt to be absent/null until
 updateWorkspaceOutputCycleLastWrite() runs. This conflicts with the explicit
-decision in [[task.2026.2026-03-18-persist-recording-last-write]] to initialize
+decision in [[completed.2026.2026-03-18-persist-recording-last-write]] to initialize
 `lastWriteAt` when a cycle opens so persisted recency matches current live
 recording semantics.
 
