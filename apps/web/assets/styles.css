@@ -1051,11 +1051,41 @@ a {
   align-items: flex-start;
 }
 
+.recording-row-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 6px;
+}
+
 .recording-state-line {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.recording-file-line {
+  line-height: 1.5;
+}
+
+.recording-timestamps-line {
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.recording-file-path {
+  font-size: 0.82rem;
+}
+
+.recording-file-path,
+.recording-detail-line {
+  overflow-wrap: anywhere;
+}
+
+.recording-detail-label {
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .activity-state-dot {
@@ -1098,6 +1128,22 @@ a {
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+.recording-session-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.recording-row-meta {
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 6px;
+}
+
+.recording-row-state {
+  white-space: nowrap;
 }
 
 .workspace-session-link {
@@ -1355,6 +1401,14 @@ a {
     width: 100%;
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .recording-row-meta {
+    justify-items: start;
+  }
+
+  .recording-row-state {
+    white-space: normal;
   }
 
   .session-list-row {

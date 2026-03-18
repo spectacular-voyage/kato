@@ -2,6 +2,9 @@ import { assertEquals } from "@std/assert";
 import {
   buildWorkspaceSelectorIds,
   canStopSessionRecording,
+  recordingsPageStaleFilterLabel,
+  recordingsPageStateLabel,
+  recordingsPageStopActionLabel,
 } from "../apps/web/src/session_recording_view_model.ts";
 import type { SessionRecordingActivityRow } from "../apps/web/src/loaders/sessions.ts";
 
@@ -47,4 +50,14 @@ Deno.test("buildWorkspaceSelectorIds returns stable popover ids", () => {
     titleId: "session-recording-popover-title-new-recording",
     selectId: "session-recording-popover-select-new-recording",
   });
+});
+
+Deno.test("recordings page labels use armed/disarm wording for idle engaged rows", () => {
+  assertEquals(recordingsPageStateLabel("active"), "recording");
+  assertEquals(recordingsPageStateLabel("stale"), "armed for recording");
+  assertEquals(recordingsPageStateLabel("inactive"), "stopped");
+  assertEquals(recordingsPageStaleFilterLabel(), "Armed for recording");
+  assertEquals(recordingsPageStopActionLabel("engaged-active"), "stop");
+  assertEquals(recordingsPageStopActionLabel("engaged-stale"), "disarm");
+  assertEquals(recordingsPageStopActionLabel("stopped"), "stop");
 });

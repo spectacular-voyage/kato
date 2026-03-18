@@ -318,6 +318,9 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(recordings.staleRecordingCount, 1);
         assertEquals(recordings.stoppedRecordingCount, 0);
         assertEquals(recordings.rows.length, 2);
+        assertEquals(recordings.rows[0]?.state, "engaged-active");
+        assertEquals(recordings.rows[0]?.recordingCycleId, "cycle-live");
+        assertEquals(recordings.rows[0]?.displayOutputPath, "notes/alpha.md");
         assertEquals(recordings.rows[1]?.state, "engaged-stale");
         assertEquals(recordings.rows[1]?.recordingCycleId, "cycle-stale");
         assertEquals(recordings.rows[1]?.displayOutputPath, "notes/beta.md");

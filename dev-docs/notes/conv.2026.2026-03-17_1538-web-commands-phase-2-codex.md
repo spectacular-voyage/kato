@@ -998,3 +998,134 @@ file-ownership rule.
 ```
 
 One caveat: your current unstaged set also includes the `0.2.9` version bumps and the conversation note file. If those are going in a different commit, I’d leave them unstaged for this one.
+
+# djradon_2026-03-18_1041_47
+
+What's next?
+
+# gpt-5.4_2026-03-18_1042_07
+
+Phase 2 looks basically done.
+
+I’d do this next, in order:
+
+1. Release-hardening pass.
+   Update [release-notes.v0.2.9.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.9.md) and do a quick smoke test of:
+   - workspace register with `displayName`
+   - Workspaces label/username editing
+   - Recordings `[stop]` / `[re-start]`
+   - missing-file and policy-denied restart errors
+
+2. If we want one more small code-hardening slice before release:
+   add a route-level POST test for [recordings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/recordings.tsx). The action-level coverage is good already; that would just lock the redirect/notice behavior.
+
+3. If we want to keep building instead of shipping:
+   move to phase 3 and start with workspace-file settings from [task.2026.2026-03-17-web-commands-phase3.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands-phase3.md), with `defaultOutputDir` as the best first slice.
+
+My recommendation: release notes + smoke test first, then decide whether to ship `0.2.9` or do the route test as a last polish pass.
+
+# djradon_2026-03-18_1043_31
+
+Please  update release-notes.v0.2.9.md. route-level POST test sounds good. Any other valuable test we could add that would increase code coverage. We will ship 0.2.9 before phase3
+
+# gpt-5.4_2026-03-18_1043_37
+
+I’m updating the release notes and then I’ll add route-level coverage for the Recordings POST handler so we ship `0.2.9` with the redirect/notice behavior locked down, not just the action internals.
+
+# gpt-5.4_2026-03-18_1043_42
+
+I don’t see an existing route-handler test harness in this repo, so I’m checking the route modules directly and then I’ll add a small direct-handler test instead of inventing a bigger integration setup.
+
+# gpt-5.4_2026-03-18_1043_52
+
+I’ve got a clean way to test the route directly. I’m checking the recording href/anchor helper now so I can assert the actual redirect target rather than just “status 303.”
+
+# gpt-5.4_2026-03-18_1044_11
+
+I’ve got two worthwhile route tests beyond the action tests: a happy-path restart redirect that verifies the new anchor/notice, and a failure redirect that keeps filters intact when the form is bad. I’m checking the logging setup once so the handler tests don’t accidentally depend on some global web config we can stub more simply.
+
+# gpt-5.4_2026-03-18_1044_25
+
+I found the only wrinkle: importing a `.tsx` route directly in tests may need the web Deno config. I’m checking that config now, and if it looks awkward I’ll do the small refactor that pulls the POST logic into a plain `.ts` helper, which is the cleaner long-term testing boundary anyway.
+
+# gpt-5.4_2026-03-18_1044_45
+
+The TSX test boundary would be awkward under the repo’s root Deno config, so I’m taking the cleaner path: extracting the Recordings POST logic into a plain module, testing that directly, and keeping the route as a thin wrapper. I’m also opening the previous release notes so `v0.2.9` matches the repo’s normal style instead of me improvising the format.
+
+# gpt-5.4_2026-03-18_1044_58
+
+I’m making the POST handler testable now by extracting it into a plain module, then I’ll add three or four focused route-behavior tests instead of a bulky integration harness.
+
+# gpt-5.4_2026-03-18_1045_40
+
+I’m adding the handler tests now: one stop redirect, one restart redirect that checks the new anchor, and the two edge branches that are easy to regress later, missing session id and unsupported action.
+
+# gpt-5.4_2026-03-18_1046_26
+
+The tests are in; next I’m filling the release notes with the actual `0.2.9` operator-facing changes so the ship note matches what landed instead of just the last slice.
+
+# gpt-5.4_2026-03-18_1046_41
+
+I’ve patched the release notes. I’m running the focused checks now on the new helper and route tests so we know the extra ship polish is real, not just a speculative note.
+
+# gpt-5.4_2026-03-18_1046_43
+
+One lint nit popped up in the new route test. I’m trimming that import and then I’ll run the test file plus a quick broader web pass.
+
+# gpt-5.4_2026-03-18_1046_53
+
+The new route test file is running now. I’m also re-running the existing recordings-related suites so we don’t ship a helper refactor that subtly changes behavior outside the new tests.
+
+# gpt-5.4_2026-03-18_1047_06
+
+Updated [release-notes.v0.2.9.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/release-notes.v0.2.9.md) with the `0.2.9` user-facing changes: workspace display labels, Workspaces-page label/username editing, CLI registration/list improvements, and the Recordings-page per-file stop / same-path `Re-start` behavior.
+
+I also added route-level POST coverage by extracting the Recordings POST logic into [recordings_page_post.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/recordings_page_post.ts), keeping [recordings.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/recordings.tsx) thin, and adding [web-recordings-page-post_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-recordings-page-post_test.ts). That new test file covers:
+- successful `stop-recording` redirect with preserved filters and row anchor
+- successful `restart-recording` redirect with the new cycle anchor
+- missing `sessionId` error redirect
+- unsupported action `400`
+
+Everything relevant is green:
+- `deno check --config apps/web/deno.json apps/web/routes/recordings.tsx apps/web/src/recordings_page_post.ts`
+- `deno lint ...`
+- `deno test ... tests/web-recordings-page-post_test.ts`
+- `deno test ... tests/web-session-actions_test.ts tests/web-activity-loader_test.ts tests/web-live-routes_test.ts`
+
+If you want one more small coverage bump before shipping, the best next test would be a route-level `restart-recording` failure redirect for a real policy-denied or missing-file case. The action layer already covers those failures, so it’s not urgent, but it would lock the exact user-facing redirect/error text end to end.
+
+# djradon_2026-03-18_1050_51
+
+On the recordings page, let's make the filename font size smaller., and prefix it with "File:" For the "session" line, let's prefix with "Session: and make the session title clickable as well as the short id. 
+
+There's a minor layout nit: if the filename wraps, then "ready to record" gets wrapped too, see image
+
+What if for idle recordings, instead of "ready to record" we say "armed for recordings", and then for those, instead of "stop" we say "disarm"? What do you think?
+
+# djradon_2026-03-18_1051_27
+
+On the recordings page, let's make the filename font size smaller., and prefix it with "File:" For the "session" line, let's prefix with "Session: and make the session title clickable as well as the short id. 
+
+There's a minor layout nit: if the filename wraps, then "ready to record" gets wrapped too, see image
+
+What if for idle recordings, instead of "ready to record" we say "armed for recordings", and then for those, instead of "stop" we say "disarm"? What do you think?
+
+# djradon_2026-03-18_1051_50
+
+On the recordings page, let's make the filename font size smaller., and prefix it with "File:" For the "session" line, let's prefix with "Session: and make the session title clickable as well as the short id. 
+
+There's a minor layout nit: if the filename wraps, then "ready to record" gets wrapped too, see image
+
+What if for idle recordings, instead of "ready to record" we say "armed for recordings", and then for those, instead of "stop" we say "disarm"? What do you think?
+
+# djradon_2026-03-18_1052_09
+
+keep getting an error
+
+# djradon_2026-03-18_1053_00
+
+On the recordings page, let's make the filename font size smaller., and prefix it with "File:" For the "session" line, let's prefix with "Session: and make the session title clickable as well as the short id. 
+
+There's a minor layout nit: if the filename wraps, then "ready to record" gets wrapped too, see image
+
+What if for idle recordings, instead of "ready to record" we say "armed for recordings", and then for those, instead of "stop" we say "disarm"? What do you think?

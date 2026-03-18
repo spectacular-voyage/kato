@@ -194,15 +194,6 @@ function sortRecordings(
   rows: SessionRecordingActivityRow[],
 ): SessionRecordingActivityRow[] {
   return [...rows].sort((a, b) => {
-    const order = {
-      "engaged-active": 0,
-      "engaged-stale": 1,
-      "stopped": 2,
-    } as const;
-    const statusDiff = order[a.state] - order[b.state];
-    if (statusDiff !== 0) {
-      return statusDiff;
-    }
     const timeDiff = resolveActivityTimestamp(b) - resolveActivityTimestamp(a);
     if (timeDiff !== 0) {
       return timeDiff;
