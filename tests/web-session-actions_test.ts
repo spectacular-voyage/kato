@@ -1,4 +1,9 @@
-import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import {
   createDefaultSharedBehaviorConfig,
@@ -16,6 +21,7 @@ import {
 } from "../apps/runtime/src/mod.ts";
 import {
   runSessionRecordingAction,
+  runSessionRecordingRestartAction,
   runSessionRecordingStopAction,
 } from "../apps/web/src/session_recording_actions.ts";
 import {
@@ -412,6 +418,10 @@ Deno.test("runSessionRecordingAction capture creates a fresh destination and pre
           history.events.length,
         );
         assertEquals(
+          nextOutput.recordingCycles[0]?.lastWriteAt,
+          "2026-03-17T17:05:00.000Z",
+        );
+        assertEquals(
           nextOutput.activeRecordingCycleId,
           nextOutput.recordingCycles[0]?.recordingCycleId,
         );
@@ -622,6 +632,579 @@ Deno.test("runSessionRecordingStopAction stops all engaged recordings for the se
           );
         }
       });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingRestartAction re-opens a stopped output file and stops conflicting active writers on the same path", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-action-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const sharedOutputPath = join(alphaRoot, "notes", "shared.md");
+          const sessionAPath = join(homeDir, "provider-session-a.jsonl");
+          const sessionBPath = join(homeDir, "provider-session-b.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionAPath);
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionBPath);
+          await Deno.writeTextFile(sharedOutputPath, "# existing recording\n");
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-001",
+            providerSessionId: "provider-session-restart-001",
+            sourceFilePath: sessionAPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "off",
+                writeCursor: 4,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-stopped",
+                  startedCursor: 1,
+                  stoppedCursor: 4,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 4,
+                }],
+              }),
+            ],
+          });
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-002",
+            providerSessionId: "provider-session-restart-002",
+            sourceFilePath: sessionBPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "on",
+                activeRecordingCycleId: "cycle-conflict",
+                writeCursor: 6,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-conflict",
+                  startedCursor: 6,
+                  startedAt: "2026-03-17T16:45:00.000Z",
+                  startedBySeq: 6,
+                }],
+              }),
+            ],
+          });
+
+          const sessionStore = new PersistentSessionStateStore({
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+          const metadataBefore = await sessionStore.listSessionMetadata();
+          const restartedBefore = metadataBefore.find((entry) =>
+            entry.sessionId === "sess-web-restart-001"
+          );
+          const conflictingBefore = metadataBefore.find((entry) =>
+            entry.sessionId === "sess-web-restart-002"
+          );
+          assertExists(restartedBefore);
+          assertExists(conflictingBefore);
+          const restartedHistory = await loadPersistedSessionHistoryEvents(
+            restartedBefore,
+            sessionStore,
+          );
+          const conflictingHistory = await loadPersistedSessionHistoryEvents(
+            conflictingBefore,
+            sessionStore,
+          );
+
+          const result = await runSessionRecordingRestartAction({
+            action: "restart-recording",
+            sessionId: "sess-web-restart-001",
+            workspaceId: "ws-alpha",
+            recordingCycleId: "cycle-stopped",
+            outputPath: sharedOutputPath,
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+
+          assertEquals(result.noOp, false);
+          assertEquals(result.workspaceAlias, "alpha");
+          assertEquals(result.outputPath, sharedOutputPath);
+          assertExists(result.recordingCycleId);
+          assertEquals(result.recordingCycleId === "cycle-stopped", false);
+
+          const metadataAfter = await sessionStore.listSessionMetadata();
+          const restartedAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-001"
+          );
+          const conflictingAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-002"
+          );
+          assertExists(restartedAfter);
+          assertExists(conflictingAfter);
+
+          const restartedOutput = restartedAfter.workspaceOutputs?.[0];
+          assertExists(restartedOutput);
+          assertEquals(restartedOutput.currentResolvedPath, sharedOutputPath);
+          assertEquals(restartedOutput.desiredState, "on");
+          assertEquals(
+            restartedOutput.activeRecordingCycleId,
+            result.recordingCycleId,
+          );
+          assertEquals(restartedOutput.recordingCycles.length, 2);
+          assertEquals(
+            restartedOutput.recordingCycles[1]?.recordingCycleId,
+            result.recordingCycleId,
+          );
+          assertEquals(
+            restartedOutput.recordingCycles[1]?.startedCursor,
+            restartedHistory.events.length,
+          );
+
+          const conflictingOutput = conflictingAfter.workspaceOutputs?.[0];
+          assertExists(conflictingOutput);
+          assertEquals(conflictingOutput.desiredState, "off");
+          assertEquals(conflictingOutput.activeRecordingCycleId, undefined);
+          assertEquals(
+            conflictingOutput.recordingCycles[0]?.stoppedCursor,
+            conflictingHistory.events.length,
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingRestartAction stops same-session conflicting writers on the same path without reviving stale metadata", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-same-session-conflict-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const sharedOutputPath = join(alphaRoot, "notes", "same-session.md");
+          const sessionPath = join(homeDir, "provider-session-same.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+          await Deno.writeTextFile(sharedOutputPath, "# existing recording\n");
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-same-session",
+            providerSessionId: "provider-session-restart-same-session",
+            sourceFilePath: sessionPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "off",
+                writeCursor: 4,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-stopped",
+                  startedCursor: 1,
+                  stoppedCursor: 4,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 4,
+                }],
+              }),
+              makeWorkspaceOutput({
+                workspaceId: "ws-beta",
+                workspaceAlias: "beta",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "on",
+                activeRecordingCycleId: "cycle-conflict",
+                writeCursor: 6,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-conflict",
+                  startedCursor: 6,
+                  startedAt: "2026-03-17T16:45:00.000Z",
+                  startedBySeq: 6,
+                }],
+              }),
+            ],
+          });
+
+          const sessionStore = new PersistentSessionStateStore({
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+          const metadataBefore = (await sessionStore.listSessionMetadata())[0];
+          assertExists(metadataBefore);
+          const history = await loadPersistedSessionHistoryEvents(
+            metadataBefore,
+            sessionStore,
+          );
+
+          const result = await runSessionRecordingRestartAction({
+            action: "restart-recording",
+            sessionId: "sess-web-restart-same-session",
+            workspaceId: "ws-alpha",
+            recordingCycleId: "cycle-stopped",
+            outputPath: sharedOutputPath,
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+
+          assertEquals(result.noOp, false);
+          assertExists(result.recordingCycleId);
+
+          const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+          assertExists(metadataAfter);
+          assertEquals(metadataAfter.workspaceOutputs?.length, 2);
+
+          const restartedOutput = metadataAfter.workspaceOutputs?.[0];
+          const conflictingOutput = metadataAfter.workspaceOutputs?.[1];
+          assertExists(restartedOutput);
+          assertExists(conflictingOutput);
+
+          assertEquals(restartedOutput.desiredState, "on");
+          assertEquals(
+            restartedOutput.activeRecordingCycleId,
+            result.recordingCycleId,
+          );
+          assertEquals(restartedOutput.recordingCycles.length, 2);
+          assertEquals(
+            restartedOutput.recordingCycles[1]?.startedCursor,
+            history.events.length,
+          );
+
+          assertEquals(conflictingOutput.desiredState, "off");
+          assertEquals(conflictingOutput.activeRecordingCycleId, undefined);
+          assertEquals(
+            conflictingOutput.recordingCycles[0]?.stoppedCursor,
+            history.events.length,
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingRestartAction fails fast when the stopped output file is missing", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-missing-file-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const missingOutputPath = join(alphaRoot, "notes", "missing.md");
+          const sessionPath = join(homeDir, "provider-session-missing.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-missing",
+            providerSessionId: "provider-session-restart-missing",
+            sourceFilePath: sessionPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: missingOutputPath,
+                desiredState: "off",
+                recordingCycles: [{
+                  recordingCycleId: "cycle-missing",
+                  startedCursor: 1,
+                  stoppedCursor: 2,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 2,
+                }],
+              }),
+            ],
+          });
+
+          await assertRejects(
+            () =>
+              runSessionRecordingRestartAction({
+                action: "restart-recording",
+                sessionId: "sess-web-restart-missing",
+                workspaceId: "ws-alpha",
+                recordingCycleId: "cycle-missing",
+                outputPath: missingOutputPath,
+                katoDir,
+                now: () => new Date("2026-03-17T17:05:00.000Z"),
+              }),
+            Error,
+            "output file no longer exists",
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingRestartAction fails fast when the stopped output path no longer passes policy", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-policy-denied-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const deniedRoot = join(homeDir, "denied-root");
+          const deniedOutputPath = join(alphaRoot, "notes", "denied.md");
+          const sessionPath = join(homeDir, "provider-session-denied.jsonl");
+          await Deno.mkdir(deniedRoot, { recursive: true });
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+          await Deno.writeTextFile(deniedOutputPath, "# denied output\n");
+
+          const sharedConfigStore = new SharedBehaviorConfigFileStore(
+            resolveDefaultSharedConfigPath(katoDir),
+          );
+          await sharedConfigStore.save(
+            createDefaultSharedBehaviorConfig({
+              allowedWriteRoots: [deniedRoot],
+            }),
+          );
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-denied",
+            providerSessionId: "provider-session-restart-denied",
+            sourceFilePath: sessionPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: deniedOutputPath,
+                desiredState: "off",
+                recordingCycles: [{
+                  recordingCycleId: "cycle-denied",
+                  startedCursor: 1,
+                  stoppedCursor: 2,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 2,
+                }],
+              }),
+            ],
+          });
+
+          await assertRejects(
+            () =>
+              runSessionRecordingRestartAction({
+                action: "restart-recording",
+                sessionId: "sess-web-restart-denied",
+                workspaceId: "ws-alpha",
+                recordingCycleId: "cycle-denied",
+                outputPath: deniedOutputPath,
+                katoDir,
+                now: () => new Date("2026-03-17T17:05:00.000Z"),
+              }),
+            Error,
+            "Path denied by policy",
+          );
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("runSessionRecordingRestartAction does not persist conflicting-session stops if the target save fails", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "web-session-restart-deferred-conflicts-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const { katoDir, alphaRoot, alphaConfigPath } =
+            await setupWorkspaceFixture(homeDir);
+          const sharedOutputPath = join(alphaRoot, "notes", "shared.md");
+          const sessionAPath = join(homeDir, "provider-session-a.jsonl");
+          const sessionBPath = join(homeDir, "provider-session-b.jsonl");
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionAPath);
+          await Deno.copyFile(CLAUDE_FIXTURE, sessionBPath);
+          await Deno.writeTextFile(sharedOutputPath, "# existing recording\n");
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-001",
+            providerSessionId: "provider-session-restart-001",
+            sourceFilePath: sessionAPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "off",
+                writeCursor: 4,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-stopped",
+                  startedCursor: 1,
+                  stoppedCursor: 4,
+                  startedAt: "2026-03-17T16:00:00.000Z",
+                  stoppedAt: "2026-03-17T16:30:00.000Z",
+                  startedBySeq: 1,
+                  stoppedBySeq: 4,
+                }],
+              }),
+            ],
+          });
+
+          await createSessionFixture({
+            katoDir,
+            sessionId: "sess-web-restart-002",
+            providerSessionId: "provider-session-restart-002",
+            sourceFilePath: sessionBPath,
+            workspaceOutputs: [
+              makeWorkspaceOutput({
+                workspaceId: "ws-alpha",
+                workspaceAlias: "alpha",
+                workspaceRoot: alphaRoot,
+                configPath: alphaConfigPath,
+                resolvedPath: sharedOutputPath,
+                desiredState: "on",
+                activeRecordingCycleId: "cycle-conflict",
+                writeCursor: 6,
+                recordingCycles: [{
+                  recordingCycleId: "cycle-conflict",
+                  startedCursor: 6,
+                  startedAt: "2026-03-17T16:45:00.000Z",
+                  startedBySeq: 6,
+                }],
+              }),
+            ],
+          });
+
+          const originalSave = PersistentSessionStateStore.prototype
+            .saveSessionMetadata;
+          try {
+            PersistentSessionStateStore.prototype.saveSessionMetadata =
+              async function (
+                metadata,
+                options,
+              ): Promise<void> {
+                if (metadata.sessionId === "sess-web-restart-001") {
+                  throw new Error("target save failed");
+                }
+                return await originalSave.call(this, metadata, options);
+              };
+
+            await assertRejects(
+              () =>
+                runSessionRecordingRestartAction({
+                  action: "restart-recording",
+                  sessionId: "sess-web-restart-001",
+                  workspaceId: "ws-alpha",
+                  recordingCycleId: "cycle-stopped",
+                  outputPath: sharedOutputPath,
+                  katoDir,
+                  now: () => new Date("2026-03-17T17:05:00.000Z"),
+                }),
+              Error,
+              "target save failed",
+            );
+          } finally {
+            PersistentSessionStateStore.prototype.saveSessionMetadata =
+              originalSave;
+          }
+
+          const sessionStore = new PersistentSessionStateStore({
+            katoDir,
+            now: () => new Date("2026-03-17T17:05:00.000Z"),
+          });
+          const metadataAfter = await sessionStore.listSessionMetadata();
+          const restartedAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-001"
+          );
+          const conflictingAfter = metadataAfter.find((entry) =>
+            entry.sessionId === "sess-web-restart-002"
+          );
+          assertExists(restartedAfter);
+          assertExists(conflictingAfter);
+
+          const restartedOutput = restartedAfter.workspaceOutputs?.[0];
+          const conflictingOutput = conflictingAfter.workspaceOutputs?.[0];
+          assertExists(restartedOutput);
+          assertExists(conflictingOutput);
+
+          assertEquals(restartedOutput.desiredState, "off");
+          assertEquals(restartedOutput.activeRecordingCycleId, undefined);
+          assertEquals(
+            restartedOutput.recordingCycles.length,
+            1,
+          );
+
+          assertEquals(conflictingOutput.desiredState, "on");
+          assertEquals(
+            conflictingOutput.activeRecordingCycleId,
+            "cycle-conflict",
+          );
+          assertEquals(
+            conflictingOutput.recordingCycles[0]?.stoppedCursor,
+            undefined,
+          );
+        },
+      );
     } finally {
       restoreRuntimeEnv(env);
     }

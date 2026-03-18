@@ -164,6 +164,7 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
     {
       workspaceId: "ws-alpha",
       alias: "alpha",
+      displayName: "Alpha Workspace",
       workspaceRoot: alphaRoot,
       configPath: alphaConfigPath,
       registeredAt: "2026-03-07T15:00:00.000Z",
@@ -171,6 +172,7 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
     {
       workspaceId: "ws-beta",
       alias: "beta",
+      displayName: "Beta Project",
       workspaceRoot: betaRoot,
       configPath: betaConfigPath,
       registeredAt: "2026-03-07T15:05:00.000Z",
@@ -338,10 +340,12 @@ Deno.test("live API routes disable caching and return expected page models", asy
         const summaryData = await summaryResponse.json() as {
           daemon: string;
           stale: boolean;
-          workspaceSummary: { rows: Array<{ workspaceId: string }> };
+          workspaceSummary: {
+            rows: Array<{ workspaceId: string; displayName?: string }>;
+          };
         };
         const workspacesData = await workspacesResponse.json() as {
-          rows: Array<{ workspaceId: string }>;
+          rows: Array<{ workspaceId: string; displayName?: string }>;
           allowedWriteRoots: string[];
         };
 
@@ -354,8 +358,16 @@ Deno.test("live API routes disable caching and return expected page models", asy
           ["ws-alpha", "ws-beta"],
         );
         assertEquals(
+          summaryData.workspaceSummary.rows.map((row) => row.displayName),
+          ["Alpha Workspace", "Beta Project"],
+        );
+        assertEquals(
           workspacesData.rows.map((row) => row.workspaceId),
           ["ws-alpha", "ws-beta"],
+        );
+        assertEquals(
+          workspacesData.rows.map((row) => row.displayName),
+          ["Alpha Workspace", "Beta Project"],
         );
         assertEquals(workspacesData.allowedWriteRoots, [
           join(homeDir, "alpha"),

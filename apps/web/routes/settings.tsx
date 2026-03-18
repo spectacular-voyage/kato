@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import {
   clearDefaultUsername,
   deleteWorkspaceUsernameMapping,
@@ -268,7 +269,10 @@ export default define.page(async function SettingsPage(ctx) {
                     key={workspace.workspaceId}
                     value={workspace.workspaceId}
                   >
-                    {workspace.alias ?? "<unaliased>"} ({workspace.workspaceId})
+                    {formatWorkspaceLabel(
+                      workspace.alias,
+                      workspace.displayName,
+                    )} ({workspace.workspaceId})
                   </option>
                 ))}
               </select>
@@ -293,8 +297,12 @@ export default define.page(async function SettingsPage(ctx) {
                   <li key={mapping.workspaceId} class="workspace-row">
                     <div class="workspace-row-main">
                       <div class="mono workspace-row-title">
-                        {mapping.workspaceAlias || "<unregistered>"} (
-                        {mapping.workspaceId})
+                        {mapping.workspaceAlias
+                          ? formatWorkspaceLabel(
+                            mapping.workspaceAlias,
+                            mapping.workspaceDisplayName,
+                          )
+                          : "<unregistered>"} ({mapping.workspaceId})
                       </div>
                       <div class="muted">{mapping.username}</div>
                     </div>

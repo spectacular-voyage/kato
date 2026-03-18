@@ -1,4 +1,7 @@
-import type { SharedBehaviorConfig } from "@kato/shared";
+import {
+  normalizeWorkspaceDisplayName,
+  type SharedBehaviorConfig,
+} from "@kato/shared";
 import { basename, join, resolve } from "@std/path";
 import type { SharedBehaviorConfigStoreLike } from "../config/shared_behavior_config.ts";
 import {
@@ -25,6 +28,7 @@ function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
   return {
     workspaceId: entry.workspaceId,
     alias: entry.alias,
+    ...(entry.displayName ? { displayName: entry.displayName } : {}),
     workspaceRoot: entry.workspaceRoot,
     configPath: entry.configPath,
     registeredAt: entry.registeredAt,
@@ -51,6 +55,24 @@ function validateWorkspaceAlias(alias: string): string {
     throw new Error("Workspace alias must not contain spaces");
   }
   return trimmed;
+}
+
+function resolveWorkspaceSelector(selector: string): string {
+  const trimmed = selector.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Workspace selector must be a non-empty string");
+  }
+  return trimmed;
+}
+
+function findWorkspaceBySelector(
+  entries: RegisteredWorkspace[],
+  selector: string,
+): RegisteredWorkspace | undefined {
+  const trimmed = resolveWorkspaceSelector(selector);
+  return entries.find((entry) =>
+    entry.alias === trimmed || entry.workspaceId === trimmed
+  );
 }
 
 function resolveRequestedWorkspaceAlias(
@@ -138,6 +160,7 @@ async function ensureWorkspaceRootWriteCoverage(
 
 export interface RegisterWorkspaceMutationOptions {
   alias?: string;
+  displayName?: string;
   workspacePath?: string;
   cwdPath?: string;
   katoDir?: string;
@@ -185,6 +208,11 @@ export async function registerWorkspace(
     options.alias,
     target.workspaceRoot,
   );
+  const requestedDisplayName = normalizeWorkspaceDisplayName(
+    requestedAlias,
+    options.displayName,
+  );
+  const shouldUpdateDisplayName = options.displayName !== undefined;
 
   const existingByAlias = entries.find((entry) =>
     entry.alias === requestedAlias
@@ -235,6 +263,7 @@ export async function registerWorkspace(
     finalEntry = {
       workspaceId: configuredWorkspaceId ?? crypto.randomUUID(),
       alias: requestedAlias,
+      ...(requestedDisplayName ? { displayName: requestedDisplayName } : {}),
       workspaceRoot: target.workspaceRoot,
       configPath: target.configPath,
       registeredAt: nowIso,
@@ -242,14 +271,24 @@ export async function registerWorkspace(
     nextEntries = [...entries, cloneEntry(finalEntry)];
     changed = true;
   } else {
-    changed = requestedAlias !== existingWorkspace.alias ||
+    const identityChanged = requestedAlias !== existingWorkspace.alias ||
       target.workspaceRoot !== existingWorkspace.workspaceRoot ||
       target.configPath !== existingWorkspace.configPath;
-    restartRequired = changed;
+    const displayNameChanged = shouldUpdateDisplayName &&
+      requestedDisplayName !== existingWorkspace.displayName;
+    changed = identityChanged || displayNameChanged;
+    restartRequired = identityChanged;
     finalEntry = changed
       ? {
         ...existingWorkspace,
         alias: requestedAlias,
+        ...(shouldUpdateDisplayName
+          ? (requestedDisplayName
+            ? { displayName: requestedDisplayName }
+            : { displayName: undefined })
+          : (existingWorkspace.displayName
+            ? { displayName: existingWorkspace.displayName }
+            : {})),
         workspaceRoot: target.workspaceRoot,
         configPath: target.configPath,
         updatedAt: nowIso,
@@ -300,6 +339,7 @@ export async function registerWorkspace(
       alias: finalEntry.alias,
       workspaceRoot: finalEntry.workspaceRoot,
       configPath: finalEntry.configPath,
+      displayNamePresent: finalEntry.displayName !== undefined,
       created,
       changed,
       restartRequired,
@@ -315,6 +355,7 @@ export async function registerWorkspace(
       alias: finalEntry.alias,
       workspaceRoot: finalEntry.workspaceRoot,
       configPath: finalEntry.configPath,
+      displayNamePresent: finalEntry.displayName !== undefined,
       created,
       changed,
       restartRequired,
@@ -349,10 +390,7 @@ export interface UnregisterWorkspaceMutationResult {
 export async function unregisterWorkspace(
   options: UnregisterWorkspaceMutationOptions,
 ): Promise<UnregisterWorkspaceMutationResult> {
-  const trimmed = options.selector.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Workspace selector must be a non-empty string");
-  }
+  const trimmed = resolveWorkspaceSelector(options.selector);
 
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
   const registryStore = options.registryStore ??
@@ -360,9 +398,7 @@ export async function unregisterWorkspace(
       resolveDefaultWorkspaceRegistryPath(katoDir),
     );
   const entries = await registryStore.load();
-  const match = entries.find((entry) =>
-    entry.alias === trimmed || entry.workspaceId === trimmed
-  );
+  const match = findWorkspaceBySelector(entries, trimmed);
   if (!match) {
     throw new Error(`Workspace not found: ${trimmed}`);
   }
@@ -392,4 +428,92 @@ export async function unregisterWorkspace(
   );
 
   return { entry: cloneEntry(match) };
+}
+
+export interface SetWorkspaceDisplayNameOptions {
+  selector: string;
+  displayName?: string;
+  katoDir?: string;
+  now?: () => Date;
+  registryStore?: WorkspaceRegistryStoreLike;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface SetWorkspaceDisplayNameResult {
+  entry: RegisteredWorkspace;
+  changed: boolean;
+}
+
+export async function setWorkspaceDisplayName(
+  options: SetWorkspaceDisplayNameOptions,
+): Promise<SetWorkspaceDisplayNameResult> {
+  const trimmedSelector = resolveWorkspaceSelector(options.selector);
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const now = options.now ?? (() => new Date());
+  const registryStore = options.registryStore ??
+    new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
+  const entries = await registryStore.load();
+  const existing = findWorkspaceBySelector(entries, trimmedSelector);
+  if (!existing) {
+    throw new Error(`Workspace not found: ${trimmedSelector}`);
+  }
+
+  const normalizedDisplayName = normalizeWorkspaceDisplayName(
+    existing.alias,
+    options.displayName,
+  );
+  const changed = normalizedDisplayName !== existing.displayName;
+  const nextEntry = changed
+    ? {
+      ...existing,
+      ...(normalizedDisplayName
+        ? { displayName: normalizedDisplayName }
+        : { displayName: undefined }),
+      updatedAt: now().toISOString(),
+    }
+    : cloneEntry(existing);
+
+  if (changed) {
+    const nextEntries = entries.map((entry) =>
+      entry.workspaceId === existing.workspaceId
+        ? cloneEntry(nextEntry)
+        : cloneEntry(entry)
+    );
+    await registryStore.save(nextEntries);
+  }
+
+  await options.operationalLogger?.info(
+    changed
+      ? "workspace.display-name.updated"
+      : "workspace.display-name.unchanged",
+    changed
+      ? normalizedDisplayName
+        ? "Updated workspace display name"
+        : "Cleared workspace display name"
+      : "Workspace display name already matches requested value",
+    {
+      workspaceId: nextEntry.workspaceId,
+      alias: nextEntry.alias,
+      displayNamePresent: normalizedDisplayName !== undefined,
+      changed,
+    },
+  );
+  await options.auditLogger?.record(
+    "workspace.display-name.set",
+    "Workspace display name mutation invoked",
+    {
+      workspaceId: nextEntry.workspaceId,
+      alias: nextEntry.alias,
+      displayNamePresent: normalizedDisplayName !== undefined,
+      changed,
+    },
+  );
+
+  return {
+    entry: cloneEntry(nextEntry),
+    changed,
+  };
 }

@@ -6,6 +6,7 @@ interface SessionSnippetProps {
   allowSourceReplay?: boolean;
   snippetClass?: string;
   title?: string;
+  href?: string;
 }
 
 interface SessionSnippetResponse {
@@ -75,6 +76,13 @@ export default function SessionSnippet(props: SessionSnippetProps) {
   }, [props.sessionId, props.snippet]);
 
   if (state.status === "ready") {
+    if (props.href) {
+      return (
+        <a class={props.snippetClass} href={props.href} title={props.title}>
+          {state.snippet}
+        </a>
+      );
+    }
     return (
       <span class={props.snippetClass} title={props.title}>
         {state.snippet}

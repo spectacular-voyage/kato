@@ -1,4 +1,11 @@
-import { registerWorkspace, unregisterWorkspace } from "@kato/runtime";
+import { formatWorkspaceLabel } from "@kato/shared";
+import {
+  deleteWorkspaceUsernameMapping,
+  registerWorkspace,
+  setWorkspaceDisplayName,
+  setWorkspaceUsernameMapping,
+  unregisterWorkspace,
+} from "@kato/runtime";
 import { Head } from "fresh/runtime";
 import WorkspacesLive from "../islands/WorkspacesLive.tsx";
 import AppHeader from "../src/app_header.tsx";
@@ -33,19 +40,28 @@ export const handler = define.handlers({
     try {
       if (action === "register") {
         const alias = String(form.get("alias") ?? "");
+        const rawDisplayName = String(form.get("displayName") ?? "").trim();
+        const displayName = rawDisplayName.length > 0
+          ? rawDisplayName
+          : undefined;
         const workspacePath = String(form.get("workspacePath") ?? "");
         const result = await registerWorkspace({
           alias,
+          displayName,
           workspacePath,
           operationalLogger,
           auditLogger,
         });
+        const workspaceLabel = formatWorkspaceLabel(
+          result.entry.alias,
+          result.entry.displayName,
+        );
         const notice = encodeURIComponent(
           result.created
-            ? `workspace registered: ${result.entry.alias}`
+            ? `workspace registered: ${workspaceLabel}`
             : result.changed
-            ? `workspace registration updated: ${result.entry.alias}`
-            : `workspace already registered: ${result.entry.alias}`,
+            ? `workspace registration updated: ${workspaceLabel}`
+            : `workspace already registered: ${workspaceLabel}`,
         );
         return Response.redirect(
           new URL(`/workspaces?notice=${notice}`, ctx.req.url),
@@ -69,6 +85,67 @@ export const handler = define.handlers({
             }`,
             ctx.req.url,
           ),
+          303,
+        );
+      }
+
+      if (action === "save-display-name") {
+        const selector = String(form.get("selector") ?? "");
+        const displayName = String(form.get("displayName") ?? "");
+        const result = await setWorkspaceDisplayName({
+          selector,
+          displayName,
+          operationalLogger,
+          auditLogger,
+        });
+        const workspaceLabel = formatWorkspaceLabel(
+          result.entry.alias,
+          result.entry.displayName,
+        );
+        const notice = encodeURIComponent(
+          result.changed
+            ? result.entry.displayName
+              ? `workspace label saved: ${workspaceLabel}`
+              : `workspace label cleared: ${result.entry.alias}`
+            : `workspace label unchanged: ${workspaceLabel}`,
+        );
+        return Response.redirect(
+          new URL(`/workspaces?notice=${notice}`, ctx.req.url),
+          303,
+        );
+      }
+
+      if (action === "save-workspace-username") {
+        const selector = String(form.get("selector") ?? "");
+        const username = String(form.get("username") ?? "").trim();
+        if (username.length === 0) {
+          const result = await deleteWorkspaceUsernameMapping({
+            selector,
+            operationalLogger,
+            auditLogger,
+          });
+          const notice = encodeURIComponent(
+            result.deleted
+              ? `workspace username cleared: ${result.workspaceAlias}`
+              : `workspace username already absent: ${result.workspaceAlias}`,
+          );
+          return Response.redirect(
+            new URL(`/workspaces?notice=${notice}`, ctx.req.url),
+            303,
+          );
+        }
+
+        const result = await setWorkspaceUsernameMapping({
+          selector,
+          username,
+          operationalLogger,
+          auditLogger,
+        });
+        const notice = encodeURIComponent(
+          `workspace username saved: ${result.workspaceAlias} -> ${result.username}`,
+        );
+        return Response.redirect(
+          new URL(`/workspaces?notice=${notice}`, ctx.req.url),
           303,
         );
       }
@@ -112,7 +189,7 @@ export default define.page(async function WorkspacesPage(ctx) {
       <div class="shell">
         <AppHeader
           title="Workspaces"
-          description="Register, review, and remove workspace aliases, then inspect the latest recording per destination writing into each workspace."
+          description="Register, label, and review workspace destinations, then set a preferred username override for each workspace when needed."
           currentPath="/workspaces"
           showLogout
           csrfToken={ctx.state.csrfToken}
@@ -154,6 +231,16 @@ export default define.page(async function WorkspacesPage(ctx) {
                     type="text"
                     placeholder="defaults to workspace folder name"
                   />
+                  <label class="form-label" for="displayName">
+                    Display Label
+                  </label>
+                  <input
+                    class="form-input"
+                    id="displayName"
+                    name="displayName"
+                    type="text"
+                    placeholder="optional operator-facing label"
+                  />
                   <button class="form-button" type="submit">Register</button>
                 </form>
               </div>
@@ -169,6 +256,10 @@ export default define.page(async function WorkspacesPage(ctx) {
                 <p>
                   Alias is optional. If you leave it blank, Kato uses the
                   workspace folder name.
+                </p>
+                <p>
+                  Display Label is optional. If you leave it blank, Kato shows
+                  the alias alone.
                 </p>
               </div>
             </div>

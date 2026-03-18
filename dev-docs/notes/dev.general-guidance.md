@@ -26,6 +26,9 @@ see [[dev.testing]]
   - [[dev.decision-log]]
   - [[dev.testing]]
 - Keep changes small, reviewable, and test-backed.
+- For behavior, contract, or persisted-state changes: define the contract
+  changes first, then add the key substantive tests before broad
+  implementation.
 - Run `deno task ci` before opening or updating a PR.
 - Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not
   change it.

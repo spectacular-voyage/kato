@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import { activityStateDot, activityStateLabel } from "../src/activity_state.ts";
 import type {
   SessionActivityRow,
@@ -26,8 +27,11 @@ function buildSessionListStateLabel(row: SessionActivityRow): string {
 function buildPageTitle(
   workspaceAlias: string | undefined,
   workspaceId: string | undefined,
+  workspaceDisplayName: string | undefined,
 ): string {
-  const workspaceLabel = workspaceAlias ?? workspaceId;
+  const workspaceLabel = workspaceAlias
+    ? formatWorkspaceLabel(workspaceAlias, workspaceDisplayName)
+    : workspaceId;
   return workspaceLabel ? `Sessions for ${workspaceLabel}` : "Sessions";
 }
 
@@ -67,7 +71,13 @@ function buildRecordingFilename(path: string): string {
 }
 
 function buildWorkspaceLabel(recording: SessionRecordingActivityRow): string {
-  return recording.workspaceAlias ?? recording.workspaceId ?? "workspace";
+  if (recording.workspaceAlias) {
+    return formatWorkspaceLabel(
+      recording.workspaceAlias,
+      recording.workspaceDisplayName,
+    );
+  }
+  return recording.workspaceId ?? "workspace";
 }
 
 function resolveRecordingWorkspaceFilter(
@@ -293,7 +303,6 @@ function SessionRecordingActions(
                 class="form-input session-recording-select"
                 name="workspaceSelector"
                 aria-labelledby={buildWorkspaceSelectorIds(openAction).titleId}
-                disabled={pendingCreateAction !== null}
                 value={selectedWorkspace}
                 onInput={(event) =>
                   setSelectedWorkspace(
@@ -302,7 +311,7 @@ function SessionRecordingActions(
               >
                 {props.workspaceOptions.map((option) => (
                   <option key={option.workspaceId} value={option.workspaceId}>
-                    {option.alias}
+                    {formatWorkspaceLabel(option.alias, option.displayName)}
                   </option>
                 ))}
               </select>
@@ -348,6 +357,7 @@ export default function SessionsLive(
   const heading = buildPageTitle(
     pageData.workspaceFilterAlias,
     pageData.workspaceFilterId,
+    pageData.workspaceFilterDisplayName,
   );
   const countSummary = buildCountSummary({
     includeStale: pageData.includeStale,

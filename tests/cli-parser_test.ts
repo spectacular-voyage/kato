@@ -1,5 +1,9 @@
-import { assertEquals, assertThrows } from "@std/assert";
-import { CliUsageError, parseDaemonCliArgs } from "../apps/cli/src/mod.ts";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  CliUsageError,
+  getCommandUsage,
+  parseDaemonCliArgs,
+} from "../apps/cli/src/mod.ts";
 
 function parseCommand(args: string[]) {
   const intent = parseDaemonCliArgs(args);
@@ -65,16 +69,19 @@ Deno.test("cli parser parses workspace init optional dir and rejects extra args"
 Deno.test("cli parser supports workspace register with optional alias", () => {
   assertHelpTopic(["workspace", "register", "--help"], "workspace-register");
 
-  const withAlias = parseCommand([
+  const withAliasAndName = parseCommand([
     "workspace",
     "register",
     "--alias",
     "  docs  ",
+    "--name",
+    "  Docs Workspace  ",
     "./notes",
   ]);
-  assertEquals(withAlias, {
+  assertEquals(withAliasAndName, {
     name: "workspace-register",
     alias: "docs",
+    displayName: "Docs Workspace",
     dirPath: "./notes",
   });
 
@@ -93,6 +100,17 @@ Deno.test("cli parser supports workspace register with optional alias", () => {
   assertEquals(aliasOnly, {
     name: "workspace-register",
     alias: "docs",
+  });
+
+  const nameOnly = parseCommand([
+    "workspace",
+    "register",
+    "--name",
+    "Docs Workspace",
+  ]);
+  assertEquals(nameOnly, {
+    name: "workspace-register",
+    displayName: "Docs Workspace",
   });
 
   const noRestart = parseCommand([
@@ -136,6 +154,59 @@ Deno.test("cli parser accepts workspace register alias=value compatibility synta
         "alias=other",
       ]),
     CliUsageError,
+  );
+});
+
+Deno.test("cli parser accepts workspace register name=value compatibility syntax", () => {
+  assertEquals(
+    parseCommand(["workspace", "register", "name=Docs Workspace"]),
+    {
+      name: "workspace-register",
+      displayName: "Docs Workspace",
+    },
+  );
+
+  assertEquals(
+    parseCommand([
+      "workspace",
+      "register",
+      "./notes",
+      "name=Docs Workspace",
+    ]),
+    {
+      name: "workspace-register",
+      displayName: "Docs Workspace",
+      dirPath: "./notes",
+    },
+  );
+
+  assertThrows(
+    () =>
+      parseDaemonCliArgs([
+        "workspace",
+        "register",
+        "--name",
+        "Docs Workspace",
+        "name=Other Workspace",
+      ]),
+    CliUsageError,
+  );
+
+  assertThrows(
+    () => parseDaemonCliArgs(["workspace", "register", "name="]),
+    CliUsageError,
+  );
+});
+
+Deno.test("workspace register usage synopsis documents --name and omits deprecated name=value syntax", () => {
+  const usage = getCommandUsage("workspace-register");
+  assertStringIncludes(
+    usage,
+    "[--name <display-name>]",
+  );
+  assertEquals(
+    usage.includes("name=<display-name>"),
+    false,
   );
 });
 

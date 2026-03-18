@@ -64,7 +64,12 @@ Deno.test(
           writerItalicizeUserMessages: false,
         },
         writeCursor: 0,
-        recordingCycles: [],
+        recordingCycles: [{
+          recordingCycleId: "cycle-1",
+          startedCursor: 0,
+          startedAt: "2026-03-14T10:00:00.000Z",
+          lastWriteAt: "2026-03-14T10:01:00.000Z",
+        }],
       },
       {
         workspaceId: "workspace-2",
@@ -114,6 +119,38 @@ Deno.test(
       },
       writeCursor: 0,
       recordingCycles: [],
+    }];
+
+    assertEquals(isSessionMetadataV1(metadata), false);
+  },
+);
+
+Deno.test(
+  "isSessionMetadataV1 rejects non-string recording cycle lastWriteAt values",
+  () => {
+    const metadata = makeSessionMetadata();
+    metadata.workspaceOutputs = [{
+      workspaceId: "workspace-1",
+      desiredState: "on",
+      currentDestination: {
+        kind: "workspace-relative",
+      },
+      currentResolvedPath: "C:/workspace/notes/output.md",
+      workspaceRootSnapshot: "C:/workspace",
+      resolvedDefaultOutputDir: "C:/workspace/notes",
+      filenameTemplate: "{provider}.md",
+      writerFeatureFlags: {
+        writerIncludeCommentary: true,
+        writerIncludeThinking: true,
+        writerIncludeToolCalls: true,
+        writerItalicizeUserMessages: false,
+      },
+      writeCursor: 0,
+      recordingCycles: [{
+        recordingCycleId: "cycle-1",
+        startedCursor: 0,
+        lastWriteAt: 123 as unknown as string,
+      }],
     }];
 
     assertEquals(isSessionMetadataV1(metadata), false);

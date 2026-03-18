@@ -39,6 +39,7 @@ export interface MaintenanceTwinsData {
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
+  workspaceFilterDisplayName?: string;
   sessionCount: number;
   currentTwinCount: number;
   behindTwinCount: number;
@@ -157,6 +158,7 @@ export async function loadMaintenanceTwinsData(
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
+    workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     sessionCount: rows.length,
     currentTwinCount: rows.filter((row) => row.twinState === "current").length,
     behindTwinCount: rows.filter((row) => row.twinState === "behind").length,

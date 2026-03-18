@@ -1,9 +1,13 @@
-import {
-  type ActivityState,
-  activityStateDot,
-  recordingActivityStateLabel,
-} from "../src/activity_state.ts";
+import { formatWorkspaceLabel } from "@kato/shared";
+import { type ActivityState, activityStateDot } from "../src/activity_state.ts";
 import type { RecordingsPageData } from "../src/loaders/recordings.ts";
+import {
+  canRestartSessionRecording,
+  canStopSessionRecording,
+  recordingsPageStaleFilterLabel,
+  recordingsPageStateLabel,
+  recordingsPageStopActionLabel,
+} from "../src/session_recording_view_model.ts";
 import {
   buildRecordingRowAnchorId,
   buildRecordingsHref,
@@ -27,7 +31,11 @@ function recordingState(
 }
 
 export default function RecordingsLive(
-  props: { initialData: RecordingsPageData; endpoint: string },
+  props: {
+    initialData: RecordingsPageData;
+    endpoint: string;
+    csrfToken?: string;
+  },
 ) {
   const pageData = usePolledJson({
     initialData: props.initialData,
@@ -35,8 +43,59 @@ export default function RecordingsLive(
     intervalMs: LIVE_POLL_INTERVAL_MS,
   });
   const timeZone = useBrowserTimeZone();
-  const workspaceLabel = pageData.workspaceFilterAlias ??
-    pageData.workspaceFilterId;
+  const workspaceLabel = pageData.workspaceFilterAlias
+    ? formatWorkspaceLabel(
+      pageData.workspaceFilterAlias,
+      pageData.workspaceFilterDisplayName,
+    )
+    : pageData.workspaceFilterId;
+
+  function RecordingsPageActionFields(
+    actionProps: {
+      sessionId: string;
+      recordingCycleId?: string;
+      rowKey: string;
+      workspaceId?: string;
+      outputPath: string;
+    },
+  ) {
+    return (
+      <>
+        <input type="hidden" name="sessionId" value={actionProps.sessionId} />
+        <input
+          type="hidden"
+          name="stateFilter"
+          value={pageData.stateFilter}
+        />
+        <input
+          type="hidden"
+          name="workspaceFilter"
+          value={pageData.workspaceFilter ?? ""}
+        />
+        <input
+          type="hidden"
+          name="recordingCycleId"
+          value={actionProps.recordingCycleId ?? ""}
+        />
+        <input type="hidden" name="rowKey" value={actionProps.rowKey} />
+        <input
+          type="hidden"
+          name="workspaceId"
+          value={actionProps.workspaceId ?? ""}
+        />
+        <input
+          type="hidden"
+          name="outputPath"
+          value={actionProps.outputPath}
+        />
+        <input
+          type="hidden"
+          name="csrfToken"
+          value={props.csrfToken ?? ""}
+        />
+      </>
+    );
+  }
 
   return (
     <section class="grid">
@@ -56,7 +115,8 @@ export default function RecordingsLive(
               )
               : null}
             <p class="page-toolbar-summary muted mono">
-              Recording: {pageData.activeRecordingCount}, Ready to record:{" "}
+              Recording: {pageData.activeRecordingCount},{" "}
+              {recordingsPageStaleFilterLabel()}:{" "}
               {pageData.staleRecordingCount}, Stopped:{" "}
               {pageData.stoppedRecordingCount}
             </p>
@@ -93,7 +153,7 @@ export default function RecordingsLive(
                 workspaceFilter: pageData.workspaceFilter,
               })}
             >
-              Ready to record
+              {recordingsPageStaleFilterLabel()}
             </a>
             <a
               class={pageData.stateFilter === "stopped"
@@ -128,9 +188,13 @@ export default function RecordingsLive(
             ? <li class="muted">No recordings match the current filters.</li>
             : pageData.rows.map((row) => {
               const uiState = recordingState(row.state);
-              const rowWorkspaceLabel = row.workspaceAlias ??
-                row.workspaceId ??
-                "workspace";
+              const rowWorkspaceLabel = row.workspaceAlias
+                ? formatWorkspaceLabel(
+                  row.workspaceAlias,
+                  row.workspaceDisplayName,
+                )
+                : row.workspaceId ?? "workspace";
+              const stopActionLabel = recordingsPageStopActionLabel(row.state);
               return (
                 <li
                   key={row.key}
@@ -141,62 +205,140 @@ export default function RecordingsLive(
                   })}
                 >
                   <div class="recording-row-top">
-                    <div class="mono recording-state-line">
-                      <span
-                        class={`activity-state-dot ${uiState}`}
-                        aria-hidden="true"
-                      >
-                        {activityStateDot(uiState)}
-                      </span>
-                      <a
-                        class="recording-primary-link"
-                        href={row.workspaceHref}
-                      >
-                        {rowWorkspaceLabel}
-                      </a>
-                      <span>:</span>
-                      <span>{row.displayOutputPath}</span>
+                    <div class="recording-row-copy">
+                      <div class="mono muted recording-file-line">
+                        <span class="recording-detail-label">File:</span>{" "}
+                        <span class="recording-file-path">
+                          {row.displayOutputPath}
+                        </span>
+                      </div>
+                      <div class="muted recording-detail-line recording-timestamps-line">
+                        Started{" "}
+                        <TimestampText
+                          value={row.startedAt}
+                          timeZone={timeZone}
+                        />
+                        {uiState === "inactive"
+                          ? (
+                            <>
+                              {" · "}Stopped{" "}
+                              <TimestampText
+                                value={row.stoppedAt}
+                                timeZone={timeZone}
+                              />
+                            </>
+                          )
+                          : (
+                            <>
+                              {" · "}Last write{" "}
+                              <TimestampText
+                                value={row.lastWriteAt}
+                                timeZone={timeZone}
+                              />
+                            </>
+                          )}
+                      </div>
+                      <div class="recording-detail-line">
+                        <span class="mono recording-detail-label">
+                          Workspace:
+                        </span>{" "}
+                        <span class="mono recording-state-line">
+                          <span
+                            class={`activity-state-dot ${uiState}`}
+                            aria-hidden="true"
+                          >
+                            {activityStateDot(uiState)}
+                          </span>
+                          <a
+                            class="recording-primary-link"
+                            href={row.workspaceHref}
+                          >
+                            {rowWorkspaceLabel}
+                          </a>
+                        </span>
+                      </div>
+                      <div class="recording-detail-line session-list-primary">
+                        <span class="mono recording-detail-label">
+                          Session:
+                        </span>{" "}
+                        <span class="mono">{row.provider}:</span>{" "}
+                        <SessionSnippet
+                          sessionId={row.sessionId}
+                          snippet={row.snippet}
+                          snippetClass="session-list-snippet recording-session-link"
+                          title={`Session ${row.sessionShortId}`}
+                          href={row.sessionHref}
+                        />{" "}
+                        <a
+                          class="workspace-session-link mono"
+                          href={row.sessionHref}
+                        >
+                          ({row.sessionShortId})
+                        </a>
+                      </div>
                     </div>
-                    <div class={`mono activity-state-text ${uiState}`}>
-                      {recordingActivityStateLabel(uiState)}
+                    <div class="session-activity-meta recording-row-meta">
+                      <div
+                        class={`mono activity-state-text recording-row-state ${uiState}`}
+                      >
+                        {recordingsPageStateLabel(uiState)}
+                      </div>
+                      {row.state !== "stopped" &&
+                          canStopSessionRecording(row)
+                        ? (
+                          <form
+                            method="post"
+                            class="session-list-action-form session-inline-action-form"
+                          >
+                            <RecordingsPageActionFields
+                              sessionId={row.sessionId}
+                              recordingCycleId={row.recordingCycleId}
+                              rowKey={row.key}
+                              workspaceId={row.workspaceId}
+                              outputPath={row.outputPath}
+                            />
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="stop-recording"
+                            />
+                            <button
+                              class="session-inline-action session-inline-action-danger mono"
+                              type="submit"
+                            >
+                              [{stopActionLabel}]
+                            </button>
+                          </form>
+                        )
+                        : null}
+                      {canRestartSessionRecording(row)
+                        ? (
+                          <form
+                            method="post"
+                            class="session-list-action-form session-inline-action-form"
+                          >
+                            <RecordingsPageActionFields
+                              sessionId={row.sessionId}
+                              recordingCycleId={row.recordingCycleId}
+                              rowKey={row.key}
+                              workspaceId={row.workspaceId}
+                              outputPath={row.outputPath}
+                            />
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="restart-recording"
+                            />
+                            <button
+                              class="session-inline-action mono"
+                              type="submit"
+                            >
+                              [re-arm]
+                            </button>
+                          </form>
+                        )
+                        : null}
                     </div>
-                  </div>
-                  <div class="session-list-primary">
-                    <span class="mono">{row.provider}:</span>{" "}
-                    <SessionSnippet
-                      sessionId={row.sessionId}
-                      snippet={row.snippet}
-                      snippetClass="session-list-snippet"
-                    />{" "}
-                    <a
-                      class="workspace-session-link mono"
-                      href={row.sessionHref}
-                    >
-                      ({row.sessionShortId})
-                    </a>
-                  </div>
-                  <div class="muted">
-                    Started{" "}
-                    <TimestampText value={row.startedAt} timeZone={timeZone} />
-                    {uiState === "inactive"
-                      ? (
-                        <>
-                          {" · "}Stopped{" "}
-                          <TimestampText
-                            value={row.stoppedAt}
-                            timeZone={timeZone}
-                          />
-                        </>
-                      )
-                      : (
-                        <>
-                          {" · "}Last write{" "}
-                          <TimestampText
-                            value={row.lastWriteAt}
-                            timeZone={timeZone}
-                          />
-                        </>
-                      )}
                   </div>
                 </li>
               );

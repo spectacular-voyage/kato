@@ -1,6 +1,6 @@
 import type { DaemonCliCommandContext } from "./context.ts";
 import {
-  formatWorkspaceEntry,
+  formatWorkspaceListEntry,
   resolveWorkspaceRegistryStore,
 } from "./workspace_shared.ts";
 
@@ -14,6 +14,6 @@ export async function runWorkspaceListCommand(
   }
   const lines = entries
     .sort((a, b) => a.alias.localeCompare(b.alias))
-    .map((entry) => formatWorkspaceEntry(entry));
-  ctx.runtime.writeStdout(`${lines.join("\n")}\n`);
+    .map((entry) => formatWorkspaceListEntry(entry));
+  ctx.runtime.writeStdout(`${lines.join("\n\n")}\n`);
 }

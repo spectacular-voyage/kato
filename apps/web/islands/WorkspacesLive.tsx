@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import { type ActivityState, activityStateDot } from "../src/activity_state.ts";
 import type { WorkspacesPageData } from "../src/loaders/workspaces.ts";
 import {
@@ -61,7 +62,9 @@ export default function WorkspacesLive(
                   >
                     <div class="workspace-row-header">
                       <div class="workspace-row-main">
-                        <div class="workspace-row-title">{row.alias}</div>
+                        <div class="workspace-row-title">
+                          {formatWorkspaceLabel(row.alias, row.displayName)}
+                        </div>
                         <div class="muted mono workspace-row-id">
                           {workspaceShortId(row.workspaceId)}
                         </div>
@@ -133,6 +136,85 @@ export default function WorkspacesLive(
                           </button>
                         </form>
                       </div>
+                    </div>
+
+                    <div class="workspace-settings-grid">
+                      <form method="post" class="workspace-settings-form">
+                        <input
+                          type="hidden"
+                          name="action"
+                          value="save-display-name"
+                        />
+                        <input
+                          type="hidden"
+                          name="csrfToken"
+                          value={props.csrfToken ?? ""}
+                        />
+                        <input
+                          type="hidden"
+                          name="selector"
+                          value={row.workspaceId}
+                        />
+                        <label
+                          class="form-label"
+                          for={`workspace-display-name-${row.workspaceId}`}
+                        >
+                          Display Label
+                        </label>
+                        <input
+                          class="form-input"
+                          id={`workspace-display-name-${row.workspaceId}`}
+                          name="displayName"
+                          type="text"
+                          defaultValue={row.displayName ?? ""}
+                          placeholder="optional operator-facing label"
+                        />
+                        <p class="workspace-settings-note muted">
+                          Blank or matching-alias values fall back to alias-only
+                          labels.
+                        </p>
+                        <button class="secondary-button" type="submit">
+                          Save Label
+                        </button>
+                      </form>
+
+                      <form method="post" class="workspace-settings-form">
+                        <input
+                          type="hidden"
+                          name="action"
+                          value="save-workspace-username"
+                        />
+                        <input
+                          type="hidden"
+                          name="csrfToken"
+                          value={props.csrfToken ?? ""}
+                        />
+                        <input
+                          type="hidden"
+                          name="selector"
+                          value={row.workspaceId}
+                        />
+                        <label
+                          class="form-label"
+                          for={`workspace-username-${row.workspaceId}`}
+                        >
+                          Preferred Username
+                        </label>
+                        <input
+                          class="form-input"
+                          id={`workspace-username-${row.workspaceId}`}
+                          name="username"
+                          type="text"
+                          defaultValue={row.workspaceUsername ?? ""}
+                          placeholder="blank clears the override"
+                        />
+                        <p class="workspace-settings-note muted">
+                          Stored in user settings, but scoped to this workspace.
+                        </p>
+                        <button class="secondary-button" type="submit">
+                          Save Username
+                        </button>
+                      </form>
                     </div>
 
                     <details class="workspace-recordings-toggle">

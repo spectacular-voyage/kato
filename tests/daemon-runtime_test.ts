@@ -215,10 +215,6 @@ const DAEMON_RUNTIME_MOCK_SESSION_PATH = resolveTestTempPath(
   "daemon-runtime",
   "mock-session.jsonl",
 );
-const DAEMON_RUNTIME_CAPTURE_PATH = resolveTestTempPath(
-  "daemon-runtime",
-  "captured.md",
-);
 const DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH = resolveTestTempPath(
   "daemon-runtime",
   "first-seen.md",
@@ -1959,6 +1955,10 @@ Deno.test(
         assertEquals(output.writeCursor, 2);
         assertEquals(output.recordingCycles.length, 1);
         assertEquals(output.recordingCycles[0]?.stoppedCursor, undefined);
+        assertEquals(
+          output.recordingCycles[0]?.lastWriteAt,
+          "2026-02-22T10:00:00.000Z",
+        );
       },
     );
   },
@@ -4065,265 +4065,269 @@ Deno.test("runDaemonRuntimeLoop in-chat dedupe keeps distinct same-content event
 });
 
 Deno.test("runDaemonRuntimeLoop applies in-chat ::capture-<alias> and activates recording", async () => {
-  let currentStatus: DaemonStatusSnapshot = {
-    schemaVersion: 1,
-    generatedAt: "2026-02-22T10:00:00.000Z",
-    heartbeatAt: "2026-02-22T10:00:00.000Z",
-    daemonRunning: false,
-    providers: [],
-    recordings: {
-      activeRecordings: 0,
-      destinations: 0,
-    },
-  };
+  const stateDir = await makeTestTempDir("runtime-live-capture-");
+  try {
+    const capturePath = join(stateDir, "captured.md");
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: "2026-02-22T10:00:00.000Z",
+      heartbeatAt: "2026-02-22T10:00:00.000Z",
+      daemonRunning: false,
+      providers: [],
+      recordings: {
+        activeRecordings: 0,
+        destinations: 0,
+      },
+    };
 
-  const statusStore: DaemonStatusSnapshotStoreLike = {
-    load() {
-      return Promise.resolve({
-        ...currentStatus,
-        providers: [...currentStatus.providers],
-        recordings: { ...currentStatus.recordings },
-      });
-    },
-    save(snapshot) {
-      currentStatus = {
-        ...snapshot,
-        providers: [...snapshot.providers],
-        recordings: { ...snapshot.recordings },
-      };
-      return Promise.resolve();
-    },
-  };
-
-  const sessionSnapshotStore = new InMemorySessionSnapshotStore({
-    now: () => new Date("2026-02-22T10:00:00.000Z"),
-  });
-  const workspace = await createTestWorkspaceFixture(
-    makeTestTempPath("runtime-live-capture-"),
-  );
-
-  let pollCount = 0;
-  const ingestionRunner: ProviderIngestionRunner = {
-    provider: "codex",
-    start() {
-      return Promise.resolve();
-    },
-    poll() {
-      pollCount += 1;
-
-      const baselineMessage = makeEvent(
-        "m1",
-        "message.user",
-        "plain baseline",
-        "2026-02-22T10:00:00.000Z",
-      );
-      const captureCommandMessage = makeEvent(
-        "m2",
-        "message.user",
-        `::capture-${TEST_WORKSPACE_ALIAS} ${DAEMON_RUNTIME_CAPTURE_PATH}\ncapture now`,
-        "2026-02-22T10:00:01.000Z",
-      );
-      const assistantReply = makeEvent(
-        "m3",
-        "message.assistant",
-        "captured and now recording",
-        "2026-02-22T10:00:02.000Z",
-      );
-
-      if (pollCount === 1) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-capture",
-          cursor: { kind: "byte-offset", value: 10 },
-          events: [baselineMessage],
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
         });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+    });
+    const workspace = await createTestWorkspaceFixture(stateDir);
+
+    let pollCount = 0;
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+
+        const baselineMessage = makeEvent(
+          "m1",
+          "message.user",
+          "plain baseline",
+          "2026-02-22T10:00:00.000Z",
+        );
+        const captureCommandMessage = makeEvent(
+          "m2",
+          "message.user",
+          `::capture-${TEST_WORKSPACE_ALIAS} ${capturePath}\ncapture now`,
+          "2026-02-22T10:00:01.000Z",
+        );
+        const assistantReply = makeEvent(
+          "m3",
+          "message.assistant",
+          "captured and now recording",
+          "2026-02-22T10:00:02.000Z",
+        );
+
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-capture",
+            cursor: { kind: "byte-offset", value: 10 },
+            events: [baselineMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:00.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        if (pollCount === 2) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-capture",
+            cursor: { kind: "byte-offset", value: 20 },
+            events: [baselineMessage, captureCommandMessage],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:01.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
+        if (pollCount === 3) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-capture",
+            cursor: { kind: "byte-offset", value: 30 },
+            events: [baselineMessage, captureCommandMessage, assistantReply],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: "2026-02-22T10:00:02.000Z",
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+
         return Promise.resolve({
           provider: "codex",
-          polledAt: "2026-02-22T10:00:00.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
+          polledAt: "2026-02-22T10:00:03.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
         });
-      }
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
 
-      if (pollCount === 2) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-capture",
-          cursor: { kind: "byte-offset", value: 20 },
-          events: [baselineMessage, captureCommandMessage],
-        });
+    const requests = [{
+      requestId: "req-stop",
+      requestedAt: "2026-02-22T10:00:05.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        if (pollCount >= 3) {
+          return Promise.resolve(requests.map((request) => ({ ...request })));
+        }
+        return Promise.resolve([]);
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called in this test");
+      },
+      markProcessed(requestId: string) {
+        const index = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (index >= 0) {
+          requests.splice(0, index + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const callOrder: string[] = [];
+    const captureTargets: string[] = [];
+    const captureRecordingCycleIds: string[][] = [];
+    const activatedTargets: string[] = [];
+    const activatedRecordingIds: Array<string | undefined> = [];
+    const appendedMessageIds: string[] = [];
+    let activeRecording = false;
+    let activeRecordingKey: string | undefined;
+    const recordingPipeline: RecordingPipelineLike = {
+      activateRecording(input) {
+        callOrder.push("record");
+        activeRecording = true;
+        activeRecordingKey = input.recordingKey;
+        activatedTargets.push(input.targetPath);
+        activatedRecordingIds.push(input.recordingId);
+        const nowIso = "2026-02-22T10:00:01.000Z";
         return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:01.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
-        });
-      }
-
-      if (pollCount === 3) {
-        sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-capture",
-          cursor: { kind: "byte-offset", value: 30 },
-          events: [baselineMessage, captureCommandMessage, assistantReply],
-        });
-        return Promise.resolve({
-          provider: "codex",
-          polledAt: "2026-02-22T10:00:02.000Z",
-          sessionsUpdated: 1,
-          eventsObserved: 1,
-        });
-      }
-
-      return Promise.resolve({
-        provider: "codex",
-        polledAt: "2026-02-22T10:00:03.000Z",
-        sessionsUpdated: 0,
-        eventsObserved: 0,
-      });
-    },
-    stop() {
-      return Promise.resolve();
-    },
-  };
-
-  const requests = [{
-    requestId: "req-stop",
-    requestedAt: "2026-02-22T10:00:05.000Z",
-    command: "stop" as const,
-  }];
-  const controlStore: DaemonControlRequestStoreLike = {
-    list() {
-      if (pollCount >= 3) {
-        return Promise.resolve(requests.map((request) => ({ ...request })));
-      }
-      return Promise.resolve([]);
-    },
-    enqueue(_request) {
-      throw new Error("enqueue should not be called in this test");
-    },
-    markProcessed(requestId: string) {
-      const index = requests.findIndex((request) =>
-        request.requestId === requestId
-      );
-      if (index >= 0) {
-        requests.splice(0, index + 1);
-      }
-      return Promise.resolve();
-    },
-  };
-
-  const callOrder: string[] = [];
-  const captureTargets: string[] = [];
-  const captureRecordingCycleIds: string[][] = [];
-  const activatedTargets: string[] = [];
-  const activatedRecordingIds: Array<string | undefined> = [];
-  const appendedMessageIds: string[] = [];
-  let activeRecording = false;
-  let activeRecordingKey: string | undefined;
-  const recordingPipeline: RecordingPipelineLike = {
-    activateRecording(input) {
-      callOrder.push("record");
-      activeRecording = true;
-      activeRecordingKey = input.recordingKey;
-      activatedTargets.push(input.targetPath);
-      activatedRecordingIds.push(input.recordingId);
-      const nowIso = "2026-02-22T10:00:01.000Z";
-      return Promise.resolve({
-        recordingId: "rec-capture",
-        provider: input.provider,
-        sessionId: input.sessionId,
-        outputPath: input.targetPath,
-        startedAt: nowIso,
-        lastWriteAt: nowIso,
-      });
-    },
-    captureSnapshot(input) {
-      callOrder.push("capture");
-      captureTargets.push(input.targetPath);
-      captureRecordingCycleIds.push(input.recordingCycleIds ?? []);
-      return Promise.resolve({
-        outputPath: input.targetPath,
-        writeResult: {
-          mode: "overwrite",
+          recordingId: "rec-capture",
+          provider: input.provider,
+          sessionId: input.sessionId,
           outputPath: input.targetPath,
-          wrote: true,
-          deduped: false,
-        },
-        format: "markdown" as const,
-      });
-    },
-    exportSnapshot() {
-      throw new Error("not used");
-    },
-    appendToActiveRecording(input) {
-      if (!activeRecording || input.recordingKey !== activeRecordingKey) {
+          startedAt: nowIso,
+          lastWriteAt: nowIso,
+        });
+      },
+      captureSnapshot(input) {
+        callOrder.push("capture");
+        captureTargets.push(input.targetPath);
+        captureRecordingCycleIds.push(input.recordingCycleIds ?? []);
         return Promise.resolve({
-          appended: false,
+          outputPath: input.targetPath,
+          writeResult: {
+            mode: "overwrite",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          },
+          format: "markdown" as const,
+        });
+      },
+      exportSnapshot() {
+        throw new Error("not used");
+      },
+      appendToActiveRecording(input) {
+        if (!activeRecording || input.recordingKey !== activeRecordingKey) {
+          return Promise.resolve({
+            appended: false,
+            deduped: false,
+          });
+        }
+
+        for (const event of input.events) {
+          appendedMessageIds.push(event.eventId);
+        }
+        return Promise.resolve({
+          appended: true,
           deduped: false,
         });
-      }
+      },
+      stopRecording(_provider, _sessionId, recordingKey) {
+        if (recordingKey && recordingKey !== activeRecordingKey) {
+          return false;
+        }
+        activeRecording = false;
+        activeRecordingKey = undefined;
+        return true;
+      },
+      getActiveRecording() {
+        return undefined;
+      },
+      listActiveRecordings() {
+        return [];
+      },
+      getRecordingSummary() {
+        return {
+          activeRecordings: activeRecording ? 1 : 0,
+          destinations: activeRecording ? 1 : 0,
+        };
+      },
+    };
 
-      for (const event of input.events) {
-        appendedMessageIds.push(event.eventId);
-      }
-      return Promise.resolve({
-        appended: true,
-        deduped: false,
-      });
-    },
-    stopRecording(_provider, _sessionId, recordingKey) {
-      if (recordingKey && recordingKey !== activeRecordingKey) {
-        return false;
-      }
-      activeRecording = false;
-      activeRecordingKey = undefined;
-      return true;
-    },
-    getActiveRecording() {
-      return undefined;
-    },
-    listActiveRecordings() {
-      return [];
-    },
-    getRecordingSummary() {
-      return {
-        activeRecordings: activeRecording ? 1 : 0,
-        destinations: activeRecording ? 1 : 0,
-      };
-    },
-  };
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      recordingPipeline,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      now: () => new Date("2026-02-22T10:00:00.000Z"),
+      pid: 4242,
+      heartbeatIntervalMs: 50,
+      pollIntervalMs: 10,
+      workspaceCatalog: workspace.workspaceCatalog,
+      workspaceProfileResolver: workspace.workspaceProfileResolver,
+    });
 
-  await runDaemonRuntimeLoop({
-    statusStore,
-    controlStore,
-    recordingPipeline,
-    ingestionRunners: [ingestionRunner],
-    sessionSnapshotStore,
-    now: () => new Date("2026-02-22T10:00:00.000Z"),
-    pid: 4242,
-    heartbeatIntervalMs: 50,
-    pollIntervalMs: 10,
-    workspaceCatalog: workspace.workspaceCatalog,
-    workspaceProfileResolver: workspace.workspaceProfileResolver,
-  });
-
-  assertEquals(callOrder, ["capture", "record"]);
-  assertEquals(captureTargets.length, 1);
-  assertEquals(
-    toPosixPath(captureTargets[0] ?? ""),
-    toPosixPath(DAEMON_RUNTIME_CAPTURE_PATH),
-  );
-  assertEquals(captureRecordingCycleIds.length, 1);
-  assertEquals(captureRecordingCycleIds[0]?.length, 1);
-  assertEquals(activatedTargets.length, 1);
-  assertEquals(
-    toPosixPath(activatedTargets[0] ?? ""),
-    toPosixPath(DAEMON_RUNTIME_CAPTURE_PATH),
-  );
-  assertEquals(activatedRecordingIds.length, 1);
-  assertEquals(activatedRecordingIds[0], captureRecordingCycleIds[0]?.[0]);
-  assertEquals(appendedMessageIds, ["m2", "m3"]);
+    assertEquals(callOrder, ["capture", "record"]);
+    assertEquals(captureTargets.length, 1);
+    assertEquals(
+      toPosixPath(captureTargets[0] ?? ""),
+      toPosixPath(capturePath),
+    );
+    assertEquals(captureRecordingCycleIds.length, 1);
+    assertEquals(captureRecordingCycleIds[0]?.length, 1);
+    assertEquals(activatedTargets.length, 1);
+    assertEquals(
+      toPosixPath(activatedTargets[0] ?? ""),
+      toPosixPath(capturePath),
+    );
+    assertEquals(activatedRecordingIds.length, 1);
+    assertEquals(activatedRecordingIds[0], captureRecordingCycleIds[0]?.[0]);
+    assertEquals(appendedMessageIds, ["m2", "m3"]);
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
 });
 
 Deno.test(
@@ -6446,6 +6450,401 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
 
   assert(controlPolls >= 5);
   assertEquals(metadataReads, 3);
+});
+
+Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs when saving stale session metadata", async () => {
+  const stateDir = await makeTestTempDir(
+    "daemon-runtime-preserve-web-recording-mutations-",
+  );
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    const capturePath = join(stateDir, "captured.md");
+    const nowIso = "2026-02-22T10:00:00.000Z";
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: nowIso,
+      heartbeatAt: nowIso,
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionKey = "codex:session-web-race";
+    const staleMetadata: SessionMetadataV1 = {
+      schemaVersion: 1,
+      sessionKey,
+      provider: "codex",
+      providerSessionId: "session-web-race",
+      sessionId: "kato-session-web-race-1234",
+      createdAt: "2026-02-22T09:59:00.000Z",
+      updatedAt: nowIso,
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SESSION_PATH,
+      ingestCursor: { kind: "byte-offset", value: 0 },
+      twinPath: join(stateDir, "session-web-race.twin.jsonl"),
+      nextTwinSeq: 1,
+      recentFingerprints: [],
+      commandCursor: 0,
+    };
+    const webCaptureOutput = makeWorkspaceOutputState(workspace, {
+      currentResolvedPath: capturePath,
+      desiredState: "on",
+      writeCursor: 1,
+      activeRecordingCycleId: "cycle-web-capture",
+      recordingCycles: [{
+        recordingCycleId: "cycle-web-capture",
+        startedCursor: 1,
+        startedAt: "2026-02-22T10:00:01.000Z",
+        lastWriteAt: "2026-02-22T10:00:01.000Z",
+        startedBySeq: 1,
+      }],
+    });
+    const webMutatedMetadata: SessionMetadataV1 = {
+      ...structuredClone(staleMetadata),
+      updatedAt: "2026-02-22T10:00:01.000Z",
+      workspaceOutputs: [structuredClone(webCaptureOutput)],
+    };
+
+    let storedMetadata = structuredClone(staleMetadata);
+    let metadataReads = 0;
+    const sessionStateStore = {
+      listSessionMetadata() {
+        metadataReads += 1;
+        const result = [structuredClone(storedMetadata)];
+        if (metadataReads === 1) {
+          storedMetadata = structuredClone(webMutatedMetadata);
+        }
+        return Promise.resolve(result);
+      },
+      getOrCreateSessionMetadata() {
+        return Promise.resolve(structuredClone(staleMetadata));
+      },
+      saveSessionMetadata(next: SessionMetadataV1) {
+        storedMetadata = structuredClone(next);
+        return Promise.resolve();
+      },
+    } as unknown as PersistentSessionStateStore;
+
+    let pollCount = 0;
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date(nowIso),
+    });
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-web-race",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [
+              makeEventForSession(
+                "session-web-race",
+                "a-race-1",
+                "message.assistant",
+                "assistant response",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: nowIso,
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-web-race",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      recordingPipeline: new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date(nowIso),
+      }),
+      now: () => new Date(nowIso),
+      pid: 4242,
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1,
+      sessionMetadataRefreshIntervalMs: 10_000,
+    });
+
+    assertEquals(storedMetadata.commandCursor, 1);
+    assertExists(storedMetadata.workspaceOutputs);
+    assertEquals(storedMetadata.workspaceOutputs.length, 1);
+    assertEquals(
+      storedMetadata.workspaceOutputs[0]?.currentResolvedPath,
+      capturePath,
+    );
+    assertEquals(
+      storedMetadata.workspaceOutputs[0]?.activeRecordingCycleId,
+      "cycle-web-capture",
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
+});
+
+Deno.test("runDaemonRuntimeLoop merges daemon-updated fields into a newer web-written matching output", async () => {
+  const stateDir = await makeTestTempDir("daemon-runtime-web-race-merge-");
+  try {
+    const workspace = await createTestWorkspaceFixture(stateDir);
+    const capturePath = join(stateDir, "captured.md");
+    const nowIso = "2026-02-22T10:00:00.000Z";
+    let currentStatus: DaemonStatusSnapshot = {
+      schemaVersion: 1,
+      generatedAt: nowIso,
+      heartbeatAt: nowIso,
+      daemonRunning: false,
+      providers: [],
+      recordings: { activeRecordings: 0, destinations: 0 },
+    };
+    const statusStore: DaemonStatusSnapshotStoreLike = {
+      load() {
+        return Promise.resolve({
+          ...currentStatus,
+          providers: [...currentStatus.providers],
+          recordings: { ...currentStatus.recordings },
+        });
+      },
+      save(snapshot) {
+        currentStatus = {
+          ...snapshot,
+          providers: [...snapshot.providers],
+          recordings: { ...snapshot.recordings },
+        };
+        return Promise.resolve();
+      },
+    };
+
+    const sessionKey = "codex:session-web-race-merge";
+    const staleMetadata: SessionMetadataV1 = {
+      schemaVersion: 1,
+      sessionKey,
+      provider: "codex",
+      providerSessionId: "session-web-race-merge",
+      sessionId: "kato-session-web-race-merge-1234",
+      createdAt: "2026-02-22T09:59:00.000Z",
+      updatedAt: nowIso,
+      sourceFilePath: DAEMON_RUNTIME_MOCK_SESSION_PATH,
+      ingestCursor: { kind: "byte-offset", value: 0 },
+      twinPath: join(stateDir, "session-web-race-merge.twin.jsonl"),
+      nextTwinSeq: 1,
+      recentFingerprints: [],
+      commandCursor: 0,
+      workspaceOutputs: [
+        makeWorkspaceOutputState(workspace, {
+          currentResolvedPath: capturePath,
+          desiredState: "on",
+          writeCursor: 0,
+          activeRecordingCycleId: "cycle-web-capture",
+          recordingCycles: [{
+            recordingCycleId: "cycle-web-capture",
+            startedCursor: 0,
+            startedAt: "2026-02-22T09:59:30.000Z",
+            lastWriteAt: "2026-02-22T09:59:30.000Z",
+            startedBySeq: 1,
+          }],
+        }),
+      ],
+    };
+    const webMutatedOutput = makeWorkspaceOutputState(workspace, {
+      currentResolvedPath: capturePath,
+      desiredState: "on",
+      writeCursor: 0,
+      activeRecordingCycleId: "cycle-web-capture",
+      recordingCycles: [{
+        recordingCycleId: "cycle-web-capture",
+        startedCursor: 0,
+        startedAt: "2026-02-22T09:59:30.000Z",
+        lastWriteAt: "2026-02-22T09:59:45.000Z",
+        startedBySeq: 1,
+      }],
+    });
+    webMutatedOutput.workspaceAliasSnapshot = "alpha-web";
+    const webMutatedMetadata: SessionMetadataV1 = {
+      ...structuredClone(staleMetadata),
+      updatedAt: "2026-02-22T10:00:01.000Z",
+      workspaceOutputs: [webMutatedOutput],
+    };
+
+    let storedMetadata = structuredClone(staleMetadata);
+    let metadataReads = 0;
+    const sessionStateStore = {
+      listSessionMetadata() {
+        metadataReads += 1;
+        const result = [structuredClone(storedMetadata)];
+        if (metadataReads === 1) {
+          storedMetadata = structuredClone(webMutatedMetadata);
+        }
+        return Promise.resolve(result);
+      },
+      getOrCreateSessionMetadata() {
+        return Promise.resolve(structuredClone(staleMetadata));
+      },
+      saveSessionMetadata(next: SessionMetadataV1) {
+        storedMetadata = structuredClone(next);
+        return Promise.resolve();
+      },
+    } as unknown as PersistentSessionStateStore;
+
+    let pollCount = 0;
+    const sessionSnapshotStore = new InMemorySessionSnapshotStore({
+      now: () => new Date(nowIso),
+    });
+    const ingestionRunner: ProviderIngestionRunner = {
+      provider: "codex",
+      start() {
+        return Promise.resolve();
+      },
+      poll() {
+        pollCount += 1;
+        if (pollCount === 1) {
+          sessionSnapshotStore.upsert({
+            provider: "codex",
+            sessionId: "session-web-race-merge",
+            cursor: { kind: "byte-offset", value: 1 },
+            events: [
+              makeEventForSession(
+                "session-web-race-merge",
+                "a-race-merge-1",
+                "message.assistant",
+                "assistant response",
+              ),
+            ],
+          });
+          return Promise.resolve({
+            provider: "codex",
+            polledAt: nowIso,
+            sessionsUpdated: 1,
+            eventsObserved: 1,
+          });
+        }
+        return Promise.resolve({
+          provider: "codex",
+          polledAt: "2026-02-22T10:00:02.000Z",
+          sessionsUpdated: 0,
+          eventsObserved: 0,
+        });
+      },
+      stop() {
+        return Promise.resolve();
+      },
+    };
+
+    const requests = [{
+      requestId: "req-stop-web-race-merge",
+      requestedAt: "2026-02-22T10:00:03.000Z",
+      command: "stop" as const,
+    }];
+    const controlStore: DaemonControlRequestStoreLike = {
+      list() {
+        return Promise.resolve(
+          pollCount >= 2 ? requests.map((request) => ({ ...request })) : [],
+        );
+      },
+      enqueue(_request) {
+        throw new Error("enqueue should not be called");
+      },
+      markProcessed(requestId: string) {
+        const idx = requests.findIndex((request) =>
+          request.requestId === requestId
+        );
+        if (idx >= 0) {
+          requests.splice(0, idx + 1);
+        }
+        return Promise.resolve();
+      },
+    };
+
+    await runDaemonRuntimeLoop({
+      statusStore,
+      controlStore,
+      ingestionRunners: [ingestionRunner],
+      sessionSnapshotStore,
+      sessionStateStore,
+      recordingPipeline: new RecordingPipeline({
+        pathPolicyGate: makeAllowAllPathPolicyGate(),
+        now: () => new Date(nowIso),
+      }),
+      now: () => new Date(nowIso),
+      pid: 4242,
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1,
+      sessionMetadataRefreshIntervalMs: 10_000,
+    });
+
+    assertExists(storedMetadata.workspaceOutputs);
+    assertEquals(storedMetadata.workspaceOutputs.length, 1);
+    const mergedOutput = storedMetadata.workspaceOutputs[0];
+    assertExists(mergedOutput);
+    assertEquals(mergedOutput.workspaceAliasSnapshot, "alpha-web");
+    assertEquals(mergedOutput.writeCursor, 1);
+    assertEquals(
+      mergedOutput.recordingCycles[0]?.lastWriteAt,
+      nowIso,
+    );
+  } finally {
+    await removeDirIfPresent(stateDir);
+  }
 });
 
 Deno.test("runDaemonRuntimeLoop treats ::stop with an argument as a parse error and leaves state unchanged", async () => {

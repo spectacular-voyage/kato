@@ -1,6 +1,6 @@
 ---
 id: r81e47fxow5rps1s86ddz7i
-title: 'Distribution Phase 2'
+title: Distribution Phase 2
 desc: ''
 updated: 1773767954991
 created: 1773375447431
@@ -11,7 +11,7 @@ created: 1773375447431
 Capture post-Phase-1 distribution ideas that are worth keeping, but are not
 part of the current binary/npm closeout tracked in
 [[completed.2026.2026-03-11-binary-distributions]] and
-[[task.2026.2026-03-11-npmjs-install]].
+[[completed.2026.2026-03-11-npmjs-install]].
 
 ## Carry-Forward Constraints
 

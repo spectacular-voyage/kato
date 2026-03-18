@@ -3,10 +3,12 @@ import type {
   DaemonSessionStatus,
   SessionMetadataV1,
 } from "@kato/shared";
+import { DEFAULT_STATUS_STALE_AFTER_MS, isSessionStale } from "@kato/shared";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   PersistentSessionStateStore,
+  type RegisteredWorkspace,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
   resolveDefaultWorkspaceRegistryPath,
@@ -26,6 +28,7 @@ export interface SessionRecordingActivityRow {
   state: "engaged-active" | "engaged-stale" | "stopped";
   workspaceId?: string;
   workspaceAlias?: string;
+  workspaceDisplayName?: string;
   workspaceHref: string;
   outputPath: string;
   displayOutputPath: string;
@@ -57,10 +60,8 @@ export interface SessionsPageData {
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
-  workspaceOptions: Array<{
-    workspaceId: string;
-    alias: string;
-  }>;
+  workspaceFilterDisplayName?: string;
+  workspaceOptions: WorkspaceOption[];
   sessionCount: number;
   activeSessionCount: number;
   staleSessionCount: number;
@@ -79,12 +80,14 @@ export interface LoadSessionActivityRowsOptions {
   katoDir?: string;
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
+  workspaceEntries?: RegisteredWorkspace[];
 }
 
 export interface ResolvedWorkspaceFilter {
   selector: string;
   workspaceId: string;
   workspaceAlias?: string;
+  workspaceDisplayName?: string;
 }
 
 export interface RecordingListEntry extends SessionRecordingActivityRow {
@@ -96,6 +99,12 @@ export interface RecordingListEntry extends SessionRecordingActivityRow {
   sessionHref: string;
   updatedAt: string;
   lastEventAt?: string;
+}
+
+export interface WorkspaceOption {
+  workspaceId: string;
+  alias: string;
+  displayName?: string;
 }
 
 function resolveActivityTimestamp(
@@ -114,6 +123,27 @@ function resolveActivityTimestamp(
     }
   }
   return 0;
+}
+
+function resolveEngagedRecordingState(options: {
+  startedAt?: string;
+  lastWriteAt?: string;
+  sessionStale: boolean;
+  now: Date;
+}): SessionRecordingActivityRow["state"] {
+  for (const value of [options.lastWriteAt, options.startedAt]) {
+    if (!value) {
+      continue;
+    }
+    return isSessionStale(
+        value,
+        options.now,
+        DEFAULT_STATUS_STALE_AFTER_MS,
+      )
+      ? "engaged-stale"
+      : "engaged-active";
+  }
+  return options.sessionStale ? "engaged-stale" : "engaged-active";
 }
 
 function resolveCycleTimestamp(
@@ -170,25 +200,57 @@ function buildWorkspaceHref(workspaceId: string | undefined): string {
   return workspaceId ? `/workspaces#workspace-${workspaceId}` : "/workspaces";
 }
 
+async function loadRegisteredWorkspaces(
+  katoDir: string,
+): Promise<RegisteredWorkspace[]> {
+  try {
+    const store = new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
+    return await store.load();
+  } catch {
+    return [];
+  }
+}
+
 function sortRecordings(
   rows: SessionRecordingActivityRow[],
 ): SessionRecordingActivityRow[] {
   return [...rows].sort((a, b) => {
-    const order = {
-      "engaged-active": 0,
-      "engaged-stale": 1,
-      "stopped": 2,
-    } as const;
-    const statusDiff = order[a.state] - order[b.state];
-    if (statusDiff !== 0) {
-      return statusDiff;
-    }
     const timeDiff = resolveActivityTimestamp(b) - resolveActivityTimestamp(a);
     if (timeDiff !== 0) {
       return timeDiff;
     }
     return a.outputPath.localeCompare(b.outputPath);
   });
+}
+
+function matchesWorkspaceFilter(
+  row: SessionRecordingActivityRow,
+  resolvedWorkspaceFilter: ResolvedWorkspaceFilter | undefined,
+): boolean {
+  if (!resolvedWorkspaceFilter) {
+    return true;
+  }
+  return row.workspaceId === resolvedWorkspaceFilter.workspaceId ||
+    (
+      !row.workspaceId &&
+      !!row.workspaceAlias &&
+      row.workspaceAlias === resolvedWorkspaceFilter.workspaceAlias
+    );
+}
+
+function resolveWorkspaceDisplayName(
+  row: SessionRecordingActivityRow,
+  workspaceDisplayNamesById: ReadonlyMap<string, string | undefined>,
+  workspaceDisplayNamesByAlias: ReadonlyMap<string, string | undefined>,
+): string | undefined {
+  return (row.workspaceId
+    ? workspaceDisplayNamesById.get(row.workspaceId)
+    : undefined) ??
+    (row.workspaceAlias
+      ? workspaceDisplayNamesByAlias.get(row.workspaceAlias)
+      : undefined);
 }
 
 function deriveSessionShortId(
@@ -296,6 +358,7 @@ function buildRecordingRowsForOutput(
   output: SessionWorkspaceOutputState,
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
+  now: Date,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -306,6 +369,9 @@ function buildRecordingRowsForOutput(
     output.workspaceRootSnapshot,
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
+  const activeStartedAt = activeCycle?.startedAt ?? liveRecording?.startedAt;
+  const activeLastWriteAt = liveRecording?.lastWriteAt ??
+    activeCycle?.lastWriteAt;
 
   if (activeCycle || output.desiredState === "on") {
     return [{
@@ -314,15 +380,20 @@ function buildRecordingRowsForOutput(
         output.currentResolvedPath,
         activeCycle?.recordingCycleId ?? liveRecording?.recordingId ?? "active",
       ].join(":"),
-      state: sessionStale ? "engaged-stale" : "engaged-active",
+      state: resolveEngagedRecordingState({
+        startedAt: activeStartedAt,
+        lastWriteAt: activeLastWriteAt,
+        sessionStale,
+        now,
+      }),
       workspaceId: output.workspaceId,
       workspaceAlias: output.workspaceAliasSnapshot ??
         liveRecording?.workspaceAlias,
       workspaceHref: buildWorkspaceHref(output.workspaceId),
       outputPath: output.currentResolvedPath,
       displayOutputPath,
-      startedAt: activeCycle?.startedAt ?? liveRecording?.startedAt,
-      lastWriteAt: liveRecording?.lastWriteAt,
+      startedAt: activeStartedAt,
+      lastWriteAt: activeLastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId,
     }];
   }
@@ -342,6 +413,7 @@ function buildRecordingRowsForOutput(
       outputPath: output.currentResolvedPath,
       displayOutputPath,
       startedAt: latestStoppedCycle.startedAt,
+      lastWriteAt: latestStoppedCycle.lastWriteAt,
       stoppedAt: latestStoppedCycle.stoppedAt,
       recordingCycleId: latestStoppedCycle.recordingCycleId,
     }];
@@ -357,7 +429,12 @@ function buildRecordingRowsForOutput(
       output.currentResolvedPath,
       liveRecording.recordingId ?? "active",
     ].join(":"),
-    state: sessionStale ? "engaged-stale" : "engaged-active",
+    state: resolveEngagedRecordingState({
+      startedAt: liveRecording.startedAt,
+      lastWriteAt: liveRecording.lastWriteAt,
+      sessionStale,
+      now,
+    }),
     workspaceId: output.workspaceId,
     workspaceAlias: output.workspaceAliasSnapshot ??
       liveRecording.workspaceAlias,
@@ -374,6 +451,7 @@ function buildAllRecordingRowsForOutput(
   output: SessionWorkspaceOutputState,
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
+  now: Date,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -388,6 +466,11 @@ function buildAllRecordingRowsForOutput(
 
   for (const cycle of output.recordingCycles) {
     const active = activeCycle?.recordingCycleId === cycle.recordingCycleId;
+    const startedAt = cycle.startedAt ??
+      (active ? liveRecording?.startedAt : undefined);
+    const lastWriteAt = active
+      ? liveRecording?.lastWriteAt ?? cycle.lastWriteAt
+      : cycle.lastWriteAt;
     rows.push({
       key: [
         output.workspaceId,
@@ -395,7 +478,12 @@ function buildAllRecordingRowsForOutput(
         cycle.recordingCycleId,
       ].join(":"),
       state: active
-        ? sessionStale ? "engaged-stale" : "engaged-active"
+        ? resolveEngagedRecordingState({
+          startedAt,
+          lastWriteAt,
+          sessionStale,
+          now,
+        })
         : "stopped",
       workspaceId: output.workspaceId,
       workspaceAlias: output.workspaceAliasSnapshot ??
@@ -403,10 +491,9 @@ function buildAllRecordingRowsForOutput(
       workspaceHref: buildWorkspaceHref(output.workspaceId),
       outputPath: output.currentResolvedPath,
       displayOutputPath,
-      startedAt: cycle.startedAt ??
-        (active ? liveRecording?.startedAt : undefined),
+      startedAt,
       stoppedAt: active ? undefined : cycle.stoppedAt,
-      lastWriteAt: active ? liveRecording?.lastWriteAt : undefined,
+      lastWriteAt,
       recordingCycleId: cycle.recordingCycleId,
     });
   }
@@ -422,7 +509,12 @@ function buildAllRecordingRowsForOutput(
         output.currentResolvedPath,
         activeCycle?.recordingCycleId ?? liveRecording?.recordingId ?? "active",
       ].join(":"),
-      state: sessionStale ? "engaged-stale" : "engaged-active",
+      state: resolveEngagedRecordingState({
+        startedAt: activeCycle?.startedAt ?? liveRecording?.startedAt,
+        lastWriteAt: liveRecording?.lastWriteAt ?? activeCycle?.lastWriteAt,
+        sessionStale,
+        now,
+      }),
       workspaceId: output.workspaceId,
       workspaceAlias: output.workspaceAliasSnapshot ??
         liveRecording?.workspaceAlias,
@@ -443,6 +535,7 @@ function buildRecordingRows(
   session: SessionMetadataV1,
   live: DaemonSessionStatus | undefined,
   recordingsMode: "latest" | "all" = "latest",
+  now: Date,
 ): SessionRecordingActivityRow[] {
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
@@ -455,11 +548,13 @@ function buildRecordingRows(
         output,
         liveRecordings,
         sessionStale,
+        now,
       )
       : buildRecordingRowsForOutput(
         output,
         liveRecordings,
         sessionStale,
+        now,
       );
     for (const row of outputRows) {
       rows.push(row);
@@ -477,7 +572,12 @@ function buildRecordingRows(
         liveRecording.outputPath,
         liveRecording.recordingId ?? "active",
       ].join(":"),
-      state: sessionStale ? "engaged-stale" : "engaged-active",
+      state: resolveEngagedRecordingState({
+        startedAt: liveRecording.startedAt,
+        lastWriteAt: liveRecording.lastWriteAt,
+        sessionStale,
+        now,
+      }),
       workspaceAlias: liveRecording.workspaceAlias,
       workspaceHref: buildWorkspaceHref(undefined),
       outputPath: liveRecording.outputPath,
@@ -494,6 +594,7 @@ function buildRecordingRows(
 export async function resolveWorkspaceFilter(
   selector: string | undefined,
   katoDir: string,
+  workspaceEntries?: RegisteredWorkspace[],
 ): Promise<ResolvedWorkspaceFilter | undefined> {
   const trimmed = selector?.trim();
   if (!trimmed) {
@@ -501,10 +602,7 @@ export async function resolveWorkspaceFilter(
   }
 
   try {
-    const store = new WorkspaceRegistryFileStore(
-      resolveDefaultWorkspaceRegistryPath(katoDir),
-    );
-    const entries = await store.load();
+    const entries = workspaceEntries ?? await loadRegisteredWorkspaces(katoDir);
     const matched = entries.find((entry) =>
       entry.workspaceId === trimmed || entry.alias === trimmed
     );
@@ -513,6 +611,7 @@ export async function resolveWorkspaceFilter(
         selector: trimmed,
         workspaceId: matched.workspaceId,
         workspaceAlias: matched.alias,
+        workspaceDisplayName: matched.displayName,
       };
     }
   } catch {
@@ -541,15 +640,6 @@ export function flattenSessionRecordings(
       lastEventAt: row.lastEventAt,
     }))
   ).sort((a, b) => {
-    const order = {
-      "engaged-active": 0,
-      "engaged-stale": 1,
-      "stopped": 2,
-    } as const;
-    const stateDiff = order[a.state] - order[b.state];
-    if (stateDiff !== 0) {
-      return stateDiff;
-    }
     const timeDiff = resolveActivityTimestamp(b) - resolveActivityTimestamp(a);
     if (timeDiff !== 0) {
       return timeDiff;
@@ -577,11 +667,16 @@ export async function loadSessionActivityRows(
     katoDir,
     now,
   });
-  const [snapshot, metadataList, runtimeConfig] = await Promise.all([
-    statusStore.load(),
-    sessionStore.listSessionMetadata(),
-    loadRuntimeConfigOrDefault(),
-  ]);
+  const workspaceEntriesPromise = options.workspaceEntries
+    ? Promise.resolve(options.workspaceEntries)
+    : loadRegisteredWorkspaces(katoDir);
+  const [snapshot, metadataList, runtimeConfig, workspaceEntries] =
+    await Promise.all([
+      statusStore.load(),
+      sessionStore.listSessionMetadata(),
+      loadRuntimeConfigOrDefault(),
+      workspaceEntriesPromise,
+    ]);
   const normalizedMetadataList = await Promise.all(
     metadataList.map((metadata) =>
       normalizePersistedTwinMetadata(sessionStore, metadata)
@@ -594,7 +689,18 @@ export async function loadSessionActivityRows(
   const resolvedWorkspaceFilter = await resolveWorkspaceFilter(
     options.workspaceFilter,
     katoDir,
+    workspaceEntries,
   );
+  const workspaceDisplayNamesById = new Map(
+    workspaceEntries.map((entry) => [entry.workspaceId, entry.displayName]),
+  );
+  const workspaceDisplayNamesByAlias = new Map(
+    workspaceEntries.map((entry) => [entry.alias, entry.displayName]),
+  );
+  const statusClock = (() => {
+    const generatedAtMs = Date.parse(snapshot.generatedAt);
+    return Number.isNaN(generatedAtMs) ? now() : new Date(generatedAtMs);
+  })();
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
 
@@ -602,12 +708,30 @@ export async function loadSessionActivityRows(
     metadata,
   ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
-    const recordings = buildRecordingRows(metadata, live, recordingsMode);
+    const recordings = buildRecordingRows(
+      metadata,
+      live,
+      recordingsMode,
+      statusClock,
+    );
     const filteredRecordings = resolvedWorkspaceFilter
       ? recordings.filter((row) =>
-        row.workspaceId === resolvedWorkspaceFilter.workspaceId
+        matchesWorkspaceFilter(row, resolvedWorkspaceFilter)
       )
       : recordings;
+    const displayRecordings = filteredRecordings.map((recording) => {
+      const workspaceDisplayName = resolveWorkspaceDisplayName(
+        recording,
+        workspaceDisplayNamesById,
+        workspaceDisplayNamesByAlias,
+      );
+      return workspaceDisplayName
+        ? {
+          ...recording,
+          workspaceDisplayName,
+        }
+        : recording;
+    });
     const activeRecordingCount = filteredRecordings.filter((row) =>
       row.state === "engaged-active"
     ).length;
@@ -642,7 +766,7 @@ export async function loadSessionActivityRows(
       staleRecordingCount,
       stoppedRecordingCount:
         filteredRecordings.filter((row) => row.state === "stopped").length,
-      recordings: filteredRecordings,
+      recordings: displayRecordings,
     };
   }))).filter((row) => includeStale || !row.stale).filter((row) =>
     !resolvedWorkspaceFilter || row.recordings.length > 0
@@ -674,39 +798,38 @@ export async function loadSessionsPageData(
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
-  const [rows, resolvedWorkspaceFilter, workspaceOptions] = await Promise.all([
+  const workspaceEntries = options.workspaceEntries ??
+    await loadRegisteredWorkspaces(katoDir);
+  const [rows, resolvedWorkspaceFilter] = await Promise.all([
     loadSessionActivityRows({
       ...options,
       includeStale,
       katoDir,
+      workspaceEntries,
     }),
-    resolveWorkspaceFilter(options.workspaceFilter, katoDir),
-    (async () => {
-      try {
-        const store = new WorkspaceRegistryFileStore(
-          resolveDefaultWorkspaceRegistryPath(katoDir),
-        );
-        const entries = await store.load();
-        return entries
-          .map((entry) => ({
-            workspaceId: entry.workspaceId,
-            alias: entry.alias,
-          }))
-          .sort((a, b) =>
-            a.alias.localeCompare(b.alias) ||
-            a.workspaceId.localeCompare(b.workspaceId)
-          );
-      } catch {
-        return [];
-      }
-    })(),
+    resolveWorkspaceFilter(
+      options.workspaceFilter,
+      katoDir,
+      workspaceEntries,
+    ),
   ]);
+  const workspaceOptions = workspaceEntries
+    .map((entry) => ({
+      workspaceId: entry.workspaceId,
+      alias: entry.alias,
+      displayName: entry.displayName,
+    }))
+    .sort((a, b) =>
+      a.alias.localeCompare(b.alias) ||
+      a.workspaceId.localeCompare(b.workspaceId)
+    );
 
   return {
     includeStale,
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
+    workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     workspaceOptions,
     sessionCount: rows.length,
     activeSessionCount: rows.filter((row) => row.state === "active").length,

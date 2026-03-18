@@ -13,7 +13,7 @@ This note is closed as the broad distribution-planning umbrella.
 - The Phase 1 implementation track now lives in
   [[completed.2026.2026-03-11-binary-distributions]].
 - The npm-wrapper install path now lives in
-  [[task.2026.2026-03-11-npmjs-install]].
+  [[completed.2026.2026-03-11-npmjs-install]].
 - The older recommendation that direct GitHub-release archives should be the
   primary user-facing channel is superseded: npm wrapper install is now the
   preferred documented user path, while GitHub release bundles remain the build
@@ -46,7 +46,7 @@ This note is closed as the broad distribution-planning umbrella.
 - [[completed.2026.2026-03-11-binary-distributions]] owns the implemented
   binary bundle shape, launcher/runtime contract, packaging workflow, GitHub
   release upload path, and remaining binary hardening items.
-- [[task.2026.2026-03-11-npmjs-install]] owns the npm wrapper/package layout
+- [[completed.2026.2026-03-11-npmjs-install]] owns the npm wrapper/package layout
   and the primary user-facing install/update contract.
 - [[dev.feature-ideas.distribution-phase-2]] holds the deferred ideas worth
   keeping around: channel-aware self-update, installer channels, and per-user

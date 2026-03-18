@@ -39,7 +39,7 @@ Current `kato web init` requires either `KATO_WEB_PASSWORD` or
 That is acceptable for CI and secret-manager piping, but it is rough for the
 local first-run experience, especially for the binary/npm installation track in
 [[completed.2026.2026-03-11-binary-distributions]] and
-[[task.2026.2026-03-11-npmjs-install]].
+[[completed.2026.2026-03-11-npmjs-install]].
 
 The operator is already at a terminal, but the command still forces shell-env
 or piped-secret ceremony just to create the first password. That is needless

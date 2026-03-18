@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import type {
   MaintenanceTwinAction,
   MaintenanceTwinRow,
@@ -42,8 +43,11 @@ function twinActionLabel(action: MaintenanceTwinAction): string {
 function buildPageTitle(
   workspaceAlias: string | undefined,
   workspaceId: string | undefined,
+  workspaceDisplayName: string | undefined,
 ): string {
-  const workspaceLabel = workspaceAlias ?? workspaceId;
+  const workspaceLabel = workspaceAlias
+    ? formatWorkspaceLabel(workspaceAlias, workspaceDisplayName)
+    : workspaceId;
   return workspaceLabel
     ? `Twin Maintenance for ${workspaceLabel}`
     : "Twin Maintenance";
@@ -79,6 +83,7 @@ export default function MaintenanceTwinsLive(props: MaintenanceTwinsLiveProps) {
   const heading = buildPageTitle(
     pageData.workspaceFilterAlias,
     pageData.workspaceFilterId,
+    pageData.workspaceFilterDisplayName,
   );
   const timeZone = useBrowserTimeZone();
 

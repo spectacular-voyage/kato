@@ -30,6 +30,7 @@ const RECENT_ERRORS_LIMIT = 12;
 export interface WorkspaceSummaryRow {
   workspaceId: string;
   alias: string;
+  displayName?: string;
   workspaceRoot: string;
   configPath: string;
   valid: boolean;
@@ -445,6 +446,7 @@ export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
           return {
             workspaceId: entry.workspaceId,
             alias: entry.alias,
+            displayName: entry.displayName,
             workspaceRoot: entry.workspaceRoot,
             configPath: entry.configPath,
             valid: false,
@@ -455,6 +457,7 @@ export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
         return {
           workspaceId: entry.workspaceId,
           alias: entry.alias,
+          displayName: entry.displayName,
           workspaceRoot: entry.workspaceRoot,
           configPath: entry.configPath,
           valid: true,
@@ -463,6 +466,7 @@ export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
         return {
           workspaceId: entry.workspaceId,
           alias: entry.alias,
+          displayName: entry.displayName,
           workspaceRoot: entry.workspaceRoot,
           configPath: entry.configPath,
           valid: false,

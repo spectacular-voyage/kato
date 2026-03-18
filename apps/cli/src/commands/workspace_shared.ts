@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "@std/path";
 import type { DaemonCliCommandContext } from "./context.ts";
-import type { RuntimeConfig } from "@kato/shared";
+import { formatWorkspaceLabel, type RuntimeConfig } from "@kato/shared";
 import {
   createWorkspaceConfigScaffold,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
@@ -165,7 +165,19 @@ export function findWorkspaceByRoot(
 }
 
 export function formatWorkspaceEntry(entry: RegisteredWorkspace): string {
-  return `${entry.alias} (${entry.workspaceId}) root=${entry.workspaceRoot} config=${entry.configPath}`;
+  return `${
+    formatWorkspaceLabel(entry.alias, entry.displayName)
+  } (${entry.workspaceId}) root=${entry.workspaceRoot} config=${entry.configPath}`;
+}
+
+export function formatWorkspaceListEntry(entry: RegisteredWorkspace): string {
+  return [
+    `${
+      formatWorkspaceLabel(entry.alias, entry.displayName)
+    } (${entry.workspaceId})`,
+    `root=${entry.workspaceRoot}`,
+    `config=${entry.configPath}`,
+  ].join("\n");
 }
 
 export function shouldWarnWriteRootCoverage(

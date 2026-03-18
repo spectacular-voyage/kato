@@ -747,6 +747,7 @@ export async function runDaemonCli(
         await runWorkspaceRegisterCommand(
           commandContext,
           intent.command.alias,
+          intent.command.displayName,
           intent.command.dirPath,
           intent.command.noRestart,
         );

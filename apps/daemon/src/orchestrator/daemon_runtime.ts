@@ -68,6 +68,7 @@ import {
   readWorkspaceOutputs,
   resolveBindingForRetargetedWorkspacePath,
   stopAllWorkspaceOutputs,
+  updateWorkspaceOutputCycleLastWrite,
 } from "./runtime_workspace_output_state.ts";
 import {
   type FirstSeenSourceFileFreshnessBasis,
@@ -931,7 +932,7 @@ async function applyPersistentControlCommandsForEvent(
                   "Recording pipeline does not support appendToDestination",
                 );
               }
-              await recordingPipeline.appendToDestination({
+              const writeResult = await recordingPipeline.appendToDestination({
                 provider,
                 sessionId: providerSessionId,
                 targetPath: output.currentResolvedPath,
@@ -942,6 +943,13 @@ async function applyPersistentControlCommandsForEvent(
                 workspaceIds: [workspace.workspaceId],
                 outputOverrides,
               });
+              if (writeResult.wrote) {
+                updateWorkspaceOutputCycleLastWrite(
+                  output,
+                  now().toISOString(),
+                  cycleId,
+                );
+              }
             }
             output.writeCursor = writeCursor;
             metadataChanged = true;
@@ -1061,7 +1069,7 @@ async function applyPersistentControlCommandsForEvent(
                 "Recording pipeline does not support appendToDestination",
               );
             }
-            await recordingPipeline.appendToDestination({
+            const writeResult = await recordingPipeline.appendToDestination({
               provider,
               sessionId: providerSessionId,
               targetPath,
@@ -1072,6 +1080,13 @@ async function applyPersistentControlCommandsForEvent(
               workspaceIds: [workspace.workspaceId],
               outputOverrides,
             });
+            if (writeResult.wrote && activeCycleId) {
+              updateWorkspaceOutputCycleLastWrite(
+                output,
+                now().toISOString(),
+                activeCycleId,
+              );
+            }
           }
           output.writeCursor = writeCursor;
           stateChanged = true;
@@ -1979,7 +1994,7 @@ async function processPersistentRecordingUpdates(
           workspaceProfileResolver,
           userConfig,
         });
-        await recordingPipeline.appendToDestination({
+        const writeResult = await recordingPipeline.appendToDestination({
           provider,
           sessionId: providerSessionId,
           targetPath: output.currentResolvedPath,
@@ -1994,6 +2009,12 @@ async function processPersistentRecordingUpdates(
           workspaceIds: [output.workspaceId],
           outputOverrides,
         });
+        if (writeResult.wrote) {
+          updateWorkspaceOutputCycleLastWrite(
+            output,
+            now().toISOString(),
+          );
+        }
         output.writeCursor = snapshot.events.length;
         metadataChanged = true;
       } catch (error) {
@@ -2023,11 +2044,293 @@ async function processPersistentRecordingUpdates(
     }
 
     if (metadataChanged) {
+      metadata = await mergeLatestSessionMetadataBeforeSave(
+        sessionStateStore,
+        metadata,
+      );
       await sessionStateStore.saveSessionMetadata(metadata);
+      metadataBySessionKey.set(sessionKey, metadata);
       anyMetadataChanged = true;
     }
   }
   return anyMetadataChanged;
+}
+
+function readMetadataUpdatedAtMs(
+  metadata: Pick<SessionMetadataV1, "updatedAt">,
+): number {
+  const parsed = Date.parse(metadata.updatedAt);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function buildWorkspaceOutputMergeKey(
+  output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number],
+): string {
+  return `${output.workspaceId}\u0000${output.currentResolvedPath}`;
+}
+
+type WorkspaceOutputStateForMerge = NonNullable<
+  SessionMetadataV1["workspaceOutputs"]
+>[number];
+type WorkspaceRecordingCycleForMerge =
+  WorkspaceOutputStateForMerge["recordingCycles"][number];
+
+function readOptionalIsoTimestampMs(value: string | undefined): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+function mergeLatestOrCurrentTimestamp(
+  latest: string | undefined,
+  current: string | undefined,
+): string | undefined {
+  if (!latest) {
+    return current;
+  }
+  if (!current) {
+    return latest;
+  }
+  return readOptionalIsoTimestampMs(current) >
+      readOptionalIsoTimestampMs(latest)
+    ? current
+    : latest;
+}
+
+function mergeLatestOrCurrentCount(
+  latest: number | undefined,
+  current: number | undefined,
+): number | undefined {
+  if (latest === undefined) {
+    return current;
+  }
+  if (current === undefined) {
+    return latest;
+  }
+  return Math.max(latest, current);
+}
+
+function mergeMatchingWorkspaceRecordingCyclePreferringLatest(
+  latest: WorkspaceRecordingCycleForMerge,
+  current: WorkspaceRecordingCycleForMerge,
+): WorkspaceRecordingCycleForMerge {
+  const merged = structuredClone(latest);
+
+  if (!merged.startedAt && current.startedAt) {
+    merged.startedAt = current.startedAt;
+  }
+
+  const lastWriteAt = mergeLatestOrCurrentTimestamp(
+    merged.lastWriteAt,
+    current.lastWriteAt,
+  );
+  if (lastWriteAt !== undefined) {
+    merged.lastWriteAt = lastWriteAt;
+  } else {
+    delete merged.lastWriteAt;
+  }
+
+  const stoppedAt = mergeLatestOrCurrentTimestamp(
+    merged.stoppedAt,
+    current.stoppedAt,
+  );
+  if (stoppedAt !== undefined) {
+    merged.stoppedAt = stoppedAt;
+  } else {
+    delete merged.stoppedAt;
+  }
+
+  const startedBySeq = mergeLatestOrCurrentCount(
+    merged.startedBySeq,
+    current.startedBySeq,
+  );
+  if (startedBySeq !== undefined) {
+    merged.startedBySeq = startedBySeq;
+  } else {
+    delete merged.startedBySeq;
+  }
+
+  const stoppedCursor = mergeLatestOrCurrentCount(
+    merged.stoppedCursor,
+    current.stoppedCursor,
+  );
+  if (stoppedCursor !== undefined) {
+    merged.stoppedCursor = stoppedCursor;
+  } else {
+    delete merged.stoppedCursor;
+  }
+
+  const stoppedBySeq = mergeLatestOrCurrentCount(
+    merged.stoppedBySeq,
+    current.stoppedBySeq,
+  );
+  if (stoppedBySeq !== undefined) {
+    merged.stoppedBySeq = stoppedBySeq;
+  } else {
+    delete merged.stoppedBySeq;
+  }
+
+  return merged;
+}
+
+function mergeWorkspaceRecordingCyclesPreferringLatest(
+  latest: WorkspaceOutputStateForMerge["recordingCycles"],
+  current: WorkspaceOutputStateForMerge["recordingCycles"],
+): WorkspaceOutputStateForMerge["recordingCycles"] {
+  const merged = structuredClone(latest);
+  const indexByCycleId = new Map(
+    merged.map((cycle, index) => [cycle.recordingCycleId, index]),
+  );
+
+  for (const cycle of current) {
+    const existingIndex = indexByCycleId.get(cycle.recordingCycleId);
+    if (existingIndex === undefined) {
+      merged.push(structuredClone(cycle));
+      indexByCycleId.set(cycle.recordingCycleId, merged.length - 1);
+      continue;
+    }
+    merged[existingIndex] =
+      mergeMatchingWorkspaceRecordingCyclePreferringLatest(
+        merged[existingIndex],
+        cycle,
+      );
+  }
+
+  return merged;
+}
+
+function mergeMatchingWorkspaceOutputPreferringLatest(
+  latest: WorkspaceOutputStateForMerge,
+  current: WorkspaceOutputStateForMerge,
+): WorkspaceOutputStateForMerge {
+  const merged = structuredClone(latest);
+
+  if (!merged.workspaceAliasSnapshot && current.workspaceAliasSnapshot) {
+    merged.workspaceAliasSnapshot = current.workspaceAliasSnapshot;
+  }
+  if (!merged.sourceConfigPath && current.sourceConfigPath) {
+    merged.sourceConfigPath = current.sourceConfigPath;
+  }
+  if (!merged.createdAt && current.createdAt) {
+    merged.createdAt = current.createdAt;
+  }
+
+  merged.writeCursor = Math.max(merged.writeCursor, current.writeCursor);
+  merged.recordingCycles = mergeWorkspaceRecordingCyclesPreferringLatest(
+    merged.recordingCycles,
+    current.recordingCycles,
+  );
+
+  if (
+    merged.desiredState === "on" &&
+    !merged.activeRecordingCycleId &&
+    current.activeRecordingCycleId
+  ) {
+    merged.activeRecordingCycleId = current.activeRecordingCycleId;
+  }
+  if (merged.desiredState === "off") {
+    delete merged.activeRecordingCycleId;
+  }
+
+  return merged;
+}
+
+function mergeWorkspaceOutputsPreferringLatest(
+  latest: SessionMetadataV1["workspaceOutputs"],
+  current: SessionMetadataV1["workspaceOutputs"],
+): SessionMetadataV1["workspaceOutputs"] {
+  const merged = latest ? structuredClone(latest) : [];
+  const indexByKey = new Map(
+    merged.map((
+      output,
+      index,
+    ) => [buildWorkspaceOutputMergeKey(output), index]),
+  );
+  for (const output of current ?? []) {
+    const key = buildWorkspaceOutputMergeKey(output);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex !== undefined) {
+      merged[existingIndex] = mergeMatchingWorkspaceOutputPreferringLatest(
+        merged[existingIndex],
+        output,
+      );
+      continue;
+    }
+    merged.push(structuredClone(output));
+    indexByKey.set(key, merged.length - 1);
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+async function loadLatestSessionMetadataForMerge(
+  sessionStateStore: PersistentSessionStateStore,
+  metadata: SessionMetadataV1,
+): Promise<SessionMetadataV1 | undefined> {
+  return (await sessionStateStore.listSessionMetadata()).find((entry) =>
+    entry.sessionKey === metadata.sessionKey ||
+    entry.providerSessionId === metadata.providerSessionId ||
+    entry.sessionId === metadata.sessionId
+  ) as SessionMetadataV1 | undefined;
+}
+
+async function mergeLatestSessionMetadataBeforeSave(
+  sessionStateStore: PersistentSessionStateStore,
+  metadata: SessionMetadataV1,
+): Promise<SessionMetadataV1> {
+  const latest = await loadLatestSessionMetadataForMerge(
+    sessionStateStore,
+    metadata,
+  );
+  if (!latest || latest.sessionKey !== metadata.sessionKey) {
+    return metadata;
+  }
+
+  const merged = structuredClone(latest) as SessionMetadataV1;
+  merged.ingestCursor = structuredClone(metadata.ingestCursor);
+  merged.nextTwinSeq = metadata.nextTwinSeq;
+  merged.recentFingerprints = [...metadata.recentFingerprints];
+  if (metadata.lastObservedMtimeMs !== undefined) {
+    merged.lastObservedMtimeMs = metadata.lastObservedMtimeMs;
+  } else {
+    delete merged.lastObservedMtimeMs;
+  }
+  if (metadata.ingestionActivatedAt !== undefined) {
+    merged.ingestionActivatedAt = metadata.ingestionActivatedAt;
+  } else {
+    delete merged.ingestionActivatedAt;
+  }
+  if (metadata.commandCursor !== undefined) {
+    merged.commandCursor = metadata.commandCursor;
+  } else {
+    delete merged.commandCursor;
+  }
+  if (metadata.commandCursorAnchor !== undefined) {
+    merged.commandCursorAnchor = structuredClone(metadata.commandCursorAnchor);
+  } else {
+    delete merged.commandCursorAnchor;
+  }
+
+  if (readMetadataUpdatedAtMs(latest) <= readMetadataUpdatedAtMs(metadata)) {
+    if (metadata.workspaceOutputs) {
+      merged.workspaceOutputs = structuredClone(metadata.workspaceOutputs);
+    } else {
+      delete merged.workspaceOutputs;
+    }
+    return merged;
+  }
+
+  const preservedWorkspaceOutputs = mergeWorkspaceOutputsPreferringLatest(
+    latest.workspaceOutputs,
+    metadata.workspaceOutputs,
+  );
+  if (preservedWorkspaceOutputs) {
+    merged.workspaceOutputs = preservedWorkspaceOutputs;
+  } else {
+    delete merged.workspaceOutputs;
+  }
+  return merged;
 }
 
 function summarizeControlCommands(

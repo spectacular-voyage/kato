@@ -727,3 +727,191 @@ lock for start/stop flows, and keep new-recording output-dir snapshots aligned
 with the resolved destination. Also add focused regression tests and update the
 completed task note checklist.
 ```
+
+# djradon_2026-03-17_1453_35
+
+git tag -a v0.2.8 -m "kato v0.2.8"                                           ─╯
+
+    ~/hub/spectacular-voyage/kato    main              02:52:56 PM  ─╮
+❯ git push origin v0.2.8                                                       ─╯
+error: src refspec v0.2.8 matches more than one
+error: failed to push some refs to 'github.com:spectacular-voyage/kato.git'
+
+# gpt-5.4_2026-03-17_1453_41
+
+I’m checking which refs share `v0.2.8` locally, because that error usually means Git sees both a tag and a branch with the same name. Then I’ll give you the exact safe push command to disambiguate it.
+
+# gpt-5.4_2026-03-17_1453_51
+
+Git is telling you `v0.2.8` is ambiguous locally. You have both:
+
+- a branch: `refs/heads/v0.2.8`
+- a tag: `refs/tags/v0.2.8`
+
+They’re not even the same target:
+- branch `v0.2.8` -> `e996f122`
+- annotated tag `v0.2.8` -> commit `d15defd8`
+
+If you want to push the tag, use an explicit tag ref:
+
+```bash
+git push origin refs/tags/v0.2.8
+```
+
+or:
+
+```bash
+git push origin refs/tags/v0.2.8:refs/tags/v0.2.8
+```
+
+If that `v0.2.8` branch was accidental, I’d clean it up afterward so this doesn’t keep happening:
+
+```bash
+git branch -d v0.2.8
+git push origin :refs/heads/v0.2.8
+```
+
+If you want, I can also help you sanity-check whether the tag is pointing at the commit you actually meant to release.
+
+# djradon_2026-03-17_1454_21
+
+I've been naming my branches after the versions. is there a better practice?
+
+# gpt-5.4_2026-03-17_1454_25
+
+Yes. I’d stop using the exact release tag name as the branch name.
+
+Best practice is to keep branch names and tag names clearly different:
+
+- tags: `v0.2.8`
+- release branches: `release/v0.2.8` or `release/0.2.8`
+- feature branches: `feature/web-commands-phase2`
+- hotfix branches: `hotfix/recording-stop-race`
+
+Why this is better:
+- avoids Git ref ambiguity like the one you just hit
+- makes it visually obvious what is a movable branch vs an immutable release tag
+- scales better once you have more than a few releases
+
+If you like version-named branches for release prep, I’d use:
+
+```bash
+git checkout -b release/0.2.8
+git tag -a v0.2.8 -m "kato v0.2.8"
+git push origin release/0.2.8
+git push origin refs/tags/v0.2.8
+```
+
+If you don’t actually need a dedicated release branch, even simpler is:
+- do normal work on feature branches
+- merge to `main`
+- tag `main` with `v0.2.8`
+
+That’s the cleanest setup for a repo like this unless you’re maintaining multiple active release lines.
+
+# djradon_2026-03-17_1456_46
+
+don't need release branches, but instead of naming the branches after features which might not be well-defined yet, I thought it's easier to just name branches of the next version. Can always do sub-branches for feature names.
+
+# gpt-5.4_2026-03-17_1456_51
+
+That’s a reasonable workflow, but I’d still avoid naming the branch exactly the same as the version tag.
+
+A good compromise is:
+
+- integration branch for the next release: `next/0.2.9` or `prep/0.2.9`
+- optional sub-branches: `feature/workspace-names`, `feature/phase2-recordings`
+- release tag: `v0.2.9`
+
+That keeps your “branch by upcoming version” habit, which is totally valid, while avoiding collisions with tags.
+
+So instead of:
+- branch: `v0.2.9`
+- tag: `v0.2.9`
+
+do:
+- branch: `next/0.2.9`
+- tag: `v0.2.9`
+
+I think that fits what you want better than forcing early feature naming. It preserves flexibility without creating Git ambiguity.
+
+# djradon_2026-03-17_1457_31
+
+what does "integration branch" refer to?
+
+# gpt-5.4_2026-03-17_1457_37
+
+An integration branch is just a branch where multiple changes get combined and stabilized together before release.
+
+In your workflow, if you use something like `next/0.2.9`, that branch is the place where:
+
+- several not-fully-related features can land
+- you test how they work together
+- you do release polish
+- you eventually tag the release from there or merge it to `main`
+
+So “integration” means “integrating multiple lines of work,” not a special Git feature.
+
+If you’re mostly working alone, you can think of it as:
+- `main`: stable history
+- `next/0.2.9`: the current working release train
+- `v0.2.9`: the immutable tag once that train is ready
+
+If you’re not really using separate feature branches much, `next/0.2.9` is basically just “the branch for the next release.” That may be the clearest name for your case.
+
+# djradon_2026-03-17_1517_21
+
+Let's pick up Phase 2. New chat or here?
+
+# gpt-5.4_2026-03-17_1517_34
+
+New chat.
+
+Phase 2 is a real scope shift, and this thread already has a lot of phase-1 implementation/detail baggage. A fresh chat will make it easier to keep the plan clean, avoid dragging old assumptions forward, and give us a better future conversation note.
+
+I’d start the new chat with:
+- the phase-2 note: [task.2026.2026-03-17-web-commands-phase2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands-phase2.md)
+- one sentence saying whether you want planning, implementation, or review first
+- any phase-2 item you want to prioritize first
+
+If you want, I can suggest the exact opener to paste into the new chat.
+
+# djradon_2026-03-17_1517_53
+
+sure
+
+# gpt-5.4_2026-03-17_1518_01
+
+```text
+Please pick up phase 2 from [task.2026.2026-03-17-web-commands-phase2.md](dev-docs/notes/task.2026.2026-03-17-web-commands-phase2.md).
+
+First, review the note against the current codebase and suggest any scope corrections, missing decisions, or sequencing improvements before implementation. Then recommend the best first slice to build.
+```
+
+# djradon_2026-03-17_1529_45
+
+What's your assessment about the TDD approach. Should we update [dev.general-guidance.md](dev-docs/notes/dev.general-guidance.md) with "contract changes first, then substantive/key tests"
+
+# gpt-5.4_2026-03-17_1529_54
+
+I’m checking the current developer guidance note first so we can fit this into the existing style instead of stapling on a new rule awkwardly. If it belongs there, I’ll update it in a way that matches the repo’s current guidance language.
+
+# gpt-5.4_2026-03-17_1529_59
+
+The general note is pretty high-level already, and it punts most testing detail to `[[dev.testing]]`. I’m opening that too so I can tell whether this belongs in the top-level guidance, the testing note, or both.
+
+# gpt-5.4_2026-03-17_1530_07
+
+I think the principle is right, but I wouldn’t put the raw slogan in the guidance without the nuance. I’m adding a short contract-first testing rule to the general guidance and a slightly more operational note to `dev.testing` so it’s clear when to be test-first and when not to force it.
+
+# gpt-5.4_2026-03-17_1530_19
+
+Yes, with one refinement: I think the repo should say “contract-first, then key substantive tests,” not imply rigid red-green for every UI/detail change.
+
+I updated both notes:
+- [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md)
+- [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md)
+
+The split is intentional. The general note now carries the short rule for behavior/contract/persisted-state changes, and the testing note explains the workflow more concretely: lock the contract first, add the key regression/substantive tests next, then implement to green, while not forcing test-first on copy/styling/layout polish.
+
+I didn’t run tests since this was a docs-only change.

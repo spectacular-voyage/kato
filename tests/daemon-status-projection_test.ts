@@ -196,6 +196,7 @@ Deno.test(
               recordingCycleId: "recording-active-1",
               startedCursor: 10,
               startedAt: "2026-02-22T09:00:00.000Z",
+              lastWriteAt: "2026-02-22T09:45:00.000Z",
             },
           ],
         }),
@@ -217,6 +218,7 @@ Deno.test(
             recordingCycleId: "recording-stale-1",
             startedCursor: 0,
             startedAt: "2026-02-22T07:00:00.000Z",
+            lastWriteAt: "2026-02-22T07:30:00.000Z",
           }],
         }),
         makeWorkspaceOutput({
@@ -241,7 +243,7 @@ Deno.test(
     assertExists(active);
     assertEquals(active.startedAt, "2026-02-22T08:00:00.000Z");
     assertEquals(active.restartedAt, "2026-02-22T09:00:00.000Z");
-    assertEquals(active.lastWriteAt, "2026-02-22T10:00:00.000Z");
+    assertEquals(active.lastWriteAt, "2026-02-22T09:45:00.000Z");
 
     const summary = summarizeRecordingStatus(activeRecordings, [
       {

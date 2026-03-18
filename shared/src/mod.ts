@@ -88,3 +88,7 @@ export type {
   SessionMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "./contracts/session_state.ts";
+export {
+  formatWorkspaceLabel,
+  normalizeWorkspaceDisplayName,
+} from "./workspace_labels.ts";

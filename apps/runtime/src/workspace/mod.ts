@@ -35,7 +35,13 @@ export {
 export type {
   RegisterWorkspaceMutationOptions,
   RegisterWorkspaceMutationResult,
+  SetWorkspaceDisplayNameOptions,
+  SetWorkspaceDisplayNameResult,
   UnregisterWorkspaceMutationOptions,
   UnregisterWorkspaceMutationResult,
 } from "./mutations.ts";
-export { registerWorkspace, unregisterWorkspace } from "./mutations.ts";
+export {
+  registerWorkspace,
+  setWorkspaceDisplayName,
+  unregisterWorkspace,
+} from "./mutations.ts";

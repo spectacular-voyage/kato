@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import type { SummaryPageData } from "../src/loaders/status.ts";
 import {
   buildSessionInventoryHref,
@@ -267,7 +268,9 @@ export default function SummaryLive(
                 ? <li class="muted">No workspaces registered.</li>
                 : data.workspaceSummary.rows.map((row) => (
                   <li key={row.workspaceId}>
-                    <div class="mono">{row.alias}</div>
+                    <div class="mono">
+                      {formatWorkspaceLabel(row.alias, row.displayName)}
+                    </div>
                     <div class={row.valid ? "ok" : "danger"}>
                       {row.valid ? "valid" : row.invalidReason ?? "invalid"}
                     </div>

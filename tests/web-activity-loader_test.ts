@@ -39,6 +39,7 @@ function makeWorkspaceOutput(options: {
     startedCursor: number;
     stoppedCursor?: number;
     startedAt?: string;
+    lastWriteAt?: string;
     stoppedAt?: string;
     startedBySeq?: number;
     stoppedBySeq?: number;
@@ -132,6 +133,27 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         await Deno.mkdir(betaRoot, { recursive: true });
         await Deno.writeTextFile(alphaConfigPath, "workspaceId: ws-alpha\n");
         await Deno.writeTextFile(betaConfigPath, "workspaceId: ws-beta\n");
+        const registry = new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        );
+        await registry.save([
+          {
+            workspaceId: "ws-alpha",
+            alias: "alpha",
+            displayName: "Alpha Workspace",
+            workspaceRoot: alphaRoot,
+            configPath: alphaConfigPath,
+            registeredAt: "2026-03-07T15:00:00.000Z",
+          },
+          {
+            workspaceId: "ws-beta",
+            alias: "beta",
+            displayName: "Beta Project",
+            workspaceRoot: betaRoot,
+            configPath: betaConfigPath,
+            registeredAt: "2026-03-07T15:05:00.000Z",
+          },
+        ]);
 
         const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
         const betaOutputPath = join(betaRoot, "notes", "beta.md");
@@ -191,6 +213,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
                 recordingCycleId: "cycle-stale",
                 startedCursor: 4,
                 startedAt: "2026-03-07T13:45:00.000Z",
+                lastWriteAt: "2026-03-07T16:00:00.000Z",
                 startedBySeq: 4,
               }],
             }),
@@ -237,8 +260,8 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(data.activeSessionCount, 1);
         assertEquals(data.staleSessionCount, 1);
         assertEquals(data.inactiveSessionCount, 0);
-        assertEquals(data.activeRecordingCount, 1);
-        assertEquals(data.staleRecordingCount, 1);
+        assertEquals(data.activeRecordingCount, 2);
+        assertEquals(data.staleRecordingCount, 0);
         assertEquals(data.stoppedRecordingCount, 0);
         assertEquals(data.rows[0]?.sessionId, "sess-live");
         assertEquals(data.rows[0]?.state, "active");
@@ -251,13 +274,21 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
           data.rows[0]?.recordings[0]?.lastWriteAt,
           "2026-03-07T15:59:30.000Z",
         );
+        assertEquals(
+          data.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
         assertEquals(data.rows[1]?.sessionId, "sess-stale");
         assertEquals(data.rows[1]?.state, "stale");
         assertEquals(data.rows[1]?.recordings.length, 1);
-        assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-stale");
+        assertEquals(data.rows[1]?.recordings[0]?.state, "engaged-active");
         assertEquals(
           data.rows[1]?.recordings[0]?.displayOutputPath,
           "notes/beta.md",
+        );
+        assertEquals(
+          data.workspaceOptions.map((workspace) => workspace.displayName),
+          ["Alpha Workspace", "Beta Project"],
         );
         assertEquals(
           data.rows[1]?.recordings[0]?.workspaceHref,
@@ -268,12 +299,13 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
           workspaceFilter: "ws-beta",
         });
         assertEquals(filtered.sessionCount, 1);
-        assertEquals(filtered.activeRecordingCount, 0);
-        assertEquals(filtered.staleRecordingCount, 1);
+        assertEquals(filtered.workspaceFilterDisplayName, "Beta Project");
+        assertEquals(filtered.activeRecordingCount, 1);
+        assertEquals(filtered.staleRecordingCount, 0);
         assertEquals(filtered.stoppedRecordingCount, 0);
         assertEquals(filtered.rows[0]?.sessionId, "sess-stale");
-        assertEquals(filtered.rows[0]?.activeRecordingCount, 0);
-        assertEquals(filtered.rows[0]?.staleRecordingCount, 1);
+        assertEquals(filtered.rows[0]?.activeRecordingCount, 1);
+        assertEquals(filtered.rows[0]?.staleRecordingCount, 0);
         assertEquals(filtered.rows[0]?.stoppedRecordingCount, 0);
         assertEquals(filtered.rows[0]?.recordings.length, 1);
         assertEquals(
@@ -284,24 +316,156 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         );
 
         const recordings = await loadRecordingsPageData();
-        assertEquals(recordings.activeRecordingCount, 1);
-        assertEquals(recordings.staleRecordingCount, 1);
-        assertEquals(recordings.stoppedRecordingCount, 1);
-        assertEquals(recordings.rows.length, 3);
-        assertEquals(recordings.rows[2]?.state, "stopped");
-        assertEquals(recordings.rows[2]?.recordingCycleId, "cycle-old");
-        assertEquals(recordings.rows[2]?.displayOutputPath, "notes/beta.md");
+        assertEquals(recordings.activeRecordingCount, 2);
+        assertEquals(recordings.staleRecordingCount, 0);
+        assertEquals(recordings.stoppedRecordingCount, 0);
+        assertEquals(recordings.rows.length, 2);
+        assertEquals(recordings.rows[0]?.state, "engaged-active");
+        assertEquals(recordings.rows[0]?.recordingCycleId, "cycle-stale");
+        assertEquals(recordings.rows[0]?.displayOutputPath, "notes/beta.md");
+        assertEquals(
+          recordings.rows[0]?.lastWriteAt,
+          "2026-03-07T16:00:00.000Z",
+        );
+        assertEquals(recordings.rows[1]?.state, "engaged-active");
+        assertEquals(recordings.rows[1]?.recordingCycleId, "cycle-live");
+        assertEquals(recordings.rows[1]?.displayOutputPath, "notes/alpha.md");
+        assertEquals(
+          recordings.rows[1]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
 
         const staleRecordings = await loadRecordingsPageData({
           stateFilter: "engaged-stale",
         });
-        assertEquals(staleRecordings.activeRecordingCount, 1);
-        assertEquals(staleRecordings.staleRecordingCount, 1);
-        assertEquals(staleRecordings.stoppedRecordingCount, 1);
-        assertEquals(staleRecordings.rows.length, 1);
+        assertEquals(staleRecordings.activeRecordingCount, 2);
+        assertEquals(staleRecordings.staleRecordingCount, 0);
+        assertEquals(staleRecordings.stoppedRecordingCount, 0);
+        assertEquals(staleRecordings.rows.length, 0);
+      });
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("loadSessionsPageData enriches and filters alias-only live recordings by workspace alias", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+
+    try {
+      await withTestTempDir("web-activity-live-alias-", async (homeDir) => {
+        setRuntimeEnv({
+          HOME: homeDir,
+          USERPROFILE: undefined,
+          KATO_RUNTIME_DIR: undefined,
+        });
+
+        const katoDir = join(homeDir, ".kato");
+        const statusPath = join(katoDir, "shared", "status.json");
+        const alphaRoot = join(homeDir, "alpha");
+        const alphaConfigPath = join(
+          alphaRoot,
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        );
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        await Deno.mkdir(alphaRoot, { recursive: true });
+        await Deno.writeTextFile(alphaConfigPath, "workspaceId: ws-alpha\n");
+        const registry = new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        );
+        await registry.save([{
+          workspaceId: "ws-alpha",
+          alias: "alpha",
+          displayName: "Alpha Workspace",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          registeredAt: "2026-03-07T15:00:00.000Z",
+        }]);
+
+        const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
+        const sessionFixturesDir = join(homeDir, "session-fixtures");
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-live-only",
+          providerSessionId: "provider-live-only",
+          snippet: "live only session",
+          updatedAt: "2026-03-07T15:59:00.000Z",
+          sourceFilePath: join(sessionFixturesDir, "provider-live-only.jsonl"),
+        });
+
+        await Deno.writeTextFile(
+          statusPath,
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-03-07T16:00:00.000Z",
+            heartbeatAt: "2026-03-07T16:00:00.000Z",
+            daemonRunning: true,
+            providers: [{
+              provider: "codex",
+              activeSessions: 1,
+              lastEventAt: "2026-03-07T15:59:30.000Z",
+            }],
+            recordings: {
+              activeRecordings: 1,
+              destinations: 1,
+            },
+            sessions: [{
+              provider: "codex",
+              sessionId: "sess-live-only",
+              providerSessionId: "provider-live-only",
+              updatedAt: "2026-03-07T15:59:30.000Z",
+              lastEventAt: "2026-03-07T15:59:30.000Z",
+              stale: false,
+              snippet: "live only session",
+              recordings: [{
+                recordingId: "rec-live-only",
+                workspaceAlias: "alpha",
+                outputPath: alphaOutputPath,
+                startedAt: "2026-03-07T15:30:00.000Z",
+                lastWriteAt: "2026-03-07T15:59:30.000Z",
+              }],
+            }],
+          }),
+        );
+
+        const data = await loadSessionsPageData();
+        assertEquals(data.sessionCount, 1);
+        assertEquals(data.rows[0]?.recordings.length, 1);
+        assertEquals(data.rows[0]?.recordings[0]?.workspaceId, undefined);
+        assertEquals(data.rows[0]?.recordings[0]?.workspaceAlias, "alpha");
         assertEquals(
-          staleRecordings.rows[0]?.displayOutputPath,
-          "notes/beta.md",
+          data.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
+
+        const filteredSessions = await loadSessionsPageData({
+          workspaceFilter: "ws-alpha",
+        });
+        assertEquals(filteredSessions.workspaceFilterAlias, "alpha");
+        assertEquals(
+          filteredSessions.workspaceFilterDisplayName,
+          "Alpha Workspace",
+        );
+        assertEquals(filteredSessions.sessionCount, 1);
+        assertEquals(filteredSessions.rows[0]?.recordings.length, 1);
+        assertEquals(
+          filteredSessions.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
+
+        const filteredRecordings = await loadRecordingsPageData({
+          workspaceFilter: "ws-alpha",
+        });
+        assertEquals(filteredRecordings.workspaceFilterAlias, "alpha");
+        assertEquals(
+          filteredRecordings.workspaceFilterDisplayName,
+          "Alpha Workspace",
+        );
+        assertEquals(filteredRecordings.rows.length, 1);
+        assertEquals(
+          filteredRecordings.rows[0]?.workspaceDisplayName,
+          "Alpha Workspace",
         );
       });
     } finally {
@@ -482,6 +646,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           {
             workspaceId: "ws-alpha",
             alias: "alpha",
+            displayName: "Alpha Workspace",
             workspaceRoot: alphaRoot,
             configPath: alphaConfigPath,
             registeredAt: "2026-03-07T15:00:00.000Z",
@@ -489,6 +654,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           {
             workspaceId: "ws-beta",
             alias: "beta",
+            displayName: "Beta Project",
             workspaceRoot: betaRoot,
             configPath: betaConfigPath,
             registeredAt: "2026-03-07T15:05:00.000Z",
@@ -608,6 +774,8 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         const betaRow = data.rows.find((row) => row.workspaceId === "ws-beta");
         assertExists(alphaRow);
         assertExists(betaRow);
+        assertEquals(alphaRow.displayName, "Alpha Workspace");
+        assertEquals(betaRow.displayName, "Beta Project");
         assertEquals(alphaRow.activeRecordingCount, 1);
         assertEquals(alphaRow.staleRecordingCount, 0);
         assertEquals(alphaRow.stoppedRecordingCount, 0);
@@ -616,13 +784,13 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           alphaRow.recordings[0]?.displayOutputPath,
           "notes/alpha.md",
         );
-        assertEquals(betaRow.activeRecordingCount, 1);
-        assertEquals(betaRow.staleRecordingCount, 0);
+        assertEquals(betaRow.activeRecordingCount, 0);
+        assertEquals(betaRow.staleRecordingCount, 1);
         assertEquals(betaRow.stoppedRecordingCount, 0);
         assertEquals(betaRow.writePathCovered, true);
         assertEquals(betaRow.workspaceUsername, "beta-user");
         assertEquals(alphaRow.recordings[0]?.sessionId, "sess-mixed");
-        assertEquals(betaRow.recordings[0]?.state, "engaged-active");
+        assertEquals(betaRow.recordings[0]?.state, "engaged-stale");
         assertEquals(betaRow.recordings.length, 1);
         assertEquals(betaRow.recordings[0]?.displayOutputPath, "notes/beta.md");
         assertEquals(
@@ -663,6 +831,16 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         await Deno.mkdir(join(gammaRoot, "notes"), { recursive: true });
         await Deno.mkdir(externalDir, { recursive: true });
         await Deno.writeTextFile(gammaConfigPath, "workspaceId: ws-gamma\n");
+        await new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        ).save([{
+          workspaceId: "ws-gamma",
+          alias: "gamma",
+          displayName: "Gamma Workspace",
+          workspaceRoot: gammaRoot,
+          configPath: gammaConfigPath,
+          registeredAt: "2026-03-07T15:00:00.000Z",
+        }]);
         await Deno.writeTextFile(continuationSourcePath, "[]\n");
         const lastObservedAt = new Date("2026-03-07T16:00:00.000Z");
         const refreshedAt = new Date("2026-03-07T16:05:00.000Z");
@@ -822,7 +1000,8 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         });
         assertEquals(filtered.workspaceFilter, "ws-gamma");
         assertEquals(filtered.workspaceFilterId, "ws-gamma");
-        assertEquals(filtered.workspaceFilterAlias, undefined);
+        assertEquals(filtered.workspaceFilterAlias, "gamma");
+        assertEquals(filtered.workspaceFilterDisplayName, "Gamma Workspace");
         assertEquals(filtered.sessionCount, 2);
         assertEquals(
           filtered.rows.map((row) => row.sessionId),
@@ -834,19 +1013,20 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         });
         assertEquals(recordings.activeRecordingCount, 0);
         assertEquals(recordings.staleRecordingCount, 1);
-        assertEquals(recordings.stoppedRecordingCount, 3);
-        assertEquals(recordings.rows.length, 4);
+        assertEquals(recordings.stoppedRecordingCount, 1);
+        assertEquals(recordings.workspaceFilterDisplayName, "Gamma Workspace");
+        assertEquals(recordings.rows.length, 2);
         assertEquals(
           recordings.rows
             .filter((row) => row.sessionId === "sess-continue")
             .map((row) => row.state),
-          ["engaged-stale", "stopped"],
+          ["engaged-stale"],
         );
         assertEquals(
           recordings.rows
             .filter((row) => row.sessionId === "sess-stopped")
             .map((row) => row.recordingCycleId),
-          ["cycle-newest", "cycle-oldest"],
+          ["cycle-newest"],
         );
       });
     } finally {

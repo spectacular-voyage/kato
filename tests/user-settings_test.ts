@@ -86,6 +86,7 @@ Deno.test("setWorkspaceUsernameMapping and deleteWorkspaceUsernameMapping use re
             workspaces: [{
               workspaceId: "ws-1",
               alias: "demo",
+              displayName: "Demo Workspace",
               workspaceRoot: join(homeDir, "demo-workspace"),
               configPath: join(
                 homeDir,
@@ -112,6 +113,12 @@ Deno.test("setWorkspaceUsernameMapping and deleteWorkspaceUsernameMapping use re
         assertEquals(saved.participants.workspaceUsernames, {
           "ws-1": "Case.User",
         });
+        const loaded = await loadUserSettings();
+        assertEquals(loaded.workspaces[0]?.displayName, "Demo Workspace");
+        assertEquals(
+          loaded.mappings[0]?.workspaceDisplayName,
+          "Demo Workspace",
+        );
 
         const deleteResult = await deleteWorkspaceUsernameMapping({
           selector: "demo",

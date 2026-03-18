@@ -75,10 +75,13 @@ Current top-level web routes are:
 - `/sessions`: primary discovered chat-session inventory, backed by
   `loadSessionsPageData()` and `/api/sessions`, with live activity,
   recording state, and on-demand snippet reveal.
-- `/recordings`: flattened recording history across sessions and workspaces,
-  backed by `loadRecordingsPageData()` and `/api/recordings`.
-- `/workspaces`: workspace register/unregister plus workspace-level recording
-  rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
+- `/recordings`: latest recording-output state across sessions and workspaces
+  (one row per output file, with stop / same-path `Re-start` for persisted
+  rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
+- `/workspaces`: workspace register/unregister, operator-facing display-label
+  editing, registration-time display-label entry, per-workspace
+  preferred-username overrides, plus workspace-level recording rollups, backed
+  by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/logs`: combined daemon + web operational/security log view with shared
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.
@@ -91,6 +94,9 @@ Supporting web files worth knowing:
 
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
+- `apps/web/src/session_recording_actions.ts`: shared web mutation flows for
+  Sessions and Recordings recording/capture start-stop-`Re-start` actions,
+  including same-file exclusivity guards.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/maintenance`, `/sessions`, and session anchor links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for
@@ -132,6 +138,9 @@ under `~/.kato` by default.
 Generated defaults derived from workspace `defaultOutputDir` remain
 workspace-root-contained after template expansion; only explicit command paths
 may target outside the workspace root.
+Operator-facing workspace `displayName` labels live in the shared workspace
+registry, while preferred per-workspace participant usernames remain in
+`kato-user-config.yaml`.
 
 ## Topology
 
