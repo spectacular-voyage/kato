@@ -7,6 +7,7 @@ import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   PersistentSessionStateStore,
+  type RegisteredWorkspace,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
   resolveDefaultWorkspaceRegistryPath,
@@ -26,6 +27,7 @@ export interface SessionRecordingActivityRow {
   state: "engaged-active" | "engaged-stale" | "stopped";
   workspaceId?: string;
   workspaceAlias?: string;
+  workspaceDisplayName?: string;
   workspaceHref: string;
   outputPath: string;
   displayOutputPath: string;
@@ -57,10 +59,8 @@ export interface SessionsPageData {
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
-  workspaceOptions: Array<{
-    workspaceId: string;
-    alias: string;
-  }>;
+  workspaceFilterDisplayName?: string;
+  workspaceOptions: WorkspaceOption[];
   sessionCount: number;
   activeSessionCount: number;
   staleSessionCount: number;
@@ -85,6 +85,7 @@ export interface ResolvedWorkspaceFilter {
   selector: string;
   workspaceId: string;
   workspaceAlias?: string;
+  workspaceDisplayName?: string;
 }
 
 export interface RecordingListEntry extends SessionRecordingActivityRow {
@@ -96,6 +97,12 @@ export interface RecordingListEntry extends SessionRecordingActivityRow {
   sessionHref: string;
   updatedAt: string;
   lastEventAt?: string;
+}
+
+export interface WorkspaceOption {
+  workspaceId: string;
+  alias: string;
+  displayName?: string;
 }
 
 function resolveActivityTimestamp(
@@ -168,6 +175,19 @@ function resolveDisplayOutputPath(
 
 function buildWorkspaceHref(workspaceId: string | undefined): string {
   return workspaceId ? `/workspaces#workspace-${workspaceId}` : "/workspaces";
+}
+
+async function loadRegisteredWorkspaces(
+  katoDir: string,
+): Promise<RegisteredWorkspace[]> {
+  try {
+    const store = new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
+    return await store.load();
+  } catch {
+    return [];
+  }
 }
 
 function sortRecordings(
@@ -494,6 +514,7 @@ function buildRecordingRows(
 export async function resolveWorkspaceFilter(
   selector: string | undefined,
   katoDir: string,
+  workspaceEntries?: RegisteredWorkspace[],
 ): Promise<ResolvedWorkspaceFilter | undefined> {
   const trimmed = selector?.trim();
   if (!trimmed) {
@@ -501,10 +522,7 @@ export async function resolveWorkspaceFilter(
   }
 
   try {
-    const store = new WorkspaceRegistryFileStore(
-      resolveDefaultWorkspaceRegistryPath(katoDir),
-    );
-    const entries = await store.load();
+    const entries = workspaceEntries ?? await loadRegisteredWorkspaces(katoDir);
     const matched = entries.find((entry) =>
       entry.workspaceId === trimmed || entry.alias === trimmed
     );
@@ -513,6 +531,7 @@ export async function resolveWorkspaceFilter(
         selector: trimmed,
         workspaceId: matched.workspaceId,
         workspaceAlias: matched.alias,
+        workspaceDisplayName: matched.displayName,
       };
     }
   } catch {
@@ -577,11 +596,13 @@ export async function loadSessionActivityRows(
     katoDir,
     now,
   });
-  const [snapshot, metadataList, runtimeConfig] = await Promise.all([
-    statusStore.load(),
-    sessionStore.listSessionMetadata(),
-    loadRuntimeConfigOrDefault(),
-  ]);
+  const [snapshot, metadataList, runtimeConfig, workspaceEntries] =
+    await Promise.all([
+      statusStore.load(),
+      sessionStore.listSessionMetadata(),
+      loadRuntimeConfigOrDefault(),
+      loadRegisteredWorkspaces(katoDir),
+    ]);
   const normalizedMetadataList = await Promise.all(
     metadataList.map((metadata) =>
       normalizePersistedTwinMetadata(sessionStore, metadata)
@@ -594,6 +615,10 @@ export async function loadSessionActivityRows(
   const resolvedWorkspaceFilter = await resolveWorkspaceFilter(
     options.workspaceFilter,
     katoDir,
+    workspaceEntries,
+  );
+  const workspaceDisplayNamesById = new Map(
+    workspaceEntries.map((entry) => [entry.workspaceId, entry.displayName]),
   );
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
@@ -608,6 +633,16 @@ export async function loadSessionActivityRows(
         row.workspaceId === resolvedWorkspaceFilter.workspaceId
       )
       : recordings;
+    const displayRecordings = filteredRecordings.map((recording) =>
+      recording.workspaceId
+        ? {
+          ...recording,
+          workspaceDisplayName: workspaceDisplayNamesById.get(
+            recording.workspaceId,
+          ),
+        }
+        : recording
+    );
     const activeRecordingCount = filteredRecordings.filter((row) =>
       row.state === "engaged-active"
     ).length;
@@ -642,7 +677,7 @@ export async function loadSessionActivityRows(
       staleRecordingCount,
       stoppedRecordingCount:
         filteredRecordings.filter((row) => row.state === "stopped").length,
-      recordings: filteredRecordings,
+      recordings: displayRecordings,
     };
   }))).filter((row) => includeStale || !row.stale).filter((row) =>
     !resolvedWorkspaceFilter || row.recordings.length > 0
@@ -674,39 +709,36 @@ export async function loadSessionsPageData(
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
   const katoDir = options.katoDir ?? resolveDefaultKatoDir();
-  const [rows, resolvedWorkspaceFilter, workspaceOptions] = await Promise.all([
+  const [rows, workspaceEntries] = await Promise.all([
     loadSessionActivityRows({
       ...options,
       includeStale,
       katoDir,
     }),
-    resolveWorkspaceFilter(options.workspaceFilter, katoDir),
-    (async () => {
-      try {
-        const store = new WorkspaceRegistryFileStore(
-          resolveDefaultWorkspaceRegistryPath(katoDir),
-        );
-        const entries = await store.load();
-        return entries
-          .map((entry) => ({
-            workspaceId: entry.workspaceId,
-            alias: entry.alias,
-          }))
-          .sort((a, b) =>
-            a.alias.localeCompare(b.alias) ||
-            a.workspaceId.localeCompare(b.workspaceId)
-          );
-      } catch {
-        return [];
-      }
-    })(),
+    loadRegisteredWorkspaces(katoDir),
   ]);
+  const resolvedWorkspaceFilter = await resolveWorkspaceFilter(
+    options.workspaceFilter,
+    katoDir,
+    workspaceEntries,
+  );
+  const workspaceOptions = workspaceEntries
+    .map((entry) => ({
+      workspaceId: entry.workspaceId,
+      alias: entry.alias,
+      displayName: entry.displayName,
+    }))
+    .sort((a, b) =>
+      a.alias.localeCompare(b.alias) ||
+      a.workspaceId.localeCompare(b.workspaceId)
+    );
 
   return {
     includeStale,
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
+    workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     workspaceOptions,
     sessionCount: rows.length,
     activeSessionCount: rows.filter((row) => row.state === "active").length,

@@ -132,6 +132,27 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         await Deno.mkdir(betaRoot, { recursive: true });
         await Deno.writeTextFile(alphaConfigPath, "workspaceId: ws-alpha\n");
         await Deno.writeTextFile(betaConfigPath, "workspaceId: ws-beta\n");
+        const registry = new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        );
+        await registry.save([
+          {
+            workspaceId: "ws-alpha",
+            alias: "alpha",
+            displayName: "Alpha Workspace",
+            workspaceRoot: alphaRoot,
+            configPath: alphaConfigPath,
+            registeredAt: "2026-03-07T15:00:00.000Z",
+          },
+          {
+            workspaceId: "ws-beta",
+            alias: "beta",
+            displayName: "Beta Project",
+            workspaceRoot: betaRoot,
+            configPath: betaConfigPath,
+            registeredAt: "2026-03-07T15:05:00.000Z",
+          },
+        ]);
 
         const alphaOutputPath = join(alphaRoot, "notes", "alpha.md");
         const betaOutputPath = join(betaRoot, "notes", "beta.md");
@@ -251,6 +272,10 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
           data.rows[0]?.recordings[0]?.lastWriteAt,
           "2026-03-07T15:59:30.000Z",
         );
+        assertEquals(
+          data.rows[0]?.recordings[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
         assertEquals(data.rows[1]?.sessionId, "sess-stale");
         assertEquals(data.rows[1]?.state, "stale");
         assertEquals(data.rows[1]?.recordings.length, 1);
@@ -258,6 +283,10 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(
           data.rows[1]?.recordings[0]?.displayOutputPath,
           "notes/beta.md",
+        );
+        assertEquals(
+          data.workspaceOptions.map((workspace) => workspace.displayName),
+          ["Alpha Workspace", "Beta Project"],
         );
         assertEquals(
           data.rows[1]?.recordings[0]?.workspaceHref,
@@ -268,6 +297,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
           workspaceFilter: "ws-beta",
         });
         assertEquals(filtered.sessionCount, 1);
+        assertEquals(filtered.workspaceFilterDisplayName, "Beta Project");
         assertEquals(filtered.activeRecordingCount, 0);
         assertEquals(filtered.staleRecordingCount, 1);
         assertEquals(filtered.stoppedRecordingCount, 0);
@@ -291,6 +321,10 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
         assertEquals(recordings.rows[2]?.state, "stopped");
         assertEquals(recordings.rows[2]?.recordingCycleId, "cycle-old");
         assertEquals(recordings.rows[2]?.displayOutputPath, "notes/beta.md");
+        assertEquals(
+          recordings.rows[0]?.workspaceDisplayName,
+          "Alpha Workspace",
+        );
 
         const staleRecordings = await loadRecordingsPageData({
           stateFilter: "engaged-stale",
@@ -482,6 +516,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           {
             workspaceId: "ws-alpha",
             alias: "alpha",
+            displayName: "Alpha Workspace",
             workspaceRoot: alphaRoot,
             configPath: alphaConfigPath,
             registeredAt: "2026-03-07T15:00:00.000Z",
@@ -489,6 +524,7 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
           {
             workspaceId: "ws-beta",
             alias: "beta",
+            displayName: "Beta Project",
             workspaceRoot: betaRoot,
             configPath: betaConfigPath,
             registeredAt: "2026-03-07T15:05:00.000Z",
@@ -608,6 +644,8 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
         const betaRow = data.rows.find((row) => row.workspaceId === "ws-beta");
         assertExists(alphaRow);
         assertExists(betaRow);
+        assertEquals(alphaRow.displayName, "Alpha Workspace");
+        assertEquals(betaRow.displayName, "Beta Project");
         assertEquals(alphaRow.activeRecordingCount, 1);
         assertEquals(alphaRow.staleRecordingCount, 0);
         assertEquals(alphaRow.stoppedRecordingCount, 0);
@@ -663,6 +701,16 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         await Deno.mkdir(join(gammaRoot, "notes"), { recursive: true });
         await Deno.mkdir(externalDir, { recursive: true });
         await Deno.writeTextFile(gammaConfigPath, "workspaceId: ws-gamma\n");
+        await new WorkspaceRegistryFileStore(
+          resolveDefaultWorkspaceRegistryPath(katoDir),
+        ).save([{
+          workspaceId: "ws-gamma",
+          alias: "gamma",
+          displayName: "Gamma Workspace",
+          workspaceRoot: gammaRoot,
+          configPath: gammaConfigPath,
+          registeredAt: "2026-03-07T15:00:00.000Z",
+        }]);
         await Deno.writeTextFile(continuationSourcePath, "[]\n");
         const lastObservedAt = new Date("2026-03-07T16:00:00.000Z");
         const refreshedAt = new Date("2026-03-07T16:05:00.000Z");
@@ -822,7 +870,8 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         });
         assertEquals(filtered.workspaceFilter, "ws-gamma");
         assertEquals(filtered.workspaceFilterId, "ws-gamma");
-        assertEquals(filtered.workspaceFilterAlias, undefined);
+        assertEquals(filtered.workspaceFilterAlias, "gamma");
+        assertEquals(filtered.workspaceFilterDisplayName, "Gamma Workspace");
         assertEquals(filtered.sessionCount, 2);
         assertEquals(
           filtered.rows.map((row) => row.sessionId),
@@ -835,6 +884,7 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         assertEquals(recordings.activeRecordingCount, 0);
         assertEquals(recordings.staleRecordingCount, 1);
         assertEquals(recordings.stoppedRecordingCount, 3);
+        assertEquals(recordings.workspaceFilterDisplayName, "Gamma Workspace");
         assertEquals(recordings.rows.length, 4);
         assertEquals(
           recordings.rows

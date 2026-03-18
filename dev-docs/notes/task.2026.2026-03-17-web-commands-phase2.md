@@ -131,10 +131,13 @@ controls in the web client after the basic Session page command entry lands.
 
 ## Implementation Plan
 
-- [ ] Add `displayName` contract updates and shared workspace-label view-models
+- [x] Add `displayName` contract updates and shared workspace-label view-models
 - [ ] Define the Recordings-page stop / `Re-start` contract, including
       same-path failure behavior
-- [ ] Define the narrow per-workspace settings surface for `displayName` and
+- [x] Define the narrow per-workspace settings surface for `displayName` and
       preferred username
+- [x] Implement Workspaces-page editing for `displayName` and preferred
+      username, then propagate workspace labels through Sessions, Summary, and
+      workspace-filter headings
 - [ ] Split concrete follow-up implementation tasks once the contracts above
       are locked

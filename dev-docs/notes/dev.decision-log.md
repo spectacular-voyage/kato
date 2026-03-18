@@ -71,6 +71,35 @@ created: 1771779490894
   - Add more live-refresh coverage around register/unregister and config reload
     behavior.
 
+### Workspace Display Labels Stay Out of Workspace Config
+
+- Decision:
+  - Keep operator-facing workspace `displayName` values in shared workspace
+    registry metadata rather than in `.kato-workspace-config.yaml`.
+  - Keep preferred per-workspace participant usernames in user config even when
+    the web UI edits them from the Workspaces page.
+  - Continue using alias as the command selector and workspace-filter identity;
+    UI labels render as `<alias> (<displayName>)` only when a meaningful
+    display name exists.
+- Owner: Kato engineering
+- Date: 2026-03-17
+- Why:
+  - `displayName` is presentation-only and should not affect runtime profile
+    resolution, workspace-config validation, or command routing semantics.
+  - Username overrides are user-scoped preferences, not shared workspace state.
+  - Keeping alias as the stable selector avoids restart-sensitive alias-mutation
+    work for the simpler first web-management slice.
+- Tradeoffs:
+  - Workspace identity is now split across registry metadata, workspace config,
+    and user config depending on the concern.
+  - A raw alias still appears in persisted recording snapshots and command
+    surfaces even when the UI prefers the richer label.
+- Follow-up tasks:
+  - Revisit whether more workspace-local config should become editable from the
+    web UI in phase 3.
+  - Decide whether stopped-recording `Re-start` and future per-session twin
+    controls should surface the richer workspace label everywhere.
+
 ### CLI Framework
 
 - Decision: Use Deno standard-library argument parsing (`@std/cli`) with a small

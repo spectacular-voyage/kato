@@ -77,8 +77,9 @@ Current top-level web routes are:
   recording state, and on-demand snippet reveal.
 - `/recordings`: flattened recording history across sessions and workspaces,
   backed by `loadRecordingsPageData()` and `/api/recordings`.
-- `/workspaces`: workspace register/unregister plus workspace-level recording
-  rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
+- `/workspaces`: workspace register/unregister, operator-facing display-label
+  editing, per-workspace preferred-username overrides, plus workspace-level
+  recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/logs`: combined daemon + web operational/security log view with shared
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.
@@ -132,6 +133,9 @@ under `~/.kato` by default.
 Generated defaults derived from workspace `defaultOutputDir` remain
 workspace-root-contained after template expansion; only explicit command paths
 may target outside the workspace root.
+Operator-facing workspace `displayName` labels live in the shared workspace
+registry, while preferred per-workspace participant usernames remain in
+`kato-user-config.yaml`.
 
 ## Topology
 

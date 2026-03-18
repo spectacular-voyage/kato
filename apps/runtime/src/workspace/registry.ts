@@ -91,6 +91,7 @@ type WorkspaceMarkdownFrontmatterKey =
 export interface RegisteredWorkspace {
   workspaceId: string;
   alias: string;
+  displayName?: string;
   workspaceRoot: string;
   configPath: string;
   registeredAt: string;
@@ -178,6 +179,7 @@ function cloneWorkspace(entry: RegisteredWorkspace): RegisteredWorkspace {
   return {
     workspaceId: entry.workspaceId,
     alias: entry.alias,
+    ...(entry.displayName ? { displayName: entry.displayName } : {}),
     workspaceRoot: entry.workspaceRoot,
     configPath: entry.configPath,
     registeredAt: entry.registeredAt,
@@ -189,6 +191,8 @@ function isRegisteredWorkspace(value: unknown): value is RegisteredWorkspace {
   return isRecord(value) &&
     isNonEmptyString(value["workspaceId"]) &&
     isNonEmptyString(value["alias"]) &&
+    (value["displayName"] === undefined ||
+      isNonEmptyString(value["displayName"])) &&
     isNonEmptyString(value["workspaceRoot"]) &&
     isNonEmptyString(value["configPath"]) &&
     isNonEmptyString(value["registeredAt"]) &&

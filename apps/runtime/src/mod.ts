@@ -146,6 +146,7 @@ export {
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
+  setWorkspaceDisplayName,
   unregisterWorkspace,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
@@ -154,6 +155,8 @@ export {
 export type {
   RegisterWorkspaceMutationOptions,
   RegisterWorkspaceMutationResult,
+  SetWorkspaceDisplayNameOptions,
+  SetWorkspaceDisplayNameResult,
   UnregisterWorkspaceMutationOptions,
   UnregisterWorkspaceMutationResult,
 } from "./workspace/mod.ts";

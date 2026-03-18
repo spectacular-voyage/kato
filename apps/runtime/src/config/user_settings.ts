@@ -46,6 +46,7 @@ function compareWorkspaces(
 export interface UserWorkspaceMappingListEntry {
   workspaceId: string;
   workspaceAlias: string;
+  workspaceDisplayName?: string;
   username: string;
 }
 
@@ -62,12 +63,13 @@ function compareUserMapEntries(
 
 function buildUserMapListEntries(
   config: UserConfig,
-  workspaceAliasesById: Map<string, string>,
+  workspacesById: Map<string, RegisteredWorkspace>,
 ): UserWorkspaceMappingListEntry[] {
   return Object.entries(config.participants.workspaceUsernames)
     .map(([workspaceId, username]) => ({
       workspaceId,
-      workspaceAlias: workspaceAliasesById.get(workspaceId) ?? "",
+      workspaceAlias: workspacesById.get(workspaceId)?.alias ?? "",
+      workspaceDisplayName: workspacesById.get(workspaceId)?.displayName,
       username,
     }))
     .sort(compareUserMapEntries);
@@ -160,15 +162,15 @@ export async function loadUserSettings(
   const workspaces = (await workspaceRegistryStore.load()).sort(
     compareWorkspaces,
   );
-  const aliasesById = new Map(workspaces.map((workspace) => [
+  const workspacesById = new Map(workspaces.map((workspace) => [
     workspace.workspaceId,
-    workspace.alias,
+    workspace,
   ]));
 
   return {
     config: initialized.config,
     path: initialized.path,
-    mappings: buildUserMapListEntries(initialized.config, aliasesById),
+    mappings: buildUserMapListEntries(initialized.config, workspacesById),
     workspaces,
   };
 }

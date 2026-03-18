@@ -18,6 +18,7 @@ export interface RecordingsPageData {
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
+  workspaceFilterDisplayName?: string;
   stateFilter: RecordingStateFilter;
   activeRecordingCount: number;
   staleRecordingCount: number;
@@ -62,6 +63,7 @@ export async function loadRecordingsPageData(
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
+    workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     stateFilter,
     activeRecordingCount:
       allRows.filter((row) => row.state === "engaged-active")

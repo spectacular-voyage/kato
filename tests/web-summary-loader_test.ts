@@ -539,6 +539,7 @@ Deno.test("loadSummaryPageData reports workspace validation failures alongside a
             {
               workspaceId: "ws-active",
               alias: "alpha",
+              displayName: "Alpha Workspace",
               workspaceRoot: activeRoot,
               configPath: activeConfigPath,
               registeredAt: "2026-03-07T15:00:00.000Z",
@@ -620,6 +621,13 @@ Deno.test("loadSummaryPageData reports workspace validation failures alongside a
           assertEquals(
             data.workspaceSummary.rows.map((row) => row.alias),
             ["alpha", "beta", "ghost"],
+          );
+          assertEquals(
+            data.workspaceSummary.rows.find((row) =>
+              row.workspaceId === "ws-active"
+            )
+              ?.displayName,
+            "Alpha Workspace",
           );
           assertEquals(
             data.workspaceSummary.rows.find((row) =>

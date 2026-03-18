@@ -1,3 +1,4 @@
+import { formatWorkspaceLabel } from "@kato/shared";
 import {
   type ActivityState,
   activityStateDot,
@@ -35,8 +36,12 @@ export default function RecordingsLive(
     intervalMs: LIVE_POLL_INTERVAL_MS,
   });
   const timeZone = useBrowserTimeZone();
-  const workspaceLabel = pageData.workspaceFilterAlias ??
-    pageData.workspaceFilterId;
+  const workspaceLabel = pageData.workspaceFilterAlias
+    ? formatWorkspaceLabel(
+      pageData.workspaceFilterAlias,
+      pageData.workspaceFilterDisplayName,
+    )
+    : pageData.workspaceFilterId;
 
   return (
     <section class="grid">
@@ -128,9 +133,12 @@ export default function RecordingsLive(
             ? <li class="muted">No recordings match the current filters.</li>
             : pageData.rows.map((row) => {
               const uiState = recordingState(row.state);
-              const rowWorkspaceLabel = row.workspaceAlias ??
-                row.workspaceId ??
-                "workspace";
+              const rowWorkspaceLabel = row.workspaceAlias
+                ? formatWorkspaceLabel(
+                  row.workspaceAlias,
+                  row.workspaceDisplayName,
+                )
+                : row.workspaceId ?? "workspace";
               return (
                 <li
                   key={row.key}

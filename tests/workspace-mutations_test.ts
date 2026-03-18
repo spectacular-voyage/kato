@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import {
   readWorkspaceConfigWorkspaceId,
   registerWorkspace,
+  setWorkspaceDisplayName,
   unregisterWorkspace,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
@@ -105,6 +106,74 @@ Deno.test("registerWorkspace defaults alias to the workspace folder name", async
           });
 
           assertEquals(result.entry.alias, "demo-workspace");
+        },
+      );
+    } finally {
+      restoreRuntimeEnv(env);
+    }
+  });
+});
+
+Deno.test("setWorkspaceDisplayName saves trimmed labels and clears alias duplicates", async () => {
+  await withLockedEnvironment(async () => {
+    const env = snapshotRuntimeEnv();
+    try {
+      await withTestTempDir(
+        "workspace-mutation-display-name-",
+        async (homeDir) => {
+          setRuntimeEnv({
+            HOME: homeDir,
+            USERPROFILE: undefined,
+            KATO_RUNTIME_DIR: undefined,
+          });
+
+          const sharedDir = join(homeDir, ".kato", "shared");
+          const registryPath = join(sharedDir, "workspace-registry.json");
+          const workspaceRoot = join(homeDir, "demo-workspace");
+          await Deno.mkdir(sharedDir, { recursive: true });
+          await Deno.writeTextFile(
+            registryPath,
+            JSON.stringify({
+              schemaVersion: 1,
+              updatedAt: "2026-03-07T20:00:00.000Z",
+              workspaces: [{
+                workspaceId: "ws-1",
+                alias: "demo",
+                workspaceRoot,
+                configPath: join(
+                  workspaceRoot,
+                  ".kato-workspace-config.yaml",
+                ),
+                registeredAt: "2026-03-07T20:00:00.000Z",
+              }],
+            }),
+          );
+
+          const savedResult = await setWorkspaceDisplayName({
+            selector: "demo",
+            displayName: " Demo Workspace ",
+            now: () => new Date("2026-03-07T20:30:00.000Z"),
+          });
+          assertEquals(savedResult.changed, true);
+          assertEquals(savedResult.entry.displayName, "Demo Workspace");
+
+          const savedRegistry = await new WorkspaceRegistryFileStore(
+            registryPath,
+          ).load();
+          assertEquals(savedRegistry[0]?.displayName, "Demo Workspace");
+
+          const clearedResult = await setWorkspaceDisplayName({
+            selector: "ws-1",
+            displayName: " demo ",
+            now: () => new Date("2026-03-07T21:00:00.000Z"),
+          });
+          assertEquals(clearedResult.changed, true);
+          assertEquals(clearedResult.entry.displayName, undefined);
+
+          const clearedRegistry = await new WorkspaceRegistryFileStore(
+            registryPath,
+          ).load();
+          assertEquals(clearedRegistry[0]?.displayName, undefined);
         },
       );
     } finally {
