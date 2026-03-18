@@ -198,10 +198,15 @@ Deno.test("cli parser accepts workspace register name=value compatibility syntax
   );
 });
 
-Deno.test("workspace register usage synopsis shows name=value compatibility syntax", () => {
+Deno.test("workspace register usage synopsis documents --name and omits deprecated name=value syntax", () => {
+  const usage = getCommandUsage("workspace-register");
   assertStringIncludes(
-    getCommandUsage("workspace-register"),
-    "[--name <display-name>|name=<display-name>]",
+    usage,
+    "[--name <display-name>]",
+  );
+  assertEquals(
+    usage.includes("name=<display-name>"),
+    false,
   );
 });
 
