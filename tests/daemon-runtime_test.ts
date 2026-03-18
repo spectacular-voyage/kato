@@ -215,10 +215,6 @@ const DAEMON_RUNTIME_MOCK_SESSION_PATH = resolveTestTempPath(
   "daemon-runtime",
   "mock-session.jsonl",
 );
-const DAEMON_RUNTIME_CAPTURE_PATH = resolveTestTempPath(
-  "daemon-runtime",
-  "captured.md",
-);
 const DAEMON_RUNTIME_FIRST_SEEN_CAPTURE_PATH = resolveTestTempPath(
   "daemon-runtime",
   "first-seen.md",
