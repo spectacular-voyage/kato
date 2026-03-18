@@ -160,6 +160,7 @@ async function ensureWorkspaceRootWriteCoverage(
 
 export interface RegisterWorkspaceMutationOptions {
   alias?: string;
+  displayName?: string;
   workspacePath?: string;
   cwdPath?: string;
   katoDir?: string;
@@ -207,6 +208,11 @@ export async function registerWorkspace(
     options.alias,
     target.workspaceRoot,
   );
+  const requestedDisplayName = normalizeWorkspaceDisplayName(
+    requestedAlias,
+    options.displayName,
+  );
+  const shouldUpdateDisplayName = options.displayName !== undefined;
 
   const existingByAlias = entries.find((entry) =>
     entry.alias === requestedAlias
@@ -257,6 +263,7 @@ export async function registerWorkspace(
     finalEntry = {
       workspaceId: configuredWorkspaceId ?? crypto.randomUUID(),
       alias: requestedAlias,
+      ...(requestedDisplayName ? { displayName: requestedDisplayName } : {}),
       workspaceRoot: target.workspaceRoot,
       configPath: target.configPath,
       registeredAt: nowIso,
@@ -264,14 +271,24 @@ export async function registerWorkspace(
     nextEntries = [...entries, cloneEntry(finalEntry)];
     changed = true;
   } else {
-    changed = requestedAlias !== existingWorkspace.alias ||
+    const identityChanged = requestedAlias !== existingWorkspace.alias ||
       target.workspaceRoot !== existingWorkspace.workspaceRoot ||
       target.configPath !== existingWorkspace.configPath;
-    restartRequired = changed;
+    const displayNameChanged = shouldUpdateDisplayName &&
+      requestedDisplayName !== existingWorkspace.displayName;
+    changed = identityChanged || displayNameChanged;
+    restartRequired = identityChanged;
     finalEntry = changed
       ? {
         ...existingWorkspace,
         alias: requestedAlias,
+        ...(shouldUpdateDisplayName
+          ? (requestedDisplayName
+            ? { displayName: requestedDisplayName }
+            : { displayName: undefined })
+          : (existingWorkspace.displayName
+            ? { displayName: existingWorkspace.displayName }
+            : {})),
         workspaceRoot: target.workspaceRoot,
         configPath: target.configPath,
         updatedAt: nowIso,
@@ -322,6 +339,7 @@ export async function registerWorkspace(
       alias: finalEntry.alias,
       workspaceRoot: finalEntry.workspaceRoot,
       configPath: finalEntry.configPath,
+      displayNamePresent: finalEntry.displayName !== undefined,
       created,
       changed,
       restartRequired,
@@ -337,6 +355,7 @@ export async function registerWorkspace(
       alias: finalEntry.alias,
       workspaceRoot: finalEntry.workspaceRoot,
       configPath: finalEntry.configPath,
+      displayNamePresent: finalEntry.displayName !== undefined,
       created,
       changed,
       restartRequired,

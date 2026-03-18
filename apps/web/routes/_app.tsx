@@ -1,7 +1,10 @@
 import { define } from "../utils.ts";
 import { BRAND_ASSET_PUBLIC_PATHS } from "../src/brand_assets.ts";
+import { resolvePageThemeRoot } from "../src/page_theme.ts";
 
 export default define.page(function App({ Component, state }) {
+  const pageThemeRoot = resolvePageThemeRoot(state.pathname);
+
   return (
     <html lang="en">
       <head>
@@ -12,7 +15,7 @@ export default define.page(function App({ Component, state }) {
         />
         <title>{state.appName}</title>
       </head>
-      <body class="app-body">
+      <body class="app-body" data-page-root={pageThemeRoot}>
         <main class="app-main">
           <Component />
         </main>

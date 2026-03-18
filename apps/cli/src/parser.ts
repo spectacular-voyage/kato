@@ -130,7 +130,7 @@ function parseWorkspaceInit(rest: string[]): DaemonCliIntent {
 function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help", "no-restart"],
-    string: ["alias"],
+    string: ["alias", "name"],
     alias: { h: "help", a: "alias" },
   });
 
@@ -140,6 +140,9 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
 
   let alias = typeof parsed.alias === "string"
     ? parsed.alias.trim() || undefined
+    : undefined;
+  let displayName = typeof parsed.name === "string"
+    ? parsed.name.trim() || undefined
     : undefined;
   const positionals: string[] = [];
   for (const raw of toPositionals(parsed)) {
@@ -159,6 +162,21 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
       alias = inlineAlias;
       continue;
     }
+    if (trimmed.startsWith("name=")) {
+      const inlineDisplayName = trimmed.slice("name=".length).trim();
+      if (inlineDisplayName.length === 0) {
+        throw new CliUsageError(
+          "Command 'workspace register' requires a non-empty name value",
+        );
+      }
+      if (displayName !== undefined) {
+        throw new CliUsageError(
+          "Command 'workspace register' accepts only one name source; use either --name <display-name> or name=<display-name>",
+        );
+      }
+      displayName = inlineDisplayName;
+      continue;
+    }
     positionals.push(raw);
   }
 
@@ -173,6 +191,7 @@ function parseWorkspaceRegister(rest: string[]): DaemonCliIntent {
     command: {
       name: "workspace-register",
       ...(alias ? { alias } : {}),
+      ...(displayName ? { displayName } : {}),
       ...(positionals[0] ? { dirPath: positionals[0] } : {}),
       ...(parsed["no-restart"] === true ? { noRestart: true } : {}),
     },

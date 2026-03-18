@@ -430,3 +430,245 @@ That means I’d treat it as a phase-3 design subtask, not a silent implementati
 # djradon_2026-03-18_0903_14
 
 OK, let's leave  everything in the registry for now. What's next?
+
+# gpt-5.4_2026-03-18_0908_34
+
+Keeping it in the registry means the current direction still makes sense, so I would not rewrite that part.
+
+Next best slice is the Recordings page controls from phase 2:
+1. Add per-recording `Stop` for engaged rows backed by persisted workspace-output metadata.
+2. Then add `Re-start` for stopped rows, reusing the same path only.
+3. Fail fast with a clear message if the path is missing or no longer passes policy.
+
+I’d do `Stop` first because it’s the smaller, safer slice and gives us most of the action-model plumbing we’ll need for `Re-start`. If you want, I can start that implementation next in this chat.
+
+# djradon_2026-03-18_0908_34
+
+Users should be able to provide the Display Name when registering a workspace, i.e. in the CLI with a name= parameter and via the "Register Workspace" tile on the web "Workspaces" page.
+
+# gpt-5.4_2026-03-18_0908_48
+
+I’m picking up the next slice by tracing workspace registration end to end in both CLI and web so we can add `displayName` at creation time without creating a second mutation path right away.
+
+# gpt-5.4_2026-03-18_0909_03
+
+I found the registration path, and the smallest clean change is to treat `displayName` as an optional registration attribute: new registrations can set it, re-registering can update it when explicitly provided, and leaving it blank won’t wipe an existing label. I’m checking the parser and usage text now so the CLI shape matches what you asked for instead of guessing.
+
+# gpt-5.4_2026-03-18_0909_10
+
+I’ve got the CLI shape now: it already supports `alias=` compatibility syntax, so I can mirror that for `name=` without inventing a second idiom. I’m opening the direct registration tests next so I can patch behavior and assertions in one pass.
+
+# gpt-5.4_2026-03-18_0909_19
+
+The CLI command type is the next constraint: once I add `name` there, the parser, router, direct command, and tests can all line up cleanly. After that I’ll wire the web register tile to send the same field into `registerWorkspace`.
+
+# gpt-5.4_2026-03-18_0909_29
+
+I’ve got the implementation surface bounded now: runtime registration, CLI parse/usage, and the web register form. One small product call remains while I patch: I’m leaning toward including the display name in the CLI success output too, so registration confirms what was actually saved instead of only showing alias/id.
+
+# gpt-5.4_2026-03-18_0910_05
+
+I’ve got the shape. I’m patching the runtime registration contract first so both CLI and web can feed the same new field into one place instead of adding one-off behavior in each caller.
+
+# gpt-5.4_2026-03-18_0911_04
+
+I’m picking up the registration flow now and wiring `displayName` into both entry points: CLI `name=`/`--name` and the Workspaces registration tile. I’ll check the current parser, registration mutation, and web form together first so we can change the contract once and thread it through cleanly.
+
+# gpt-5.4_2026-03-18_0911_11
+
+The current registration path is still alias-only, so I’m extending the runtime contract first and then threading that through the CLI parser and the web form. After that I’ll add focused tests around “new registration with label” and “re-register updates label without restart semantics.”
+
+# gpt-5.4_2026-03-18_0911_17
+
+I’ve confirmed the repo already has a clean label model and post-registration label editing, which is good news: this follow-up is just about letting registration set the same field up front. I’m reading the existing mutation/test surfaces now so we can change the contract once instead of layering special cases on top.
+
+# gpt-5.4_2026-03-18_0911_22
+
+I’ve got the shape now: there’s one runtime mutation to extend, two thin entry points to pass the new field through, and a few parser/help tests to tighten the contract. I’m about to patch the runtime first so both CLI and web can reuse the same normalization behavior.
+
+# gpt-5.4_2026-03-18_0911_28
+
+I’ve checked the worktree, and there are a few unrelated web-theme edits already in progress. I’ll stay clear of those and keep this change confined to the workspace runtime, CLI, and the Workspaces registration route plus tests.
+
+# gpt-5.4_2026-03-18_0911_38
+
+The new requirement is nicely bounded: “registration can set the label” rather than “a new label system.” I’m going to keep the implementation narrow and then update the task note and decision log so the docs match the actual entry points that support it.
+
+# gpt-5.4_2026-03-18_0911_42
+
+Plan for this slice:
+- Update the runtime registration contract so `registerWorkspace()` can accept and normalize an optional `displayName`, while keeping restart requirements tied only to alias/root/config-path changes.
+- Thread that field through both registration entry points: CLI `workspace register` via `--name` / `name=` and the Workspaces-page “Register Workspace” tile.
+- Add focused tests for parser behavior, runtime registration persistence/update semantics, and CLI end-to-end registration output/state, then run targeted fmt/check/lint/test passes.
+
+# gpt-5.4_2026-03-18_0911_47
+
+I’m at the edit point now. First patch is in the runtime mutation so both CLI and web registration paths inherit the same trim/fallback behavior instead of each inventing their own label rules.
+
+# gpt-5.4_2026-03-18_0912_13
+
+I found one small UX question while wiring this: for re-registering an existing workspace, a blank name from the registration tile/CLI should not silently clear the saved label, since there’s already a dedicated “edit label” control for that. I’m implementing it that way so registration can set or update the label when provided, but blank registration fields remain non-destructive.
+
+# gpt-5.4_2026-03-18_0912_15
+
+I’m editing the runtime mutation now. The key behavior change is: explicit `displayName` updates registry metadata during registration, but restart-required stays scoped to alias/root/config-path changes only.
+
+# gpt-5.4_2026-03-18_0912_26
+
+The runtime piece is in. Next I’m threading the field through the CLI surface: parser, command type/router, help text, and registration output so the saved label is visible right away.
+
+# gpt-5.4_2026-03-18_0912_41
+
+I’m moving to the web registration tile now. This is a smaller patch: capture an optional display label in the form, pass it through on registration, and reflect the richer label in the success notice without making blank submissions destructive.
+
+# gpt-5.4_2026-03-18_0912_54
+
+The entry points are wired. I’m in the test pass now, focusing on three things: parser grammar (`--name` / `name=`), runtime persistence/update semantics, and one CLI end-to-end case that proves the label actually lands in the registry on registration.
+
+# gpt-5.4_2026-03-18_0912_56
+
+I’m adding the runtime test coverage first because it defines the contract most cleanly: create with label, and re-register with only a label change should persist it but not demand a daemon restart.
+
+# gpt-5.4_2026-03-18_0913_08
+
+The runtime contract is covered now. I’m tightening the CLI grammar next so `name=` behaves like the existing compatibility syntax for `alias=`, including duplicate-source rejection.
+
+# gpt-5.4_2026-03-18_0913_26
+
+I’m using one existing CLI end-to-end test to prove the user-visible behavior, rather than scattering lots of tiny duplicates: register with `--name`, see it in stdout and registry state, then re-register without `--name` and confirm the label is preserved.
+
+# gpt-5.4_2026-03-18_0913_42
+
+The code paths are patched. I’m doing a quick consistency sweep now for any direct calls or stale usage text, then I’ll run the focused formatter/tests/checks so we catch contract mismatches before touching the docs.
+
+# gpt-5.4_2026-03-18_0913_49
+
+The patch set is coherent in diff, so I’m running format and the focused test/check/lint batch now. If anything shakes out, I’ll fix it before I touch the task docs.
+
+# gpt-5.4_2026-03-18_0913_53
+
+Formatting and lint are clean. The test/check jobs are still running; I’m polling those now and will use any failures to tighten the contract before wrapping up the docs.
+
+# gpt-5.4_2026-03-18_0913_58
+
+The code itself looks okay so far; the failure was just the test runner permissions, not behavior. I’m checking the repo’s usual Deno test permissions and then I’ll rerun the focused suites with the right flags instead of broadening the change set.
+
+# gpt-5.4_2026-03-18_0914_07
+
+The repo’s testing note confirms these suites are expected to run with filesystem/env permissions. I’m rerunning with the same permissions the root `deno task test` uses, so the result reflects actual behavior rather than the sandbox defaults of a plain `deno test`.
+
+# gpt-5.4_2026-03-18_0914_22
+
+The code is green, so I’m doing the lightweight docs sync now: the phase-2 task note, the decision log, and the codebase overview. I’ll keep it specific to this new behavior rather than broadening the phase scope again.
+
+# gpt-5.4_2026-03-18_0914_42
+
+I’ve synced the docs to the actual behavior. I’m doing one last formatting/status pass so I can hand you a clean summary with the exact files that changed and the checks that passed.
+
+# gpt-5.4_2026-03-18_0914_59
+
+Registration can set workspace display labels now.
+
+CLI `workspace register` accepts `--name <display-name>` and `name=<display-name>`, and passes that through to the shared registration mutation in [parser.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts), [workspace_register.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_register.ts), and [mutations.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts). The Workspaces registration tile also has a new `Display Label` field in [workspaces.tsx](/home/djradon/hub/spectacular-voyage/kato/apps/web/routes/workspaces.tsx). Registration-time label updates persist in the registry, show up in CLI output via [workspace_shared.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_shared.ts), and do not mark the daemon restart-required when only the label changes. Blank registration fields are non-destructive, so re-registering without a name does not clear an existing label.
+
+I added focused coverage in [workspace-mutations_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts), [cli-parser_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/cli-parser_test.ts), and [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts), and updated the phase-2/docs notes in [task.2026.2026-03-17-web-commands-phase2.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-17-web-commands-phase2.md), [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md), and [dev.codebase-overview.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.codebase-overview.md).
+
+Verified with `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=... tests/workspace-mutations_test.ts tests/cli-parser_test.ts tests/daemon-cli_test.ts`, `deno check --config apps/web/deno.json apps/web/routes/workspaces.tsx`, and `deno lint` on the touched files. I left the unrelated pre-existing theme/worktree changes alone.
+
+# djradon_2026-03-18_0919_11
+
+In the [README.md](README.md) it has "kato workspace register --alias default" (without the '=') but I don't think that's supported. I think when providing optional named parameters we always require the '='? 
+
+What's the "key" during re-registration, alias, or path? I'm not sure what the utility of re-registration is. 
+
+Should we disallow re-using the same name? I presume we already disallow repeat aliases. (aliases must be unique)
+
+# gpt-5.4_2026-03-18_0919_36
+
+I’m checking the actual parser and registration mutation so I can answer this against the code, not memory. Then I’ll give you the clean behavioral split between “what syntax is accepted” and “what actually identifies a re-registration.”
+
+# gpt-5.4_2026-03-18_0919_48
+
+`kato workspace register --alias default` is supported as written. The parser accepts standard `--flag value` syntax for `--alias` and `--name`; the `alias=...` / `name=...` forms are just extra compatibility shorthands for this one command, not the general CLI rule. See [README.md:51](/home/djradon/hub/spectacular-voyage/kato/README.md#L51), [parser.ts:130](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/parser.ts#L130), and [usage.ts:95](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/usage.ts#L95).
+
+On re-registration, the real key is the workspace identity from config/path, not the alias. The mutation matches an existing registration by `workspaceId` from `.kato-workspace-config.yaml` first, and otherwise by workspace root/config path; alias is enforced as unique, but it is not the primary “find existing workspace” key. See [mutations.ts:223](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts#L223) and [mutations.ts:240](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts#L240). The utility of re-registration is basically “update the registration in place”: moved workspace path, changed alias, added/changed display name, or re-extend shared write roots without unregistering first.
+
+I would not disallow duplicate display names. We already disallow duplicate aliases, and alias is the canonical selector. Since the UI renders `alias (displayName)`, duplicate labels are annoying at worst, not ambiguous in the important sense. If we want stricter consistency later, I’d sooner remove the special `alias=` / `name=` compatibility syntax than require `=` for all optional flags.
+
+# djradon_2026-03-18_0957_20
+
+I se the utility of re-registration. I think we need to enforce alias uniqueness, no?
+
+# gpt-5.4_2026-03-18_0957_34
+
+Yes. Aliases should be unique, and the runtime already enforces that.
+
+The registration mutation rejects:
+- an alias already used by a different workspace
+- an alias that matches an existing workspace’s `workspaceId`, so selectors stay unambiguous
+
+That logic is in [mutations.ts:217](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts#L217) through [mutations.ts:252](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/mutations.ts#L252).
+
+The only allowed “repeat” case is re-registering the same workspace, which is treated as an update-in-place rather than a duplicate. There’s test coverage for that uniqueness behavior in [workspace-mutations_test.ts:298](/home/djradon/hub/spectacular-voyage/kato/tests/workspace-mutations_test.ts#L298) and [daemon-cli_test.ts:1701](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts#L1701).
+
+So the short answer is: yes, we need alias uniqueness, and we already have it.
+
+# djradon_2026-03-18_1003_01
+
+can we update the "kato workspace list" command to include the displayName. Right now, it's kind of a jumble. maybe we add  an empty line or "---" between workspace items, and put root= and config= on separate lines?
+
+# gpt-5.4_2026-03-18_1003_08
+
+I’m updating the CLI list output now. First I’m checking the current formatter and its tests so we can make the output easier to scan without breaking anything unintentionally.
+
+# gpt-5.4_2026-03-18_1003_22
+
+I agree the jumble is really a `workspace list` problem, not a general CLI-formatting problem. I’m going to keep register/unregister output compact, and make `workspace list` render one workspace per block with separate `root=` and `config=` lines and a blank line between items.
+
+# gpt-5.4_2026-03-18_1003_28
+
+I’m keeping the change scoped to `workspace list`, not all workspace-related CLI output. The plan is: compact single-line output stays for register/unregister, while `list` gets a clearer block format with label/id on the first line and `root=` / `config=` on their own lines.
+
+# gpt-5.4_2026-03-18_1003_36
+
+The formatter change is in. I’m tightening the CLI tests now so we lock the new block-style layout instead of just loosely checking that the path appears somewhere in the output.
+
+# gpt-5.4_2026-03-18_1003_50
+
+I’ve locked the intended layout in tests too, including the blank-line separation between multiple workspaces. Running a quick format/lint/test pass now to make sure the new list output is stable.
+
+# gpt-5.4_2026-03-18_1003_52
+
+Format and lint are clean. The CLI suite is still running; once that finishes I’ll hand you the exact new `workspace list` shape so you can sanity-check it quickly.
+
+# gpt-5.4_2026-03-18_1003_54
+
+One small type mismatch shook out in the new test harness setup, not the feature itself. I’m patching that now and rerunning the CLI suite.
+
+# gpt-5.4_2026-03-18_1004_08
+
+The test harness type fix is in. I’m rerunning format on the touched test file and then the CLI suite one more time.
+
+# gpt-5.4_2026-03-18_1004_10
+
+The new list format is passing its dedicated test. I’m letting the full CLI suite finish so we know the block layout didn’t accidentally ripple into any adjacent command expectations.
+
+# gpt-5.4_2026-03-18_1004_18
+
+Updated `kato workspace list` to be more readable and to show `displayName` cleanly.
+
+The list command now renders each workspace as a small block: first line is the workspace label plus id, then `root=` and `config=` on separate lines, with a blank line between workspace items. I kept register/unregister output compact, so this only changes `list`. The main changes are in [workspace_list.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_list.ts) and [workspace_shared.ts](/home/djradon/hub/spectacular-voyage/kato/apps/cli/src/commands/workspace_shared.ts), with coverage added in [daemon-cli_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-cli_test.ts).
+
+The new shape looks like this:
+
+```text
+alpha (Alpha Workspace) (ws-alpha)
+root=/path/to/alpha
+config=/path/to/alpha/.kato-workspace-config.yaml
+
+beta (ws-beta)
+root=/path/to/beta
+config=/path/to/beta/.kato-workspace-config.yaml
+```
+
+Verified with `deno fmt`, `deno lint`, and `deno test --allow-read --allow-write=.test-tmp --allow-run --allow-env=... tests/daemon-cli_test.ts`. Unrelated pre-existing worktree changes were left alone.

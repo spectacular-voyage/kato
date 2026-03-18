@@ -78,8 +78,9 @@ Current top-level web routes are:
 - `/recordings`: flattened recording history across sessions and workspaces,
   backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label
-  editing, per-workspace preferred-username overrides, plus workspace-level
-  recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
+  editing, registration-time display-label entry, per-workspace
+  preferred-username overrides, plus workspace-level recording rollups, backed
+  by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/logs`: combined daemon + web operational/security log view with shared
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default and workspace-username mapping workflows.

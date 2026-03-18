@@ -40,19 +40,28 @@ export const handler = define.handlers({
     try {
       if (action === "register") {
         const alias = String(form.get("alias") ?? "");
+        const rawDisplayName = String(form.get("displayName") ?? "").trim();
+        const displayName = rawDisplayName.length > 0
+          ? rawDisplayName
+          : undefined;
         const workspacePath = String(form.get("workspacePath") ?? "");
         const result = await registerWorkspace({
           alias,
+          displayName,
           workspacePath,
           operationalLogger,
           auditLogger,
         });
+        const workspaceLabel = formatWorkspaceLabel(
+          result.entry.alias,
+          result.entry.displayName,
+        );
         const notice = encodeURIComponent(
           result.created
-            ? `workspace registered: ${result.entry.alias}`
+            ? `workspace registered: ${workspaceLabel}`
             : result.changed
-            ? `workspace registration updated: ${result.entry.alias}`
-            : `workspace already registered: ${result.entry.alias}`,
+            ? `workspace registration updated: ${workspaceLabel}`
+            : `workspace already registered: ${workspaceLabel}`,
         );
         return Response.redirect(
           new URL(`/workspaces?notice=${notice}`, ctx.req.url),
@@ -222,6 +231,16 @@ export default define.page(async function WorkspacesPage(ctx) {
                     type="text"
                     placeholder="defaults to workspace folder name"
                   />
+                  <label class="form-label" for="displayName">
+                    Display Label
+                  </label>
+                  <input
+                    class="form-input"
+                    id="displayName"
+                    name="displayName"
+                    type="text"
+                    placeholder="optional operator-facing label"
+                  />
                   <button class="form-button" type="submit">Register</button>
                 </form>
               </div>
@@ -237,6 +256,10 @@ export default define.page(async function WorkspacesPage(ctx) {
                 <p>
                   Alias is optional. If you leave it blank, Kato uses the
                   workspace folder name.
+                </p>
+                <p>
+                  Display Label is optional. If you leave it blank, Kato shows
+                  the alias alone.
                 </p>
               </div>
             </div>

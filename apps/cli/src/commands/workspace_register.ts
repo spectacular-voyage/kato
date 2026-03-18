@@ -6,11 +6,13 @@ import { runRestartCommand } from "./restart.ts";
 export async function runWorkspaceRegisterCommand(
   ctx: DaemonCliCommandContext,
   alias?: string,
+  displayName?: string,
   dirPath?: string,
   noRestart = false,
 ): Promise<void> {
   const result = await registerWorkspace({
     alias,
+    displayName,
     workspacePath: dirPath,
     cwdPath: ctx.runtime.cwdPath,
     katoDir: ctx.runtimeConfig.katoDir,

@@ -1,6 +1,8 @@
 :root {
   color-scheme: light;
+  --bg-top: #fbf7f1;
   --bg: #f5f0e8;
+  --glow: rgba(196, 93, 44, 0.18);
   --paper: rgba(255, 252, 247, 0.88);
   --ink: #151515;
   --muted: #615b52;
@@ -22,14 +24,57 @@ body {
   margin: 0;
   min-height: 100%;
   font-family: "IBM Plex Sans", "Aptos", sans-serif;
-  background:
-    radial-gradient(circle at top, rgba(196, 93, 44, 0.18), transparent 35%),
-    linear-gradient(180deg, #fbf7f1 0%, var(--bg) 100%);
+  background: var(--bg-top);
   color: var(--ink);
 }
 
 body {
   padding: 24px;
+  background:
+    radial-gradient(circle at top, var(--glow), transparent 35%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
+}
+
+.app-body[data-page-root="sessions"] {
+  --bg-top: #fbf6ef;
+  --bg: #f2e8dd;
+  --glow: rgba(160, 99, 52, 0.14);
+}
+
+.app-body[data-page-root="recordings"] {
+  --bg-top: #fcf6f1;
+  --bg: #f4e4d7;
+  --glow: rgba(196, 93, 44, 0.16);
+}
+
+.app-body[data-page-root="workspaces"] {
+  --bg-top: #f6f8f2;
+  --bg: #e7efd9;
+  --glow: rgba(88, 120, 74, 0.16);
+}
+
+.app-body[data-page-root="logs"] {
+  --bg-top: #f4f8fb;
+  --bg: #e4edf4;
+  --glow: rgba(59, 111, 134, 0.16);
+}
+
+.app-body[data-page-root="settings"] {
+  --bg-top: #f7f6f2;
+  --bg: #ece7dd;
+  --glow: rgba(120, 102, 74, 0.13);
+}
+
+.app-body[data-page-root="maintenance"] {
+  --bg-top: #faf4ef;
+  --bg: #f1e2d9;
+  --glow: rgba(177, 86, 42, 0.15);
+}
+
+.app-body[data-page-root="login"] {
+  --bg-top: #fbf7f1;
+  --bg: #efe7db;
+  --glow: rgba(196, 93, 44, 0.12);
 }
 
 a {

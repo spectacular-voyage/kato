@@ -20,6 +20,8 @@ controls in the web client after the basic Session page command entry lands.
     capture remains Sessions-page only
 - For Workspaces Page:
   - add an optional operator-facing `displayName` distinct from alias
+  - allow `displayName` to be set during initial workspace registration from
+    both CLI and web registration entry points
   - add ability to view and edit per-workspace settings
   - include preferred username in that per-workspace settings surface even
     though it persists in the user config file
@@ -93,6 +95,9 @@ controls in the web client after the basic Session page command entry lands.
 
 - add optional `workspace.displayName` to registered workspace metadata and web
   loader/view-model types
+- allow workspace registration entry points to accept optional `displayName`
+  alongside alias/path without turning display-name-only updates into
+  restart-required mutations
 - add shared workspace label/view-model support for display-name fallback and
   `<alias> (<displayName>)` label formatting
 - add per-workspace settings mutation surface for registry-backed
@@ -111,6 +116,8 @@ controls in the web client after the basic Session page command entry lands.
   when a stopped row cannot be restarted
 - validation tests for `displayName` and preferred-username editing across
   registry / user-config boundaries
+- parser and mutation tests for registration-time `displayName` support in CLI
+  and web-backed registration flows
 - rendering tests for workspace label fallback and Sessions-page selector copy
 - rendering tests should confirm `<alias> (<displayName>)` formatting and alias
   fallback
@@ -139,5 +146,7 @@ controls in the web client after the basic Session page command entry lands.
 - [x] Implement Workspaces-page editing for `displayName` and preferred
       username, then propagate workspace labels through Sessions, Summary, and
       workspace-filter headings
+- [x] Extend workspace registration entry points so CLI `workspace register`
+      and the Workspaces-page register tile can set an initial `displayName`
 - [ ] Split concrete follow-up implementation tasks once the contracts above
       are locked

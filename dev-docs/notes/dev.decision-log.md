@@ -95,6 +95,8 @@ created: 1771779490894
   - A raw alias still appears in persisted recording snapshots and command
     surfaces even when the UI prefers the richer label.
 - Follow-up tasks:
+  - Keep CLI and web workspace-registration entry points aligned with the
+    registry-backed `displayName` contract.
   - Revisit whether more workspace-local config should become editable from the
     web UI in phase 3.
   - Decide whether stopped-recording `Re-start` and future per-session twin

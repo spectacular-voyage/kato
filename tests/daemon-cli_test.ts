@@ -975,6 +975,8 @@ Deno.test(
             "register",
             "--alias",
             "My.Proj",
+            "--name",
+            "My Project",
             "--no-restart",
           ],
           runtimeDir,
@@ -986,17 +988,26 @@ Deno.test(
       assertEquals(registerCode, 0);
       assertStringIncludes(
         registerHarness.stdout.join(""),
-        "workspace registered: My.Proj (",
+        "workspace registered: My.Proj (My Project) (",
       );
       assertStringIncludes(
         await Deno.readTextFile(registryPath),
         `"alias": "My.Proj"`,
       );
+      assertStringIncludes(
+        await Deno.readTextFile(registryPath),
+        `"displayName": "My Project"`,
+      );
       const registeredRegistry = JSON.parse(
         await Deno.readTextFile(registryPath),
       ) as {
         workspaces?: Array<
-          { workspaceId?: string; alias?: string; workspaceRoot?: string }
+          {
+            workspaceId?: string;
+            alias?: string;
+            displayName?: string;
+            workspaceRoot?: string;
+          }
         >;
       };
       const registeredWorkspaceId = registeredRegistry.workspaces?.[0]
@@ -1013,8 +1024,15 @@ Deno.test(
           defaultRuntimeConfig,
         });
       assertEquals(listCode, 0);
-      assertStringIncludes(listHarness.stdout.join(""), "My.Proj (");
-      assertStringIncludes(listHarness.stdout.join(""), configPath);
+      assertEquals(
+        listHarness.stdout.join(""),
+        [
+          `My.Proj (My Project) (${registeredWorkspaceId})`,
+          `root=${workspaceDir}`,
+          `config=${configPath}`,
+          "",
+        ].join("\n"),
+      );
 
       const movedWorkspaceDir = join(tempDir, "Moved.Proj");
       const movedConfigPath = join(
@@ -1046,7 +1064,12 @@ Deno.test(
         await Deno.readTextFile(registryPath),
       ) as {
         workspaces?: Array<
-          { workspaceId?: string; alias?: string; workspaceRoot?: string }
+          {
+            workspaceId?: string;
+            alias?: string;
+            displayName?: string;
+            workspaceRoot?: string;
+          }
         >;
       };
       assertEquals(reRegisteredRegistry.workspaces?.length, 1);
@@ -1055,6 +1078,10 @@ Deno.test(
         registeredWorkspaceId,
       );
       assertEquals(reRegisteredRegistry.workspaces?.[0]?.alias, "Moved.Proj");
+      assertEquals(
+        reRegisteredRegistry.workspaces?.[0]?.displayName,
+        "My Project",
+      );
       assertEquals(
         reRegisteredRegistry.workspaces?.[0]?.workspaceRoot,
         movedWorkspaceDir,
@@ -1084,6 +1111,72 @@ Deno.test(
     });
   },
 );
+
+Deno.test("runDaemonCli workspace list renders one block per workspace", async () => {
+  await withTestTempDir(
+    "daemon-cli-workspace-list-format-",
+    async (tempDir) => {
+      const runtimeDir = join(tempDir, "runtime");
+      const katoDir = join(tempDir, ".kato");
+      const registryPath = resolveDefaultWorkspaceRegistryPath(katoDir);
+      const alphaRoot = join(tempDir, "alpha");
+      const betaRoot = join(tempDir, "beta");
+      await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+      await Deno.writeTextFile(
+        registryPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          updatedAt: "2026-03-18T18:00:00.000Z",
+          workspaces: [
+            {
+              workspaceId: "ws-beta",
+              alias: "beta",
+              workspaceRoot: betaRoot,
+              configPath: join(betaRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME),
+              registeredAt: "2026-03-18T18:00:00.000Z",
+            },
+            {
+              workspaceId: "ws-alpha",
+              alias: "alpha",
+              displayName: "Alpha Workspace",
+              workspaceRoot: alphaRoot,
+              configPath: join(alphaRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME),
+              registeredAt: "2026-03-18T18:00:00.000Z",
+            },
+          ],
+        }),
+      );
+      const defaultRuntimeConfig: DaemonCliRuntimeConfigFixture = {
+        ...makeDefaultRuntimeConfig(runtimeDir),
+        katoDir,
+        allowedWriteRoots: [tempDir, katoDir],
+      };
+
+      const { code, harness } = await runDaemonCliWithHarness(
+        ["workspace", "list"],
+        runtimeDir,
+        {
+          defaultRuntimeConfig,
+        },
+      );
+
+      assertEquals(code, 0);
+      assertEquals(
+        harness.stdout.join(""),
+        [
+          "alpha (Alpha Workspace) (ws-alpha)",
+          `root=${alphaRoot}`,
+          `config=${join(alphaRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)}`,
+          "",
+          "beta (ws-beta)",
+          `root=${betaRoot}`,
+          `config=${join(betaRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME)}`,
+          "",
+        ].join("\n"),
+      );
+    },
+  );
+});
 
 Deno.test(
   "runDaemonCli workspace register accepts an explicit target directory",

@@ -36,6 +36,7 @@ export type DaemonCliCommand =
   | {
     name: "workspace-register";
     alias?: string;
+    displayName?: string;
     dirPath?: string;
     noRestart?: boolean;
   }
