@@ -421,10 +421,11 @@ export async function runWebStatusCommand(
     configured: ctx.webConfig !== undefined,
     running: alive,
     stale,
-    state: alive ? "running" : stale ? "stale" : "stopped",
+    state: alive ? "running" : "stopped",
     hostname: ctx.webConfig?.hostname ?? status.hostname,
     port: ctx.webConfig?.port ?? status.port,
     pid: alive || stale ? status.pid : undefined,
+    heartbeatAt: status.heartbeatAt,
     url: ctx.webConfig
       ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
       : status.url,
@@ -446,18 +447,15 @@ export async function runWebStatusCommand(
 
   ctx.runtime.writeStdout(
     [
-      `kato web: ${
-        effective.state === "stale"
-          ? "stale status"
-          : effective.running
-          ? "running"
-          : "stopped"
-      }`,
+      `kato web: ${effective.running ? "running" : "stopped"}`,
       `version: ${effective.version ?? "unknown"}`,
       `host: ${effective.hostname ?? DEFAULT_KATO_WEB_HOSTNAME}`,
       `port: ${effective.port ?? DEFAULT_KATO_WEB_PORT}`,
       `url: ${effective.url ?? "n/a"}`,
       `pid: ${effective.pid ?? "n/a"}`,
+      ...(effective.stale
+        ? [`last heartbeat: ${effective.heartbeatAt ?? "unknown"}`]
+        : []),
     ].join("\n") + "\n",
   );
 }

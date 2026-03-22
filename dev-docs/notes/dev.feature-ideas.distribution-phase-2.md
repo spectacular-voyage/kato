@@ -2,16 +2,14 @@
 id: r81e47fxow5rps1s86ddz7i
 title: Distribution Phase 2
 desc: ''
-updated: 1773767954991
+updated: 1774193915290
 created: 1773375447431
 ---
 
 ## Purpose
 
-Capture post-Phase-1 distribution ideas that are worth keeping, but are not
-part of the current binary/npm closeout tracked in
-[[completed.2026.2026-03-11-binary-distributions]] and
-[[completed.2026.2026-03-11-npmjs-install]].
+- Capture post-Phase-1 distribution ideas that are worth keeping, but are not part of the current binary/npm closeout tracked in [[completed.2026.2026-03-11-binary-distributions]] and [[completed.2026.2026-03-11-npmjs-install]].
+- brew distribution
 
 ## Carry-Forward Constraints
 
@@ -29,7 +27,7 @@ part of the current binary/npm closeout tracked in
 
 ### Channel-Aware Self-Update
 
-- Add `kato self-update` only when Kato can reliably tell which install channel
+- Add `kato upgrade` only when Kato can reliably tell which install channel
   owns the current binaries.
 - Introduce `~/.kato/shared/install-channel.json` as the durable source of truth
   for channel, manager, install root, scope, and installed version.

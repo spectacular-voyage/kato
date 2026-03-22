@@ -56,7 +56,7 @@ export interface SummaryRecentError {
 }
 
 export interface AppChromeStatus {
-  daemon: "running" | "stopped" | "unknown";
+  daemon: "running" | "stopped" | "unresponsive";
   snapshot: "current" | "stale";
 }
 
@@ -140,7 +140,7 @@ export function toAppChromeStatus(options: {
     daemon: options.daemon === "stopped"
       ? "stopped"
       : options.stale
-      ? "unknown"
+      ? "unresponsive"
       : "running",
     snapshot: options.stale ? "stale" : "current",
   };

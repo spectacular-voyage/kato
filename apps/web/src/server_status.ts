@@ -156,6 +156,13 @@ export function startWebServerStatusHeartbeat(
     }
     runtimeState.active = false;
     clearInterval(runtimeState.intervalId);
+    globalThis.removeEventListener("unload", stop);
+    try {
+      Deno.removeSignalListener("SIGINT", stop);
+      Deno.removeSignalListener("SIGTERM", stop);
+    } catch {
+      // Some environments may not support signal listeners.
+    }
     void heartbeat(false);
   };
 

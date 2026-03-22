@@ -435,7 +435,7 @@ Deno.test("runDaemonCli web init reports invalid existing config before reading 
   });
 });
 
-Deno.test("runDaemonCli web status reports stale plain-text status when the stored process is gone", async () => {
+Deno.test("runDaemonCli web status reports stopped plain-text status when the stored process is gone", async () => {
   await withTestTempDir("web-cli-status-stale-", async (rootDir) => {
     const runtimeDir = join(rootDir, "daemon");
     await Deno.mkdir(runtimeDir, { recursive: true });
@@ -478,7 +478,11 @@ Deno.test("runDaemonCli web status reports stale plain-text status when the stor
     assertEquals(code, 0);
     assertStringIncludes(
       harness.stdout.join(""),
-      "kato web: stale status",
+      "kato web: stopped",
+    );
+    assertStringIncludes(
+      harness.stdout.join(""),
+      "last heartbeat: 2026-03-07T20:00:05.000Z",
     );
   });
 });
@@ -580,7 +584,7 @@ Deno.test(
         port: number;
       };
       assertEquals(statusPayload.configured, true);
-      assertEquals(["running", "stale"].includes(statusPayload.state), true);
+      assertEquals(statusPayload.state, "running");
       assertEquals(statusPayload.port, 3187);
     });
   },

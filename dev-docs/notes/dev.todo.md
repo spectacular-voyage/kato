@@ -2,14 +2,12 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1774097884239
+updated: 1774188215673
 created: 1771812869620
 ---
 
 - brew packaging
-- session liveness check with redirect to login page
 - review entire twin or file (i.e. markdown viewer)
-- real liveness check
 
 ## Event Schema Follow-ups (v2)
 
