@@ -6,11 +6,22 @@ import {
 } from "@kato/runtime";
 import { join } from "@std/path";
 
-export function createWebLoggers(): {
+export interface CreateWebLoggersOptions {
+  katoDir?: string;
+}
+
+export interface LogUnhandledWebRequestErrorOptions {
+  katoDir?: string;
+  operationalLogger?: StructuredLogger;
+}
+
+export function createWebLoggers(
+  options: CreateWebLoggersOptions = {},
+): {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
 } {
-  const katoDir = resolveDefaultKatoDir();
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
   const operationalLogger = new StructuredLogger([
     new JsonLineFileSink(join(katoDir, "web", "logs", "operational.jsonl")),
   ], {
@@ -46,8 +57,10 @@ function getErrorStack(error: unknown): string | undefined {
 export async function logUnhandledWebRequestError(
   request: Request,
   error: unknown,
+  options: LogUnhandledWebRequestErrorOptions = {},
 ): Promise<void> {
-  const { operationalLogger } = createWebLoggers();
+  const operationalLogger = options.operationalLogger ??
+    createWebLoggers({ katoDir: options.katoDir }).operationalLogger;
   const url = new URL(request.url);
   await operationalLogger.error(
     "web.request.unhandled_error",

@@ -10,7 +10,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
-  withLockedEnvironment,
+  withIsolatedEnvironment,
 } from "./test_env.ts";
 import { resolveTestTempPath } from "./test_temp.ts";
 
@@ -244,7 +244,7 @@ Deno.test("DenoDetachedDaemonLauncher preserves Windows-style paths", async () =
 });
 
 Deno.test("DenoDetachedDaemonLauncher omits user config dir when home is unavailable", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
@@ -315,7 +315,7 @@ Deno.test("DenoDetachedDaemonLauncher omits user config dir when home is unavail
 });
 
 Deno.test("DenoDetachedDaemonLauncher includes user config dir when home is available", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({

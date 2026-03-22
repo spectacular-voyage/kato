@@ -102,6 +102,11 @@ During active development, run only what matches your change:
 - `deno task check` when changing types/contracts/public APIs.
 - `deno task lint` when touching broader structural code.
 
+`deno task test` follows the split root workflow documented in [[dev.testing]]:
+keep env-boundary suites in the serial `test:env` slice instead of
+reintroducing suite-wide env locking or assuming the whole repo should run
+under a single `deno test --parallel`.
+
 
 Before merge:
 

@@ -21,7 +21,7 @@ import {
   resolveDefaultWorkspaceRegistryPath,
   WorkspaceRegistryFileStore,
 } from "../../../runtime/src/workspace/registry.ts";
-import { loadLogEntries } from "./logs.ts";
+import { loadLogEntries, resolveKatoDirFromStatusPath } from "./logs.ts";
 import { loadSessionActivityRows } from "./sessions.ts";
 import { toStatusViewModel } from "../main.ts";
 
@@ -103,12 +103,14 @@ export interface SummaryPageData {
 export interface LoadSummaryPageDataOptions {
   includeStale?: boolean;
   now?: () => Date;
+  katoDir?: string;
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
 }
 
 export interface LoadAppChromeStatusOptions {
   now?: () => Date;
+  katoDir?: string;
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
 }
@@ -117,7 +119,8 @@ export async function loadAppChromeStatus(
   options: LoadAppChromeStatusOptions = {},
 ): Promise<AppChromeStatus> {
   const now = options.now ?? (() => new Date());
-  const statusPath = options.statusPath ?? resolveDefaultStatusPath();
+  const statusPath = options.statusPath ??
+    resolveDefaultStatusPath(options.katoDir);
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(statusPath, now);
   const snapshot = await statusStore.load();
@@ -147,7 +150,9 @@ export async function loadSummaryPageData(
   options: LoadSummaryPageDataOptions = {},
 ): Promise<SummaryPageData> {
   const now = options.now ?? (() => new Date());
-  const statusPath = options.statusPath ?? resolveDefaultStatusPath();
+  const statusPath = options.statusPath ??
+    resolveDefaultStatusPath(options.katoDir);
+  const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(statusPath, now);
   const snapshot = await statusStore.load();
@@ -160,10 +165,11 @@ export async function loadSummaryPageData(
   const sessionActivityRows = await loadSessionActivityRows({
     includeStale: true,
     now,
+    katoDir,
     statusPath,
     statusStore,
   });
-  const runtimeConfig = await loadRuntimeConfigOrDefault();
+  const runtimeConfig = await loadRuntimeConfigOrDefault({ katoDir });
   const fallbackActiveRecordingCount = allSessions.reduce(
     (sum, session) =>
       sum + (session.stale ? 0 : (session.recordings ?? []).length),
@@ -216,7 +222,7 @@ export async function loadSummaryPageData(
     runtimeConfig,
   );
   const workspaceSummary = summarizeWorkspaceActivity(
-    await loadWorkspaceSummary(),
+    await loadWorkspaceSummary({ katoDir }),
     sessionActivityRows,
   );
   const recentErrors = await loadRecentErrors(statusPath);
@@ -412,9 +418,11 @@ function summarizeWorkspaceActivity(
   };
 }
 
-export async function loadWorkspaceSummary(): Promise<WorkspaceSummary> {
+export async function loadWorkspaceSummary(options: {
+  katoDir?: string;
+} = {}): Promise<WorkspaceSummary> {
   const store = new WorkspaceRegistryFileStore(
-    resolveDefaultWorkspaceRegistryPath(),
+    resolveDefaultWorkspaceRegistryPath(options.katoDir),
   );
 
   let entries;

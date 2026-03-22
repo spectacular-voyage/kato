@@ -46,6 +46,10 @@ export interface WorkspacesPageData {
   sharedConfigError?: string;
 }
 
+export interface LoadWorkspacesPageDataOptions {
+  katoDir?: string;
+}
+
 function resolveRecordingActivityTimestamp(
   row: Pick<WorkspaceRecordingEntry, "lastWriteAt" | "stoppedAt" | "startedAt">,
 ): number {
@@ -61,13 +65,15 @@ function resolveRecordingActivityTimestamp(
   return 0;
 }
 
-export async function loadWorkspacesPageData(): Promise<WorkspacesPageData> {
-  const katoDir = resolveDefaultKatoDir();
+export async function loadWorkspacesPageData(
+  options: LoadWorkspacesPageDataOptions = {},
+): Promise<WorkspacesPageData> {
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
   const sharedConfigStore = new SharedBehaviorConfigFileStore(
     resolveDefaultSharedConfigPath(katoDir),
   );
   const [workspaceSummary, sessionRows, userSettings] = await Promise.all([
-    loadWorkspaceSummary(),
+    loadWorkspaceSummary({ katoDir }),
     loadSessionActivityRows({ katoDir, includeStale: true }),
     loadUserSettings({ katoDir }),
   ]);

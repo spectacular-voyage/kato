@@ -4,7 +4,7 @@ import {
   createDefaultUserConfig,
   resolveFrontmatterParticipantUsername,
 } from "../apps/daemon/src/mod.ts";
-import { withLockedEnvironment } from "./test_env.ts";
+import { withIsolatedEnvironment } from "./test_env.ts";
 import { resolveTestTempPath } from "./test_temp.ts";
 
 const PARTICIPANT_USERNAME_HOME = resolveTestTempPath("participant-home");
@@ -119,7 +119,7 @@ Deno.test("resolveFrontmatterParticipantUsername omits user when addParticipantU
 });
 
 Deno.test("resolveFrontmatterParticipantUsername has no env/home fallback path", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const markdownFrontmatter = createDefaultRuntimeMarkdownFrontmatterConfig({
       addParticipantUsernameToFrontmatter: true,
     });

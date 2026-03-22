@@ -17,6 +17,34 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Root Test Parallelism Uses a Split Serial Env Slice
+
+- Decision:
+  - Split the root test workflow into `test:parallel-safe` and `test:env`.
+  - Keep `test` and `test:coverage` as composed entry points that run those
+    two slices sequentially via `scripts/run-root-test-slices.ts`.
+  - Retire the shared `.test-tmp/.env-lock`; remaining env-boundary tests use
+    `withIsolatedEnvironment(...)` to snapshot and restore the bounded
+    allowlisted env keys in the serial slice.
+- Owner: Kato engineering
+- Date: 2026-03-18
+- Why:
+  - Broad module-parallel execution was blocked less by product behavior than
+    by process-env mutation and lock starvation.
+  - A small explicit serial env slice keeps the default-env contracts covered
+    without forcing the broader suite to give up `--parallel`.
+  - Removing the filesystem lock eliminates stale-lock cleanup and lock-wait
+    false timeouts from the main suite.
+- Tradeoffs:
+  - Whole-repo `deno test --parallel tests` remains intentionally unsupported.
+  - The serial env slice still needs explicit ownership in task wiring and
+    docs.
+- Follow-up tasks:
+  - Re-measure full `test:parallel-safe` and `test:coverage` timings on the
+    split flow, especially on Windows.
+  - Keep shrinking the serial env slice when additive seams are low-risk and
+    do not weaken contract coverage.
+
 ### Workspace Default Output Containment
 
 - Decision:

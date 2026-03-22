@@ -12,7 +12,7 @@ import {
   RuntimeConfigFileStore,
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
-import { withLockedEnvironment } from "./test_env.ts";
+import { withIsolatedEnvironment } from "./test_env.ts";
 import {
   makeTestTempPath,
   removePathIfPresent,
@@ -178,7 +178,7 @@ Deno.test("RuntimeConfigFileStore defaults codex when providerAutoGenerateTwins 
 Deno.test(
   "resolveDefaultProviderSessionRoots honors env overrides and expands home paths",
   async () => {
-    await withLockedEnvironment(async () => {
+    await withIsolatedEnvironment(async () => {
       const root = makeSandboxRoot();
       const homeDir = join(root, "home");
       const snapshot = snapshotConfigEnv();
@@ -220,7 +220,7 @@ Deno.test(
 Deno.test(
   "resolveDefaultProviderSessionRoots falls back to home defaults on invalid env values",
   async () => {
-    await withLockedEnvironment(async () => {
+    await withIsolatedEnvironment(async () => {
       const root = makeSandboxRoot();
       const homeDir = join(root, "home");
       const snapshot = snapshotConfigEnv();
@@ -249,7 +249,7 @@ Deno.test(
 );
 
 Deno.test("createDefaultRuntimeConfig applies env defaults and home shorthand", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const root = makeSandboxRoot();
     const homeDir = join(root, "home");
     const snapshot = snapshotConfigEnv();
@@ -293,7 +293,7 @@ Deno.test("createDefaultRuntimeConfig applies env defaults and home shorthand", 
 });
 
 Deno.test("createDefaultRuntimeConfig rejects invalid env logging override", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotConfigEnv();
     try {
       setConfigEnv({
@@ -396,7 +396,7 @@ Deno.test("RuntimeConfigFileStore rejects deprecated auto-twin snapshot keys wit
 });
 
 Deno.test("RuntimeConfigFileStore loads explicit katoDir and normalizes config values", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const root = makeSandboxRoot();
     const homeDir = join(root, "home");
     const configPath = join(root, "kato-daemon-config.yaml");
@@ -576,7 +576,7 @@ Deno.test("SharedBehaviorConfigFileStore rejects unknown keys", async () => {
 });
 
 Deno.test("createDefaultSharedBehaviorConfig applies home shorthand and nested overrides", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const root = makeSandboxRoot();
     const homeDir = join(root, "home");
     const snapshot = snapshotConfigEnv();
@@ -640,7 +640,7 @@ Deno.test("createDefaultSharedBehaviorConfig rejects invalid export timezones", 
 });
 
 Deno.test("SharedBehaviorConfigFileStore loads expanded roots and nested shared settings", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const root = makeSandboxRoot();
     const homeDir = join(root, "home");
     const configPath = join(root, "shared", "kato-shared-config.yaml");

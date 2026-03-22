@@ -22,6 +22,7 @@ import {
 } from "../activity_state.ts";
 import { loadRuntimeConfigOrDefault } from "./activity_state.ts";
 import { buildSessionInventorySessionHref } from "../session_routes.ts";
+import { resolveKatoDirFromStatusPath } from "./logs.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
@@ -659,8 +660,9 @@ export async function loadSessionActivityRows(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionActivityRow[]> {
   const now = options.now ?? (() => new Date());
-  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
-  const statusPath = options.statusPath ?? resolveDefaultStatusPath(katoDir);
+  const statusPath = options.statusPath ??
+    resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir());
+  const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const statusStore = options.statusStore ??
     new DaemonStatusSnapshotFileStore(statusPath, now);
   const sessionStore = new PersistentSessionStateStore({
@@ -674,7 +676,7 @@ export async function loadSessionActivityRows(
     await Promise.all([
       statusStore.load(),
       sessionStore.listSessionMetadata(),
-      loadRuntimeConfigOrDefault(),
+      loadRuntimeConfigOrDefault({ katoDir }),
       workspaceEntriesPromise,
     ]);
   const normalizedMetadataList = await Promise.all(

@@ -239,13 +239,18 @@ export async function runWebInitCommand(
     }
   }
 
+  const runtimeWebInitPassword = ctx.runtime.webInitPassword;
   const password = await resolveWebInitPassword(options, {
-    isInteractiveTerminal: ctx.runtime.isStdinTerminal ??
+    readPasswordFromStdin: runtimeWebInitPassword?.readPasswordFromStdin,
+    readPasswordFromEnv: runtimeWebInitPassword?.readPasswordFromEnv,
+    isInteractiveTerminal: runtimeWebInitPassword?.isInteractiveTerminal ??
+      ctx.runtime.isStdinTerminal ??
       (() => Deno.stdin.isTerminal()),
-    promptForPassword: () =>
-      promptForWebPassword(
-        createDefaultWebPasswordPromptIO(ctx.runtime.writeStderr),
-      ),
+    promptForPassword: runtimeWebInitPassword?.promptForPassword ??
+      (() =>
+        promptForWebPassword(
+          createDefaultWebPasswordPromptIO(ctx.runtime.writeStderr),
+        )),
   });
   const defaultConfig = await createInitializedWebConfig({
     hostname: options.hostname,

@@ -12,41 +12,86 @@ import {
   parseSessionPageQuery,
 } from "./page_queries.ts";
 
-export async function getChromeStatusResponse(): Promise<Response> {
-  return liveJsonResponse(await loadAppChromeStatus());
+export interface LiveRouteOptions {
+  katoDir?: string;
 }
 
-export async function getSummaryResponse(): Promise<Response> {
-  return liveJsonResponse(await loadSummaryPageData());
-}
-
-export async function getMaintenanceTwinsResponse(url: URL): Promise<Response> {
+export async function getChromeStatusResponse(
+  options: LiveRouteOptions = {},
+): Promise<Response> {
   return liveJsonResponse(
-    await loadMaintenanceTwinsData(parseSessionPageQuery(url)),
+    await loadAppChromeStatus({ katoDir: options.katoDir }),
   );
 }
 
-export async function getSessionsResponse(url: URL): Promise<Response> {
+export async function getSummaryResponse(
+  options: LiveRouteOptions = {},
+): Promise<Response> {
   return liveJsonResponse(
-    await loadSessionsPageData(parseSessionPageQuery(url)),
+    await loadSummaryPageData({ katoDir: options.katoDir }),
   );
 }
 
-export async function getRecordingsResponse(url: URL): Promise<Response> {
+export async function getMaintenanceTwinsResponse(
+  url: URL,
+  options: LiveRouteOptions = {},
+): Promise<Response> {
   return liveJsonResponse(
-    await loadRecordingsPageData(parseRecordingsPageQuery(url)),
+    await loadMaintenanceTwinsData({
+      ...parseSessionPageQuery(url),
+      katoDir: options.katoDir,
+    }),
   );
 }
 
-export async function getWorkspacesResponse(): Promise<Response> {
-  return liveJsonResponse(await loadWorkspacesPageData());
+export async function getSessionsResponse(
+  url: URL,
+  options: LiveRouteOptions = {},
+): Promise<Response> {
+  return liveJsonResponse(
+    await loadSessionsPageData({
+      ...parseSessionPageQuery(url),
+      katoDir: options.katoDir,
+    }),
+  );
 }
 
-export async function getLogsResponse(url: URL): Promise<Response> {
-  return liveJsonResponse(await loadLogPageData(parseLogsPageQuery(url)));
+export async function getRecordingsResponse(
+  url: URL,
+  options: LiveRouteOptions = {},
+): Promise<Response> {
+  return liveJsonResponse(
+    await loadRecordingsPageData({
+      ...parseRecordingsPageQuery(url),
+      katoDir: options.katoDir,
+    }),
+  );
 }
 
-export async function getSessionSnippetResponse(url: URL): Promise<Response> {
+export async function getWorkspacesResponse(
+  options: LiveRouteOptions = {},
+): Promise<Response> {
+  return liveJsonResponse(
+    await loadWorkspacesPageData({ katoDir: options.katoDir }),
+  );
+}
+
+export async function getLogsResponse(
+  url: URL,
+  options: LiveRouteOptions = {},
+): Promise<Response> {
+  return liveJsonResponse(
+    await loadLogPageData({
+      ...parseLogsPageQuery(url),
+      katoDir: options.katoDir,
+    }),
+  );
+}
+
+export async function getSessionSnippetResponse(
+  url: URL,
+  options: LiveRouteOptions = {},
+): Promise<Response> {
   const sessionId = url.searchParams.get("sessionId")?.trim();
   if (!sessionId) {
     return Response.json(
@@ -66,6 +111,7 @@ export async function getSessionSnippetResponse(url: URL): Promise<Response> {
   return liveJsonResponse(
     await resolveSessionSnippet({
       sessionId,
+      katoDir: options.katoDir,
       allowSourceReplay: url.searchParams.get("source") === "1",
     }),
   );

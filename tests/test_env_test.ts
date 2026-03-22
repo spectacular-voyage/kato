@@ -1,39 +1,30 @@
-import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
-import { withLockedEnvironment } from "./test_env.ts";
-import { removePathIfPresent } from "./test_temp.ts";
+import { assertEquals, assertRejects } from "@std/assert";
+import { withIsolatedEnvironment } from "./test_env.ts";
 
-Deno.test("withLockedEnvironment clears a stale env lock before running", async () => {
-  const lockDir = join(Deno.cwd(), ".test-tmp", ".env-lock");
-  const lockMetadataPath = join(lockDir, "lock.json");
+Deno.test("withIsolatedEnvironment restores process env after async work", async () => {
+  const previous = Deno.env.get("KATO_WEB_PASSWORD");
 
-  await removePathIfPresent(lockDir);
-  try {
-    await Deno.mkdir(lockDir, { recursive: true });
-    await Deno.writeTextFile(
-      lockMetadataPath,
-      JSON.stringify({
-        heartbeatAt: "2026-01-01T00:00:00.000Z",
+  await withIsolatedEnvironment(async () => {
+    Deno.env.set("KATO_WEB_PASSWORD", "temp-password");
+    assertEquals(Deno.env.get("KATO_WEB_PASSWORD"), "temp-password");
+    await Promise.resolve();
+  });
+
+  assertEquals(Deno.env.get("KATO_WEB_PASSWORD"), previous);
+});
+
+Deno.test("withIsolatedEnvironment restores process env after errors", async () => {
+  const previous = Deno.env.get("KATO_WEB_PASSWORD");
+
+  await assertRejects(
+    () =>
+      withIsolatedEnvironment(() => {
+        Deno.env.set("KATO_WEB_PASSWORD", "temp-password");
+        throw new Error("boom");
       }),
-    );
+    Error,
+    "boom",
+  );
 
-    let callCount = 0;
-    await withLockedEnvironment(() => {
-      callCount += 1;
-    });
-
-    assertEquals(callCount, 1);
-    await Deno.stat(lockDir).then(
-      () => {
-        throw new Error("expected env lock directory to be removed");
-      },
-      (error) => {
-        if (!(error instanceof Deno.errors.NotFound)) {
-          throw error;
-        }
-      },
-    );
-  } finally {
-    await removePathIfPresent(lockDir);
-  }
+  assertEquals(Deno.env.get("KATO_WEB_PASSWORD"), previous);
 });

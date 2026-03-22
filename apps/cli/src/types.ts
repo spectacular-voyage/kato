@@ -89,6 +89,13 @@ export type DaemonCliIntent =
   | { kind: "version" }
   | { kind: "command"; command: DaemonCliCommand };
 
+export interface DaemonCliWebInitPasswordRuntime {
+  readPasswordFromStdin?: () => Promise<string>;
+  readPasswordFromEnv?: () => string | undefined;
+  isInteractiveTerminal?: () => boolean;
+  promptForPassword?: () => Promise<string>;
+}
+
 export interface DaemonCliRuntime {
   runtimeDir: string;
   configPath: string;
@@ -98,6 +105,7 @@ export interface DaemonCliRuntime {
   allowedWriteRoots?: string[];
   providerSessionRoots?: ProviderSessionRoots;
   isStdinTerminal?: () => boolean;
+  webInitPassword?: DaemonCliWebInitPasswordRuntime;
   now: () => Date;
   pid: number;
   writeStdout: (text: string) => void;

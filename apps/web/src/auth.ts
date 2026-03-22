@@ -60,8 +60,23 @@ function getSessionCookieValue(
   return getCookies(request.headers)[config.auth.cookieName];
 }
 
-export async function loadWebConfig(): Promise<WebConfig | undefined> {
-  const store = new WebConfigFileStore(resolveDefaultWebConfigPath());
+export interface LoadWebConfigOptions {
+  katoDir?: string;
+  configPath?: string;
+}
+
+function resolveWebConfigStore(
+  options: LoadWebConfigOptions = {},
+): WebConfigFileStore {
+  return new WebConfigFileStore(
+    options.configPath ?? resolveDefaultWebConfigPath(options.katoDir),
+  );
+}
+
+export async function loadWebConfig(
+  options: LoadWebConfigOptions = {},
+): Promise<WebConfig | undefined> {
+  const store = resolveWebConfigStore(options);
   try {
     return await store.load();
   } catch (error) {
@@ -72,11 +87,13 @@ export async function loadWebConfig(): Promise<WebConfig | undefined> {
   }
 }
 
-export async function loadWebConfigState(): Promise<{
+export async function loadWebConfigState(
+  options: LoadWebConfigOptions = {},
+): Promise<{
   config?: WebConfig;
   error?: string;
 }> {
-  const store = new WebConfigFileStore(resolveDefaultWebConfigPath());
+  const store = resolveWebConfigStore(options);
   try {
     return { config: await store.load() };
   } catch (error) {
