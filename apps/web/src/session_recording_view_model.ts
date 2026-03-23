@@ -1,7 +1,54 @@
 import type { ActivityState } from "./activity_state.ts";
-import type { SessionRecordingActivityRow } from "./loaders/sessions.ts";
+import type {
+  SessionRecordingActivityRow,
+  WorkspaceOption,
+} from "./loaders/sessions.ts";
 
 export type SessionRecordingAction = "new-capture" | "new-recording";
+export const SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY =
+  "kato:sessions:selected-workspace";
+
+export interface BrowserStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export interface ResolveDefaultWorkspaceSelectorValueOptions {
+  workspaceOptions: WorkspaceOption[];
+  workspaceFilter?: string;
+  workspaceFilterId?: string;
+  rememberedWorkspaceId?: string;
+}
+
+function normalizeWorkspacePreference(
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function hasWorkspaceOption(
+  workspaceOptions: WorkspaceOption[],
+  workspaceId: string | undefined,
+): workspaceId is string {
+  return !!workspaceId &&
+    workspaceOptions.some((option) => option.workspaceId === workspaceId);
+}
+
+function resolveWorkspaceOptionId(
+  workspaceOptions: WorkspaceOption[],
+  selector: string | undefined,
+): string | undefined {
+  const normalizedSelector = normalizeWorkspacePreference(selector);
+  if (!normalizedSelector) {
+    return undefined;
+  }
+  const matchingOption = workspaceOptions.find((option) =>
+    option.workspaceId === normalizedSelector ||
+    option.alias === normalizedSelector
+  );
+  return matchingOption?.workspaceId;
+}
 
 export function canStopSessionRecording(
   recording: SessionRecordingActivityRow,
@@ -47,4 +94,72 @@ export function buildWorkspaceSelectorIds(action: SessionRecordingAction): {
     titleId: `session-recording-popover-title-${action}`,
     selectId: `session-recording-popover-select-${action}`,
   };
+}
+
+export function readRememberedSessionsWorkspace(
+  storage?: BrowserStorageLike,
+): string | undefined {
+  try {
+    const storageValue = storage
+      ? storage.getItem(SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY)
+      : globalThis.localStorage?.getItem(
+        SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
+      );
+    return normalizeWorkspacePreference(
+      storageValue ?? undefined,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+export function rememberSessionsWorkspace(
+  workspaceId: string,
+  storage?: BrowserStorageLike,
+): void {
+  const normalizedWorkspaceId = normalizeWorkspacePreference(workspaceId);
+  if (!normalizedWorkspaceId) {
+    return;
+  }
+  try {
+    storage?.setItem(
+      SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
+      normalizedWorkspaceId,
+    );
+    if (!storage) {
+      globalThis.localStorage?.setItem(
+        SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
+        normalizedWorkspaceId,
+      );
+    }
+  } catch {
+    // Ignore storage failures; the current submission can still proceed.
+  }
+}
+
+export function resolveDefaultWorkspaceSelectorValue(
+  options: ResolveDefaultWorkspaceSelectorValueOptions,
+): string | undefined {
+  if (hasWorkspaceOption(options.workspaceOptions, options.workspaceFilterId)) {
+    return options.workspaceFilterId;
+  }
+
+  const filteredWorkspaceId = resolveWorkspaceOptionId(
+    options.workspaceOptions,
+    options.workspaceFilter,
+  );
+  if (filteredWorkspaceId) {
+    return filteredWorkspaceId;
+  }
+
+  if (
+    hasWorkspaceOption(
+      options.workspaceOptions,
+      options.rememberedWorkspaceId,
+    )
+  ) {
+    return options.rememberedWorkspaceId;
+  }
+
+  return options.workspaceOptions[0]?.workspaceId;
 }

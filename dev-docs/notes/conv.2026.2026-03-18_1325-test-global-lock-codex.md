@@ -365,3 +365,27 @@ The broad verification pass is running now. `check` and the split root `test --f
 `deno task test` is on the split model now. [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json#L18) and [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L1) define a `test:parallel-safe` slice plus a serial `test:env` slice, and [test_env.ts](/home/djradon/hub/spectacular-voyage/kato/tests/test_env.ts#L8) no longer uses `.env-lock`; it now exposes `withIsolatedEnvironment(...)` to snapshot and restore the allowlisted env keys for the remaining env-boundary tests. I also finished the last doc sync in [task.2026.2026-03-12-replace-test-global-lock.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-03-12-replace-test-global-lock.md#L11), [dev.testing.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.testing.md#L48), [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md#L97), and [dev.decision-log.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.decision-log.md#L20).
 
 The task note now records the real end state: `0` `withLockedEnvironment(...)` sites, `30` `withIsolatedEnvironment(...)` uses across `11` files, and only the intentional env-boundary slice left serial. Verification passed with `deno task check --frozen` and `deno task test --frozen` (`541` parallel-safe + `179` env-slice = `720` passing). The only planned follow-up still open is full timing refresh and Windows remeasurement.
+
+# djradon_2026-03-22_2210_55
+
+when i run deno task test, there are only 179 tests now. There used to be over 600?
+
+# gpt-5.4_2026-03-22_2211_08
+
+I’m checking the exact task wiring and where `deno task test` is resolving from, because a drop from 700-ish to 179 usually means we’re hitting only one slice or the wrong `deno.json`, not that the tests vanished.
+
+# gpt-5.4_2026-03-22_2211_17
+
+I’m reproducing the quiet/root-task output now. My guess is you’re seeing the final serial-slice summary line and missing the earlier parallel-safe summary, because the root task currently runs two separate `deno test` commands back to back.
+
+# gpt-5.4_2026-03-22_2211_49
+
+`deno task test` is a wrapper now, not one monolithic `deno test`. In repo root it resolves to [deno.json](/home/djradon/hub/spectacular-voyage/kato/deno.json#L18), which calls [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L24). That script runs two separate test commands back to back: the parallel-safe slice first, then the serial env slice.
+
+So the `179` you’re seeing is just the second slice’s summary, not the whole suite. I just reproduced it in `/home/djradon/hub/spectacular-voyage/kato`: current output is `552 passed` for the parallel-safe slice, then `179 passed` for the env slice, for `731` total. You can confirm that directly with `deno task test:parallel-safe` and `deno task test:env`.
+
+The confusing part is real, though: the wrapper does not print a final combined total. If you want, I can patch [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L52) to label each slice and print one aggregate summary at the end.
+
+# djradon_2026-03-22_2216_27
+
+yes please

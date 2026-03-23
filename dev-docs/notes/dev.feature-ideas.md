@@ -2,10 +2,13 @@
 id: rqrupsu8yrshs2femj55rch
 title: Feature Ideas
 desc: ""
-updated: 1773783243512
+updated: 1774242249060
 created: 1771724652182
 ---
 
+- Workspace detail page that included config options, and the ability to change them.
+- separate markdownFilenameTemplate and jsonlFilenameTemplate
+  - jsonl should support a metadata section
 - thinking and tools use should use, as default, the settings in config (defaults/general/workspace) but allow per-session overides, maybe by adding flags to the '::' commands
 - scan recent folders more recently, scan older folders (much) less frequency
 - add scanning for .codex/.claude folders even if not initially present

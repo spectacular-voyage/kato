@@ -2,11 +2,45 @@ import { assertEquals } from "@std/assert";
 import {
   buildWorkspaceSelectorIds,
   canStopSessionRecording,
+  readRememberedSessionsWorkspace,
   recordingsPageStaleFilterLabel,
   recordingsPageStateLabel,
   recordingsPageStopActionLabel,
+  rememberSessionsWorkspace,
+  resolveDefaultWorkspaceSelectorValue,
+  SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
 } from "../apps/web/src/session_recording_view_model.ts";
-import type { SessionRecordingActivityRow } from "../apps/web/src/loaders/sessions.ts";
+import type {
+  SessionRecordingActivityRow,
+  WorkspaceOption,
+} from "../apps/web/src/loaders/sessions.ts";
+
+class MemoryStorage {
+  #entries = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.#entries.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.#entries.set(key, value);
+  }
+}
+
+function makeWorkspaceOptions(): WorkspaceOption[] {
+  return [
+    {
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      displayName: "Alpha",
+    },
+    {
+      workspaceId: "ws-beta",
+      alias: "beta",
+      displayName: "Beta",
+    },
+  ];
+}
 
 function makeRecordingRow(
   overrides: Partial<SessionRecordingActivityRow> = {},
@@ -60,4 +94,62 @@ Deno.test("recordings page labels use armed/disarm wording for idle engaged rows
   assertEquals(recordingsPageStopActionLabel("engaged-active"), "stop");
   assertEquals(recordingsPageStopActionLabel("engaged-stale"), "disarm");
   assertEquals(recordingsPageStopActionLabel("stopped"), "stop");
+});
+
+Deno.test("resolveDefaultWorkspaceSelectorValue prefers explicit filter over remembered workspace", () => {
+  assertEquals(
+    resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: makeWorkspaceOptions(),
+      workspaceFilter: "beta",
+      rememberedWorkspaceId: "ws-alpha",
+    }),
+    "ws-beta",
+  );
+  assertEquals(
+    resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: makeWorkspaceOptions(),
+      workspaceFilterId: "ws-beta",
+      rememberedWorkspaceId: "ws-alpha",
+    }),
+    "ws-beta",
+  );
+});
+
+Deno.test("resolveDefaultWorkspaceSelectorValue falls back to remembered workspace id when valid", () => {
+  assertEquals(
+    resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: makeWorkspaceOptions(),
+      rememberedWorkspaceId: "ws-beta",
+    }),
+    "ws-beta",
+  );
+});
+
+Deno.test("resolveDefaultWorkspaceSelectorValue falls back to first option when remembered workspace is stale", () => {
+  assertEquals(
+    resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: makeWorkspaceOptions(),
+      rememberedWorkspaceId: "ws-missing",
+    }),
+    "ws-alpha",
+  );
+});
+
+Deno.test("rememberSessionsWorkspace stores a trimmed shared workspace id", () => {
+  const storage = new MemoryStorage();
+
+  rememberSessionsWorkspace("  ws-beta  ", storage);
+
+  assertEquals(
+    storage.getItem(SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY),
+    "ws-beta",
+  );
+  assertEquals(readRememberedSessionsWorkspace(storage), "ws-beta");
+});
+
+Deno.test("readRememberedSessionsWorkspace ignores blank values", () => {
+  const storage = new MemoryStorage();
+  storage.setItem(SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY, "   ");
+
+  assertEquals(readRememberedSessionsWorkspace(storage), undefined);
 });
