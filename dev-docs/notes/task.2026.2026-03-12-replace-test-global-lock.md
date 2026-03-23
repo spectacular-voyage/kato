@@ -347,6 +347,12 @@ Timed split refresh on 2026-03-23 (`--frozen --quiet`):
 | Windows | `5.08s` | `21.39s` | `22.42s` | `42.53s` |
 | WSL | `4.86s` | `8.24s` | `8.94s` | `14.18s` |
 
+- Windows result counts for those measured runs were `557` passed, `1` ignored
+  for `test:parallel-safe`; `179` passed for `test:env`; and `736` passed,
+  `1` ignored for both `test` and `test:coverage`.
+- Windows `test:coverage` emitted `79.6%` branch / `53.3%` function / `39.0%`
+  line in Deno's detailed table, subject to the extracted-source caveat noted
+  in [[dev.testing]].
 - WSL raw stdout/stderr logs for this refresh are under
   `.test-tmp/timings/wsl/`.
 - WSL beat Windows on every measured command: `test:parallel-safe` was

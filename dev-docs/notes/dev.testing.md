@@ -186,6 +186,9 @@ Current timing note (split-flow refresh on 2026-03-23):
 | Windows | `5.08s` | `21.39s` | `22.42s` | `42.53s` |
 | WSL | `4.86s` | `8.24s` | `8.94s` | `14.18s` |
 
+- Windows result counts for those measured runs were `557` passed, `1` ignored
+  for `test:parallel-safe`; `179` passed for `test:env`; and `736` passed,
+  `1` ignored for both `test` and `test:coverage`.
 - Raw WSL stdout/stderr logs for those measured runs are under
   `.test-tmp/timings/wsl/`.
 - WSL was faster across all four commands (`36.22s` total versus `91.42s` on
@@ -194,6 +197,10 @@ Current timing note (split-flow refresh on 2026-03-23):
   (`8.24s` versus `4.86s` for `test:parallel-safe`), while
   `test:coverage` remains the slowest standalone command because of coverage
   instrumentation.
+- On Windows, `deno task test:coverage --frozen --quiet` emitted `79.6%` branch
+  / `53.3%` function / `39.0%` line in Deno's detailed table. Compare those
+  percentages cautiously against older snapshots because of the extracted-source
+  caveat below.
 
 Current coverage-report caveat:
 
