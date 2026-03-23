@@ -243,8 +243,6 @@ This bucket is functionally complete:
   further?
 - Which of the remaining env-boundary tests are truly permanent contract tests
   versus candidates for future additive seams?
-- Full-slice timing and Windows re-measurement still need to be refreshed now
-  that the root test flow is split.
 
 ## Decisions
 
@@ -342,6 +340,23 @@ Validated during this task on 2026-03-18:
 - `deno task test:coverage --filter 'loadSummaryPageData reads the default shared status snapshot'`
 - `deno task test:env --frozen` (`179` passed)
 
+Timed split refresh on 2026-03-23 (`--frozen --quiet`):
+
+| Environment | `test:parallel-safe` | `test:env` | `test` | `test:coverage` |
+| --- | --- | --- | --- | --- |
+| Windows | `5.08s` | `21.39s` | `22.42s` | `42.53s` |
+| WSL | `4.86s` | `8.24s` | `8.94s` | `14.18s` |
+
+- WSL raw stdout/stderr logs for this refresh are under
+  `.test-tmp/timings/wsl/`.
+- WSL beat Windows on every measured command: `test:parallel-safe` was
+  `0.22s` faster, `test:env` was `13.15s` faster, `test` was `13.48s` faster,
+  and `test:coverage` was `28.35s` faster (`36.22s` total versus `91.42s`
+  overall).
+- `test:env` remains the slower of the two root slices and therefore still
+  dominates `test`; `test:coverage` remains the slowest overall command because
+  of coverage instrumentation.
+
 Before closing the task:
 
 - confirm the hanging web-init failure path no longer stalls behind unrelated
@@ -349,7 +364,8 @@ Before closing the task:
 - confirm `withLockedEnvironment(...)` usage stays eliminated
 - confirm the parallel-safe slice does not rely on `tests/test_env.ts`
 - confirm root task / CI wiring and docs match the actual parallelism model
-- re-measure the resulting split on Windows
+- keep the paired Windows + WSL timing baseline current if the split flow
+  changes materially
 
 ## Non-Goals
 
@@ -423,8 +439,9 @@ Before closing the task:
 - [x] Add task wiring for a broad `test:parallel-safe` slice plus a small serial
       `test:env` slice, and make root `test` / `test:coverage` reflect that
       model.
-- [ ] Run full-slice timing and Windows verification for the new
-      `test:parallel-safe` / `test:env` split and refresh the measured baseline.
+- [x] Pair the recorded 2026-03-23 Windows timing refresh with matching WSL
+      measurements for the new `test:parallel-safe` / `test:env` split and
+      refresh the measured baseline.
 - [x] Update `[[dev.testing]]`, `[[dev.general-guidance]]`, and
       `[[dev.decision-log]]` to reflect the final test-isolation model and
       parallelism policy.

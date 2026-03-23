@@ -1,8 +1,8 @@
 ---
 id: dxghri7zjwd8el4bqespmdw
-title: 20226 03 22_v0 2 10 Coderabbit
+title: 2026 03 22_v0 2 10 Coderabbit
 desc: ''
-updated: 1774272353459
+updated: 1774282062988
 created: 1774272351173
 ---
 
@@ -169,14 +169,6 @@ replacing "included" with "includes" so it reads "Workspace detail page that
 includes config options, and the ability to change them." ensuring consistency
 with other feature descriptions.
 
-In `@dev-docs/notes/dev.todo.md`:
-- Around line 9-10: Convert the two lines "brew packaging" and "review entire
-twin or file (i.e. markdown viewer)" into checklist TODOs and move them into a
-dev-docs/notes/task.* file per repo convention; create or update a file under
-dev-docs/notes/task.* and add markdown checkbox items like "- [ ] Brew
-packaging" and "- [ ] Review entire twin or file (markdown viewer)" with a short
-task note/context and preserve the original wording as the task title.
-
 In `@tests/web-cli_test.ts`:
 - Around line 579-588: The test reads the parsed status into the statusPayload
 object and currently asserts configured, state, and port; add an assertion that
@@ -264,3 +256,91 @@ runtime defaults and path rather than hard-coded YAML.
 - [ ] If we add more advanced `deno test` forwarding patterns later, extend the
       new `tests/run-root-test-slices_test.ts` coverage for additional flag
       combinations.
+
+## round 2
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/web/src/loaders/sessions.ts`:
+- Around line 663-665: The loaders compute statusPath and katoDir with
+inconsistent precedence: statusPath is set via
+resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir()) which lets
+KATO_DAEMON_STATUS_PATH override the passed katoDir, but katoDir is set directly
+from options.katoDir ?? resolveKatoDirFromStatusPath(statusPath) causing a
+mismatch; change the katoDir resolution to use the same precedence rule as
+resolveDefaultStatusPath (i.e., ask resolveDefaultStatusPath/its shared helper
+to decide precedence or create a shared helper that checks
+KATO_DAEMON_STATUS_PATH before falling back to
+options.katoDir/resolveDefaultKatoDir), update both places (the lines computing
+statusPath and katoDir and the analogous lines at 802–804) to call that shared
+helper, and if extracting a helper that returns a joined path ensure you add
+join from `@std/path` to imports.
+
+
+---
+
+Nitpick comments:
+In `@apps/web/web_app.ts`:
+- Around line 69-73: Extract the duplicated same-origin check into a helper like
+requireSameOrigin(req: Request): Response | null that calls
+isSameOriginRequest(req) and returns a 403 Response when false or null when OK,
+then replace both occurrences where you currently do if (ctx.req.method !==
+"GET" && ctx.req.method !== "HEAD") { if (!isSameOriginRequest(ctx.req)) return
+new Response(...); } with a call that checks the method and then does const
+sameOriginError = requireSameOrigin(ctx.req); if (sameOriginError) return
+sameOriginError; and reuse this helper for the other identical check (the second
+block that currently repeats the same-origin logic).
+- Around line 56-57: The middleware registered with app.use(async (ctx) => { ...
+}) recomputes the pathname using new URL(ctx.req.url).pathname; instead, reuse
+the value already stored on the context by previous middleware as
+ctx.state.pathname. Locate the anonymous middleware (app.use(async (ctx) =>
+...)) and replace the recomputation with reading ctx.state.pathname (and
+optionally guard with a fallback if undefined) so you avoid redundant URL
+parsing.
+
+In `@tests/web-cli_test.ts`:
+- Around line 503-519: The test double for WebProcessLauncherLike has an
+incompatible signature: update the webLauncher.launchDetached implementation to
+accept the same parameters the production code passes (e.g.,
+launchDetached(opts: { hostname: string; port: number }) or (...args) ), ignore
+them if unused, and return the same Promise<number> (launchedPid) after saving
+status; ensure the function name launchDetached and the WebProcessLauncherLike
+contract are respected so the test compiles and matches runtime usage.
+
+## Codex review decisions (round 2)
+
+- [ ] `apps/web/src/loaders/sessions.ts` statusPath/katoDir precedence:
+      Valid underlying bug. If `KATO_DAEMON_STATUS_PATH` is set, the current
+      code can read live status from one root while loading metadata/config
+      from another. The fix should be a shared resolution helper, though, and
+      we should audit the same precedence pattern in adjacent loaders instead
+      of treating `sessions.ts` as an isolated one-off.
+- [c] `apps/web/web_app.ts` extract a `requireSameOrigin()` helper:
+      Cancelled. This is real duplication, but only across two very small
+      branches. The helper would add indirection without materially improving
+      clarity or safety.
+- [c] `apps/web/web_app.ts` reuse `ctx.state.pathname` instead of reparsing:
+      Cancelled. Technically valid, but this saves one URL parse per request
+      in non-hot-path middleware and is not worth churning the new app factory
+      for.
+- [c] `tests/web-cli_test.ts` make the start-test launcher double accept
+      `{ hostname, port }`: Cancelled. Mirroring the runtime signature would be
+      slightly nicer, but the bot's "compile-time mismatch" rationale is
+      overstated here, and this does not materially strengthen the behavior the
+      test is actually asserting.
+
+### PR-side note comments not worth carrying forward
+
+- [x] `dev-docs/notes/review.2026.20226-03-22_v0-2-10-coderabbit.md` title
+      typo `20226` -> `2026`: Already resolved locally. The active review note
+      has the corrected title and filename shape.
+- [c] review note `updated` frontmatter removal: Cancelled. The problem is
+      hand-editing Dendron's `updated` field, not the field existing at all.
+- [c] review note code-path references should become Dendron wikilinks:
+      Cancelled. Dendron wikilinks are for notes; turning source-file paths
+      into fake note links like `[[apps.web.src.loaders.sessions]]` would make
+      the review note less accurate, not more.
+- [c] review note markdownlint `task.*` wording warning: Cancelled as stale for
+      the current local note. The warning was attached to the old typo'd path,
+      and the triggering text is not present in this file.

@@ -179,13 +179,21 @@ of rerunning the whole suite. If you need a manual raw profile, write it under
 `.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
 directory.
 
-Current timing note:
+Current timing note (split-flow refresh on 2026-03-23):
 
-- The 2026-03-11 monolithic timings are obsolete after the root split to
-  `test:parallel-safe` + `test:env`.
-- Refresh this block after rerunning full `deno task test --frozen --quiet`
-  and `deno task test:coverage --frozen --quiet` on the split flow, including
-  a Windows spot-check.
+| Environment | `test:parallel-safe` | `test:env` | `test` | `test:coverage` |
+| --- | --- | --- | --- | --- |
+| Windows | `5.08s` | `21.39s` | `22.42s` | `42.53s` |
+| WSL | `4.86s` | `8.24s` | `8.94s` | `14.18s` |
+
+- Raw WSL stdout/stderr logs for those measured runs are under
+  `.test-tmp/timings/wsl/`.
+- WSL was faster across all four commands (`36.22s` total versus `91.42s` on
+  Windows, `60.4%` faster overall).
+- `test:env` is still the dominant cost inside the split root `test` flow
+  (`8.24s` versus `4.86s` for `test:parallel-safe`), while
+  `test:coverage` remains the slowest standalone command because of coverage
+  instrumentation.
 
 Current coverage-report caveat:
 
