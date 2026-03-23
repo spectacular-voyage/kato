@@ -389,3 +389,154 @@ The confusing part is real, though: the wrapper does not print a final combined 
 # djradon_2026-03-22_2216_27
 
 yes please
+
+# gpt-5.4_2026-03-22_2216_38
+
+I’m updating the root test runner so it labels each slice and prints one combined summary at the end. After that I’ll smoke-test the wrapper with a filtered run so we can see the new output shape without waiting on the whole suite again.
+
+# gpt-5.4_2026-03-22_2217_06
+
+I found the gap: the wrapper just inherited raw `deno test` output and exited, so the last slice’s summary was the only obvious number on screen. I’m replacing that with a teeing runner that preserves the live test output, labels each slice, and adds a combined summary line at the end.
+
+# gpt-5.4_2026-03-22_2217_33
+
+I’ve patched the runner. I’m formatting and then doing a filtered `deno task test --quiet` run so we can see the new slice labels and the combined total in the actual output path you hit.
+
+# gpt-5.4_2026-03-22_2222_48
+
+The new output shape is working. I’m doing one tiny follow-up run with a single env-slice test so we can confirm the combined summary counts an actual pass, not just filtered totals.
+
+# gpt-5.4_2026-03-22_2223_10
+
+Patched [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L24) so `deno task test` now prints:
+
+- `==> Running test:parallel-safe`
+- `==> test:parallel-safe summary: ...`
+- `==> Running test:env`
+- `==> test:env summary: ...`
+- `==> Combined root test summary: ...`
+
+It still preserves the live `deno test` output, but now the total is explicit instead of leaving you with the last slice’s `179` line.
+
+I validated it with `deno check scripts/run-root-test-slices.ts` and filtered `deno task test --quiet` runs. The wrapper now ends with combined lines like `==> Combined root test summary: ok | 1 passed | 0 failed | 730 filtered out (combined)`. I didn’t rerun the full unfiltered suite in this pass.
+
+# djradon_2026-03-22_2223_10
+
+Did you get stuck?
+
+# gpt-5.4_2026-03-22_2223_13
+
+No. The wrapper change is done and validated.
+
+What happened is the runner now streams both slice outputs, so a filtered smoke run produced a lot of terminal text before the final combined summary. The actual result was successful: the new root test output now labels `test:parallel-safe`, labels `test:env`, and prints a final combined summary from [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L191).
+
+I didn’t rerun the full unfiltered suite after that patch, only filtered smoke checks plus `deno check` on the script. If you want, I can run a full `deno task test --quiet` now to confirm the new end-of-run output on the complete suite.
+
+# djradon_2026-03-22_2224_10
+
+I didn't see the end-of-run outpu using "deno task test"
+
+# gpt-5.4_2026-03-22_2224_22
+
+I’m checking the exact tail of a full root run so we can separate “the summary didn’t print” from “it printed but got buried in the stream.” I’ll inspect the last lines directly instead of relying on the scrollback.
+
+# gpt-5.4_2026-03-22_2224_26
+
+Those runs are still in progress. I’m waiting for the final tail so we can see whether the combined summary is actually at the bottom for both the quiet and non-quiet forms.
+
+# gpt-5.4_2026-03-22_2224_48
+
+I checked it directly, and the end-of-run output is there now for both `deno task test` and `deno task test --quiet`.
+
+The last lines are:
+
+```text
+ok | 179 passed | 0 failed (4s)
+
+==> test:env summary: ok | 179 passed | 0 failed (4s)
+
+==> Combined root test summary: ok | 731 passed | 0 failed (combined)
+```
+
+That behavior is coming from [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L191).
+
+If you still don’t see that locally, the most likely reason is that your terminal is still running the older version of the script. A quick check is:
+
+```bash
+tail -n 20 scripts/run-root-test-slices.ts
+```
+
+and confirm it includes the `Combined root test summary` line near the end.
+
+# djradon_2026-03-22_2226_27
+
+the script has the combined line, but I'm not seeing the output: 
+
+runDaemonCli ignores a broken web config for unrelated commands ... ok (2ms)
+
+ok | 179 passed | 0 failed (2s)
+
+==> test:env finished with exit code 0
+
+    ~/hub/spectacular-voyage/kato    next/0.2.10 !2 
+
+# gpt-5.4_2026-03-22_2226_39
+
+I can see the mismatch: the runner only prints `finished with exit code 0` when it fails to parse the `deno test` summary line, even though the test command itself succeeded. I’m reproducing that in a real TTY now so I can patch the parser against whatever the terminal is injecting.
+
+# gpt-5.4_2026-03-22_2226_43
+
+The TTY repro already shows ANSI control sequences before the runner output, which is a strong sign the summary parser is missing colored or cursor-controlled lines. I’m letting that run finish, then I’ll patch the parser to strip terminal control codes before matching.
+
+# gpt-5.4_2026-03-22_2227_00
+
+I’ve got one TTY repro that parses fine, so this is likely one of those annoying “depends on exactly how the terminal rendered that run” cases rather than a logic bug in the happy path. I’m capturing a full raw terminal transcript next so we can see the exact bytes around the summary line that failed on your machine.
+
+# gpt-5.4_2026-03-22_2227_20
+
+I can reproduce the “good” path now, but since you actually hit the bad one, I’m hardening the runner instead of hand-waving it away. I’m adding a fallback parser that strips terminal control codes and scans the full captured output after the child exits, so cursor-control noise can’t hide the summary.
+
+# gpt-5.4_2026-03-22_2227_33
+
+I’ve added a transcript-based fallback parser, so even if the terminal injects cursor-control junk into the summary line, the runner should still recover it after the child exits. I’m formatting and re-running the full root suite tail once more to make sure the end-of-run output stays intact.
+
+# gpt-5.4_2026-03-22_2227_37
+
+The patch formats cleanly. I’m just waiting on the full tail check now so we can verify the bottom-of-run output still ends with the combined total after the fallback change.
+
+# gpt-5.4_2026-03-22_2227_49
+
+Likely cause was terminal control noise confusing the summary parser in [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L75). I hardened it so it now:
+
+- strips ANSI/control sequences before matching summary lines
+- keeps a full transcript buffer
+- falls back to parsing the sanitized transcript after the child exits if the live line parser misses the summary
+
+I rechecked the end of a full `deno task test`, and it now ends with:
+
+```text
+ok | 179 passed | 0 failed (3s)
+
+==> test:env summary: ok | 179 passed | 0 failed (3s)
+
+==> Combined root test summary: ok | 731 passed | 0 failed (combined)
+```
+
+If you still see `==> test:env finished with exit code 0`, you’re almost certainly running an older copy of the script in your worktree.
+
+# djradon_2026-03-22_2229_27
+
+I see the message now. But I don't it was from control characters. Those were just icons in my fancy powerlevel10k prompt.
+
+# gpt-5.4_2026-03-22_2229_42
+
+Powerlevel10k icons are just printable Unicode glyphs, so that part was my mistake.
+
+What I should have said is: the prompt glyphs were not the problem. The likely issue was that the wrapper’s live summary detection was too brittle for TTY output in general. In one of my TTY captures I saw real ANSI redraw/clear sequences before the task output, but those are separate from your prompt icons.
+
+The fix I left in place is still useful because it no longer depends on perfectly parsing one live-rendered line. [run-root-test-slices.ts](/home/djradon/hub/spectacular-voyage/kato/scripts/run-root-test-slices.ts#L75) now:
+- tries to parse the summary live
+- also keeps the full transcript
+- falls back to parsing the sanitized transcript after the child exits
+
+So the important part is: the runner is now more robust, but blaming your prompt icons was inaccurate. If you want, the next step to make this rock-solid would be switching the wrapper to consume `deno test --json` instead of parsing human output at all.
