@@ -799,7 +799,9 @@ export async function loadSessionsPageData(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
-  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const statusPath = options.statusPath ??
+    resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir());
+  const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const workspaceEntries = options.workspaceEntries ??
     await loadRegisteredWorkspaces(katoDir);
   const [rows, resolvedWorkspaceFilter] = await Promise.all([
@@ -807,6 +809,7 @@ export async function loadSessionsPageData(
       ...options,
       includeStale,
       katoDir,
+      statusPath,
       workspaceEntries,
     }),
     resolveWorkspaceFilter(

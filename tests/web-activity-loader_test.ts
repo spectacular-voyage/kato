@@ -239,6 +239,7 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
     );
 
     const data = await loadSessionsPageData({ katoDir });
+    const statusPathData = await loadSessionsPageData({ statusPath });
 
     assertEquals(data.sessionCount, 2);
     assertEquals(data.activeSessionCount, 1);
@@ -273,6 +274,15 @@ Deno.test("loadSessionsPageData integrates live sessions with persistent recordi
     assertEquals(
       data.workspaceOptions.map((workspace) => workspace.displayName),
       ["Alpha Workspace", "Beta Project"],
+    );
+    assertEquals(statusPathData.sessionCount, 2);
+    assertEquals(
+      statusPathData.workspaceOptions.map((workspace) => workspace.displayName),
+      ["Alpha Workspace", "Beta Project"],
+    );
+    assertEquals(
+      statusPathData.rows[0]?.recordings[0]?.workspaceDisplayName,
+      "Alpha Workspace",
     );
     assertEquals(
       data.rows[1]?.recordings[0]?.workspaceHref,

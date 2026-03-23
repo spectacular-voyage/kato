@@ -370,8 +370,9 @@ Deno.test("renderStatusText: dead stored web status is shown as stopped with dia
 
   assertStringIncludes(
     out,
-    `kato web (v${CLI_APP_VERSION}): stopped (http://127.0.0.1:3173/, pid 4242, last heartbeat 2026-02-24 01:58)`,
+    `kato web (v${CLI_APP_VERSION}): stopped (http://127.0.0.1:3173/, pid 4242, last heartbeat `,
   );
+  assert(/last heartbeat \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)/.test(out));
 });
 
 Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {

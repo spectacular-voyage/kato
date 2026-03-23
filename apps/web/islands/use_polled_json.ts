@@ -40,7 +40,9 @@ export function usePolledJson<T>(options: {
           endpoint: options.endpoint,
         });
         if (result.kind === "unauthorized") {
-          signalAuthExpired();
+          if (!cancelled) {
+            signalAuthExpired();
+          }
           return;
         }
         if (result.kind === "data" && !cancelled) {

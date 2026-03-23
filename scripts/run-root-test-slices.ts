@@ -1,4 +1,4 @@
-const ENV_TEST_FILES = [
+export const ENV_TEST_FILES = [
   "tests/daemon-cli_test.ts",
   "tests/daemon-control-plane_test.ts",
   "tests/daemon-launcher_test.ts",
@@ -12,6 +12,10 @@ const ENV_TEST_FILES = [
   "tests/web-cli_test.ts",
 ] as const;
 
+export const DEFAULT_PARALLEL_SAFE_TEST_TARGETS = [
+  "tests",
+] as const;
+
 const SHARED_TEST_ARGS = [
   "--allow-read",
   "--allow-write=.test-tmp",
@@ -19,11 +23,28 @@ const SHARED_TEST_ARGS = [
   "--allow-env=KATO_LOGGING_OPERATIONAL_LEVEL,KATO_LOGGING_AUDIT_LEVEL,HOME,USERPROFILE,KATO_RUNTIME_DIR,KATO_DAEMON_STATUS_PATH,KATO_DAEMON_CONTROL_PATH,KATO_CLAUDE_SESSION_ROOTS,KATO_CODEX_SESSION_ROOTS,KATO_GEMINI_SESSION_ROOTS,KATO_DAEMON_MAX_MEMORY_MB,KATO_CONFIG_PATH,KATO_ALLOWED_WRITE_ROOT,KATO_ALLOWED_WRITE_ROOTS_JSON,KATO_WEB_PASSWORD",
 ] as const;
 
-type Mode = "standard" | "coverage";
+const TEST_FLAGS_WITH_VALUES = new Set([
+  "-c",
+  "--config",
+  "--coverage",
+  "--filter",
+  "--jobs",
+  "--junit-path",
+  "--location",
+  "--seed",
+]);
 
-type SliceName = "test:parallel-safe" | "test:env";
+export type Mode =
+  | "standard"
+  | "coverage"
+  | "parallel-safe"
+  | "env"
+  | "coverage:parallel-safe"
+  | "coverage:env";
 
-type SliceCommand = {
+export type SliceName = "test:parallel-safe" | "test:env";
+
+export type SliceCommand = {
   name: SliceName;
   args: string[];
 };
@@ -38,38 +59,165 @@ type TestSummary = {
   duration: string;
 };
 
-function buildCommands(mode: Mode, forwardedArgs: string[]): SliceCommand[] {
-  const coverageArgs = mode === "coverage"
+const TERMINAL_OSC_PATTERN = new RegExp(
+  String.raw`\u001B\][^\u0007]*(?:\u0007|\u001B\\)`,
+  "g",
+);
+const TERMINAL_CSI_PATTERN = new RegExp(
+  String.raw`\u001B\[[0-?]*[ -/]*[@-~]`,
+  "g",
+);
+const TERMINAL_ESCAPE_PATTERN = new RegExp(String.raw`\u001B[@-_]`, "g");
+const TERMINAL_CONTROL_PATTERN = new RegExp(
+  String.raw`[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]`,
+  "g",
+);
+
+function normalizeTestTarget(target: string): string {
+  const normalized = target.replaceAll("\\", "/");
+  if (normalized === ".") {
+    return normalized;
+  }
+  return normalized.replace(/\/+$/, "");
+}
+
+function isExactEnvTestTarget(target: string): boolean {
+  const normalizedTarget = normalizeTestTarget(target);
+  return ENV_TEST_FILES.some((path) =>
+    normalizeTestTarget(path) === normalizedTarget
+  );
+}
+
+function targetMatchesPath(target: string, path: string): boolean {
+  const normalizedTarget = normalizeTestTarget(target);
+  if (normalizedTarget === ".") {
+    return true;
+  }
+  const normalizedPath = normalizeTestTarget(path);
+  return normalizedPath === normalizedTarget ||
+    normalizedPath.startsWith(`${normalizedTarget}/`);
+}
+
+function splitForwardedArgs(forwardedArgs: string[]): {
+  optionArgs: string[];
+  positionalTargets: string[];
+} {
+  const optionArgs: string[] = [];
+  const positionalTargets: string[] = [];
+
+  for (let index = 0; index < forwardedArgs.length; index += 1) {
+    const arg = forwardedArgs[index];
+    if (arg === "--") {
+      positionalTargets.push(...forwardedArgs.slice(index + 1));
+      break;
+    }
+    if (arg.startsWith("-")) {
+      optionArgs.push(arg);
+      if (
+        !arg.includes("=") &&
+        TEST_FLAGS_WITH_VALUES.has(arg) &&
+        index + 1 < forwardedArgs.length
+      ) {
+        optionArgs.push(forwardedArgs[index + 1]);
+        index += 1;
+      }
+      continue;
+    }
+    positionalTargets.push(arg);
+  }
+
+  return {
+    optionArgs,
+    positionalTargets,
+  };
+}
+
+function resolveParallelSafeTargets(positionalTargets: string[]): string[] {
+  if (positionalTargets.length === 0) {
+    return [...DEFAULT_PARALLEL_SAFE_TEST_TARGETS];
+  }
+  return positionalTargets.filter((target) => !isExactEnvTestTarget(target));
+}
+
+function resolveEnvTargets(positionalTargets: string[]): string[] {
+  if (positionalTargets.length === 0) {
+    return [...ENV_TEST_FILES];
+  }
+  return ENV_TEST_FILES.filter((path) =>
+    positionalTargets.some((target) => targetMatchesPath(target, path))
+  );
+}
+
+function resolveCoverageMode(mode: Mode): boolean {
+  return mode === "coverage" ||
+    mode === "coverage:parallel-safe" ||
+    mode === "coverage:env";
+}
+
+function resolveRequestedSlices(mode: Mode): SliceName[] {
+  switch (mode) {
+    case "standard":
+    case "coverage":
+      return ["test:parallel-safe", "test:env"];
+    case "parallel-safe":
+    case "coverage:parallel-safe":
+      return ["test:parallel-safe"];
+    case "env":
+    case "coverage:env":
+      return ["test:env"];
+  }
+}
+
+export function buildCommands(
+  mode: Mode,
+  forwardedArgs: string[],
+): SliceCommand[] {
+  const { optionArgs, positionalTargets } = splitForwardedArgs(forwardedArgs);
+  const coverage = resolveCoverageMode(mode);
+  const coverageArgs = coverage
     ? ["--clean", "--coverage=.test-tmp/coverage/root"]
     : [];
-  const envCoverageArgs = mode === "coverage"
+  const envCoverageArgs = coverage
     ? ["--coverage=.test-tmp/coverage/root"]
     : [];
+  const requestedSlices = new Set(resolveRequestedSlices(mode));
+  const commands: SliceCommand[] = [];
 
-  return [
-    {
-      name: "test:parallel-safe",
-      args: [
-        "test",
-        ...SHARED_TEST_ARGS,
-        ...coverageArgs,
-        "--parallel",
-        `--ignore=${ENV_TEST_FILES.join(",")}`,
-        "tests",
-        ...forwardedArgs,
-      ],
-    },
-    {
-      name: "test:env",
-      args: [
-        "test",
-        ...SHARED_TEST_ARGS,
-        ...envCoverageArgs,
-        ...ENV_TEST_FILES,
-        ...forwardedArgs,
-      ],
-    },
-  ];
+  if (requestedSlices.has("test:parallel-safe")) {
+    const targets = resolveParallelSafeTargets(positionalTargets);
+    if (targets.length > 0) {
+      commands.push({
+        name: "test:parallel-safe",
+        args: [
+          "test",
+          ...SHARED_TEST_ARGS,
+          ...coverageArgs,
+          "--parallel",
+          `--ignore=${ENV_TEST_FILES.join(",")}`,
+          ...optionArgs,
+          ...targets,
+        ],
+      });
+    }
+  }
+
+  if (requestedSlices.has("test:env")) {
+    const targets = resolveEnvTargets(positionalTargets);
+    if (targets.length > 0) {
+      commands.push({
+        name: "test:env",
+        args: [
+          "test",
+          ...SHARED_TEST_ARGS,
+          ...envCoverageArgs,
+          ...optionArgs,
+          ...targets,
+        ],
+      });
+    }
+  }
+
+  return commands;
 }
 
 function parseTestSummary(line: string): TestSummary | undefined {
@@ -123,10 +271,10 @@ function parseTestSummary(line: string): TestSummary | undefined {
 
 function sanitizeTerminalText(text: string): string {
   return text
-    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001B[@-_]/g, "")
-    .replace(/[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]/g, "");
+    .replace(TERMINAL_OSC_PATTERN, "")
+    .replace(TERMINAL_CSI_PATTERN, "")
+    .replace(TERMINAL_ESCAPE_PATTERN, "")
+    .replace(TERMINAL_CONTROL_PATTERN, "");
 }
 
 function findSummaryInTranscript(transcript: string): TestSummary | undefined {
@@ -149,7 +297,8 @@ async function scanLines(
   stream: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
 ): Promise<void> {
-  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
   let pending = "";
 
   while (true) {
@@ -157,7 +306,7 @@ async function scanLines(
     if (done) {
       break;
     }
-    pending += value;
+    pending += decoder.decode(value, { stream: true });
     while (true) {
       const newlineIndex = pending.indexOf("\n");
       if (newlineIndex === -1) {
@@ -168,6 +317,7 @@ async function scanLines(
       onLine(line);
     }
   }
+  pending += decoder.decode();
 
   if (pending.length > 0) {
     onLine(pending.replace(/\r$/, ""));
@@ -278,9 +428,16 @@ async function runCommand(
 
 async function main(): Promise<void> {
   const [mode, ...forwardedArgs] = Deno.args;
-  if (mode !== "standard" && mode !== "coverage") {
+  if (
+    mode !== "standard" &&
+    mode !== "coverage" &&
+    mode !== "parallel-safe" &&
+    mode !== "env" &&
+    mode !== "coverage:parallel-safe" &&
+    mode !== "coverage:env"
+  ) {
     console.error(
-      "usage: deno run -A scripts/run-root-test-slices.ts <standard|coverage> [deno test args...]",
+      "usage: deno run -A scripts/run-root-test-slices.ts <standard|coverage|parallel-safe|env|coverage:parallel-safe|coverage:env> [deno test args...]",
     );
     Deno.exit(2);
   }
@@ -300,4 +457,6 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (import.meta.main) {
+  await main();
+}

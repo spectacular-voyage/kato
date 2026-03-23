@@ -585,6 +585,7 @@ Deno.test(
       };
       assertEquals(statusPayload.configured, true);
       assertEquals(statusPayload.state, "running");
+      assertEquals(statusPayload.stale, false);
       assertEquals(statusPayload.port, 3187);
     });
   },

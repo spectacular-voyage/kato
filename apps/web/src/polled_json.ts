@@ -1,7 +1,8 @@
 export type PolledJsonLoadResult<T> =
   | { kind: "data"; data: T }
   | { kind: "unchanged" }
-  | { kind: "unauthorized" };
+  | { kind: "unauthorized" }
+  | { kind: "error"; status: number; statusText?: string };
 
 export async function loadPolledJson<T>(options: {
   endpoint: string;
@@ -16,9 +17,21 @@ export async function loadPolledJson<T>(options: {
     response.body?.cancel();
     return { kind: "unauthorized" };
   }
-  if (!response.ok) {
+  if (
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
     response.body?.cancel();
     return { kind: "unchanged" };
+  }
+  if (!response.ok) {
+    response.body?.cancel();
+    return {
+      kind: "error",
+      status: response.status,
+      statusText: response.statusText || undefined,
+    };
   }
 
   return {

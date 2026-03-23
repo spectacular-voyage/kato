@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   AUTH_EXPIRY_STORAGE_KEY,
   listenForAuthExpiry,
@@ -235,4 +235,29 @@ Deno.test("loadPolledJson returns unauthorized for 401 responses without parsing
   });
 
   assertEquals(result.kind, "unauthorized");
+});
+
+Deno.test("loadPolledJson treats no-content responses as unchanged", async () => {
+  const result = await loadPolledJson<{ ok: boolean }>({
+    endpoint: "/api/summary",
+    fetchFn: () => Promise.resolve(new Response(null, { status: 204 })),
+  });
+
+  assertEquals(result.kind, "unchanged");
+});
+
+Deno.test("loadPolledJson surfaces unexpected http errors", async () => {
+  const result = await loadPolledJson<{ ok: boolean }>({
+    endpoint: "/api/summary",
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "boom" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+  });
+
+  assert(result.kind === "error");
+  assertEquals(result.status, 500);
 });

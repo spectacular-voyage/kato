@@ -1,9 +1,12 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
+  createDefaultSharedBehaviorConfig,
   readWorkspaceConfigWorkspaceId,
   registerWorkspace,
+  resolveDefaultSharedConfigPath,
   setWorkspaceDisplayName,
+  SharedBehaviorConfigFileStore,
   unregisterWorkspace,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
@@ -12,15 +15,11 @@ import { withTestTempDir } from "./test_temp.ts";
 async function writeSharedConfig(katoDir: string): Promise<void> {
   const sharedDir = join(katoDir, "shared");
   await Deno.mkdir(sharedDir, { recursive: true });
-  await Deno.writeTextFile(
-    join(sharedDir, "kato-shared-config.yaml"),
-    [
-      "schemaVersion: 1",
-      "allowedWriteRoots: []",
-      "exportTimezone: local",
-      "exportMarkdownFrontmatter: {}",
-      "exportFeatureFlags: {}",
-    ].join("\n") + "\n",
+  const store = new SharedBehaviorConfigFileStore(
+    resolveDefaultSharedConfigPath(katoDir),
+  );
+  await store.ensureInitialized(
+    createDefaultSharedBehaviorConfig({ allowedWriteRoots: [] }),
   );
 }
 
