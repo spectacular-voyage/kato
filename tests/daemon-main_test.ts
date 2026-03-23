@@ -18,7 +18,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
-  withLockedEnvironment,
+  withIsolatedEnvironment,
 } from "./test_env.ts";
 import {
   makeTestTempDir,
@@ -158,7 +158,7 @@ function makeUserConfigStore(
 async function withIsolatedDaemonPathEnv<T>(
   run: () => Promise<T> | T,
 ): Promise<T> {
-  return await withLockedEnvironment(async () => {
+  return await withIsolatedEnvironment(async () => {
     const originalStatusPath = Deno.env.get("KATO_DAEMON_STATUS_PATH");
     const originalControlPath = Deno.env.get("KATO_DAEMON_CONTROL_PATH");
     try {

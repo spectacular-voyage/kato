@@ -4,7 +4,7 @@ import {
   resolveDefaultAllowedWriteRoots,
   WritePathPolicyGate,
 } from "../apps/daemon/src/mod.ts";
-import { withLockedEnvironment } from "./test_env.ts";
+import { withIsolatedEnvironment } from "./test_env.ts";
 import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
 
 const PATH_POLICY_FALLBACK_ROOT = resolveTestTempPath(
@@ -57,7 +57,7 @@ async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 }
 
 Deno.test("resolveDefaultAllowedWriteRoots prefers JSON env and trims entries", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({
@@ -81,7 +81,7 @@ Deno.test("resolveDefaultAllowedWriteRoots prefers JSON env and trims entries", 
 });
 
 Deno.test("resolveDefaultAllowedWriteRoots fails closed on invalid JSON env", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({
@@ -97,7 +97,7 @@ Deno.test("resolveDefaultAllowedWriteRoots fails closed on invalid JSON env", as
 });
 
 Deno.test("resolveDefaultAllowedWriteRoots falls back to single-root env or cwd", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotPathPolicyEnv();
     try {
       setPathPolicyEnv({

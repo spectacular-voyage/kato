@@ -54,7 +54,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
-  withLockedEnvironment,
+  withIsolatedEnvironment,
 } from "./test_env.ts";
 import {
   makeTestTempPath,
@@ -2712,7 +2712,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli start auto-initializes global config and warns when local .kato exists",
   async () => {
-    await withLockedEnvironment(async () => {
+    await withIsolatedEnvironment(async () => {
       const snapshot = snapshotRuntimeEnv();
       await withTestTempDir(
         "daemon-cli-start-global-root-",
@@ -2778,7 +2778,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli init/start/restart warn when local .kato exists but global root is active",
   async () => {
-    await withLockedEnvironment(async () => {
+    await withIsolatedEnvironment(async () => {
       const snapshot = snapshotRuntimeEnv();
       await withTestTempDir(
         "daemon-cli-global-root-warning-",
@@ -2842,7 +2842,7 @@ Deno.test(
 Deno.test(
   "runDaemonCli fails early when KATO_RUNTIME_DIR is relative",
   async () => {
-    await withLockedEnvironment(async () => {
+    await withIsolatedEnvironment(async () => {
       const snapshot = snapshotRuntimeEnv();
       const stderr: string[] = [];
       try {

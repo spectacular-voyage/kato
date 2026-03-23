@@ -45,20 +45,24 @@ will fail with `NotCapable` for those suites.
 2. Full gate:
    - `deno task ci`
 
-The root `test` and `test:coverage` tasks now use Deno module parallelism by
-default. Local verification on 2026-03-06 stayed deterministic with both
-`deno task test --frozen --quiet` and
-`deno task test:coverage --frozen --quiet`, including after adding direct JSONL
-writer, session-twin mapper, runtime-config, shared-behavior config,
-path-policy, launcher, status-command, control-plane, env-helper,
-status-error-cursor, CLI parser, direct start / workspace-init / export command
-tests, direct hash tests, and Codex parser tests, status-workspace tests,
-provider-session-discovery tests, daemon-status-projection tests,
-daemon-export-request tests, and daemon-first-seen tests, daemon-command-state
-tests, daemon-memory-telemetry tests, daemon-workspace-paths tests,
-daemon-workspace-output-state tests, provider-ingestion-resume tests,
-provider-ingestion-merge tests, daemon-command-destination tests, plus a shared
-env lock in `tests/test_env.ts` for env-mutating cases.
+The root test flow is now intentionally split:
+
+- `deno task test:parallel-safe` runs `deno test --parallel` across the broad
+  suite with the env-boundary files excluded.
+- `deno task test:env` runs the remaining env-boundary files serially.
+- `deno task test` and `deno task test:coverage` dispatch those two slices
+  sequentially through `scripts/run-root-test-slices.ts`.
+
+`tests/test_env.ts` no longer coordinates the suite through `.env-lock`.
+`withIsolatedEnvironment(...)` now snapshots and restores the bounded env keys
+used by the serial env slice.
+
+Smoke validation on 2026-03-18 confirmed:
+
+- `deno task test:parallel-safe --filter 'loadSummaryPageData reads the default shared status snapshot'`
+- `deno task test:env --frozen` (`179` passing)
+- `deno task test --frozen --filter 'resolveWebInitPassword reads KATO_WEB_PASSWORD from process env when no override is injected'`
+- `deno task test:coverage --filter 'loadSummaryPageData reads the default shared status snapshot'`
 
 GitHub CI uses a split gate:
 
@@ -167,19 +171,36 @@ That slice now covers:
 3. Generate the LCOV artifact used by GitHub CI / Codecov:
    - `deno task coverage:lcov`
 
+`deno task test:coverage` now runs the parallel-safe slice first and then the
+serial env slice into the same `.test-tmp/coverage/root` directory.
+
 For focused local work, prefer specific `_test.ts` files and `--filter` instead
 of rerunning the whole suite. If you need a manual raw profile, write it under
 `.test-tmp/coverage/<label>` instead of creating a new top-level `.coverage-*`
 directory.
 
-Current local timings from 2026-03-11:
+Current timing note (split-flow refresh on 2026-03-23):
 
-- `deno task test --frozen --quiet`: `607` passing tests, `12.88s` real
-- `deno task test:coverage --frozen --quiet`: `607` passing tests, `80.0%` line
-  coverage, `84.9%` branch coverage, `14.17s` real
+| Environment | `test:parallel-safe` | `test:env` | `test` | `test:coverage` |
+| --- | --- | --- | --- | --- |
+| Windows | `5.08s` | `21.39s` | `22.42s` | `42.53s` |
+| WSL | `4.86s` | `8.24s` | `8.94s` | `14.18s` |
 
-Treat those numbers as a dated baseline, not a contract. Refresh this block
-after material test-count or runtime changes land.
+- Windows result counts for those measured runs were `557` passed, `1` ignored
+  for `test:parallel-safe`; `179` passed for `test:env`; and `736` passed,
+  `1` ignored for both `test` and `test:coverage`.
+- Raw WSL stdout/stderr logs for those measured runs are under
+  `.test-tmp/timings/wsl/`.
+- WSL was faster across all four commands (`36.22s` total versus `91.42s` on
+  Windows, `60.4%` faster overall).
+- `test:env` is still the dominant cost inside the split root `test` flow
+  (`8.24s` versus `4.86s` for `test:parallel-safe`), while
+  `test:coverage` remains the slowest standalone command because of coverage
+  instrumentation.
+- On Windows, `deno task test:coverage --frozen --quiet` emitted `79.6%` branch
+  / `53.3%` function / `39.0%` line in Deno's detailed table. Compare those
+  percentages cautiously against older snapshots because of the extracted-source
+  caveat below.
 
 Current coverage-report caveat:
 

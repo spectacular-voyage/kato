@@ -86,7 +86,7 @@ export interface StatusWebState {
   configured: boolean;
   running: boolean;
   stale: boolean;
-  state: "running" | "stopped" | "stale" | "unconfigured";
+  state: "running" | "stopped" | "unconfigured";
   hostname?: string;
   port?: number;
   pid?: number;
@@ -484,13 +484,7 @@ async function loadStatusWebState(
   const url = ctx.webConfig
     ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
     : stored.url;
-  const state = alive
-    ? "running"
-    : stale
-    ? "stale"
-    : configured
-    ? "stopped"
-    : "unconfigured";
+  const state = alive ? "running" : configured ? "stopped" : "unconfigured";
 
   return {
     configured,
@@ -608,10 +602,10 @@ function renderWebStatusText(
       webStatus.url ?? "url unavailable"
     }, pid ${webStatus.pid ?? "unknown"})`;
   }
-  if (webStatus.state === "stale") {
-    return `${formatStatusToken("stale status", "amber", colorize)} (${
+  if (webStatus.stale) {
+    return `${formatStatusToken("stopped", "amber", colorize)} (${
       webStatus.url ?? "url unavailable"
-    }, pid ${webStatus.pid ?? "unknown"}, heartbeat ${
+    }, pid ${webStatus.pid ?? "unknown"}, last heartbeat ${
       formatLocalTimestamp(webStatus.heartbeatAt)
     })`;
   }
@@ -1142,9 +1136,11 @@ export function renderStatusText(
     : recentErrors;
 
   const daemonText = snapshot.daemonRunning
-    ? `running (pid: ${snapshot.daemonPid ?? "unknown"}${
-      stale ? ", stale heartbeat" : ""
-    })`
+    ? stale
+      ? `unresponsive (pid: ${
+        snapshot.daemonPid ?? "unknown"
+      }, stale heartbeat)`
+      : `running (pid: ${snapshot.daemonPid ?? "unknown"})`
     : "stopped";
 
   const lines: string[] = [];

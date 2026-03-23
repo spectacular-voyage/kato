@@ -24,8 +24,7 @@ import { runExportCommand } from "../apps/cli/src/commands/export.ts";
 import { runStartCommand } from "../apps/cli/src/commands/start.ts";
 import { runWebRestartCommand } from "../apps/cli/src/commands/web.ts";
 import { runWorkspaceInitCommand } from "../apps/cli/src/commands/workspace_init.ts";
-import { withLockedEnvironment } from "./test_env.ts";
-import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
+import { withTestTempDir } from "./test_temp.ts";
 
 const NOW = new Date("2026-03-06T12:00:00.000Z");
 
@@ -309,14 +308,7 @@ async function withCommandTestRoot(
   prefix: string,
   run: (root: string) => Promise<void>,
 ): Promise<void> {
-  await withLockedEnvironment(async () => {
-    const root = await makeTestTempDir(prefix);
-    try {
-      await run(root);
-    } finally {
-      await removePathIfPresent(root);
-    }
-  });
+  await withTestTempDir(prefix, run);
 }
 
 Deno.test("runStartCommand returns early when daemon is already running and fresh", async () => {

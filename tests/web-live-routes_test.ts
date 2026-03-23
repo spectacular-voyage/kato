@@ -26,12 +26,6 @@ import {
   getSummaryResponse,
   getWorkspacesResponse,
 } from "../apps/web/src/live_routes.ts";
-import {
-  restoreRuntimeEnv,
-  setRuntimeEnv,
-  snapshotRuntimeEnv,
-  withLockedEnvironment,
-} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
@@ -187,7 +181,7 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
   );
 
   const userConfigStore = new UserConfigFileStore(
-    resolveDefaultUserConfigPath(),
+    resolveDefaultUserConfigPath(katoDir),
   );
   await userConfigStore.save(
     createDefaultUserConfig({
@@ -313,257 +307,226 @@ async function setupLiveRouteFixture(homeDir: string): Promise<void> {
 }
 
 Deno.test("live API routes disable caching and return expected page models", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
+  await withTestTempDir("web-live-routes-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    await setupLiveRouteFixture(homeDir);
 
-    try {
-      await withTestTempDir("web-live-routes-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
-        await setupLiveRouteFixture(homeDir);
+    const chromeResponse = await getChromeStatusResponse({ katoDir });
+    const summaryResponse = await getSummaryResponse({ katoDir });
+    const workspacesResponse = await getWorkspacesResponse({ katoDir });
 
-        const chromeResponse = await getChromeStatusResponse();
-        const summaryResponse = await getSummaryResponse();
-        const workspacesResponse = await getWorkspacesResponse();
+    assertNoStore(chromeResponse);
+    assertNoStore(summaryResponse);
+    assertNoStore(workspacesResponse);
 
-        assertNoStore(chromeResponse);
-        assertNoStore(summaryResponse);
-        assertNoStore(workspacesResponse);
+    const chromeData = await chromeResponse.json() as {
+      daemon: string;
+      snapshot: string;
+    };
+    const summaryData = await summaryResponse.json() as {
+      daemon: string;
+      stale: boolean;
+      workspaceSummary: {
+        rows: Array<{ workspaceId: string; displayName?: string }>;
+      };
+    };
+    const workspacesData = await workspacesResponse.json() as {
+      rows: Array<{ workspaceId: string; displayName?: string }>;
+      allowedWriteRoots: string[];
+    };
 
-        const chromeData = await chromeResponse.json() as {
-          daemon: string;
-          snapshot: string;
-        };
-        const summaryData = await summaryResponse.json() as {
-          daemon: string;
-          stale: boolean;
-          workspaceSummary: {
-            rows: Array<{ workspaceId: string; displayName?: string }>;
-          };
-        };
-        const workspacesData = await workspacesResponse.json() as {
-          rows: Array<{ workspaceId: string; displayName?: string }>;
-          allowedWriteRoots: string[];
-        };
-
-        assertEquals(chromeData.daemon, "running");
-        assertEquals(chromeData.snapshot, "current");
-        assertEquals(summaryData.daemon, "running");
-        assertEquals(summaryData.stale, false);
-        assertEquals(
-          summaryData.workspaceSummary.rows.map((row) => row.workspaceId),
-          ["ws-alpha", "ws-beta"],
-        );
-        assertEquals(
-          summaryData.workspaceSummary.rows.map((row) => row.displayName),
-          ["Alpha Workspace", "Beta Project"],
-        );
-        assertEquals(
-          workspacesData.rows.map((row) => row.workspaceId),
-          ["ws-alpha", "ws-beta"],
-        );
-        assertEquals(
-          workspacesData.rows.map((row) => row.displayName),
-          ["Alpha Workspace", "Beta Project"],
-        );
-        assertEquals(workspacesData.allowedWriteRoots, [
-          join(homeDir, "alpha"),
-          join(homeDir, "beta"),
-        ]);
-      });
-    } finally {
-      restoreRuntimeEnv(env);
-    }
+    assertEquals(chromeData.daemon, "running");
+    assertEquals(chromeData.snapshot, "current");
+    assertEquals(summaryData.daemon, "running");
+    assertEquals(summaryData.stale, false);
+    assertEquals(
+      summaryData.workspaceSummary.rows.map((row) => row.workspaceId),
+      ["ws-alpha", "ws-beta"],
+    );
+    assertEquals(
+      summaryData.workspaceSummary.rows.map((row) => row.displayName),
+      ["Alpha Workspace", "Beta Project"],
+    );
+    assertEquals(
+      workspacesData.rows.map((row) => row.workspaceId),
+      ["ws-alpha", "ws-beta"],
+    );
+    assertEquals(
+      workspacesData.rows.map((row) => row.displayName),
+      ["Alpha Workspace", "Beta Project"],
+    );
+    assertEquals(workspacesData.allowedWriteRoots, [
+      join(homeDir, "alpha"),
+      join(homeDir, "beta"),
+    ]);
   });
 });
 
 Deno.test("sessions, maintenance twins, and recordings APIs preserve current query semantics", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
+  await withTestTempDir("web-live-route-filters-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    await setupLiveRouteFixture(homeDir);
 
-    try {
-      await withTestTempDir("web-live-route-filters-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
-        await setupLiveRouteFixture(homeDir);
+    const sessionsAllResponse = await getSessionsResponse(
+      new URL("http://kato.local/api/sessions"),
+      { katoDir },
+    );
+    const sessionsActiveResponse = await getSessionsResponse(
+      new URL("http://kato.local/api/sessions?view=active"),
+      { katoDir },
+    );
+    const sessionsWorkspaceResponse = await getSessionsResponse(
+      new URL("http://kato.local/api/sessions?workspace=ws-beta"),
+      { katoDir },
+    );
+    const sessionsCombinedResponse = await getSessionsResponse(
+      new URL(
+        "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
+      ),
+      { katoDir },
+    );
+    const twinsActiveResponse = await getMaintenanceTwinsResponse(
+      new URL("http://kato.local/api/maintenance-twins?view=active"),
+      { katoDir },
+    );
+    const recordingsFilteredResponse = await getRecordingsResponse(
+      new URL(
+        "http://kato.local/api/recordings?workspace=ws-beta&state=engaged-stale",
+      ),
+      { katoDir },
+    );
 
-        const sessionsAllResponse = await getSessionsResponse(
-          new URL("http://kato.local/api/sessions"),
-        );
-        const sessionsActiveResponse = await getSessionsResponse(
-          new URL("http://kato.local/api/sessions?view=active"),
-        );
-        const sessionsWorkspaceResponse = await getSessionsResponse(
-          new URL("http://kato.local/api/sessions?workspace=ws-beta"),
-        );
-        const sessionsCombinedResponse = await getSessionsResponse(
-          new URL(
-            "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
-          ),
-        );
-        const twinsActiveResponse = await getMaintenanceTwinsResponse(
-          new URL("http://kato.local/api/maintenance-twins?view=active"),
-        );
-        const recordingsFilteredResponse = await getRecordingsResponse(
-          new URL(
-            "http://kato.local/api/recordings?workspace=ws-beta&state=engaged-stale",
-          ),
-        );
-
-        for (
-          const response of [
-            sessionsAllResponse,
-            sessionsActiveResponse,
-            sessionsWorkspaceResponse,
-            sessionsCombinedResponse,
-            twinsActiveResponse,
-            recordingsFilteredResponse,
-          ]
-        ) {
-          assertNoStore(response);
-        }
-
-        const sessionsAllData = await sessionsAllResponse.json() as {
-          includeStale: boolean;
-          rows: Array<{ sessionId: string }>;
-        };
-        const sessionsActiveData = await sessionsActiveResponse.json() as {
-          includeStale: boolean;
-          rows: Array<{ sessionId: string }>;
-        };
-        const sessionsWorkspaceData = await sessionsWorkspaceResponse
-          .json() as {
-            workspaceFilterId?: string;
-            rows: Array<{ sessionId: string }>;
-          };
-        const sessionsCombinedData = await sessionsCombinedResponse.json() as {
-          includeStale: boolean;
-          workspaceFilterId?: string;
-          rows: Array<{ sessionId: string }>;
-        };
-        const twinsActiveData = await twinsActiveResponse.json() as {
-          includeStale: boolean;
-          rows: Array<{ sessionId: string }>;
-        };
-        const recordingsFilteredData = await recordingsFilteredResponse
-          .json() as {
-            workspaceFilterId?: string;
-            stateFilter: string;
-            rows: Array<{ workspaceId?: string; state: string }>;
-          };
-
-        assertEquals(sessionsAllData.includeStale, true);
-        assertEquals(sessionsAllData.rows.map((row) => row.sessionId), [
-          "sess-active",
-          "sess-stale",
-        ]);
-        assertEquals(sessionsActiveData.includeStale, false);
-        assertEquals(sessionsActiveData.rows.map((row) => row.sessionId), [
-          "sess-active",
-        ]);
-        assertEquals(sessionsWorkspaceData.workspaceFilterId, "ws-beta");
-        assertEquals(sessionsWorkspaceData.rows.map((row) => row.sessionId), [
-          "sess-stale",
-        ]);
-        assertEquals(sessionsCombinedData.includeStale, false);
-        assertEquals(sessionsCombinedData.workspaceFilterId, "ws-alpha");
-        assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
-          "sess-active",
-        ]);
-        assertEquals(twinsActiveData.includeStale, false);
-        assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
-          "sess-active",
-        ]);
-        assertEquals(recordingsFilteredData.workspaceFilterId, "ws-beta");
-        assertEquals(recordingsFilteredData.stateFilter, "engaged-stale");
-        assertEquals(
-          recordingsFilteredData.rows.map((row) => row.workspaceId),
-          ["ws-beta"],
-        );
-        assertEquals(
-          recordingsFilteredData.rows.map((row) => row.state),
-          ["engaged-stale"],
-        );
-      });
-    } finally {
-      restoreRuntimeEnv(env);
+    for (
+      const response of [
+        sessionsAllResponse,
+        sessionsActiveResponse,
+        sessionsWorkspaceResponse,
+        sessionsCombinedResponse,
+        twinsActiveResponse,
+        recordingsFilteredResponse,
+      ]
+    ) {
+      assertNoStore(response);
     }
+
+    const sessionsAllData = await sessionsAllResponse.json() as {
+      includeStale: boolean;
+      rows: Array<{ sessionId: string }>;
+    };
+    const sessionsActiveData = await sessionsActiveResponse.json() as {
+      includeStale: boolean;
+      rows: Array<{ sessionId: string }>;
+    };
+    const sessionsWorkspaceData = await sessionsWorkspaceResponse
+      .json() as {
+        workspaceFilterId?: string;
+        rows: Array<{ sessionId: string }>;
+      };
+    const sessionsCombinedData = await sessionsCombinedResponse.json() as {
+      includeStale: boolean;
+      workspaceFilterId?: string;
+      rows: Array<{ sessionId: string }>;
+    };
+    const twinsActiveData = await twinsActiveResponse.json() as {
+      includeStale: boolean;
+      rows: Array<{ sessionId: string }>;
+    };
+    const recordingsFilteredData = await recordingsFilteredResponse
+      .json() as {
+        workspaceFilterId?: string;
+        stateFilter: string;
+        rows: Array<{ workspaceId?: string; state: string }>;
+      };
+
+    assertEquals(sessionsAllData.includeStale, true);
+    assertEquals(sessionsAllData.rows.map((row) => row.sessionId), [
+      "sess-active",
+      "sess-stale",
+    ]);
+    assertEquals(sessionsActiveData.includeStale, false);
+    assertEquals(sessionsActiveData.rows.map((row) => row.sessionId), [
+      "sess-active",
+    ]);
+    assertEquals(sessionsWorkspaceData.workspaceFilterId, "ws-beta");
+    assertEquals(sessionsWorkspaceData.rows.map((row) => row.sessionId), [
+      "sess-stale",
+    ]);
+    assertEquals(sessionsCombinedData.includeStale, false);
+    assertEquals(sessionsCombinedData.workspaceFilterId, "ws-alpha");
+    assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
+      "sess-active",
+    ]);
+    assertEquals(twinsActiveData.includeStale, false);
+    assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
+      "sess-active",
+    ]);
+    assertEquals(recordingsFilteredData.workspaceFilterId, "ws-beta");
+    assertEquals(recordingsFilteredData.stateFilter, "engaged-stale");
+    assertEquals(
+      recordingsFilteredData.rows.map((row) => row.workspaceId),
+      ["ws-beta"],
+    );
+    assertEquals(
+      recordingsFilteredData.rows.map((row) => row.state),
+      ["engaged-stale"],
+    );
   });
 });
 
 Deno.test("session snippet API reconstructs a snippet from persisted source history on demand", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
+  await withTestTempDir("web-live-session-snippet-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const sharedDir = join(katoDir, "shared");
+    await Deno.mkdir(sharedDir, { recursive: true });
+    await Deno.writeTextFile(
+      join(sharedDir, "status.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        generatedAt: "2026-03-11T10:00:00.000Z",
+        heartbeatAt: "2026-03-11T10:00:00.000Z",
+        daemonRunning: false,
+        providers: [],
+        recordings: {
+          activeRecordings: 0,
+          destinations: 0,
+        },
+        sessions: [],
+      }),
+    );
 
-    try {
-      await withTestTempDir("web-live-session-snippet-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-11T10:00:00.000Z"),
+      makeSessionId: () => "sess-source-snippet",
+    });
+    await store.getOrCreateSessionMetadata({
+      provider: "claude",
+      providerSessionId: "sess-001",
+      sourceFilePath: CLAUDE_FIXTURE,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
 
-        const katoDir = join(homeDir, ".kato");
-        const sharedDir = join(katoDir, "shared");
-        await Deno.mkdir(sharedDir, { recursive: true });
-        await Deno.writeTextFile(
-          join(sharedDir, "status.json"),
-          JSON.stringify({
-            schemaVersion: 2,
-            generatedAt: "2026-03-11T10:00:00.000Z",
-            heartbeatAt: "2026-03-11T10:00:00.000Z",
-            daemonRunning: false,
-            providers: [],
-            recordings: {
-              activeRecordings: 0,
-              destinations: 0,
-            },
-            sessions: [],
-          }),
-        );
+    const response = await getSessionSnippetResponse(
+      new URL(
+        "http://kato.local/api/session-snippet?sessionId=sess-source-snippet&source=1",
+      ),
+      { katoDir },
+    );
+    assertNoStore(response);
 
-        const store = new PersistentSessionStateStore({
-          katoDir,
-          now: () => new Date("2026-03-11T10:00:00.000Z"),
-          makeSessionId: () => "sess-source-snippet",
-        });
-        await store.getOrCreateSessionMetadata({
-          provider: "claude",
-          providerSessionId: "sess-001",
-          sourceFilePath: CLAUDE_FIXTURE,
-          initialCursor: { kind: "byte-offset", value: 0 },
-        });
-
-        const response = await getSessionSnippetResponse(
-          new URL(
-            "http://kato.local/api/session-snippet?sessionId=sess-source-snippet&source=1",
-          ),
-        );
-        assertNoStore(response);
-
-        const payload = await response.json() as {
-          sessionId: string;
-          status: string;
-          source?: string;
-          snippet?: string;
-        };
-        assertEquals(payload.sessionId, "sess-source-snippet");
-        assertEquals(payload.status, "ready");
-        assertEquals(payload.source, "source");
-        assertEquals(
-          payload.snippet,
-          "I want to add authentication to my app. Can you help?",
-        );
-      });
-    } finally {
-      restoreRuntimeEnv(env);
-    }
+    const payload = await response.json() as {
+      sessionId: string;
+      status: string;
+      source?: string;
+      snippet?: string;
+    };
+    assertEquals(payload.sessionId, "sess-source-snippet");
+    assertEquals(payload.status, "ready");
+    assertEquals(payload.source, "source");
+    assertEquals(
+      payload.snippet,
+      "I want to add authentication to my app. Can you help?",
+    );
   });
 });
 
@@ -589,49 +552,38 @@ Deno.test("session snippet API rejects missing sessionId with a no-store error p
 });
 
 Deno.test("logs API preserves channel, scope, level, event, and text filters", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
+  await withTestTempDir("web-live-logs-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    await setupLiveRouteFixture(homeDir);
 
-    try {
-      await withTestTempDir("web-live-logs-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
-        await setupLiveRouteFixture(homeDir);
+    const response = await getLogsResponse(
+      new URL(
+        "http://kato.local/api/logs?channel=operational&scope=daemon&level=error&event=active&q=failure",
+      ),
+      { katoDir },
+    );
 
-        const response = await getLogsResponse(
-          new URL(
-            "http://kato.local/api/logs?channel=operational&scope=daemon&level=error&event=active&q=failure",
-          ),
-        );
+    assertNoStore(response);
 
-        assertNoStore(response);
+    const data = await response.json() as {
+      channel: string;
+      scope: string;
+      level: string;
+      eventFilter?: string;
+      textFilter?: string;
+      matchedCount: number;
+      rows: Array<{ event: string; message: string; scope: string }>;
+    };
 
-        const data = await response.json() as {
-          channel: string;
-          scope: string;
-          level: string;
-          eventFilter?: string;
-          textFilter?: string;
-          matchedCount: number;
-          rows: Array<{ event: string; message: string; scope: string }>;
-        };
-
-        assertEquals(data.channel, "operational");
-        assertEquals(data.scope, "daemon");
-        assertEquals(data.level, "error");
-        assertEquals(data.eventFilter, "active");
-        assertEquals(data.textFilter, "failure");
-        assertEquals(data.matchedCount, 1);
-        assertEquals(data.rows.length, 1);
-        assertEquals(data.rows[0]?.event, "active.error");
-        assertEquals(data.rows[0]?.message, "active failure");
-        assertEquals(data.rows[0]?.scope, "daemon");
-      });
-    } finally {
-      restoreRuntimeEnv(env);
-    }
+    assertEquals(data.channel, "operational");
+    assertEquals(data.scope, "daemon");
+    assertEquals(data.level, "error");
+    assertEquals(data.eventFilter, "active");
+    assertEquals(data.textFilter, "failure");
+    assertEquals(data.matchedCount, 1);
+    assertEquals(data.rows.length, 1);
+    assertEquals(data.rows[0]?.event, "active.error");
+    assertEquals(data.rows[0]?.message, "active failure");
+    assertEquals(data.rows[0]?.scope, "daemon");
   });
 });

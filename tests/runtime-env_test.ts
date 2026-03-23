@@ -5,7 +5,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
-  withLockedEnvironment,
+  withIsolatedEnvironment,
 } from "./test_env.ts";
 import { resolveTestTempPath } from "./test_temp.ts";
 
@@ -14,7 +14,7 @@ const RUNTIME_ENV_HOME = resolveTestTempPath("runtime-home");
 async function withRuntimeEnvTest(
   run: () => Promise<void> | void,
 ): Promise<void> {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     try {
       await run();

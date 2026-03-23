@@ -1,3 +1,5 @@
+import type { WebConfig } from "@kato/shared";
+import type { AuditLogger, StructuredLogger } from "@kato/runtime";
 import type { RecordingStateFilter } from "./loaders/recordings.ts";
 import { loadWebConfig, verifyCsrfToken } from "./auth.ts";
 import { createWebLoggers } from "./logging.ts";
@@ -80,8 +82,16 @@ function buildRecordingsMutationErrorToken(
   return "internal_error";
 }
 
+export interface HandleRecordingsPagePostOptions {
+  katoDir?: string;
+  webConfig?: WebConfig;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
 export async function handleRecordingsPagePost(
   req: Request,
+  options: HandleRecordingsPagePostOptions = {},
 ): Promise<Response> {
   const form = await req.formData();
   const action = String(form.get("action") ?? "");
@@ -94,11 +104,20 @@ export async function handleRecordingsPagePost(
     undefined;
   const rowKey = String(form.get("rowKey") ?? "").trim() || undefined;
   const csrfToken = String(form.get("csrfToken") ?? "").trim() || undefined;
-  const webConfig = await loadWebConfig();
+  const webConfig = options.webConfig ??
+    await loadWebConfig({ katoDir: options.katoDir });
   if (!webConfig || !(await verifyCsrfToken(req, webConfig, csrfToken))) {
     return new Response("csrf token required", { status: 403 });
   }
-  const { operationalLogger, auditLogger } = createWebLoggers();
+  const defaultLoggers = options.operationalLogger && options.auditLogger
+    ? undefined
+    : createWebLoggers({ katoDir: options.katoDir });
+  const operationalLogger = options.operationalLogger ??
+    defaultLoggers?.operationalLogger;
+  const auditLogger = options.auditLogger ?? defaultLoggers?.auditLogger;
+  if (!operationalLogger || !auditLogger) {
+    throw new Error("Recordings page post loggers were not initialized");
+  }
 
   try {
     const sessionId = String(form.get("sessionId") ?? "").trim();
@@ -117,6 +136,7 @@ export async function handleRecordingsPagePost(
         workspaceId,
         recordingCycleId,
         outputPath,
+        katoDir: options.katoDir,
         operationalLogger,
         auditLogger,
       });
@@ -143,6 +163,7 @@ export async function handleRecordingsPagePost(
         workspaceId,
         recordingCycleId,
         outputPath,
+        katoDir: options.katoDir,
         operationalLogger,
         auditLogger,
       });

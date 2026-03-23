@@ -18,7 +18,7 @@ import {
   restoreRuntimeEnv,
   setRuntimeEnv,
   snapshotRuntimeEnv,
-  withLockedEnvironment,
+  withIsolatedEnvironment,
 } from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
@@ -55,7 +55,7 @@ function restoreControlPlaneOverrideEnv(snapshot: {
 }
 
 Deno.test("resolveDefaultRuntimeDir uses ~/.kato/daemon when home is present", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     await withTestTempDir("daemon-control-home-", async (rootDir) => {
       const homeDir = join(rootDir, "home");
@@ -81,7 +81,7 @@ Deno.test("resolveDefaultRuntimeDir uses USERPROFILE when HOME is unset", async 
   if (Deno.build.os !== "windows") {
     return;
   }
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
@@ -100,7 +100,7 @@ Deno.test("resolveDefaultRuntimeDir uses USERPROFILE when HOME is unset", async 
 });
 
 Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
@@ -120,7 +120,7 @@ Deno.test("resolveDefaultRuntimeDir rejects relative KATO_RUNTIME_DIR", async ()
 });
 
 Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     await withTestTempDir("daemon-control-runtime-", async (rootDir) => {
       const runtimeDir = join(rootDir, "runtime");
@@ -138,7 +138,7 @@ Deno.test("resolveDefaultRuntimeDir accepts absolute KATO_RUNTIME_DIR", async ()
 });
 
 Deno.test("resolveDefaultRuntimeDir expands ~-prefixed KATO_RUNTIME_DIR", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const snapshot = snapshotRuntimeEnv();
     await withTestTempDir("daemon-control-home-", async (rootDir) => {
       const homeDir = join(rootDir, "home");
@@ -164,7 +164,7 @@ Deno.test("resolveDefaultRuntimeDir expands ~\\-prefixed KATO_RUNTIME_DIR", asyn
   if (Deno.build.os !== "windows") {
     return;
   }
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
@@ -183,7 +183,7 @@ Deno.test("resolveDefaultRuntimeDir expands ~\\-prefixed KATO_RUNTIME_DIR", asyn
 });
 
 Deno.test("resolveDefaultRuntimeDir fails when home and override are unavailable", async () => {
-  await withLockedEnvironment(() => {
+  await withIsolatedEnvironment(() => {
     const snapshot = snapshotRuntimeEnv();
     try {
       setRuntimeEnv({
@@ -286,7 +286,7 @@ Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath use katoDir de
 });
 
 Deno.test("resolveDefaultStatusPath and resolveDefaultControlPath honor env overrides", async () => {
-  await withLockedEnvironment(async () => {
+  await withIsolatedEnvironment(async () => {
     const runtimeSnapshot = snapshotRuntimeEnv();
     const overrideSnapshot = snapshotControlPlaneOverrideEnv();
     await withTestTempDir("daemon-control-path-overrides-", async (rootDir) => {

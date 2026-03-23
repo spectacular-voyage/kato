@@ -1,4 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
+import { join } from "@std/path";
 import {
   createDefaultWebConfig,
   resolveDefaultWebConfigPath,
@@ -10,12 +11,6 @@ import {
   parseWebListenArgs,
   startWebServerStatusHeartbeat,
 } from "../apps/web/src/server_status.ts";
-import {
-  restoreRuntimeEnv,
-  setRuntimeEnv,
-  snapshotRuntimeEnv,
-  withLockedEnvironment,
-} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 async function waitFor(
@@ -87,66 +82,53 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
-    await withLockedEnvironment(async () => {
-      await withTestTempDir("web-status-heartbeat-", async (homeDir) => {
-        const envSnapshot = snapshotRuntimeEnv();
-        try {
-          setRuntimeEnv({
-            HOME: homeDir,
-            USERPROFILE: undefined,
-            KATO_RUNTIME_DIR: undefined,
-          });
+    await withTestTempDir("web-status-heartbeat-", async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      try {
+        const configStore = new WebConfigFileStore(
+          resolveDefaultWebConfigPath(katoDir),
+        );
+        await configStore.ensureInitialized(
+          createDefaultWebConfig({
+            hostname: "127.0.0.1",
+            port: 3187,
+            auth: {
+              username: "dj",
+              passwordSalt: "salt",
+              passwordHash: "abcd",
+              sessionSecret: "secret",
+              cookieName: "kato_web_test",
+            },
+          }),
+        );
 
-          const configStore = new WebConfigFileStore(
-            resolveDefaultWebConfigPath(),
-          );
-          await configStore.ensureInitialized(
-            createDefaultWebConfig({
-              hostname: "127.0.0.1",
-              port: 3187,
-              auth: {
-                username: "dj",
-                passwordSalt: "salt",
-                passwordHash: "abcd",
-                sessionSecret: "secret",
-                cookieName: "kato_web_test",
-              },
-            }),
-          );
+        const statusStore = new WebServerStatusFileStore(
+          resolveDefaultWebStatusPath(katoDir),
+        );
 
-          const statusStore = new WebServerStatusFileStore(
-            resolveDefaultWebStatusPath(),
-          );
+        startWebServerStatusHeartbeat({ katoDir });
 
-          startWebServerStatusHeartbeat();
+        await waitFor(async () => (await statusStore.load()).running === true);
+        const runningStatus = await statusStore.load();
+        assertEquals(runningStatus.running, true);
+        assertEquals(runningStatus.hostname, "127.0.0.1");
+        assertEquals(runningStatus.port, 3187);
+        assertEquals(runningStatus.url, "http://127.0.0.1:3187/");
+        assertExists(runningStatus.pid);
+        assertExists(runningStatus.startedAt);
 
-          await waitFor(async () =>
-            (await statusStore.load()).running === true
-          );
-          const runningStatus = await statusStore.load();
-          assertEquals(runningStatus.running, true);
-          assertEquals(runningStatus.hostname, "127.0.0.1");
-          assertEquals(runningStatus.port, 3187);
-          assertEquals(runningStatus.url, "http://127.0.0.1:3187/");
-          assertExists(runningStatus.pid);
-          assertExists(runningStatus.startedAt);
+        startWebServerStatusHeartbeat({ katoDir });
 
-          startWebServerStatusHeartbeat();
+        globalThis.dispatchEvent(new Event("unload"));
 
-          globalThis.dispatchEvent(new Event("unload"));
-
-          await waitFor(async () =>
-            (await statusStore.load()).running === false
-          );
-          const stoppedStatus = await statusStore.load();
-          assertEquals(stoppedStatus.running, false);
-          assertEquals(stoppedStatus.pid, undefined);
-        } finally {
-          (globalThis as Record<string, unknown>).__katoWebStatusRuntime =
-            undefined;
-          restoreRuntimeEnv(envSnapshot);
-        }
-      });
+        await waitFor(async () => (await statusStore.load()).running === false);
+        const stoppedStatus = await statusStore.load();
+        assertEquals(stoppedStatus.running, false);
+        assertEquals(stoppedStatus.pid, undefined);
+      } finally {
+        (globalThis as Record<string, unknown>).__katoWebStatusRuntime =
+          undefined;
+      }
     });
   },
 });
@@ -157,42 +139,33 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
-    await withLockedEnvironment(async () => {
-      await withTestTempDir(
-        "web-status-heartbeat-defaults-",
-        async (homeDir) => {
-          const envSnapshot = snapshotRuntimeEnv();
-          try {
-            setRuntimeEnv({
-              HOME: homeDir,
-              USERPROFILE: undefined,
-              KATO_RUNTIME_DIR: undefined,
-            });
+    await withTestTempDir(
+      "web-status-heartbeat-defaults-",
+      async (homeDir) => {
+        const katoDir = join(homeDir, ".kato");
+        try {
+          const statusStore = new WebServerStatusFileStore(
+            resolveDefaultWebStatusPath(katoDir),
+          );
 
-            const statusStore = new WebServerStatusFileStore(
-              resolveDefaultWebStatusPath(),
-            );
+          startWebServerStatusHeartbeat({ katoDir });
 
-            startWebServerStatusHeartbeat();
+          await waitFor(async () =>
+            (await statusStore.load()).running === true
+          );
+          const runningStatus = await statusStore.load();
+          assertEquals(runningStatus.hostname, "127.0.0.1");
+          assertEquals(runningStatus.port, 5173);
 
-            await waitFor(async () =>
-              (await statusStore.load()).running === true
-            );
-            const runningStatus = await statusStore.load();
-            assertEquals(runningStatus.hostname, "127.0.0.1");
-            assertEquals(runningStatus.port, 5173);
-
-            globalThis.dispatchEvent(new Event("unload"));
-            await waitFor(async () =>
-              (await statusStore.load()).running === false
-            );
-          } finally {
-            (globalThis as Record<string, unknown>).__katoWebStatusRuntime =
-              undefined;
-            restoreRuntimeEnv(envSnapshot);
-          }
-        },
-      );
-    });
+          globalThis.dispatchEvent(new Event("unload"));
+          await waitFor(async () =>
+            (await statusStore.load()).running === false
+          );
+        } finally {
+          (globalThis as Record<string, unknown>).__katoWebStatusRuntime =
+            undefined;
+        }
+      },
+    );
   },
 });

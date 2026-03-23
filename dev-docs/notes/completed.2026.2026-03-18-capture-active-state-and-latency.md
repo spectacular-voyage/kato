@@ -1,9 +1,9 @@
 ---
 id: qh0x9b9p1j3k6m4r8c2v7n5t
 title: 2026 03 18 Capture Active State And Latency
-desc: ""
-created: 1773863400000
+desc: ''
 updated: 1773863400000
+created: 1773863400000
 ---
 
 ## Goal

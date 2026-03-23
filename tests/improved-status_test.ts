@@ -338,6 +338,43 @@ Deno.test("renderStatusText: web status and web recent errors are labeled distin
   assertStringIncludes(out, "invalid username");
 });
 
+Deno.test("renderStatusText: stale daemon heartbeat is labeled unresponsive", () => {
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: true,
+    terminalWidth: 160,
+  });
+
+  assertStringIncludes(out, "unresponsive (pid: 1234, stale heartbeat)");
+});
+
+Deno.test("renderStatusText: dead stored web status is shown as stopped with diagnostics", () => {
+  const webStatus: StatusWebState = {
+    configured: true,
+    running: false,
+    stale: true,
+    state: "stopped",
+    version: CLI_APP_VERSION,
+    url: "http://127.0.0.1:3173/",
+    pid: 4242,
+    heartbeatAt: "2026-02-24T09:58:00.000Z",
+  };
+  const out = renderStatusText(makeSnapshot([]), {
+    showAll: true,
+    now: NOW,
+    stale: false,
+    webStatus,
+    terminalWidth: 160,
+  });
+
+  assertStringIncludes(
+    out,
+    `kato web (v${CLI_APP_VERSION}): stopped (http://127.0.0.1:3173/, pid 4242, last heartbeat `,
+  );
+  assert(/last heartbeat \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)/.test(out));
+});
+
 Deno.test("renderStatusText: suppressedRecentErrorKeys hides matching errors", () => {
   const recentErrors: StatusRecentError[] = [{
     timestamp: "2026-02-24T09:59:30.000Z",

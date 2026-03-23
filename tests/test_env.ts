@@ -1,5 +1,3 @@
-import { join } from "@std/path";
-
 export const RUNTIME_ENV_KEYS = [
   "HOME",
   "USERPROFILE",
@@ -7,117 +5,55 @@ export const RUNTIME_ENV_KEYS = [
 ] as const;
 export type RuntimeEnvKey = (typeof RUNTIME_ENV_KEYS)[number];
 
-const TEST_ENV_LOCK_DIR = join(Deno.cwd(), ".test-tmp", ".env-lock");
-const TEST_ENV_LOCK_METADATA_PATH = join(TEST_ENV_LOCK_DIR, "lock.json");
-const TEST_ENV_LOCK_HEARTBEAT_INTERVAL_MS = 1_000;
-const TEST_ENV_LOCK_STALE_AFTER_MS = 15_000;
-const MAX_LOCK_WAIT_MS = 30_000;
+const ISOLATED_ENV_KEYS = [
+  "HOME",
+  "USERPROFILE",
+  "KATO_RUNTIME_DIR",
+  "KATO_DAEMON_STATUS_PATH",
+  "KATO_DAEMON_CONTROL_PATH",
+  "KATO_CLAUDE_SESSION_ROOTS",
+  "KATO_CODEX_SESSION_ROOTS",
+  "KATO_GEMINI_SESSION_ROOTS",
+  "KATO_DAEMON_MAX_MEMORY_MB",
+  "KATO_CONFIG_PATH",
+  "KATO_ALLOWED_WRITE_ROOT",
+  "KATO_ALLOWED_WRITE_ROOTS_JSON",
+  "KATO_WEB_PASSWORD",
+  "KATO_LOGGING_OPERATIONAL_LEVEL",
+  "KATO_LOGGING_AUDIT_LEVEL",
+] as const;
 
-async function writeTestEnvLockMetadata(): Promise<void> {
-  await Deno.writeTextFile(
-    TEST_ENV_LOCK_METADATA_PATH,
-    JSON.stringify({
-      heartbeatAt: new Date().toISOString(),
-    }),
-  );
+type IsolatedEnvKey = (typeof ISOLATED_ENV_KEYS)[number];
+type ProcessEnvSnapshot = Record<IsolatedEnvKey, string | undefined>;
+
+function snapshotProcessEnv(): ProcessEnvSnapshot {
+  return Object.fromEntries(
+    ISOLATED_ENV_KEYS.map((key) => [key, Deno.env.get(key)]),
+  ) as ProcessEnvSnapshot;
 }
 
-async function readTestEnvLockHeartbeatMs(): Promise<number | undefined> {
-  try {
-    const raw = await Deno.readTextFile(TEST_ENV_LOCK_METADATA_PATH);
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      typeof parsed["heartbeatAt"] !== "string"
-    ) {
-      return undefined;
-    }
-    const heartbeatMs = Date.parse(parsed["heartbeatAt"]);
-    return Number.isFinite(heartbeatMs) ? heartbeatMs : undefined;
-  } catch (error) {
-    if (
-      error instanceof Deno.errors.NotFound ||
-      error instanceof SyntaxError
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-async function clearStaleTestEnvLockIfPresent(): Promise<boolean> {
-  const heartbeatMs = await readTestEnvLockHeartbeatMs();
-  if (
-    heartbeatMs !== undefined &&
-    Date.now() - heartbeatMs < TEST_ENV_LOCK_STALE_AFTER_MS
-  ) {
-    return false;
-  }
-
-  try {
-    await Deno.remove(TEST_ENV_LOCK_DIR, { recursive: true });
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return true;
-    }
-    throw error;
-  }
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function acquireTestEnvLock(): Promise<void> {
-  await Deno.mkdir(join(Deno.cwd(), ".test-tmp"), { recursive: true });
-  const startTimeMs = Date.now();
-  while (true) {
-    try {
-      await Deno.mkdir(TEST_ENV_LOCK_DIR);
-      await writeTestEnvLockMetadata();
-      return;
-    } catch (error) {
-      if (error instanceof Deno.errors.AlreadyExists) {
-        await clearStaleTestEnvLockIfPresent();
-        if (Date.now() - startTimeMs > MAX_LOCK_WAIT_MS) {
-          throw new Error(
-            `Timed out acquiring test env lock at ${TEST_ENV_LOCK_DIR}; it may be stale`,
-          );
-        }
-        await sleep(10);
-        continue;
-      }
-      throw error;
+function restoreProcessEnv(snapshot: ProcessEnvSnapshot): void {
+  for (const key of ISOLATED_ENV_KEYS) {
+    const value = snapshot[key];
+    if (value === undefined) {
+      Deno.env.delete(key);
+    } else {
+      Deno.env.set(key, value);
     }
   }
 }
 
-async function releaseTestEnvLock(): Promise<void> {
-  try {
-    await Deno.remove(TEST_ENV_LOCK_DIR, { recursive: true });
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) {
-      throw error;
-    }
-  }
-}
-
-export async function withLockedEnvironment<T>(
+// The root test tasks now keep env-boundary suites in a dedicated serial slice,
+// so this helper only restores process env after each callback instead of
+// coordinating the whole suite through a filesystem lock.
+export async function withIsolatedEnvironment<T>(
   run: () => Promise<T> | T,
 ): Promise<T> {
-  await acquireTestEnvLock();
-  const heartbeatTimer = setInterval(() => {
-    void writeTestEnvLockMetadata().catch(() => {
-      // Keep the lock best-effort; acquisition waiters will fall back to the timeout.
-    });
-  }, TEST_ENV_LOCK_HEARTBEAT_INTERVAL_MS);
+  const snapshot = snapshotProcessEnv();
   try {
     return await run();
   } finally {
-    clearInterval(heartbeatTimer);
-    await releaseTestEnvLock();
+    restoreProcessEnv(snapshot);
   }
 }
 

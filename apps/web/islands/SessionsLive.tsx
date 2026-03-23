@@ -12,6 +12,9 @@ import {
 import {
   buildWorkspaceSelectorIds,
   canStopSessionRecording,
+  readRememberedSessionsWorkspace,
+  rememberSessionsWorkspace,
+  resolveDefaultWorkspaceSelectorValue,
   type SessionRecordingAction,
 } from "../src/session_recording_view_model.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
@@ -45,24 +48,6 @@ function buildCountSummary(options: {
     return `Active: ${options.activeSessionCount}`;
   }
   return `Active: ${options.activeSessionCount}, Idle: ${options.staleSessionCount}, Inactive: ${options.inactiveSessionCount}`;
-}
-
-function resolveDefaultWorkspaceSelectorValue(
-  pageData: SessionsPageData,
-): string | undefined {
-  if (pageData.workspaceFilterId) {
-    return pageData.workspaceFilterId;
-  }
-  if (pageData.workspaceFilter) {
-    const matchingOption = pageData.workspaceOptions.find((option) =>
-      option.workspaceId === pageData.workspaceFilter ||
-      option.alias === pageData.workspaceFilter
-    );
-    if (matchingOption) {
-      return matchingOption.workspaceId;
-    }
-  }
-  return pageData.workspaceOptions[0]?.workspaceId;
 }
 
 function buildRecordingFilename(path: string): string {
@@ -160,9 +145,9 @@ function SessionRecordingActions(
     sessionId: string;
     includeStale: boolean;
     workspaceFilter?: string;
+    workspaceFilterId?: string;
     csrfToken?: string;
     workspaceOptions: SessionsPageData["workspaceOptions"];
-    defaultWorkspaceSelectorValue?: string;
   },
 ) {
   const [openAction, setOpenAction] = useState<SessionRecordingAction | null>(
@@ -171,24 +156,38 @@ function SessionRecordingActions(
   const [pendingCreateAction, setPendingCreateAction] = useState<
     SessionRecordingAction | null
   >(null);
-  const [selectedWorkspace, setSelectedWorkspace] = useState(
-    props.defaultWorkspaceSelectorValue ??
-      props.workspaceOptions[0]?.workspaceId ??
-      "",
+  const [selectedWorkspace, setSelectedWorkspace] = useState(() =>
+    resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: props.workspaceOptions,
+      workspaceFilter: props.workspaceFilter,
+      workspaceFilterId: props.workspaceFilterId,
+      rememberedWorkspaceId: readRememberedSessionsWorkspace(),
+    }) ?? ""
   );
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (
-      props.defaultWorkspaceSelectorValue &&
-      !props.workspaceOptions.some((option) =>
-        option.workspaceId === selectedWorkspace
-      )
-    ) {
-      setSelectedWorkspace(props.defaultWorkspaceSelectorValue);
+    const resolvedWorkspace = resolveDefaultWorkspaceSelectorValue({
+      workspaceOptions: props.workspaceOptions,
+      workspaceFilter: props.workspaceFilter,
+      workspaceFilterId: props.workspaceFilterId,
+      rememberedWorkspaceId: readRememberedSessionsWorkspace(),
+    }) ?? "";
+    const hasExplicitWorkspaceFilter = !!props.workspaceFilter ||
+      !!props.workspaceFilterId;
+    const hasSelectedWorkspace = props.workspaceOptions.some((option) =>
+      option.workspaceId === selectedWorkspace
+    );
+    if (hasExplicitWorkspaceFilter && selectedWorkspace !== resolvedWorkspace) {
+      setSelectedWorkspace(resolvedWorkspace);
+      return;
+    }
+    if (!hasSelectedWorkspace && selectedWorkspace !== resolvedWorkspace) {
+      setSelectedWorkspace(resolvedWorkspace);
     }
   }, [
-    props.defaultWorkspaceSelectorValue,
+    props.workspaceFilter,
+    props.workspaceFilterId,
     props.workspaceOptions,
     selectedWorkspace,
   ]);
@@ -244,6 +243,7 @@ function SessionRecordingActions(
       }
       event.preventDefault();
       const form = event.currentTarget;
+      rememberSessionsWorkspace(selectedWorkspace);
       setPendingCreateAction(action);
       if ("requestAnimationFrame" in globalThis) {
         globalThis.requestAnimationFrame(() => form.submit());
@@ -369,10 +369,6 @@ export default function SessionsLive(
   const [pendingStopActionKey, setPendingStopActionKey] = useState<
     string | null
   >(null);
-  const defaultWorkspaceSelectorValue = resolveDefaultWorkspaceSelectorValue(
-    pageData,
-  );
-
   const handleStopSubmit = (actionKey: string) => (event: Event) => {
     if (!(event.currentTarget instanceof HTMLFormElement)) {
       return;
@@ -495,9 +491,9 @@ export default function SessionsLive(
                       sessionId={row.sessionId}
                       includeStale={pageData.includeStale}
                       workspaceFilter={pageData.workspaceFilter}
+                      workspaceFilterId={pageData.workspaceFilterId}
                       csrfToken={props.csrfToken}
                       workspaceOptions={pageData.workspaceOptions}
-                      defaultWorkspaceSelectorValue={defaultWorkspaceSelectorValue}
                     />
                   </div>
                   {engagedRecordings.length > 0

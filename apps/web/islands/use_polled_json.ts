@@ -1,4 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
+import {
+  listenForAuthExpiry,
+  redirectToLogin,
+  signalAuthExpired,
+} from "./auth_expiry.ts";
+import { loadPolledJson } from "../src/polled_json.ts";
 
 export const LIVE_POLL_INTERVAL_MS = 2_000;
 
@@ -15,6 +21,12 @@ export function usePolledJson<T>(options: {
   }, [options.initialData]);
 
   useEffect(() => {
+    return listenForAuthExpiry(() => {
+      redirectToLogin();
+    });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     let polling = false;
 
@@ -24,15 +36,17 @@ export function usePolledJson<T>(options: {
       }
       polling = true;
       try {
-        const response = await fetch(options.endpoint, {
-          cache: "no-store",
+        const result = await loadPolledJson<T>({
+          endpoint: options.endpoint,
         });
-        if (!response.ok) {
+        if (result.kind === "unauthorized") {
+          if (!cancelled) {
+            signalAuthExpired();
+          }
           return;
         }
-        const next = await response.json() as T;
-        if (!cancelled) {
-          setData(next);
+        if (result.kind === "data" && !cancelled) {
+          setData(result.data);
         }
       } catch {
         // Keep the previous snapshot rendered.

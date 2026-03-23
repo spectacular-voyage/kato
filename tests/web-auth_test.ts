@@ -4,7 +4,7 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
-import { dirname } from "@std/path";
+import { dirname, join } from "@std/path";
 import type { WebConfig } from "@kato/shared";
 import {
   clearSessionCookie,
@@ -25,12 +25,6 @@ import {
   resolveDefaultWebConfigPath,
   WebConfigFileStore,
 } from "../apps/runtime/src/mod.ts";
-import {
-  restoreRuntimeEnv,
-  setRuntimeEnv,
-  snapshotRuntimeEnv,
-  withLockedEnvironment,
-} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 function encodeBase64(bytes: number[]): string {
@@ -215,46 +209,35 @@ Deno.test("web auth fails closed for missing config, malformed cookies, and empt
 });
 
 Deno.test("loadWebConfig and loadWebConfigState handle missing, invalid, and valid config files", async () => {
-  await withLockedEnvironment(async () => {
-    await withTestTempDir("web-auth-home-", async (homeDir) => {
-      const envSnapshot = snapshotRuntimeEnv();
-      try {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
+  await withTestTempDir("web-auth-home-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
 
-        assertEquals(await loadWebConfig(), undefined);
-        assertEquals(await loadWebConfigState(), {});
+    assertEquals(await loadWebConfig({ katoDir }), undefined);
+    assertEquals(await loadWebConfigState({ katoDir }), {});
 
-        const configPath = resolveDefaultWebConfigPath();
-        await Deno.mkdir(dirname(configPath), { recursive: true });
-        await Deno.writeTextFile(configPath, "auth: [broken");
+    const configPath = resolveDefaultWebConfigPath(katoDir);
+    await Deno.mkdir(dirname(configPath), { recursive: true });
+    await Deno.writeTextFile(configPath, "auth: [broken");
 
-        const invalidState = await loadWebConfigState();
-        assertStringIncludes(invalidState.error ?? "", "invalid YAML");
-        await assertRejects(
-          () => loadWebConfig(),
-          Error,
-          "invalid YAML",
-        );
+    const invalidState = await loadWebConfigState({ katoDir });
+    assertStringIncludes(invalidState.error ?? "", "invalid YAML");
+    await assertRejects(
+      () => loadWebConfig({ katoDir }),
+      Error,
+      "invalid YAML",
+    );
 
-        await Deno.remove(configPath);
+    await Deno.remove(configPath);
 
-        const config = await makeWebConfig();
-        const store = new WebConfigFileStore(configPath);
-        await store.ensureInitialized(config);
+    const config = await makeWebConfig();
+    const store = new WebConfigFileStore(configPath);
+    await store.ensureInitialized(config);
 
-        const loaded = await loadWebConfig();
-        assertEquals(loaded?.auth.username, "dj");
+    const loaded = await loadWebConfig({ katoDir });
+    assertEquals(loaded?.auth.username, "dj");
 
-        const validState = await loadWebConfigState();
-        assertEquals(validState.error, undefined);
-        assertEquals(validState.config?.port, 5173);
-      } finally {
-        restoreRuntimeEnv(envSnapshot);
-      }
-    });
+    const validState = await loadWebConfigState({ katoDir });
+    assertEquals(validState.error, undefined);
+    assertEquals(validState.config?.port, 5173);
   });
 });

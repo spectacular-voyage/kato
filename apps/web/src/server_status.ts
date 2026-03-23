@@ -14,6 +14,14 @@ interface WebListenOptions {
   port: number;
 }
 
+export interface StartWebServerStatusHeartbeatOptions {
+  args?: string[];
+  katoDir?: string;
+  statusPath?: string;
+  now?: () => Date;
+  heartbeatIntervalMs?: number;
+}
+
 interface WebStatusRuntimeState {
   active: boolean;
   startedAt: string;
@@ -72,10 +80,10 @@ export function parseWebListenArgs(
 }
 
 async function resolveWebListenOptions(
-  args: string[] = Deno.args,
+  options: StartWebServerStatusHeartbeatOptions = {},
 ): Promise<WebListenOptions> {
-  const parsed = parseWebListenArgs(args);
-  const { config } = await loadWebConfigState();
+  const parsed = parseWebListenArgs(options.args ?? Deno.args);
+  const { config } = await loadWebConfigState({ katoDir: options.katoDir });
 
   return {
     hostname: parsed.hostname ?? config?.hostname ?? DEFAULT_KATO_WEB_HOSTNAME,
@@ -88,6 +96,7 @@ async function persistWebStatus(
   running: boolean,
   startedAt: string,
   listen: WebListenOptions,
+  now: () => Date = () => new Date(),
 ): Promise<void> {
   await store.save({
     schemaVersion: 1,
@@ -96,26 +105,31 @@ async function persistWebStatus(
     port: listen.port,
     pid: running ? Deno.pid : undefined,
     startedAt: running ? startedAt : undefined,
-    heartbeatAt: new Date().toISOString(),
+    heartbeatAt: now().toISOString(),
     url: `http://${listen.hostname}:${listen.port}/`,
     version: WEB_APP_VERSION,
   });
 }
 
-export function startWebServerStatusHeartbeat(): void {
+export function startWebServerStatusHeartbeat(
+  options: StartWebServerStatusHeartbeatOptions = {},
+): void {
   if (getGlobalRuntimeState()) {
     return;
   }
 
-  const startedAt = new Date().toISOString();
-  const store = new WebServerStatusFileStore(resolveDefaultWebStatusPath());
+  const now = options.now ?? (() => new Date());
+  const startedAt = now().toISOString();
+  const store = new WebServerStatusFileStore(
+    options.statusPath ?? resolveDefaultWebStatusPath(options.katoDir),
+  );
   const runtimeState: WebStatusRuntimeState = {
     active: true,
     startedAt,
     pendingWrite: Promise.resolve(),
     intervalId: setInterval(() => {
       void heartbeat(true);
-    }, HEARTBEAT_INTERVAL_MS),
+    }, options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS),
   };
   setGlobalRuntimeState(runtimeState);
 
@@ -127,8 +141,8 @@ export function startWebServerStatusHeartbeat(): void {
           return;
         }
         try {
-          const listen = await resolveWebListenOptions();
-          await persistWebStatus(store, running, startedAt, listen);
+          const listen = await resolveWebListenOptions(options);
+          await persistWebStatus(store, running, startedAt, listen, now);
         } catch {
           // Status heartbeat is best-effort and must not break the web server.
         }
@@ -142,6 +156,13 @@ export function startWebServerStatusHeartbeat(): void {
     }
     runtimeState.active = false;
     clearInterval(runtimeState.intervalId);
+    globalThis.removeEventListener("unload", stop);
+    try {
+      Deno.removeSignalListener("SIGINT", stop);
+      Deno.removeSignalListener("SIGTERM", stop);
+    } catch {
+      // Some environments may not support signal listeners.
+    }
     void heartbeat(false);
   };
 

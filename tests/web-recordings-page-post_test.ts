@@ -22,12 +22,6 @@ import {
   createSessionCookieValue,
 } from "../apps/web/src/auth.ts";
 import { handleRecordingsPagePost } from "../apps/web/src/recordings_page_post.ts";
-import {
-  restoreRuntimeEnv,
-  setRuntimeEnv,
-  snapshotRuntimeEnv,
-  withLockedEnvironment,
-} from "./test_env.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
@@ -187,399 +181,330 @@ async function buildAuthenticatedPostRequest(
 }
 
 Deno.test("handleRecordingsPagePost stops an engaged recording and redirects back to the filtered row", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir("web-recordings-post-stop-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
+  await withTestTempDir("web-recordings-post-stop-", async (homeDir) => {
+    const { katoDir, alphaRoot, alphaConfigPath } = await setupWorkspaceFixture(
+      homeDir,
+    );
+    const webConfig = await setupWebAuthFixture(katoDir);
+    const sessionPath = join(homeDir, "provider-session-stop.jsonl");
+    const outputPath = join(alphaRoot, "notes", "stop-target.md");
+    await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
 
-        const { katoDir, alphaRoot, alphaConfigPath } =
-          await setupWorkspaceFixture(homeDir);
-        const webConfig = await setupWebAuthFixture(katoDir);
-        const sessionPath = join(homeDir, "provider-session-stop.jsonl");
-        const outputPath = join(alphaRoot, "notes", "stop-target.md");
-        await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
-
-        await createSessionFixture({
-          katoDir,
-          sessionId: "sess-web-route-stop",
-          providerSessionId: "provider-session-route-stop",
-          sourceFilePath: sessionPath,
-          workspaceOutputs: [
-            makeWorkspaceOutput({
-              workspaceId: "ws-alpha",
-              workspaceAlias: "alpha",
-              workspaceRoot: alphaRoot,
-              configPath: alphaConfigPath,
-              resolvedPath: outputPath,
-              desiredState: "on",
-              activeRecordingCycleId: "cycle-stop-route",
-              writeCursor: 4,
-              recordingCycles: [{
-                recordingCycleId: "cycle-stop-route",
-                startedCursor: 4,
-                startedAt: "2026-03-17T17:00:00.000Z",
-                startedBySeq: 4,
-              }],
-            }),
-          ],
-        });
-
-        const response = await handleRecordingsPagePost(
-          await buildAuthenticatedPostRequest("http://kato.local/recordings", {
-            action: "stop-recording",
-            sessionId: "sess-web-route-stop",
-            workspaceId: "ws-alpha",
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-web-route-stop",
+      providerSessionId: "provider-session-route-stop",
+      sourceFilePath: sessionPath,
+      workspaceOutputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceAlias: "alpha",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          resolvedPath: outputPath,
+          desiredState: "on",
+          activeRecordingCycleId: "cycle-stop-route",
+          writeCursor: 4,
+          recordingCycles: [{
             recordingCycleId: "cycle-stop-route",
-            outputPath,
-            stateFilter: "engaged-active",
-            workspaceFilter: "ws-alpha",
-            rowKey: "row-stop-route",
-          }, webConfig),
-        );
+            startedCursor: 4,
+            startedAt: "2026-03-17T17:00:00.000Z",
+            startedBySeq: 4,
+          }],
+        }),
+      ],
+    });
 
-        assertEquals(response.status, 303);
-        const location = response.headers.get("location");
-        assertExists(location);
-        const redirectUrl = new URL(location, "http://kato.local");
-        assertEquals(redirectUrl.pathname, "/recordings");
-        assertEquals(
-          redirectUrl.searchParams.get("state"),
-          "engaged-active",
-        );
-        assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
-        assertEquals(
-          redirectUrl.searchParams.get("notice"),
-          "recording stopped: alpha (sess-web)",
-        );
-        assertEquals(redirectUrl.hash, "#recording-cycle-stop-route");
+    const response = await handleRecordingsPagePost(
+      await buildAuthenticatedPostRequest("http://kato.local/recordings", {
+        action: "stop-recording",
+        sessionId: "sess-web-route-stop",
+        workspaceId: "ws-alpha",
+        recordingCycleId: "cycle-stop-route",
+        outputPath,
+        stateFilter: "engaged-active",
+        workspaceFilter: "ws-alpha",
+        rowKey: "row-stop-route",
+      }, webConfig),
+      { katoDir },
+    );
 
-        const sessionStore = new PersistentSessionStateStore({ katoDir });
-        const metadataAfter = (await sessionStore.listSessionMetadata())[0];
-        assertExists(metadataAfter);
-        const output = metadataAfter.workspaceOutputs?.[0];
-        assertExists(output);
-        assertEquals(output.desiredState, "off");
-        assertEquals(output.activeRecordingCycleId, undefined);
-      });
-    } finally {
-      restoreRuntimeEnv(env);
-    }
+    assertEquals(response.status, 303);
+    const location = response.headers.get("location");
+    assertExists(location);
+    const redirectUrl = new URL(location, "http://kato.local");
+    assertEquals(redirectUrl.pathname, "/recordings");
+    assertEquals(
+      redirectUrl.searchParams.get("state"),
+      "engaged-active",
+    );
+    assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
+    assertEquals(
+      redirectUrl.searchParams.get("notice"),
+      "recording stopped: alpha (sess-web)",
+    );
+    assertEquals(redirectUrl.hash, "#recording-cycle-stop-route");
+
+    const sessionStore = new PersistentSessionStateStore({ katoDir });
+    const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+    assertExists(metadataAfter);
+    const output = metadataAfter.workspaceOutputs?.[0];
+    assertExists(output);
+    assertEquals(output.desiredState, "off");
+    assertEquals(output.activeRecordingCycleId, undefined);
   });
 });
 
 Deno.test("handleRecordingsPagePost restarts a stopped recording and redirects to the new cycle anchor", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir(
-        "web-recordings-post-restart-",
-        async (homeDir) => {
-          setRuntimeEnv({
-            HOME: homeDir,
-            USERPROFILE: undefined,
-            KATO_RUNTIME_DIR: undefined,
-          });
+  await withTestTempDir(
+    "web-recordings-post-restart-",
+    async (homeDir) => {
+      const { katoDir, alphaRoot, alphaConfigPath } =
+        await setupWorkspaceFixture(homeDir);
+      const webConfig = await setupWebAuthFixture(katoDir);
+      const sessionPath = join(homeDir, "provider-session-restart.jsonl");
+      const outputPath = join(alphaRoot, "notes", "restart-target.md");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+      await Deno.writeTextFile(outputPath, "# existing recording\n");
 
-          const { katoDir, alphaRoot, alphaConfigPath } =
-            await setupWorkspaceFixture(homeDir);
-          const webConfig = await setupWebAuthFixture(katoDir);
-          const sessionPath = join(homeDir, "provider-session-restart.jsonl");
-          const outputPath = join(alphaRoot, "notes", "restart-target.md");
-          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
-          await Deno.writeTextFile(outputPath, "# existing recording\n");
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-route-restart",
+        providerSessionId: "provider-session-route-restart",
+        sourceFilePath: sessionPath,
+        workspaceOutputs: [
+          makeWorkspaceOutput({
+            workspaceId: "ws-alpha",
+            workspaceAlias: "alpha",
+            workspaceRoot: alphaRoot,
+            configPath: alphaConfigPath,
+            resolvedPath: outputPath,
+            desiredState: "off",
+            writeCursor: 4,
+            recordingCycles: [{
+              recordingCycleId: "cycle-restart-old",
+              startedCursor: 1,
+              stoppedCursor: 4,
+              startedAt: "2026-03-17T16:00:00.000Z",
+              stoppedAt: "2026-03-17T16:30:00.000Z",
+              startedBySeq: 1,
+              stoppedBySeq: 4,
+            }],
+          }),
+        ],
+      });
 
-          await createSessionFixture({
-            katoDir,
+      const response = await handleRecordingsPagePost(
+        await buildAuthenticatedPostRequest(
+          "http://kato.local/recordings",
+          {
+            action: "restart-recording",
             sessionId: "sess-web-route-restart",
-            providerSessionId: "provider-session-route-restart",
-            sourceFilePath: sessionPath,
-            workspaceOutputs: [
-              makeWorkspaceOutput({
-                workspaceId: "ws-alpha",
-                workspaceAlias: "alpha",
-                workspaceRoot: alphaRoot,
-                configPath: alphaConfigPath,
-                resolvedPath: outputPath,
-                desiredState: "off",
-                writeCursor: 4,
-                recordingCycles: [{
-                  recordingCycleId: "cycle-restart-old",
-                  startedCursor: 1,
-                  stoppedCursor: 4,
-                  startedAt: "2026-03-17T16:00:00.000Z",
-                  stoppedAt: "2026-03-17T16:30:00.000Z",
-                  startedBySeq: 1,
-                  stoppedBySeq: 4,
-                }],
-              }),
-            ],
-          });
-
-          const response = await handleRecordingsPagePost(
-            await buildAuthenticatedPostRequest(
-              "http://kato.local/recordings",
-              {
-                action: "restart-recording",
-                sessionId: "sess-web-route-restart",
-                workspaceId: "ws-alpha",
-                recordingCycleId: "cycle-restart-old",
-                outputPath,
-                stateFilter: "stopped",
-                workspaceFilter: "ws-alpha",
-                rowKey: "row-restart-route",
-              },
-              webConfig,
-            ),
-          );
-
-          assertEquals(response.status, 303);
-          const location = response.headers.get("location");
-          assertExists(location);
-
-          const sessionStore = new PersistentSessionStateStore({ katoDir });
-          const metadataAfter = (await sessionStore.listSessionMetadata())[0];
-          assertExists(metadataAfter);
-          const output = metadataAfter.workspaceOutputs?.[0];
-          assertExists(output);
-          assertEquals(output.desiredState, "on");
-          assertExists(output.activeRecordingCycleId);
-          assertEquals(
-            output.activeRecordingCycleId === "cycle-restart-old",
-            false,
-          );
-
-          const redirectUrl = new URL(location, "http://kato.local");
-          assertEquals(redirectUrl.pathname, "/recordings");
-          assertEquals(redirectUrl.searchParams.get("state"), "stopped");
-          assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
-          assertEquals(
-            redirectUrl.searchParams.get("notice"),
-            "recording re-armed: alpha (sess-web)",
-          );
-          assertEquals(
-            redirectUrl.hash,
-            `#recording-${output.activeRecordingCycleId}`,
-          );
-        },
+            workspaceId: "ws-alpha",
+            recordingCycleId: "cycle-restart-old",
+            outputPath,
+            stateFilter: "stopped",
+            workspaceFilter: "ws-alpha",
+            rowKey: "row-restart-route",
+          },
+          webConfig,
+        ),
+        { katoDir },
       );
-    } finally {
-      restoreRuntimeEnv(env);
-    }
-  });
+
+      assertEquals(response.status, 303);
+      const location = response.headers.get("location");
+      assertExists(location);
+
+      const sessionStore = new PersistentSessionStateStore({ katoDir });
+      const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadataAfter);
+      const output = metadataAfter.workspaceOutputs?.[0];
+      assertExists(output);
+      assertEquals(output.desiredState, "on");
+      assertExists(output.activeRecordingCycleId);
+      assertEquals(
+        output.activeRecordingCycleId === "cycle-restart-old",
+        false,
+      );
+
+      const redirectUrl = new URL(location, "http://kato.local");
+      assertEquals(redirectUrl.pathname, "/recordings");
+      assertEquals(redirectUrl.searchParams.get("state"), "stopped");
+      assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
+      assertEquals(
+        redirectUrl.searchParams.get("notice"),
+        "recording re-armed: alpha (sess-web)",
+      );
+      assertEquals(
+        redirectUrl.hash,
+        `#recording-${output.activeRecordingCycleId}`,
+      );
+    },
+  );
 });
 
 Deno.test("handleRecordingsPagePost redirects with an error when sessionId is missing", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir(
-        "web-recordings-post-missing-session-",
-        async (homeDir) => {
-          setRuntimeEnv({
-            HOME: homeDir,
-            USERPROFILE: undefined,
-            KATO_RUNTIME_DIR: undefined,
-          });
-          const katoDir = join(homeDir, ".kato");
-          const webConfig = await setupWebAuthFixture(katoDir);
+  await withTestTempDir(
+    "web-recordings-post-missing-session-",
+    async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      const webConfig = await setupWebAuthFixture(katoDir);
 
-          const response = await handleRecordingsPagePost(
-            await buildAuthenticatedPostRequest(
-              "http://kato.local/recordings",
-              {
-                action: "restart-recording",
-                sessionId: "",
-                recordingCycleId: "cycle-missing-session",
-                stateFilter: "stopped",
-                workspaceFilter: "ws-alpha",
-                rowKey: "row-missing-session",
-              },
-              webConfig,
-            ),
-          );
-
-          assertEquals(response.status, 303);
-          const location = response.headers.get("location");
-          assertExists(location);
-          const redirectUrl = new URL(location, "http://kato.local");
-          assertEquals(redirectUrl.pathname, "/recordings");
-          assertEquals(redirectUrl.searchParams.get("state"), "stopped");
-          assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
-          assertEquals(
-            redirectUrl.searchParams.get("error"),
-            "invalid_request",
-          );
-          assertEquals(
-            redirectUrl.hash,
-            "#recording-cycle-missing-session",
-          );
-        },
+      const response = await handleRecordingsPagePost(
+        await buildAuthenticatedPostRequest(
+          "http://kato.local/recordings",
+          {
+            action: "restart-recording",
+            sessionId: "",
+            recordingCycleId: "cycle-missing-session",
+            stateFilter: "stopped",
+            workspaceFilter: "ws-alpha",
+            rowKey: "row-missing-session",
+          },
+          webConfig,
+        ),
+        { katoDir },
       );
-    } finally {
-      restoreRuntimeEnv(env);
-    }
-  });
+
+      assertEquals(response.status, 303);
+      const location = response.headers.get("location");
+      assertExists(location);
+      const redirectUrl = new URL(location, "http://kato.local");
+      assertEquals(redirectUrl.pathname, "/recordings");
+      assertEquals(redirectUrl.searchParams.get("state"), "stopped");
+      assertEquals(redirectUrl.searchParams.get("workspace"), "ws-alpha");
+      assertEquals(
+        redirectUrl.searchParams.get("error"),
+        "invalid_request",
+      );
+      assertEquals(
+        redirectUrl.hash,
+        "#recording-cycle-missing-session",
+      );
+    },
+  );
 });
 
 Deno.test("handleRecordingsPagePost rejects recording mutations without a valid csrf token", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir("web-recordings-post-csrf-", async (homeDir) => {
-        setRuntimeEnv({
-          HOME: homeDir,
-          USERPROFILE: undefined,
-          KATO_RUNTIME_DIR: undefined,
-        });
+  await withTestTempDir("web-recordings-post-csrf-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const webConfig = await setupWebAuthFixture(katoDir);
+    const response = await handleRecordingsPagePost(
+      await buildAuthenticatedPostRequest(
+        "http://kato.local/recordings",
+        {
+          action: "stop-recording",
+          sessionId: "sess-web-route-stop",
+        },
+        webConfig,
+        { csrfToken: null },
+      ),
+      { katoDir },
+    );
 
-        const katoDir = join(homeDir, ".kato");
-        const webConfig = await setupWebAuthFixture(katoDir);
-        const response = await handleRecordingsPagePost(
-          await buildAuthenticatedPostRequest(
-            "http://kato.local/recordings",
-            {
-              action: "stop-recording",
-              sessionId: "sess-web-route-stop",
-            },
-            webConfig,
-            { csrfToken: null },
-          ),
-        );
-
-        assertEquals(response.status, 403);
-        assertEquals(await response.text(), "csrf token required");
-      });
-    } finally {
-      restoreRuntimeEnv(env);
-    }
+    assertEquals(response.status, 403);
+    assertEquals(await response.text(), "csrf token required");
   });
 });
 
 Deno.test("handleRecordingsPagePost uses a safe error token for restart failures", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir(
-        "web-recordings-post-restart-error-",
-        async (homeDir) => {
-          setRuntimeEnv({
-            HOME: homeDir,
-            USERPROFILE: undefined,
-            KATO_RUNTIME_DIR: undefined,
-          });
+  await withTestTempDir(
+    "web-recordings-post-restart-error-",
+    async (homeDir) => {
+      const { katoDir, alphaRoot, alphaConfigPath } =
+        await setupWorkspaceFixture(homeDir);
+      const webConfig = await setupWebAuthFixture(katoDir);
+      const sessionPath = join(homeDir, "provider-session-restart.jsonl");
+      const missingOutputPath = join(alphaRoot, "notes", "missing.md");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
 
-          const { katoDir, alphaRoot, alphaConfigPath } =
-            await setupWorkspaceFixture(homeDir);
-          const webConfig = await setupWebAuthFixture(katoDir);
-          const sessionPath = join(homeDir, "provider-session-restart.jsonl");
-          const missingOutputPath = join(alphaRoot, "notes", "missing.md");
-          await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-route-restart-error",
+        providerSessionId: "provider-session-route-restart-error",
+        sourceFilePath: sessionPath,
+        workspaceOutputs: [
+          makeWorkspaceOutput({
+            workspaceId: "ws-alpha",
+            workspaceAlias: "alpha",
+            workspaceRoot: alphaRoot,
+            configPath: alphaConfigPath,
+            resolvedPath: missingOutputPath,
+            desiredState: "off",
+            writeCursor: 4,
+            recordingCycles: [{
+              recordingCycleId: "cycle-restart-missing",
+              startedCursor: 1,
+              stoppedCursor: 4,
+              startedAt: "2026-03-17T16:00:00.000Z",
+              stoppedAt: "2026-03-17T16:30:00.000Z",
+              startedBySeq: 1,
+              stoppedBySeq: 4,
+            }],
+          }),
+        ],
+      });
 
-          await createSessionFixture({
-            katoDir,
+      const response = await handleRecordingsPagePost(
+        await buildAuthenticatedPostRequest(
+          "http://kato.local/recordings",
+          {
+            action: "restart-recording",
             sessionId: "sess-web-route-restart-error",
-            providerSessionId: "provider-session-route-restart-error",
-            sourceFilePath: sessionPath,
-            workspaceOutputs: [
-              makeWorkspaceOutput({
-                workspaceId: "ws-alpha",
-                workspaceAlias: "alpha",
-                workspaceRoot: alphaRoot,
-                configPath: alphaConfigPath,
-                resolvedPath: missingOutputPath,
-                desiredState: "off",
-                writeCursor: 4,
-                recordingCycles: [{
-                  recordingCycleId: "cycle-restart-missing",
-                  startedCursor: 1,
-                  stoppedCursor: 4,
-                  startedAt: "2026-03-17T16:00:00.000Z",
-                  stoppedAt: "2026-03-17T16:30:00.000Z",
-                  startedBySeq: 1,
-                  stoppedBySeq: 4,
-                }],
-              }),
-            ],
-          });
-
-          const response = await handleRecordingsPagePost(
-            await buildAuthenticatedPostRequest(
-              "http://kato.local/recordings",
-              {
-                action: "restart-recording",
-                sessionId: "sess-web-route-restart-error",
-                workspaceId: "ws-alpha",
-                recordingCycleId: "cycle-restart-missing",
-                outputPath: missingOutputPath,
-                stateFilter: "stopped",
-                workspaceFilter: "ws-alpha",
-                rowKey: "row-restart-error",
-              },
-              webConfig,
-            ),
-          );
-
-          assertEquals(response.status, 303);
-          const location = response.headers.get("location");
-          assertExists(location);
-          const redirectUrl = new URL(location, "http://kato.local");
-          assertEquals(
-            redirectUrl.searchParams.get("error"),
-            "restart_failed",
-          );
-          assertEquals(location.includes(missingOutputPath), false);
-          assertEquals(
-            location.includes("output file no longer exists"),
-            false,
-          );
-        },
+            workspaceId: "ws-alpha",
+            recordingCycleId: "cycle-restart-missing",
+            outputPath: missingOutputPath,
+            stateFilter: "stopped",
+            workspaceFilter: "ws-alpha",
+            rowKey: "row-restart-error",
+          },
+          webConfig,
+        ),
+        { katoDir },
       );
-    } finally {
-      restoreRuntimeEnv(env);
-    }
-  });
+
+      assertEquals(response.status, 303);
+      const location = response.headers.get("location");
+      assertExists(location);
+      const redirectUrl = new URL(location, "http://kato.local");
+      assertEquals(
+        redirectUrl.searchParams.get("error"),
+        "restart_failed",
+      );
+      assertEquals(location.includes(missingOutputPath), false);
+      assertEquals(
+        location.includes("output file no longer exists"),
+        false,
+      );
+    },
+  );
 });
 
 Deno.test("handleRecordingsPagePost rejects unsupported actions with a 400 response", async () => {
-  await withLockedEnvironment(async () => {
-    const env = snapshotRuntimeEnv();
-    try {
-      await withTestTempDir(
-        "web-recordings-post-unsupported-",
-        async (homeDir) => {
-          setRuntimeEnv({
-            HOME: homeDir,
-            USERPROFILE: undefined,
-            KATO_RUNTIME_DIR: undefined,
-          });
-          const katoDir = join(homeDir, ".kato");
-          const webConfig = await setupWebAuthFixture(katoDir);
+  await withTestTempDir(
+    "web-recordings-post-unsupported-",
+    async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      const webConfig = await setupWebAuthFixture(katoDir);
 
-          const response = await handleRecordingsPagePost(
-            await buildAuthenticatedPostRequest(
-              "http://kato.local/recordings",
-              {
-                action: "not-a-real-action",
-                sessionId: "sess-unsupported",
-              },
-              webConfig,
-            ),
-          );
-
-          assertEquals(response.status, 400);
-          assertEquals(
-            await response.text(),
-            "unsupported recordings action",
-          );
-        },
+      const response = await handleRecordingsPagePost(
+        await buildAuthenticatedPostRequest(
+          "http://kato.local/recordings",
+          {
+            action: "not-a-real-action",
+            sessionId: "sess-unsupported",
+          },
+          webConfig,
+        ),
+        { katoDir },
       );
-    } finally {
-      restoreRuntimeEnv(env);
-    }
-  });
+
+      assertEquals(response.status, 400);
+      assertEquals(
+        await response.text(),
+        "unsupported recordings action",
+      );
+    },
+  );
 });
