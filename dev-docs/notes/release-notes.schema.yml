@@ -1,0 +1,9 @@
+version: 1
+schemas:
+  - id: release-notes
+    parent: root
+    # Match versioned release notes like `release-notes.v0.2.10`, then apply
+    # the release notes template to notes created beneath them.
+    children:
+      - pattern: "v*"
+        template: template.release-notes
