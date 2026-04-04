@@ -2,7 +2,9 @@ import { assertArrayIncludes, assertEquals } from "@std/assert";
 import {
   buildCommands,
   DEFAULT_PARALLEL_SAFE_TEST_TARGETS,
+  ENV_COVERAGE_DIR,
   ENV_TEST_FILES,
+  PARALLEL_SAFE_COVERAGE_DIR,
 } from "../scripts/run-root-test-slices.ts";
 
 Deno.test("buildCommands uses the default parallel-safe targets when no targets are forwarded", () => {
@@ -48,4 +50,22 @@ Deno.test("buildCommands narrows env mode to matching env files", () => {
   assertEquals(commands.length, 1);
   assertEquals(commands[0]?.name, "test:env");
   assertEquals(commands[0]?.args.at(-1), "tests/path-policy_test.ts");
+});
+
+Deno.test("buildCommands coverage mode writes each slice into its own coverage directory", () => {
+  const commands = buildCommands("coverage", []);
+  const parallelSafeCommand = commands.find((command) =>
+    command.name === "test:parallel-safe"
+  );
+  const envCommand = commands.find((command) => command.name === "test:env");
+
+  assertEquals(commands.length, 2);
+  assertArrayIncludes(parallelSafeCommand?.args ?? [], [
+    "--clean",
+    `--coverage=${PARALLEL_SAFE_COVERAGE_DIR}`,
+  ]);
+  assertArrayIncludes(envCommand?.args ?? [], [
+    "--clean",
+    `--coverage=${ENV_COVERAGE_DIR}`,
+  ]);
 });
