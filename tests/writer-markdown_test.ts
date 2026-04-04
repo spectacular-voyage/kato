@@ -543,6 +543,44 @@ Deno.test("MarkdownConversationWriter create respects includeFrontmatter false",
 });
 
 Deno.test(
+  "renderEventsToMarkdown rewrites local markdown note links to Dendron wikilinks",
+  () => {
+    const assistant = makeEvent(
+      "assistant-dendron-links",
+      "message.assistant",
+      [
+        "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).",
+        "Also [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
+        "Windows path: [todo](C:\\Users\\djradon\\notes\\dev.todo.md).",
+        "External link stays [OpenAI](https://openai.com).",
+        "Anchor stays [section](#local-anchor).",
+      ].join("\n"),
+      "2026-04-04T10:00:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "dendron-wikilink",
+    });
+
+    assertStringIncludes(rendered, "[[dev.general-guidance]]");
+    assertStringIncludes(
+      rendered,
+      "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
+    );
+    assertStringIncludes(rendered, "[[dev.todo]]");
+    assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
+    assertStringIncludes(rendered, "[section](#local-anchor)");
+    assertEquals(
+      rendered.includes(
+        "/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md",
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown keeps tool call revisions when includeToolCalls is enabled",
   () => {
     const baseAssistant = makeEvent(

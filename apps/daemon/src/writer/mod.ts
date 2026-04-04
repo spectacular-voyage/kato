@@ -5,6 +5,7 @@ export {
 export type {
   ConversationWriteMode,
   ConversationWriterLike,
+  MarkdownLinkStyle,
   MarkdownRenderOptions,
   MarkdownSpeakerNames,
   MarkdownWriteResult,

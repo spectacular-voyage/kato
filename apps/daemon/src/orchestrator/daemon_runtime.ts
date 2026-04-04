@@ -466,6 +466,7 @@ function createOutputOverrides(options: {
     writerIncludeDecisionOptions?: boolean;
     writerIncludeDecisionSelection?: boolean;
     writerItalicizeUserMessages: boolean;
+    writerUseDendronStyleWikilinks?: boolean;
   };
   workspaceTimezone: string;
   preferredUsername?: string;
@@ -503,6 +504,10 @@ function createOutputOverrides(options: {
         options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
+      markdownLinkStyle:
+        options.writerFeatureFlags.writerUseDendronStyleWikilinks
+          ? "dendron-wikilink"
+          : "standard",
       includeSystemEvents: options.captureIncludeSystemEvents,
       headingTimestampTimezone: options.workspaceTimezone,
       ...(options.markdownFrontmatter.addParticipantUsernameToHeadings &&

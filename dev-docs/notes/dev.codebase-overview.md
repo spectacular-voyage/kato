@@ -138,6 +138,9 @@ under `~/.kato` by default.
 Generated defaults derived from workspace `defaultOutputDir` remain
 workspace-root-contained after template expansion; only explicit command paths
 may target outside the workspace root.
+Workspace-local `workspaceFeatureFlags` also carry recording-render policy,
+including an opt-in Dendron wikilink rewrite for local `.md` inline links in
+workspace-scoped markdown output.
 Operator-facing workspace `displayName` labels live in the shared workspace
 registry, while preferred per-workspace participant usernames remain in
 `kato-user-config.yaml`.

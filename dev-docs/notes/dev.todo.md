@@ -2,18 +2,11 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1775014693695
+updated: 1775331871767
 created: 1771812869620
 ---
 
-- brew packaging
-- review entire twin or file (i.e. markdown viewer)
-- heading templates
-  - -ai-enabled mode lets you summarize in x words (by first speech act, and eventually retroactively replace 
-  - product name, not just llm
-  - nickname
-- redact list. redact words, sentences, entire chats based on regex or simple mat
-
+-
 ## Event Schema Follow-ups (v2)
 
 - [ ] Add schema fail-closed check when persisted snapshot files are added (fail

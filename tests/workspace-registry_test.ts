@@ -167,6 +167,7 @@ Deno.test(
           'filenameTemplate: "{provider}-{sessionShortId}.md"',
           "workspaceFeatureFlags:",
           "  writerIncludeCommentary: true",
+          "  writerUseDendronStyleWikilinks: false",
         ].join("\n") + "\n",
       );
 
@@ -193,6 +194,10 @@ Deno.test(
         true,
       );
       assertEquals(
+        first.writerFeatureFlags.writerUseDendronStyleWikilinks,
+        false,
+      );
+      assertEquals(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
       );
@@ -211,6 +216,7 @@ Deno.test(
           "  writerIncludeCommentary: false",
           "  writerIncludeToolResults: true",
           "  writerIncludeDecisionSelection: false",
+          "  writerUseDendronStyleWikilinks: true",
         ].join("\n") + "\n",
       );
       await Deno.utime(
@@ -230,6 +236,10 @@ Deno.test(
       assertEquals(
         second.writerFeatureFlags.writerIncludeDecisionSelection,
         false,
+      );
+      assertEquals(
+        second.writerFeatureFlags.writerUseDendronStyleWikilinks,
+        true,
       );
     });
   },

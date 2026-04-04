@@ -20,6 +20,8 @@ export interface MarkdownSpeakerNames {
   system?: string;
 }
 
+export type MarkdownLinkStyle = "standard" | "dendron-wikilink";
+
 export interface MarkdownRenderOptions {
   includeFrontmatter?: boolean;
   includeUpdatedInFrontmatter?: boolean;
@@ -45,6 +47,7 @@ export interface MarkdownRenderOptions {
   requireCreateNew?: boolean;
   speakerNames?: MarkdownSpeakerNames;
   headingTimestampTimezone?: string;
+  markdownLinkStyle?: MarkdownLinkStyle;
 }
 
 export interface ConversationWriterLike {
@@ -187,8 +190,92 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}...`;
 }
 
+const MARKDOWN_INLINE_LINK_PATTERN = /(!)?\[([^\]]+)\]\(([^)\n]+)\)/g;
+
+function trimMarkdownLinkDestination(rawDestination: string): string | null {
+  const trimmed = rawDestination.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.startsWith("<")) {
+    const closeIndex = trimmed.indexOf(">");
+    if (closeIndex <= 1) {
+      return null;
+    }
+    return trimmed.slice(1, closeIndex).trim();
+  }
+  const whitespaceIndex = trimmed.search(/\s/);
+  return whitespaceIndex >= 0
+    ? trimmed.slice(0, whitespaceIndex).trim()
+    : trimmed;
+}
+
+function isWindowsDrivePath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function resolveDendronWikilinkTarget(
+  rawDestination: string,
+): string | null {
+  const destination = trimMarkdownLinkDestination(rawDestination);
+  if (!destination || destination.startsWith("#")) {
+    return null;
+  }
+  if (
+    !isWindowsDrivePath(destination) &&
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(destination)
+  ) {
+    return null;
+  }
+
+  const hashIndex = destination.indexOf("#");
+  const pathWithQuery = hashIndex >= 0
+    ? destination.slice(0, hashIndex)
+    : destination;
+  const fragment = hashIndex >= 0 ? destination.slice(hashIndex + 1) : "";
+  if (pathWithQuery.includes("?")) {
+    return null;
+  }
+  if (!/\.md$/i.test(pathWithQuery)) {
+    return null;
+  }
+
+  const filename = pathWithQuery.split(/[\\/]/).pop()?.trim() ?? "";
+  const noteName = filename.replace(/\.md$/i, "");
+  if (noteName.length === 0) {
+    return null;
+  }
+  return fragment.length > 0 ? `${noteName}#${fragment}` : noteName;
+}
+
+function applyMarkdownLinkStyle(
+  content: string,
+  markdownLinkStyle: MarkdownLinkStyle,
+): string {
+  if (markdownLinkStyle !== "dendron-wikilink" || !content.includes("](")) {
+    return content;
+  }
+
+  return content.replace(
+    MARKDOWN_INLINE_LINK_PATTERN,
+    (
+      match,
+      imageMarker: string | undefined,
+      _label: string,
+      destination: string,
+    ) => {
+      if (imageMarker === "!") {
+        return match;
+      }
+      const wikilinkTarget = resolveDendronWikilinkTarget(destination);
+      return wikilinkTarget ? `[[${wikilinkTarget}]]` : match;
+    },
+  );
+}
+
 function parseQuestionnaireOptionLines(
   metadata: Record<string, unknown> | undefined,
+  markdownLinkStyle: MarkdownLinkStyle,
 ): string[] {
   const optionsValue = metadata?.["options"];
   return Array.isArray(optionsValue)
@@ -199,7 +286,10 @@ function parseQuestionnaireOptionLines(
       .map((option) => {
         const label = String(option["label"] ?? "").trim();
         if (label.length === 0) return "";
-        const description = String(option["description"] ?? "").trim();
+        const description = applyMarkdownLinkStyle(
+          String(option["description"] ?? "").trim(),
+          markdownLinkStyle,
+        );
         return description.length > 0
           ? `- ${label}: ${description}`
           : `- ${label}`;
@@ -314,6 +404,7 @@ export function renderEventsToMarkdown(
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
+  const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
 
   const parts: string[] = [];
   const questionnaireContextByKey = new Map<
@@ -373,13 +464,17 @@ export function renderEventsToMarkdown(
       const content = (event.kind === "message.user" && italicizeUserMessages)
         ? formatUserMessageContent(event.content)
         : event.content;
+      const renderedContent = applyMarkdownLinkStyle(
+        content,
+        markdownLinkStyle,
+      );
 
-      if (content.trim().length === 0) {
+      if (renderedContent.trim().length === 0) {
         continue;
       }
 
       if (event.kind === "message.assistant") {
-        const normalizedContent = content.trim();
+        const normalizedContent = event.content.trim();
         const nextEvent = events[i + 1];
         if (
           event.phase === "commentary" &&
@@ -426,7 +521,7 @@ export function renderEventsToMarkdown(
           "",
         );
       }
-      messageParts.push(content);
+      messageParts.push(renderedContent);
       parts.push(messageParts.join("\n"), "");
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
@@ -440,7 +535,10 @@ export function renderEventsToMarkdown(
         }_Tool-${event.name}`,
       ];
       if (event.description?.trim().length) {
-        callParts.push("", event.description);
+        callParts.push(
+          "",
+          applyMarkdownLinkStyle(event.description, markdownLinkStyle),
+        );
       }
       parts.push(callParts.join("\n"), "");
       lastSignature = undefined;
@@ -469,7 +567,10 @@ export function renderEventsToMarkdown(
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;
-      const thinkingContent = event.content.trim();
+      const thinkingContent = applyMarkdownLinkStyle(
+        event.content.trim(),
+        markdownLinkStyle,
+      );
       if (thinkingContent.length === 0) continue;
       parts.push(thinkingContent, "");
       lastSignature = undefined;
@@ -480,7 +581,10 @@ export function renderEventsToMarkdown(
         : undefined;
       const providerQuestionId = String(metadata?.["providerQuestionId"] ?? "")
         .trim();
-      const parsedOptionLines = parseQuestionnaireOptionLines(metadata);
+      const parsedOptionLines = parseQuestionnaireOptionLines(
+        metadata,
+        markdownLinkStyle,
+      );
       const questionnaireDecision = providerQuestionId.length > 0 ||
         parsedOptionLines.length > 0;
       const questionnaireAcceptedDecision = questionnaireDecision &&
@@ -500,9 +604,13 @@ export function renderEventsToMarkdown(
           continue;
         }
 
+        const styledSummary = applyMarkdownLinkStyle(
+          event.summary,
+          markdownLinkStyle,
+        );
         const parsedSummary = questionnaireAcceptedDecision
-          ? splitAcceptedDecisionSummary(event.summary)
-          : { prompt: event.summary.trim() };
+          ? splitAcceptedDecisionSummary(styledSummary)
+          : { prompt: styledSummary.trim() };
         const contextKeys = new Set<string>();
         const decisionKeyContext = normalizeDecisionContextKey(
           event.decisionKey,
@@ -541,7 +649,7 @@ export function renderEventsToMarkdown(
         const selection = questionnaireAcceptedDecision
           ? (parsedSummary.selection && parsedSummary.selection.length > 0
             ? parsedSummary.selection
-            : event.summary.trim())
+            : styledSummary.trim())
           : undefined;
 
         if (contextKeys.size > 0 && (prompt || optionLines.length > 0)) {
@@ -590,7 +698,9 @@ export function renderEventsToMarkdown(
       }
       const decisionParts = [
         "",
-        `**Decision [${event.decisionKey}]:** ${event.summary}`,
+        `**Decision [${event.decisionKey}]:** ${
+          applyMarkdownLinkStyle(event.summary, markdownLinkStyle)
+        }`,
         `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
       ];
       parts.push(decisionParts.join("\n"), "");
@@ -599,9 +709,9 @@ export function renderEventsToMarkdown(
       if (!includeSystemEvents) continue;
       const infoParts = [
         "",
-        `> [provider.info${
-          event.subtype ? `:${event.subtype}` : ""
-        }] ${event.content}`,
+        `> [provider.info${event.subtype ? `:${event.subtype}` : ""}] ${
+          applyMarkdownLinkStyle(event.content, markdownLinkStyle)
+        }`,
       ];
       parts.push(infoParts.join("\n"), "");
       lastSignature = undefined;

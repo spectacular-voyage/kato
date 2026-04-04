@@ -5369,6 +5369,7 @@ Deno.test(
           "workspaceFeatureFlags:",
           "  writerIncludeToolResults: true",
           "  writerIncludeDecisionSelection: false",
+          "  writerUseDendronStyleWikilinks: true",
           "markdownFrontmatter:",
           "  includeFrontmatterInMarkdownRecordings: false",
           "  addParticipantUsernameToHeadings: true",
@@ -5529,6 +5530,10 @@ Deno.test(
       assertEquals(
         renderOptions.headingTimestampTimezone,
         "UTC",
+      );
+      assertEquals(
+        renderOptions.markdownLinkStyle,
+        "dendron-wikilink",
       );
       assertEquals(
         renderOptions.speakerNames?.user,

@@ -957,6 +957,10 @@ Deno.test(
       );
       assertStringIncludes(
         initializedConfig,
+        "writerUseDendronStyleWikilinks: false",
+      );
+      assertStringIncludes(
+        initializedConfig,
         "includeSessionIds: false",
       );
       assertStringIncludes(

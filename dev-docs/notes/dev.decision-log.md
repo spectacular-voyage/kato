@@ -17,6 +17,33 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Workspace Markdown Links Can Collapse to Dendron Wikilinks
+
+- Decision:
+  - Add `workspaceFeatureFlags.writerUseDendronStyleWikilinks` to workspace
+    config, default `false`.
+  - When enabled, workspace-scoped markdown output rewrites local `.md` inline
+    links to Dendron wikilinks using the target note filename without the
+    `.md` extension.
+  - Preserve `#fragment` suffixes as `[[note#fragment]]`, and leave external
+    URLs, fragment-only links, and query-bearing links unchanged.
+- Owner: Kato engineering
+- Date: 2026-04-04
+- Why:
+  - Workspace recordings for Dendron vaults should not spill absolute
+    filesystem paths into captured markdown.
+  - The concern is render-shape policy, so workspace-local control is the right
+    scope.
+- Tradeoffs:
+  - Custom markdown link labels collapse to the canonical note identity in this
+    first pass.
+  - Shared/global CLI export defaults do not yet expose the same toggle.
+- Follow-up tasks:
+  - Revisit Dendron alias-style output later if preserving custom labels turns
+    out to matter.
+  - Revisit whether shared export defaults should gain parity once the
+    workspace-local behavior has baked in.
+
 ### Root Test Parallelism Uses a Split Serial Env Slice
 
 - Decision:
