@@ -62,6 +62,7 @@ Deno.test(
           writerIncludeThinking: true,
           writerIncludeToolCalls: true,
           writerItalicizeUserMessages: false,
+          writerRelativizeLocalLinks: true,
         },
         writeCursor: 0,
         recordingCycles: [{
@@ -86,6 +87,7 @@ Deno.test(
           writerIncludeThinking: false,
           writerIncludeToolCalls: true,
           writerItalicizeUserMessages: true,
+          writerRelativizeLocalLinks: false,
         },
         writeCursor: 5,
         recordingCycles: [],

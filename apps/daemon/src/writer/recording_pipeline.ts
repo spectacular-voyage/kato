@@ -29,6 +29,8 @@ export type RecordingRenderOptionOverrides = Pick<
   | "italicizeUserMessages"
   | "includeSystemEvents"
   | "headingTimestampTimezone"
+  | "markdownLinkStyle"
+  | "relativizeLocalLinks"
   | "speakerNames"
 >;
 

@@ -21,7 +21,7 @@
     "test:coverage": "deno run -A scripts/run-root-test-slices.ts coverage",
     "test:coverage:parallel-safe": "deno run -A scripts/run-root-test-slices.ts coverage:parallel-safe",
     "test:coverage:env": "deno run -A scripts/run-root-test-slices.ts coverage:env",
-    "coverage:lcov": "deno coverage --lcov --output=coverage.lcov .test-tmp/coverage/root",
+    "coverage:lcov": "deno coverage --lcov --output=coverage.lcov .test-tmp/coverage/root/parallel-safe .test-tmp/coverage/root/env",
     "ci:quality": "deno task fmt --check && deno task lint && deno task check --frozen",
     "ci": "deno task audit && deno task fmt --check && deno task lint && deno task check --frozen && deno task test --frozen"
   },

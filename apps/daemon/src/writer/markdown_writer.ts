@@ -1,5 +1,7 @@
 import type { ConversationEvent } from "@kato/shared";
 import { basename, dirname } from "@std/path";
+import * as posixPath from "@std/path/posix";
+import * as windowsPath from "@std/path/windows";
 import {
   mergeAccretiveFrontmatterFields,
   renderFrontmatter,
@@ -19,6 +21,8 @@ export interface MarkdownSpeakerNames {
   assistant?: string;
   system?: string;
 }
+
+export type MarkdownLinkStyle = "standard" | "dendron-wikilink";
 
 export interface MarkdownRenderOptions {
   includeFrontmatter?: boolean;
@@ -45,6 +49,9 @@ export interface MarkdownRenderOptions {
   requireCreateNew?: boolean;
   speakerNames?: MarkdownSpeakerNames;
   headingTimestampTimezone?: string;
+  markdownLinkStyle?: MarkdownLinkStyle;
+  relativizeLocalLinks?: boolean;
+  renderOutputPath?: string;
 }
 
 export interface ConversationWriterLike {
@@ -187,8 +194,397 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}...`;
 }
 
+const MARKDOWN_INLINE_LINK_PATTERN = /^(!)?\[([^\]]+)\]\(([^)\n]+)\)/;
+
+interface ParsedMarkdownLinkDestination {
+  destination: string;
+  suffix: string;
+  wrapInAngles: boolean;
+}
+
+interface MarkdownInlineLinkMatch {
+  fullMatch: string;
+  isImage: boolean;
+  label: string;
+  rawDestination: string;
+}
+
+interface MarkdownLinkRenderContext {
+  markdownLinkStyle: MarkdownLinkStyle;
+  relativizeLocalLinks: boolean;
+  renderOutputPath?: string;
+}
+
+function parseMarkdownLinkDestination(
+  rawDestination: string,
+): ParsedMarkdownLinkDestination | null {
+  const trimmed = rawDestination.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.startsWith("<")) {
+    const closeIndex = trimmed.indexOf(">");
+    if (closeIndex <= 1) {
+      return null;
+    }
+    return {
+      destination: trimmed.slice(1, closeIndex).trim(),
+      suffix: trimmed.slice(closeIndex + 1),
+      wrapInAngles: true,
+    };
+  }
+  const whitespaceIndex = trimmed.search(/\s/);
+  return whitespaceIndex >= 0
+    ? {
+      destination: trimmed.slice(0, whitespaceIndex).trim(),
+      suffix: trimmed.slice(whitespaceIndex),
+      wrapInAngles: false,
+    }
+    : {
+      destination: trimmed,
+      suffix: "",
+      wrapInAngles: false,
+    };
+}
+
+function trimMarkdownLinkDestination(rawDestination: string): string | null {
+  return parseMarkdownLinkDestination(rawDestination)?.destination ?? null;
+}
+
+function rebuildMarkdownLinkDestination(
+  parsed: ParsedMarkdownLinkDestination,
+  destination: string,
+): string {
+  return `${
+    parsed.wrapInAngles ? `<${destination}>` : destination
+  }${parsed.suffix}`;
+}
+
+function isWindowsDrivePath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function isSchemeBasedDestination(value: string): boolean {
+  return !isWindowsDrivePath(value) &&
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+}
+
+function splitDestinationPathQueryAndFragment(
+  destination: string,
+): { pathname: string; search: string; hash: string } {
+  const hashIndex = destination.indexOf("#");
+  const beforeHash = hashIndex >= 0
+    ? destination.slice(0, hashIndex)
+    : destination;
+  const hash = hashIndex >= 0 ? destination.slice(hashIndex) : "";
+  const queryIndex = beforeHash.indexOf("?");
+  return queryIndex >= 0
+    ? {
+      pathname: beforeHash.slice(0, queryIndex),
+      search: beforeHash.slice(queryIndex),
+      hash,
+    }
+    : {
+      pathname: beforeHash,
+      search: "",
+      hash,
+    };
+}
+
+function detectPathFlavor(value: string): "posix" | "windows" | null {
+  if (
+    isWindowsDrivePath(value) ||
+    value.startsWith("\\\\") ||
+    value.startsWith("\\")
+  ) {
+    return "windows";
+  }
+  if (value.startsWith("/")) {
+    return "posix";
+  }
+  return null;
+}
+
+function isAbsoluteLocalDestinationPath(pathname: string): boolean {
+  if (pathname.startsWith("//")) {
+    return false;
+  }
+  return detectPathFlavor(pathname) !== null;
+}
+
+function computeRelativeMarkdownPath(
+  absolutePath: string,
+  renderOutputPath: string | undefined,
+): string | null {
+  if (!renderOutputPath) {
+    return null;
+  }
+
+  const targetFlavor = detectPathFlavor(absolutePath);
+  const outputFlavor = detectPathFlavor(renderOutputPath);
+  if (!targetFlavor || !outputFlavor || targetFlavor !== outputFlavor) {
+    return null;
+  }
+
+  const pathModule = targetFlavor === "windows" ? windowsPath : posixPath;
+  const relativePath = pathModule.relative(
+    pathModule.dirname(renderOutputPath),
+    absolutePath,
+  );
+  const normalized =
+    (relativePath.length > 0 ? relativePath : pathModule.basename(absolutePath))
+      .replaceAll("\\", "/");
+  if (normalized.length === 0 || isAbsoluteLocalDestinationPath(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function rewriteMarkdownLinkDestination(
+  rawDestination: string,
+  renderOutputPath: string | undefined,
+): string | null {
+  const parsed = parseMarkdownLinkDestination(rawDestination);
+  if (!parsed) {
+    return null;
+  }
+
+  const destination = parsed.destination;
+  if (
+    destination.startsWith("#") ||
+    destination.startsWith("//") ||
+    isSchemeBasedDestination(destination)
+  ) {
+    return null;
+  }
+
+  const { pathname, search, hash } = splitDestinationPathQueryAndFragment(
+    destination,
+  );
+  if (!isAbsoluteLocalDestinationPath(pathname)) {
+    return null;
+  }
+
+  const relativePath = computeRelativeMarkdownPath(pathname, renderOutputPath);
+  if (!relativePath) {
+    return null;
+  }
+
+  return rebuildMarkdownLinkDestination(
+    parsed,
+    `${relativePath}${search}${hash}`,
+  );
+}
+
+function isEscapedMarkdownCharacter(content: string, index: number): boolean {
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    if (content[cursor] !== "\\") {
+      break;
+    }
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function matchFenceMarker(
+  content: string,
+  index: number,
+  lineStart: boolean,
+): { character: "`" | "~"; length: number; text: string } | null {
+  if (!lineStart) {
+    return null;
+  }
+  const match = /^[ \t]*(`{3,}|~{3,})/.exec(content.slice(index));
+  if (!match) {
+    return null;
+  }
+  const marker = match[1]!;
+  return {
+    character: marker[0] as "`" | "~",
+    length: marker.length,
+    text: match[0]!,
+  };
+}
+
+function applyMarkdownLinkTransform(
+  content: string,
+  transform: (match: MarkdownInlineLinkMatch) => string | null,
+): string {
+  if (!content.includes("](")) {
+    return content;
+  }
+
+  const output: string[] = [];
+  let cursor = 0;
+  let lineStart = true;
+  let activeFence: { character: "`" | "~"; length: number } | null = null;
+  let activeInlineCodeTicks = 0;
+
+  while (cursor < content.length) {
+    if (activeFence) {
+      const closingFence = matchFenceMarker(content, cursor, lineStart);
+      if (
+        closingFence &&
+        closingFence.character === activeFence.character &&
+        closingFence.length >= activeFence.length
+      ) {
+        output.push(closingFence.text);
+        cursor += closingFence.text.length;
+        lineStart = false;
+        activeFence = null;
+        continue;
+      }
+      const character = content[cursor]!;
+      output.push(character);
+      lineStart = character === "\n";
+      cursor += 1;
+      continue;
+    }
+
+    const openingFence = matchFenceMarker(content, cursor, lineStart);
+    if (openingFence) {
+      output.push(openingFence.text);
+      cursor += openingFence.text.length;
+      lineStart = false;
+      activeFence = {
+        character: openingFence.character,
+        length: openingFence.length,
+      };
+      continue;
+    }
+
+    if (activeInlineCodeTicks > 0) {
+      const inlineFence = "`".repeat(activeInlineCodeTicks);
+      if (content.startsWith(inlineFence, cursor)) {
+        output.push(inlineFence);
+        cursor += inlineFence.length;
+        activeInlineCodeTicks = 0;
+        lineStart = false;
+        continue;
+      }
+      const character = content[cursor]!;
+      output.push(character);
+      lineStart = character === "\n";
+      cursor += 1;
+      continue;
+    }
+
+    if (content[cursor] === "`") {
+      let tickCount = 1;
+      while (content[cursor + tickCount] === "`") {
+        tickCount += 1;
+      }
+      const inlineFence = "`".repeat(tickCount);
+      output.push(inlineFence);
+      cursor += inlineFence.length;
+      activeInlineCodeTicks = tickCount;
+      lineStart = false;
+      continue;
+    }
+
+    const maybeLinkStart = content[cursor] === "[" ||
+      (content[cursor] === "!" && content[cursor + 1] === "[");
+    if (maybeLinkStart && !isEscapedMarkdownCharacter(content, cursor)) {
+      const match = MARKDOWN_INLINE_LINK_PATTERN.exec(content.slice(cursor));
+      if (match) {
+        const [fullMatch, imageMarker, label, rawDestination] = match;
+        const replacement = transform({
+          fullMatch,
+          isImage: imageMarker === "!",
+          label,
+          rawDestination,
+        });
+        output.push(replacement ?? fullMatch);
+        cursor += fullMatch.length;
+        lineStart = false;
+        continue;
+      }
+    }
+
+    const character = content[cursor]!;
+    output.push(character);
+    lineStart = character === "\n";
+    cursor += 1;
+  }
+
+  return output.join("");
+}
+
+function resolveDendronWikilinkTarget(
+  rawDestination: string,
+): string | null {
+  const destination = trimMarkdownLinkDestination(rawDestination);
+  if (
+    !destination ||
+    destination.startsWith("#") ||
+    destination.startsWith("//")
+  ) {
+    return null;
+  }
+  if (isSchemeBasedDestination(destination)) {
+    return null;
+  }
+
+  const hashIndex = destination.indexOf("#");
+  const pathWithQuery = hashIndex >= 0
+    ? destination.slice(0, hashIndex)
+    : destination;
+  const fragment = hashIndex >= 0 ? destination.slice(hashIndex + 1) : "";
+  if (pathWithQuery.includes("?")) {
+    return null;
+  }
+  if (!/\.md$/i.test(pathWithQuery)) {
+    return null;
+  }
+
+  const filename = pathWithQuery.split(/[\\/]/).pop()?.trim() ?? "";
+  const noteName = filename.replace(/\.md$/i, "");
+  if (noteName.length === 0) {
+    return null;
+  }
+  return fragment.length > 0 ? `${noteName}#${fragment}` : noteName;
+}
+
+function applyMarkdownLinkRendering(
+  content: string,
+  options: MarkdownLinkRenderContext,
+): string {
+  if (
+    !content.includes("](") ||
+    (options.markdownLinkStyle !== "dendron-wikilink" &&
+      !options.relativizeLocalLinks)
+  ) {
+    return content;
+  }
+
+  return applyMarkdownLinkTransform(
+    content,
+    ({ isImage, label, rawDestination }) => {
+      if (!isImage && options.markdownLinkStyle === "dendron-wikilink") {
+        const wikilinkTarget = resolveDendronWikilinkTarget(rawDestination);
+        if (wikilinkTarget) {
+          return `[[${wikilinkTarget}]]`;
+        }
+      }
+
+      if (!options.relativizeLocalLinks) {
+        return null;
+      }
+      const rewrittenDestination = rewriteMarkdownLinkDestination(
+        rawDestination,
+        options.renderOutputPath,
+      );
+      return rewrittenDestination
+        ? `${isImage ? "!" : ""}[${label}](${rewrittenDestination})`
+        : null;
+    },
+  );
+}
+
 function parseQuestionnaireOptionLines(
   metadata: Record<string, unknown> | undefined,
+  linkRenderContext: MarkdownLinkRenderContext,
 ): string[] {
   const optionsValue = metadata?.["options"];
   return Array.isArray(optionsValue)
@@ -199,7 +595,10 @@ function parseQuestionnaireOptionLines(
       .map((option) => {
         const label = String(option["label"] ?? "").trim();
         if (label.length === 0) return "";
-        const description = String(option["description"] ?? "").trim();
+        const description = applyMarkdownLinkRendering(
+          String(option["description"] ?? "").trim(),
+          linkRenderContext,
+        );
         return description.length > 0
           ? `- ${label}: ${description}`
           : `- ${label}`;
@@ -314,6 +713,12 @@ export function renderEventsToMarkdown(
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
+  const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
+  const linkRenderContext: MarkdownLinkRenderContext = {
+    markdownLinkStyle,
+    relativizeLocalLinks: options.relativizeLocalLinks ?? false,
+    renderOutputPath: options.renderOutputPath,
+  };
 
   const parts: string[] = [];
   const questionnaireContextByKey = new Map<
@@ -373,20 +778,26 @@ export function renderEventsToMarkdown(
       const content = (event.kind === "message.user" && italicizeUserMessages)
         ? formatUserMessageContent(event.content)
         : event.content;
+      const renderedContent = applyMarkdownLinkRendering(
+        content,
+        linkRenderContext,
+      );
 
-      if (content.trim().length === 0) {
+      if (renderedContent.trim().length === 0) {
         continue;
       }
 
       if (event.kind === "message.assistant") {
-        const normalizedContent = content.trim();
+        const normalizedContent = renderedContent.trim();
         const nextEvent = events[i + 1];
         if (
           event.phase === "commentary" &&
           nextEvent?.kind === "message.assistant" &&
           nextEvent.phase === "final" &&
           nextEvent.turnId === event.turnId &&
-          nextEvent.content.trim() === normalizedContent
+          applyMarkdownLinkRendering(nextEvent.content, linkRenderContext)
+              .trim() ===
+            normalizedContent
         ) {
           continue;
         }
@@ -395,7 +806,11 @@ export function renderEventsToMarkdown(
         if (
           previousEvent?.kind === "message.assistant" &&
           previousEvent.turnId === event.turnId &&
-          previousEvent.content.trim() === normalizedContent
+          applyMarkdownLinkRendering(
+              previousEvent.content,
+              linkRenderContext,
+            )
+              .trim() === normalizedContent
         ) {
           const keepFinalOverCommentary =
             previousEvent.phase === "commentary" &&
@@ -426,7 +841,7 @@ export function renderEventsToMarkdown(
           "",
         );
       }
-      messageParts.push(content);
+      messageParts.push(renderedContent);
       parts.push(messageParts.join("\n"), "");
     } else if (event.kind === "tool.call") {
       if (!includeToolCalls) continue;
@@ -440,7 +855,10 @@ export function renderEventsToMarkdown(
         }_Tool-${event.name}`,
       ];
       if (event.description?.trim().length) {
-        callParts.push("", event.description);
+        callParts.push(
+          "",
+          applyMarkdownLinkRendering(event.description, linkRenderContext),
+        );
       }
       parts.push(callParts.join("\n"), "");
       lastSignature = undefined;
@@ -469,7 +887,10 @@ export function renderEventsToMarkdown(
       continue;
     } else if (event.kind === "thinking") {
       if (!includeThinking) continue;
-      const thinkingContent = event.content.trim();
+      const thinkingContent = applyMarkdownLinkRendering(
+        event.content.trim(),
+        linkRenderContext,
+      );
       if (thinkingContent.length === 0) continue;
       parts.push(thinkingContent, "");
       lastSignature = undefined;
@@ -480,7 +901,10 @@ export function renderEventsToMarkdown(
         : undefined;
       const providerQuestionId = String(metadata?.["providerQuestionId"] ?? "")
         .trim();
-      const parsedOptionLines = parseQuestionnaireOptionLines(metadata);
+      const parsedOptionLines = parseQuestionnaireOptionLines(
+        metadata,
+        linkRenderContext,
+      );
       const questionnaireDecision = providerQuestionId.length > 0 ||
         parsedOptionLines.length > 0;
       const questionnaireAcceptedDecision = questionnaireDecision &&
@@ -500,9 +924,13 @@ export function renderEventsToMarkdown(
           continue;
         }
 
+        const styledSummary = applyMarkdownLinkRendering(
+          event.summary,
+          linkRenderContext,
+        );
         const parsedSummary = questionnaireAcceptedDecision
-          ? splitAcceptedDecisionSummary(event.summary)
-          : { prompt: event.summary.trim() };
+          ? splitAcceptedDecisionSummary(styledSummary)
+          : { prompt: styledSummary.trim() };
         const contextKeys = new Set<string>();
         const decisionKeyContext = normalizeDecisionContextKey(
           event.decisionKey,
@@ -541,7 +969,7 @@ export function renderEventsToMarkdown(
         const selection = questionnaireAcceptedDecision
           ? (parsedSummary.selection && parsedSummary.selection.length > 0
             ? parsedSummary.selection
-            : event.summary.trim())
+            : styledSummary.trim())
           : undefined;
 
         if (contextKeys.size > 0 && (prompt || optionLines.length > 0)) {
@@ -590,7 +1018,9 @@ export function renderEventsToMarkdown(
       }
       const decisionParts = [
         "",
-        `**Decision [${event.decisionKey}]:** ${event.summary}`,
+        `**Decision [${event.decisionKey}]:** ${
+          applyMarkdownLinkRendering(event.summary, linkRenderContext)
+        }`,
         `*Status: ${event.status} — decided by: ${event.decidedBy}*`,
       ];
       parts.push(decisionParts.join("\n"), "");
@@ -599,9 +1029,9 @@ export function renderEventsToMarkdown(
       if (!includeSystemEvents) continue;
       const infoParts = [
         "",
-        `> [provider.info${
-          event.subtype ? `:${event.subtype}` : ""
-        }] ${event.content}`,
+        `> [provider.info${event.subtype ? `:${event.subtype}` : ""}] ${
+          applyMarkdownLinkRendering(event.content, linkRenderContext)
+        }`,
       ];
       parts.push(infoParts.join("\n"), "");
       lastSignature = undefined;
@@ -722,6 +1152,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         ...options,
         includeFrontmatter,
         title,
+        renderOutputPath: outputPath,
       });
       const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
       try {
@@ -769,6 +1200,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     const rendered = renderEventsToMarkdown(events, {
       ...options,
       includeFrontmatter: false,
+      renderOutputPath: outputPath,
     });
     const content = rendered.trim();
     const hasBodyToAppend = content.length > 0;
@@ -864,6 +1296,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       const body = renderEventsToMarkdown(events, {
         ...options,
         includeFrontmatter: false,
+        renderOutputPath: outputPath,
       }).trim();
       const content = body.length > 0
         ? `${mergedFrontmatter}\n\n${body}\n`
@@ -883,6 +1316,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       ...options,
       includeFrontmatter,
       title,
+      renderOutputPath: outputPath,
     });
     const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
     await Deno.writeTextFile(outputPath, content);

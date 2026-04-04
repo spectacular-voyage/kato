@@ -16,6 +16,10 @@ export const DEFAULT_PARALLEL_SAFE_TEST_TARGETS = [
   "tests",
 ] as const;
 
+export const ROOT_COVERAGE_DIR = ".test-tmp/coverage/root";
+export const PARALLEL_SAFE_COVERAGE_DIR = `${ROOT_COVERAGE_DIR}/parallel-safe`;
+export const ENV_COVERAGE_DIR = `${ROOT_COVERAGE_DIR}/env`;
+
 const SHARED_TEST_ARGS = [
   "--allow-read",
   "--allow-write=.test-tmp",
@@ -174,12 +178,6 @@ export function buildCommands(
 ): SliceCommand[] {
   const { optionArgs, positionalTargets } = splitForwardedArgs(forwardedArgs);
   const coverage = resolveCoverageMode(mode);
-  const coverageArgs = coverage
-    ? ["--clean", "--coverage=.test-tmp/coverage/root"]
-    : [];
-  const envCoverageArgs = coverage
-    ? ["--coverage=.test-tmp/coverage/root"]
-    : [];
   const requestedSlices = new Set(resolveRequestedSlices(mode));
   const commands: SliceCommand[] = [];
 
@@ -191,7 +189,9 @@ export function buildCommands(
         args: [
           "test",
           ...SHARED_TEST_ARGS,
-          ...coverageArgs,
+          ...(coverage
+            ? ["--clean", `--coverage=${PARALLEL_SAFE_COVERAGE_DIR}`]
+            : []),
           "--parallel",
           `--ignore=${ENV_TEST_FILES.join(",")}`,
           ...optionArgs,
@@ -209,7 +209,7 @@ export function buildCommands(
         args: [
           "test",
           ...SHARED_TEST_ARGS,
-          ...envCoverageArgs,
+          ...(coverage ? ["--clean", `--coverage=${ENV_COVERAGE_DIR}`] : []),
           ...optionArgs,
           ...targets,
         ],

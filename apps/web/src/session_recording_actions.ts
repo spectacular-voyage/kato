@@ -275,6 +275,12 @@ function createOutputOverrides(options: {
         options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
       italicizeUserMessages:
         options.writerFeatureFlags.writerItalicizeUserMessages,
+      relativizeLocalLinks:
+        options.writerFeatureFlags.writerRelativizeLocalLinks ?? true,
+      markdownLinkStyle:
+        options.writerFeatureFlags.writerUseDendronStyleWikilinks
+          ? "dendron-wikilink"
+          : "standard",
       includeSystemEvents: false,
       headingTimestampTimezone: options.workspaceTimezone,
       ...(options.markdownFrontmatter.addParticipantUsernameToHeadings &&

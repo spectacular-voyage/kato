@@ -419,6 +419,7 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
         writerIncludeThinking: true,
         writerIncludeToolCalls: false,
         writerItalicizeUserMessages: true,
+        writerRelativizeLocalLinks: false,
       },
       activeRecordingCycleId: "cycle-1",
       writeCursor: 42,
@@ -462,6 +463,10 @@ Deno.test("PersistentSessionStateStore persists workspace outputs", async () => 
     assertEquals(
       output.writerFeatureFlags.writerIncludeThinking,
       true,
+    );
+    assertEquals(
+      output.writerFeatureFlags.writerRelativizeLocalLinks,
+      false,
     );
     assertEquals(output.activeRecordingCycleId, "cycle-1");
     assertEquals(output.recordingCycles.length, 1);

@@ -28,8 +28,9 @@ block. If you hard-code a path (e.g. for tests that do not need isolation), use
 
 Raw Deno coverage profiles should also stay under `.test-tmp/coverage/` rather
 than top-level `.coverage*` directories. The root `test:coverage` task now uses
-`.test-tmp/coverage/root`, and focused local coverage runs should use a labeled
-subdirectory such as `.test-tmp/coverage/status` or
+per-slice subdirectories under `.test-tmp/coverage/root/`
+(`parallel-safe/` and `env/`), and focused local coverage runs should use a
+labeled subdirectory such as `.test-tmp/coverage/status` or
 `.test-tmp/coverage/provider-ingestion`.
 
 Focused tests that use `tests/test_temp.ts` or otherwise create real files
@@ -167,12 +168,13 @@ That slice now covers:
 1. Generate a fresh raw coverage profile:
    - `deno task test:coverage --frozen`
 2. Inspect local hotspots:
-   - `deno coverage --detailed .test-tmp/coverage/root`
+   - `deno coverage --detailed .test-tmp/coverage/root/parallel-safe .test-tmp/coverage/root/env`
 3. Generate the LCOV artifact used by GitHub CI / Codecov:
    - `deno task coverage:lcov`
 
-`deno task test:coverage` now runs the parallel-safe slice first and then the
-serial env slice into the same `.test-tmp/coverage/root` directory.
+`deno task test:coverage` now runs the parallel-safe slice and the serial env
+slice into separate profile directories under `.test-tmp/coverage/root/`, and
+`deno task coverage:lcov` merges both slices for the CI / Codecov artifact.
 
 For focused local work, prefer specific `_test.ts` files and `--filter` instead
 of rerunning the whole suite. If you need a manual raw profile, write it under
@@ -204,7 +206,7 @@ Current timing note (split-flow refresh on 2026-03-23):
 
 Current coverage-report caveat:
 
-- `deno coverage --detailed .test-tmp/coverage/root` currently warns that some
+- `deno coverage --detailed .test-tmp/coverage/root/parallel-safe .test-tmp/coverage/root/env` currently warns that some
   extracted modules may be missing transpiled source, including
   `apps/runtime/src/orchestrator/launcher.ts`,
   `apps/cli/src/commands/status.ts`,

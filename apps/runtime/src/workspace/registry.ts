@@ -53,6 +53,8 @@ const WRITER_FEATURE_FLAG_KEYS = [
   "writerIncludeDecisionOptions",
   "writerIncludeDecisionSelection",
   "writerItalicizeUserMessages",
+  "writerRelativizeLocalLinks",
+  "writerUseDendronStyleWikilinks",
 ] as const;
 const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
   "includeFrontmatterInMarkdownRecordings",
@@ -458,6 +460,9 @@ export function createDefaultWorkspaceWriterFeatureFlags(
     writerIncludeDecisionSelection: overrides.writerIncludeDecisionSelection ??
       true,
     writerItalicizeUserMessages: overrides.writerItalicizeUserMessages ?? false,
+    writerRelativizeLocalLinks: overrides.writerRelativizeLocalLinks ?? true,
+    writerUseDendronStyleWikilinks: overrides.writerUseDendronStyleWikilinks ??
+      false,
   };
 }
 
@@ -917,6 +922,8 @@ export function createWorkspaceConfigScaffold(): string {
     "  writerIncludeDecisionOptions: true",
     "  writerIncludeDecisionSelection: true",
     "  writerItalicizeUserMessages: false",
+    "  writerRelativizeLocalLinks: true",
+    "  writerUseDendronStyleWikilinks: false",
     "",
   ].join("\n");
 }
