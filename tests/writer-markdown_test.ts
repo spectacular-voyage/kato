@@ -552,6 +552,7 @@ Deno.test(
         "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).",
         "Also [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
         "Windows path: [todo](C:\\Users\\djradon\\notes\\dev.todo.md).",
+        "Protocol-relative stays [cdn](//example.com/dev.todo.md).",
         "External link stays [OpenAI](https://openai.com).",
         "Anchor stays [section](#local-anchor).",
       ].join("\n"),
@@ -569,11 +570,222 @@ Deno.test(
       "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
     );
     assertStringIncludes(rendered, "[[dev.todo]]");
+    assertStringIncludes(rendered, "[cdn](//example.com/dev.todo.md)");
     assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
     assertStringIncludes(rendered, "[section](#local-anchor)");
     assertEquals(
       rendered.includes(
         "/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md",
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown keeps local markdown links unchanged for standard link style",
+  () => {
+    const assistant = makeEvent(
+      "assistant-standard-links",
+      "message.assistant",
+      [
+        "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).",
+        "Also [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
+      ].join("\n"),
+      "2026-04-04T10:05:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "standard",
+    });
+
+    assertStringIncludes(
+      rendered,
+      "[dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md)",
+    );
+    assertStringIncludes(
+      rendered,
+      "[task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal)",
+    );
+    assertEquals(rendered.includes("[[dev.general-guidance]]"), false);
+    assertEquals(
+      rendered.includes(
+        "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
+      ),
+      false,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown rewrites Dendron links across tool thinking decision and provider info sections",
+  () => {
+    const toolCall: ConversationEvent = {
+      eventId: "tool-call-dendron-extra-surfaces",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-04-04T10:10:00.000Z",
+      kind: "tool.call",
+      toolCallId: "tool-dendron-extra-surfaces",
+      name: "read_note",
+      description:
+        "Inspect [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md) and keep ![diagram](diagram.png).",
+      source: {
+        providerEventType: "tool_call",
+        providerEventId: "tool-call-dendron-extra-surfaces",
+      },
+    } as unknown as ConversationEvent;
+    const thinking: ConversationEvent = {
+      eventId: "thinking-dendron-extra-surfaces",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-04-04T10:10:01.000Z",
+      kind: "thinking",
+      content:
+        "Need [dev.todo](dev-docs/notes/dev.todo.md#Next) but leave [query](dev-docs/notes/dev.todo.md?view=full) alone.",
+      source: {
+        providerEventType: "thinking",
+        providerEventId: "thinking-dendron-extra-surfaces",
+      },
+    } as unknown as ConversationEvent;
+    const questionnaireDecision: ConversationEvent = {
+      eventId: "decision-questionnaire-dendron-extra-surfaces",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-04-04T10:10:02.000Z",
+      kind: "decision",
+      decisionId: "decision-questionnaire-dendron-extra-surfaces",
+      decisionKey: "note-export-target",
+      summary:
+        "Review [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal)",
+      status: "proposed",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-dendron-extra-surfaces"],
+      metadata: {
+        providerQuestionId: "note_export_target",
+        options: [{
+          label: "Decision log",
+          description:
+            "Cross-check [dev.decision-log.md](/workspace/dev-docs/notes/dev.decision-log.md).",
+        }],
+      },
+      source: {
+        providerEventType: "response_item.function_call.request_user_input",
+        providerEventId: "decision-questionnaire-dendron-extra-surfaces",
+      },
+    } as unknown as ConversationEvent;
+    const genericDecision: ConversationEvent = {
+      eventId: "decision-generic-dendron-extra-surfaces",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-04-04T10:10:03.000Z",
+      kind: "decision",
+      decisionId: "decision-generic-dendron-extra-surfaces",
+      decisionKey: "note-target",
+      summary:
+        "Use [completed note](/workspace/dev-docs/notes/completed.2026.2026-04-04-dendron-style-links.md)",
+      status: "accepted",
+      decidedBy: "assistant",
+      basisEventIds: ["tool-call-dendron-extra-surfaces"],
+      source: {
+        providerEventType: "system",
+        providerEventId: "decision-generic-dendron-extra-surfaces",
+      },
+    } as unknown as ConversationEvent;
+    const providerInfo: ConversationEvent = {
+      eventId: "provider-info-dendron-extra-surfaces",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-04-04T10:10:04.000Z",
+      kind: "provider.info",
+      subtype: "notice",
+      content:
+        "Indexed [product ideas](/workspace/dev-docs/notes/product-ideas.md) and kept ![diagram](diagram.png).",
+      source: {
+        providerEventType: "provider.info",
+        providerEventId: "provider-info-dendron-extra-surfaces",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([
+      toolCall,
+      thinking,
+      questionnaireDecision,
+      genericDecision,
+      providerInfo,
+    ], {
+      includeFrontmatter: false,
+      includeToolCalls: true,
+      includeThinking: true,
+      includeSystemEvents: true,
+      markdownLinkStyle: "dendron-wikilink",
+    });
+
+    assertStringIncludes(rendered, "[[dev.general-guidance]]");
+    assertStringIncludes(rendered, "![diagram](diagram.png)");
+    assertStringIncludes(rendered, "[[dev.todo#Next]]");
+    assertStringIncludes(
+      rendered,
+      "[query](dev-docs/notes/dev.todo.md?view=full)",
+    );
+    assertStringIncludes(
+      rendered,
+      "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
+    );
+    assertStringIncludes(rendered, "[[dev.decision-log]]");
+    assertStringIncludes(
+      rendered,
+      "[[completed.2026.2026-04-04-dendron-style-links]]",
+    );
+    assertStringIncludes(rendered, "[[product-ideas]]");
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown skips fenced code inline code and escaped link syntax",
+  () => {
+    const assistant = makeEvent(
+      "assistant-dendron-code-spans",
+      "message.assistant",
+      [
+        "Visible [note](/tmp/dev.todo.md).",
+        "",
+        "```md",
+        "[fenced](/tmp/dev.general-guidance.md)",
+        "```",
+        "",
+        "Inline ` [inline](/tmp/product-ideas.md) ` stays literal.",
+        String
+          .raw`Escaped \[escaped](/tmp/completed.2026.2026-04-04-dendron-style-links.md) stays literal.`,
+      ].join("\n"),
+      "2026-04-04T10:06:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "dendron-wikilink",
+    });
+
+    assertStringIncludes(rendered, "Visible [[dev.todo]].");
+    assertStringIncludes(
+      rendered,
+      "```md\n[fenced](/tmp/dev.general-guidance.md)\n```",
+    );
+    assertStringIncludes(
+      rendered,
+      "` [inline](/tmp/product-ideas.md) `",
+    );
+    assertStringIncludes(
+      rendered,
+      String
+        .raw`\[escaped](/tmp/completed.2026.2026-04-04-dendron-style-links.md)`,
+    );
+    assertEquals(rendered.includes("[[dev.general-guidance]]"), false);
+    assertEquals(rendered.includes("[[product-ideas]]"), false);
+    assertEquals(
+      rendered.includes(
+        "[[completed.2026.2026-04-04-dendron-style-links]]",
       ),
       false,
     );
@@ -1548,6 +1760,50 @@ Deno.test(
       rendered.split("Done. Your selected answer was: `Alpha`.").length - 1,
       1,
     );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown suppresses commentary duplicates after Dendron link normalization",
+  () => {
+    const commentary: ConversationEvent = {
+      eventId: "assistant-commentary-link-normalized-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:00.000Z",
+      turnId: "turn-link-normalized-1",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "See [first label](/tmp/dev.todo.md).",
+      phase: "commentary",
+      source: {
+        providerEventType: "event_msg.agent_message",
+        providerEventId: "assistant-commentary-link-normalized-1",
+      },
+    } as unknown as ConversationEvent;
+    const finalAnswer: ConversationEvent = {
+      eventId: "assistant-final-link-normalized-1",
+      provider: "test",
+      sessionId: "sess-test",
+      timestamp: "2026-02-22T10:00:01.000Z",
+      turnId: "turn-link-normalized-1",
+      kind: "message.assistant",
+      role: "assistant",
+      content: "See [second label](/tmp/dev.todo.md).",
+      phase: "final",
+      source: {
+        providerEventType: "response_item.message.final_answer",
+        providerEventId: "assistant-final-link-normalized-1",
+      },
+    } as unknown as ConversationEvent;
+
+    const rendered = renderEventsToMarkdown([commentary, finalAnswer], {
+      includeFrontmatter: false,
+      includeCommentary: true,
+      markdownLinkStyle: "dendron-wikilink",
+    });
+
+    assertEquals(rendered.split("See [[dev.todo]].").length - 1, 1);
   },
 );
 

@@ -57,6 +57,9 @@ links such as `[dev.general-guidance.md](/abs/path/dev.general-guidance.md)` to
 
 ## Testing
 
+- Added follow-up coverage for non-message markdown render surfaces and a
+  twin-backed web capture path that verifies final file content under the
+  workspace flag.
 - `deno test -A --quiet tests/writer-markdown_test.ts tests/workspace-registry_test.ts tests/daemon-cli_test.ts tests/daemon-runtime_test.ts`
 - `deno test -A --quiet tests/web-session-actions_test.ts`
 - `deno task check --frozen`
@@ -77,4 +80,6 @@ links such as `[dev.general-guidance.md](/abs/path/dev.general-guidance.md)` to
   render paths.
 - [x] Add focused tests for writer behavior and workspace-config/runtime
   propagation.
+- [x] Expand coverage to non-message render paths and a web capture flow that
+  writes Dendron links from persisted twin history.
 - [x] Record the decision and contract in developer notes.

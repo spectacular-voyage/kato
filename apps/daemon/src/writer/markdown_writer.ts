@@ -190,7 +190,7 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}...`;
 }
 
-const MARKDOWN_INLINE_LINK_PATTERN = /(!)?\[([^\]]+)\]\(([^)\n]+)\)/g;
+const MARKDOWN_INLINE_LINK_PATTERN = /^(!)?\[([^\]]+)\]\(([^)\n]+)\)/;
 
 function trimMarkdownLinkDestination(rawDestination: string): string | null {
   const trimmed = rawDestination.trim();
@@ -214,11 +214,145 @@ function isWindowsDrivePath(value: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(value);
 }
 
+function isEscapedMarkdownCharacter(content: string, index: number): boolean {
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    if (content[cursor] !== "\\") {
+      break;
+    }
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function matchFenceMarker(
+  content: string,
+  index: number,
+  lineStart: boolean,
+): { character: "`" | "~"; length: number; text: string } | null {
+  if (!lineStart) {
+    return null;
+  }
+  const match = /^[ \t]*(`{3,}|~{3,})/.exec(content.slice(index));
+  if (!match) {
+    return null;
+  }
+  const marker = match[1]!;
+  return {
+    character: marker[0] as "`" | "~",
+    length: marker.length,
+    text: match[0]!,
+  };
+}
+
+function applyMarkdownLinkTransform(
+  content: string,
+  transform: (destination: string, isImage: boolean) => string | null,
+): string {
+  if (!content.includes("](")) {
+    return content;
+  }
+
+  const output: string[] = [];
+  let cursor = 0;
+  let lineStart = true;
+  let activeFence: { character: "`" | "~"; length: number } | null = null;
+  let activeInlineCodeTicks = 0;
+
+  while (cursor < content.length) {
+    if (activeFence) {
+      const closingFence = matchFenceMarker(content, cursor, lineStart);
+      if (
+        closingFence &&
+        closingFence.character === activeFence.character &&
+        closingFence.length >= activeFence.length
+      ) {
+        output.push(closingFence.text);
+        cursor += closingFence.text.length;
+        lineStart = false;
+        activeFence = null;
+        continue;
+      }
+      const character = content[cursor]!;
+      output.push(character);
+      lineStart = character === "\n";
+      cursor += 1;
+      continue;
+    }
+
+    const openingFence = matchFenceMarker(content, cursor, lineStart);
+    if (openingFence) {
+      output.push(openingFence.text);
+      cursor += openingFence.text.length;
+      lineStart = false;
+      activeFence = {
+        character: openingFence.character,
+        length: openingFence.length,
+      };
+      continue;
+    }
+
+    if (activeInlineCodeTicks > 0) {
+      const inlineFence = "`".repeat(activeInlineCodeTicks);
+      if (content.startsWith(inlineFence, cursor)) {
+        output.push(inlineFence);
+        cursor += inlineFence.length;
+        activeInlineCodeTicks = 0;
+        lineStart = false;
+        continue;
+      }
+      const character = content[cursor]!;
+      output.push(character);
+      lineStart = character === "\n";
+      cursor += 1;
+      continue;
+    }
+
+    if (content[cursor] === "`") {
+      let tickCount = 1;
+      while (content[cursor + tickCount] === "`") {
+        tickCount += 1;
+      }
+      const inlineFence = "`".repeat(tickCount);
+      output.push(inlineFence);
+      cursor += inlineFence.length;
+      activeInlineCodeTicks = tickCount;
+      lineStart = false;
+      continue;
+    }
+
+    const maybeLinkStart = content[cursor] === "[" ||
+      (content[cursor] === "!" && content[cursor + 1] === "[");
+    if (maybeLinkStart && !isEscapedMarkdownCharacter(content, cursor)) {
+      const match = MARKDOWN_INLINE_LINK_PATTERN.exec(content.slice(cursor));
+      if (match) {
+        const [fullMatch, imageMarker, _label, destination] = match;
+        const replacement = transform(destination, imageMarker === "!");
+        output.push(replacement ?? fullMatch);
+        cursor += fullMatch.length;
+        lineStart = false;
+        continue;
+      }
+    }
+
+    const character = content[cursor]!;
+    output.push(character);
+    lineStart = character === "\n";
+    cursor += 1;
+  }
+
+  return output.join("");
+}
+
 function resolveDendronWikilinkTarget(
   rawDestination: string,
 ): string | null {
   const destination = trimMarkdownLinkDestination(rawDestination);
-  if (!destination || destination.startsWith("#")) {
+  if (
+    !destination ||
+    destination.startsWith("#") ||
+    destination.startsWith("//")
+  ) {
     return null;
   }
   if (
@@ -256,19 +390,14 @@ function applyMarkdownLinkStyle(
     return content;
   }
 
-  return content.replace(
-    MARKDOWN_INLINE_LINK_PATTERN,
-    (
-      match,
-      imageMarker: string | undefined,
-      _label: string,
-      destination: string,
-    ) => {
-      if (imageMarker === "!") {
-        return match;
+  return applyMarkdownLinkTransform(
+    content,
+    (destination, isImage) => {
+      if (isImage) {
+        return null;
       }
       const wikilinkTarget = resolveDendronWikilinkTarget(destination);
-      return wikilinkTarget ? `[[${wikilinkTarget}]]` : match;
+      return wikilinkTarget ? `[[${wikilinkTarget}]]` : null;
     },
   );
 }
@@ -474,14 +603,16 @@ export function renderEventsToMarkdown(
       }
 
       if (event.kind === "message.assistant") {
-        const normalizedContent = event.content.trim();
+        const normalizedContent = renderedContent.trim();
         const nextEvent = events[i + 1];
         if (
           event.phase === "commentary" &&
           nextEvent?.kind === "message.assistant" &&
           nextEvent.phase === "final" &&
           nextEvent.turnId === event.turnId &&
-          nextEvent.content.trim() === normalizedContent
+          applyMarkdownLinkStyle(nextEvent.content, markdownLinkStyle)
+              .trim() ===
+            normalizedContent
         ) {
           continue;
         }
@@ -490,7 +621,8 @@ export function renderEventsToMarkdown(
         if (
           previousEvent?.kind === "message.assistant" &&
           previousEvent.turnId === event.turnId &&
-          previousEvent.content.trim() === normalizedContent
+          applyMarkdownLinkStyle(previousEvent.content, markdownLinkStyle)
+              .trim() === normalizedContent
         ) {
           const keepFinalOverCommentary =
             previousEvent.phase === "commentary" &&

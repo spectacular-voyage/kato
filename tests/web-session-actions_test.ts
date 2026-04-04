@@ -5,6 +5,8 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
+import type { ConversationEvent } from "@kato/shared";
+import { mapConversationEventsToTwin } from "../apps/daemon/src/mod.ts";
 import {
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
@@ -28,6 +30,28 @@ import { withTestTempDir } from "./test_temp.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
 const CLAUDE_FIXTURE = join(THIS_DIR, "fixtures", "claude-session.jsonl");
+
+function makeConversationEvent(
+  sessionId: string,
+  id: string,
+  kind: "message.user" | "message.assistant",
+  content: string,
+  timestamp: string,
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "claude",
+    sessionId,
+    timestamp,
+    kind,
+    role: kind === "message.user" ? "user" : "assistant",
+    content,
+    source: {
+      providerEventType: kind === "message.user" ? "user" : "assistant",
+      providerEventId: id,
+    },
+  } as unknown as ConversationEvent;
+}
 
 function makeWorkspaceOutput(options: {
   workspaceId: string;
@@ -73,7 +97,12 @@ function makeWorkspaceOutput(options: {
   };
 }
 
-async function setupWorkspaceFixture(homeDir: string): Promise<{
+async function setupWorkspaceFixture(
+  homeDir: string,
+  options: {
+    writerUseDendronStyleWikilinks?: boolean;
+  } = {},
+): Promise<{
   katoDir: string;
   alphaRoot: string;
   alphaConfigPath: string;
@@ -90,6 +119,12 @@ async function setupWorkspaceFixture(homeDir: string): Promise<{
       "workspaceId: ws-alpha",
       "defaultOutputDir: notes",
       'filenameTemplate: "{provider}-{sessionShortId}.md"',
+      ...(options.writerUseDendronStyleWikilinks === undefined ? [] : [
+        "workspaceFeatureFlags:",
+        `  writerUseDendronStyleWikilinks: ${
+          options.writerUseDendronStyleWikilinks ? "true" : "false"
+        }`,
+      ]),
     ].join("\n") + "\n",
   );
 
@@ -386,6 +421,92 @@ Deno.test("runSessionRecordingAction capture creates a fresh destination and pre
       nextOutput.recordingCycles[0]?.recordingCycleId,
     );
   });
+});
+
+Deno.test("runSessionRecordingAction capture writes Dendron wikilinks from twin-backed history when the workspace flag is enabled", async () => {
+  await withTestTempDir(
+    "web-session-capture-dendron-action-",
+    async (homeDir) => {
+      const { katoDir } = await setupWorkspaceFixture(homeDir, {
+        writerUseDendronStyleWikilinks: true,
+      });
+      const sessionFilePath = join(homeDir, "provider-session-dendron.jsonl");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-004",
+        providerSessionId: "provider-session-004",
+        sourceFilePath: sessionFilePath,
+      });
+
+      const sessionStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+      const metadata = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadata);
+
+      const twinConversation = [
+        makeConversationEvent(
+          metadata.sessionId,
+          "user-dendron-1",
+          "message.user",
+          "Summarize the workspace notes.",
+          "2026-03-17T17:00:00.000Z",
+        ),
+        makeConversationEvent(
+          metadata.sessionId,
+          "assistant-dendron-1",
+          "message.assistant",
+          [
+            "Check [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md).",
+            "Then [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
+          ].join("\n"),
+          "2026-03-17T17:00:01.000Z",
+        ),
+      ];
+      const twinEvents = mapConversationEventsToTwin({
+        provider: metadata.provider,
+        providerSessionId: metadata.providerSessionId,
+        sessionId: metadata.sessionId,
+        events: twinConversation,
+        mode: "live",
+        capturedAt: "2026-03-17T17:00:02.000Z",
+      });
+      await sessionStore.appendTwinEvents(metadata, twinEvents);
+
+      const metadataWithTwin = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadataWithTwin);
+      const history = await loadPersistedSessionHistoryEvents(
+        metadataWithTwin,
+        sessionStore,
+      );
+      assertEquals(history.source, "twin");
+      assertEquals(history.events.length, twinConversation.length);
+
+      const result = await runSessionRecordingAction({
+        action: "new-capture",
+        sessionId: metadata.sessionId,
+        workspaceSelector: "alpha",
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+
+      assertEquals(result.mode, "capture");
+      assertEquals(result.source, "twin");
+      const written = await Deno.readTextFile(result.targetPath);
+      assertStringIncludes(written, "[[dev.general-guidance]]");
+      assertStringIncludes(
+        written,
+        "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
+      );
+      assertEquals(
+        written.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
+        false,
+      );
+    },
+  );
 });
 
 Deno.test("runSessionRecordingStopAction stops the targeted engaged recording", async () => {
