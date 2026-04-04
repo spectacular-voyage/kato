@@ -5369,6 +5369,7 @@ Deno.test(
           "workspaceFeatureFlags:",
           "  writerIncludeToolResults: true",
           "  writerIncludeDecisionSelection: false",
+          "  writerRelativizeLocalLinks: false",
           "  writerUseDendronStyleWikilinks: true",
           "markdownFrontmatter:",
           "  includeFrontmatterInMarkdownRecordings: false",
@@ -5535,6 +5536,7 @@ Deno.test(
         renderOptions.markdownLinkStyle,
         "dendron-wikilink",
       );
+      assertEquals(renderOptions.relativizeLocalLinks, false);
       assertEquals(
         renderOptions.speakerNames?.user,
         "persisted-user",
@@ -5710,6 +5712,7 @@ Deno.test(
         renderOptions.italicizeUserMessages,
         true,
       );
+      assertEquals(renderOptions.relativizeLocalLinks, true);
       assertEquals(
         renderOptions.headingTimestampTimezone,
         "local",
@@ -5883,6 +5886,7 @@ Deno.test(
       assertEquals(outputOverrides.includeFrontmatter, true);
       assertEquals(renderOptions.includeToolResults, true);
       assertEquals(renderOptions.includeDecisionSelection, false);
+      assertEquals(renderOptions.relativizeLocalLinks, true);
       assertEquals(renderOptions.headingTimestampTimezone, "local");
       assertEquals(renderOptions.speakerNames, undefined);
 

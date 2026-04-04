@@ -359,3 +359,82 @@ fix(writer): harden Dendron link rewriting edge cases
 - compare normalized rendered assistant content during duplicate suppression so Dendron-collapsed links do not duplicate commentary/final output
 - add writer regression coverage for protocol-relative links, code/escaped markdown regions, and normalized duplicate suppression
 ```
+
+# djradon_2026-04-04_1404_40
+
+Can we do task.2026.2026-04-04-relative-link-output-sanitization as tdd?
+
+# gpt-5.4_2026-04-04_1405_00
+
+Yes. This task is a good TDD fit, and it matches the repo guidance: define the contract first, then add the key tests before implementation.
+
+I’d do it in this order for [[task.2026.2026-04-04-relative-link-output-sanitization]]:
+
+1. Write failing writer tests first in [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts).
+   Cases:
+   - absolute local links become relative
+   - non-`.md` links also relativize
+   - image links relativize
+   - external URLs and `#fragment` stay unchanged
+   - already-relative links stay unchanged
+   - Dendron + relative mode composes correctly
+
+2. Add failing integration tests next.
+   Files:
+   - [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts)
+   - maybe [daemon-runtime_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/daemon-runtime_test.ts)
+   Assertions:
+   - twin history keeps full/original paths
+   - final markdown output is sanitized relative to the output file path
+
+3. Then implement the minimal writer changes.
+   The likely seam is in [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts): link rewriting needs the destination output path as context.
+
+4. Finish with `deno test` and `deno task check --frozen`.
+
+One thing I’d tighten in the note before coding: explicitly state that already-relative links are preserved as-authored, not re-based. That keeps the contract sharp.
+
+If you want, I can rewrite the task note’s `## Testing` and `## Implementation Plan` sections into explicit TDD order before implementation.
+
+# djradon_2026-04-04_1407_38
+
+Yes to explicit statement of preservation and give me you honest opinion, is TDD worth it here.
+
+# gpt-5.4_2026-04-04_1407_46
+
+I’m updating the task note to make preservation explicit, then I’ll answer the TDD question directly. For this feature, the value is mostly in pinning edge-case output behavior before touching the writer.
+
+# gpt-5.4_2026-04-04_1407_53
+
+The note already leaned that way, but I’m tightening it into an explicit contract statement so there’s no room for “re-base” ambiguity later.
+
+# gpt-5.4_2026-04-04_1408_07
+
+I updated [[task.2026.2026-04-04-relative-link-output-sanitization]] to make the preservation rule explicit: already-relative links stay exactly as authored, and only output is sanitized.
+
+My honest opinion: yes, TDD is worth it here, but only in a focused way. This writer logic is exactly the kind of code that picks up subtle regressions around path shape, markdown syntax, and mode interactions. The tests are cheap to write, the behavior is contract-heavy, and the failures are easy to miss by inspection. So I’d do targeted TDD for:
+- writer unit tests first
+- one or two integration tests proving twins keep full paths and output gets sanitized
+
+I would not do dogmatic TDD for every bit of config plumbing around it. The value is highest at the render boundary and the twin/output contract seam.
+
+# djradon_2026-04-04_1410_44
+
+OK, proceed with task refinement.
+
+# gpt-5.4_2026-04-04_1410_56
+
+I’m refining the task note itself, not starting implementation. I’m tightening it around the intended TDD sequence so the contract, failing tests, and minimal implementation path are explicit before any code work.
+
+# gpt-5.4_2026-04-04_1411_22
+
+Refined [[task.2026.2026-04-04-relative-link-output-sanitization]] to make the development approach explicit.
+
+The main changes:
+- made preservation of already-relative links explicit in the contract
+- added a clear recommendation for focused TDD
+- separated high-value TDD scope from low-value plumbing
+- reordered the implementation plan so failing writer tests and twin/output integration tests come before implementation
+- added an explicit “focused tests first, then broader check” validation step
+
+This note is now in better shape to drive the work without ambiguity.

@@ -30,6 +30,7 @@ export type RecordingRenderOptionOverrides = Pick<
   | "includeSystemEvents"
   | "headingTimestampTimezone"
   | "markdownLinkStyle"
+  | "relativizeLocalLinks"
   | "speakerNames"
 >;
 

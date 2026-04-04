@@ -66,6 +66,7 @@ export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   writerIncludeDecisionOptions?: boolean;
   writerIncludeDecisionSelection?: boolean;
   writerItalicizeUserMessages: boolean;
+  writerRelativizeLocalLinks?: boolean;
   writerUseDendronStyleWikilinks?: boolean;
 }
 
@@ -294,6 +295,8 @@ function isWorkspaceAttachmentWriterFeatureFlags(
     (value["writerIncludeDecisionSelection"] === undefined ||
       typeof value["writerIncludeDecisionSelection"] === "boolean") &&
     typeof value["writerItalicizeUserMessages"] === "boolean" &&
+    (value["writerRelativizeLocalLinks"] === undefined ||
+      typeof value["writerRelativizeLocalLinks"] === "boolean") &&
     (value["writerUseDendronStyleWikilinks"] === undefined ||
       typeof value["writerUseDendronStyleWikilinks"] === "boolean");
 }

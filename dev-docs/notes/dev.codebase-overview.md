@@ -139,8 +139,10 @@ Generated defaults derived from workspace `defaultOutputDir` remain
 workspace-root-contained after template expansion; only explicit command paths
 may target outside the workspace root.
 Workspace-local `workspaceFeatureFlags` also carry recording-render policy,
-including an opt-in Dendron wikilink rewrite for local `.md` inline links in
-workspace-scoped markdown output.
+including default-on relative sanitization for absolute local inline markdown
+destinations plus an optional Dendron wikilink rewrite for local `.md` note
+links in workspace-scoped markdown output. The sanitation is render-time only:
+twins and persisted source/history snapshots stay authoritative.
 Operator-facing workspace `displayName` labels live in the shared workspace
 registry, while preferred per-workspace participant usernames remain in
 `kato-user-config.yaml`.

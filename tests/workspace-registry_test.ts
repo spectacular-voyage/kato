@@ -198,6 +198,10 @@ Deno.test(
         false,
       );
       assertEquals(
+        first.writerFeatureFlags.writerRelativizeLocalLinks,
+        true,
+      );
+      assertEquals(
         first.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
         true,
       );
@@ -216,6 +220,7 @@ Deno.test(
           "  writerIncludeCommentary: false",
           "  writerIncludeToolResults: true",
           "  writerIncludeDecisionSelection: false",
+          "  writerRelativizeLocalLinks: false",
           "  writerUseDendronStyleWikilinks: true",
         ].join("\n") + "\n",
       );
@@ -240,6 +245,10 @@ Deno.test(
       assertEquals(
         second.writerFeatureFlags.writerUseDendronStyleWikilinks,
         true,
+      );
+      assertEquals(
+        second.writerFeatureFlags.writerRelativizeLocalLinks,
+        false,
       );
     });
   },

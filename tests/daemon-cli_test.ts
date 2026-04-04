@@ -957,6 +957,10 @@ Deno.test(
       );
       assertStringIncludes(
         initializedConfig,
+        "writerRelativizeLocalLinks: true",
+      );
+      assertStringIncludes(
+        initializedConfig,
         "writerUseDendronStyleWikilinks: false",
       );
       assertStringIncludes(

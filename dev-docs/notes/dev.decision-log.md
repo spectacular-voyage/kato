@@ -17,6 +17,42 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Workspace Markdown Output Relativizes Absolute Local Inline Links
+
+- Decision:
+  - Add `workspaceFeatureFlags.writerRelativizeLocalLinks` to workspace config.
+  - Treat the feature as default-on for workspace-scoped markdown rendering:
+    new workspace scaffolds emit it explicitly as `true`, and older workspaces
+    or persisted workspace-output state that omit the key resolve as enabled.
+  - Apply sanitization only when rendering markdown output for
+    record/capture/export flows; do not rewrite twins, provider source history,
+    or already-written markdown files on disk.
+  - Only rewrite explicit inline markdown link/image destinations, and only
+    when the destination path is absolute and local. Already-relative links,
+    external URLs, fragment-only links, reference-style links, literal
+    autolinks, and plain bare URLs stay untouched in this slice.
+  - When both writer flags are enabled, local `.md` note links still collapse
+    to Dendron wikilinks while other absolute local assets relativize against
+    the final output file location.
+- Owner: Kato engineering
+- Date: 2026-04-04
+- Why:
+  - Workspace recordings should not leak absolute filesystem paths into
+    portable markdown output.
+  - This is a render-shape concern, not a source-of-truth migration concern, so
+    the change belongs at writer render time instead of in twins or provider
+    history.
+- Tradeoffs:
+  - Existing workspaces change behavior for future renders even if they do not
+    add the new key explicitly.
+  - The first pass intentionally keeps markdown parsing narrow instead of
+    trying to sanitize every possible link-like syntax.
+- Follow-up tasks:
+  - Revisit reference-style links or literal autolinks only if real output
+    shows they matter.
+  - Revisit cross-surface parity if shared/global export defaults later need
+    the same sanitization control outside workspace-scoped rendering.
+
 ### Workspace Markdown Links Can Collapse to Dendron Wikilinks
 
 - Decision:

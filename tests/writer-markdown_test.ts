@@ -619,6 +619,80 @@ Deno.test(
 );
 
 Deno.test(
+  "renderEventsToMarkdown relativizes absolute local links and images when enabled",
+  () => {
+    const assistant = makeEvent(
+      "assistant-relative-links",
+      "message.assistant",
+      [
+        "See [guide](/workspace/dev-docs/notes/dev.general-guidance.md#Goal).",
+        "Asset [spec](/workspace/docs/spec.pdf?download=1#page=2).",
+        "Diagram ![diagram](/workspace/dev-docs/assets/diagram.png).",
+        "Keep [relative](../notes/already-relative.md#Keep).",
+        "External [OpenAI](https://openai.com).",
+        "Anchor [section](#local-anchor).",
+      ].join("\n"),
+      "2026-04-04T10:07:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "standard",
+      relativizeLocalLinks: true,
+      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+    });
+
+    assertStringIncludes(rendered, "[guide](../dev.general-guidance.md#Goal)");
+    assertStringIncludes(
+      rendered,
+      "[spec](../../../docs/spec.pdf?download=1#page=2)",
+    );
+    assertStringIncludes(rendered, "![diagram](../../assets/diagram.png)");
+    assertStringIncludes(
+      rendered,
+      "[relative](../notes/already-relative.md#Keep)",
+    );
+    assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
+    assertStringIncludes(rendered, "[section](#local-anchor)");
+    assertEquals(rendered.includes("/workspace/dev-docs/notes/"), false);
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown composes Dendron note rewriting with relative asset sanitization",
+  () => {
+    const assistant = makeEvent(
+      "assistant-dendron-relative-links",
+      "message.assistant",
+      [
+        "See [guide](/workspace/dev-docs/notes/dev.general-guidance.md).",
+        "Leave [query](/workspace/dev-docs/notes/dev.general-guidance.md?view=full).",
+        "Keep ![diagram](/workspace/dev-docs/notes/assets/diagram.png).",
+      ].join("\n"),
+      "2026-04-04T10:08:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "dendron-wikilink",
+      relativizeLocalLinks: true,
+      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+    });
+
+    assertStringIncludes(rendered, "[[dev.general-guidance]]");
+    assertStringIncludes(
+      rendered,
+      "[query](../dev.general-guidance.md?view=full)",
+    );
+    assertStringIncludes(rendered, "![diagram](../assets/diagram.png)");
+    assertEquals(
+      rendered.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
+      false,
+    );
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown rewrites Dendron links across tool thinking decision and provider info sections",
   () => {
     const toolCall: ConversationEvent = {
