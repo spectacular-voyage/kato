@@ -531,3 +531,29 @@ fix(writer): scope Dendron wikilinks to discovered vault note roots
 - update the Dendron vault-awareness task note, codebase overview, and
   decision log to reflect the narrowed writer contract
 ```
+
+# djradon_2026-04-05_0916_42
+
+Could you compose @release-notes.0.2.11.md with all changes since the last version?
+
+# gpt-5.4_2026-04-05_0916_58
+
+I’m pulling the release note format, the current target note, and the git/version history first. Then I’ll draft the `0.2.11` note from the actual changes since the prior release rather than summarizing from memory.
+
+# gpt-5.4_2026-04-05_0917_11
+
+I have the release range now: `v0.2.10..HEAD`, which includes the Dendron/writer work plus a few CI and docs updates. I’m reading the recent release-note style next so the `0.2.11` note matches the existing shape instead of inventing a new format.
+
+# gpt-5.4_2026-04-05_0917_29
+
+The release is clearly centered on workspace markdown output behavior, with a smaller testing/release-process tail. I’m checking the manual-release workflow and the bumped version files just long enough to avoid overstating that part in the notes.
+
+# gpt-5.4_2026-04-05_0917_56
+
+I have enough to draft this cleanly: one core product theme, one upgrade section, and one developer-oriented tail for coverage/release/CI. I’m writing the note into the versioned release-notes file now.
+
+# gpt-5.4_2026-04-05_0918_18
+
+Composed [[release-notes.v0.2.11]] from the `v0.2.10..HEAD` change range.
+
+It covers the workspace markdown changes, Dendron vault-awareness follow-up, the Codecov coverage fix, and the release/CI workflow updates. I did not run tests for this step since it was a release-note edit only.
