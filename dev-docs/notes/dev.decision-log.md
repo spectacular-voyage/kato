@@ -58,25 +58,43 @@ created: 1771779490894
 - Decision:
   - Add `workspaceFeatureFlags.writerUseDendronStyleWikilinks` to workspace
     config, default `false`.
-  - When enabled, workspace-scoped markdown output rewrites local `.md` inline
-    links to Dendron wikilinks using the target note filename without the
-    `.md` extension.
-  - Preserve `#fragment` suffixes as `[[note#fragment]]`, and leave external
-    URLs, fragment-only links, and query-bearing links unchanged.
+  - When enabled, workspace-scoped markdown output rewrites only eligible
+    local `.md` inline links to Dendron wikilinks using the target note
+    filename without the `.md` extension.
+  - Eligibility is derived at render time from the final `outputPath`:
+    walk upward for `dendron.yml`, resolve `workspace.vaults[].fsPath`
+    relative to that config, derive note roots as `<fsPath>/notes` for
+    `selfContained: true` and `<fsPath>` otherwise, and keep the first config
+    whose roots contain the output file.
+  - If no matching Dendron config is found, fall back to same-directory-only
+    rewriting for local `.md` targets resolved against `dirname(outputPath)`.
+  - Preserve `#fragment` suffixes as `[[note#fragment]]`; leave `.md` links
+    outside the derived roots as standard markdown links; and leave external
+    URLs, fragment-only links, query-bearing links, and non-markdown assets
+    unchanged by the wikilink rewrite.
+  - Expose the matched `dendron.yml` path and derived
+    `wikilinkifiableRoots` on the Workspaces page as read-only diagnostics for
+    the workspace default output location.
 - Owner: Kato engineering
-- Date: 2026-04-04
+- Date: 2026-04-05
 - Why:
   - Workspace recordings for Dendron vaults should not spill absolute
     filesystem paths into captured markdown.
   - The concern is render-shape policy, so workspace-local control is the right
     scope.
+  - Broad "any local `.md`" rewriting was incorrect for repo files such as
+    `README.md` that live outside the actual Dendron note tree.
 - Tradeoffs:
   - Custom markdown link labels collapse to the canonical note identity in this
     first pass.
+  - Cross-vault note-name collisions remain unresolved because eligibility is
+    root-aware but emitted syntax is still plain `[[note]]`.
   - Shared/global CLI export defaults do not yet expose the same toggle.
 - Follow-up tasks:
   - Revisit Dendron alias-style output later if preserving custom labels turns
     out to matter.
+  - Revisit collision-aware or x-vault-qualified syntax if cross-vault
+    basenames become a real problem.
   - Revisit whether shared export defaults should gain parity once the
     workspace-local behavior has baked in.
 

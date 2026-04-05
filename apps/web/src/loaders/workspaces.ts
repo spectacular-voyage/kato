@@ -1,10 +1,17 @@
+import { join } from "@std/path";
 import {
+  DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+  DEFAULT_WORKSPACE_TIMEZONE,
+  type DendronWikilinkContextMode,
   isPathWithinRoots,
   loadUserSettings,
+  loadWorkspaceConfigOverrides,
   resolveDefaultKatoDir,
   resolveDefaultSharedConfigPath,
+  resolveDendronWikilinkContext,
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
+import { resolveWorkspaceDefaultOutputDir } from "../../../daemon/src/orchestrator/runtime_workspace_paths.ts";
 import {
   formatWorkspaceRegistryError,
   loadWorkspaceSummary,
@@ -32,6 +39,9 @@ export interface WorkspaceRecordingEntry {
 export interface WorkspaceManagementRow extends WorkspaceSummaryRow {
   workspaceUsername?: string;
   writePathCovered?: boolean;
+  wikilinkContextMode?: DendronWikilinkContextMode;
+  dendronConfigPath?: string;
+  wikilinkifiableRoots?: string[];
   activeRecordingCount: number;
   staleRecordingCount: number;
   stoppedRecordingCount: number;
@@ -50,6 +60,12 @@ export interface LoadWorkspacesPageDataOptions {
   katoDir?: string;
 }
 
+const WORKSPACE_DIAGNOSTIC_PROVIDER = "workspace";
+const WORKSPACE_DIAGNOSTIC_SESSION_ID = "workspace-diagnostic";
+const WORKSPACE_DIAGNOSTIC_OUTPUT_USERNAME = "workspace";
+const WORKSPACE_DIAGNOSTIC_SNIPPET = "workspace";
+const WORKSPACE_DIAGNOSTIC_NOW = new Date("2000-01-01T00:00:00.000Z");
+
 function resolveRecordingActivityTimestamp(
   row: Pick<WorkspaceRecordingEntry, "lastWriteAt" | "stoppedAt" | "startedAt">,
 ): number {
@@ -63,6 +79,30 @@ function resolveRecordingActivityTimestamp(
     }
   }
   return 0;
+}
+
+function resolveDiagnosticDefaultOutputDir(options: {
+  workspaceRoot: string;
+  defaultOutputDirTemplate: string;
+  workspaceTimezone: string;
+}): string | undefined {
+  try {
+    return resolveWorkspaceDefaultOutputDir({
+      profile: {
+        workspaceRoot: options.workspaceRoot,
+        defaultOutputDirTemplate: options.defaultOutputDirTemplate,
+        filenameTemplate: "{timestampHumane}-{provider}.md",
+        workspaceTimezone: options.workspaceTimezone,
+      },
+      provider: WORKSPACE_DIAGNOSTIC_PROVIDER,
+      sessionId: WORKSPACE_DIAGNOSTIC_SESSION_ID,
+      now: WORKSPACE_DIAGNOSTIC_NOW,
+      outputUsername: WORKSPACE_DIAGNOSTIC_OUTPUT_USERNAME,
+      snapshotSnippet: WORKSPACE_DIAGNOSTIC_SNIPPET,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 export async function loadWorkspacesPageData(
@@ -109,11 +149,54 @@ export async function loadWorkspacesPageData(
     }
   }
 
-  function augmentRows(
+  async function loadWikilinkDiagnostics(
+    row: WorkspaceSummaryRow,
+  ): Promise<
+    Pick<
+      WorkspaceManagementRow,
+      "wikilinkContextMode" | "dendronConfigPath" | "wikilinkifiableRoots"
+    >
+  > {
+    if (!row.valid) {
+      return {};
+    }
+
+    try {
+      const overrides = await loadWorkspaceConfigOverrides(row.configPath);
+      const workspaceTimezone = overrides.workspaceTimezone ??
+        DEFAULT_WORKSPACE_TIMEZONE;
+      const resolvedDefaultOutputDir = resolveDiagnosticDefaultOutputDir({
+        workspaceRoot: row.workspaceRoot,
+        defaultOutputDirTemplate: overrides.defaultOutputDir ??
+          DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+        workspaceTimezone,
+      }) ??
+        resolveDiagnosticDefaultOutputDir({
+          workspaceRoot: row.workspaceRoot,
+          defaultOutputDirTemplate: DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+          workspaceTimezone,
+        });
+      if (!resolvedDefaultOutputDir) {
+        return {};
+      }
+      const context = await resolveDendronWikilinkContext(
+        join(resolvedDefaultOutputDir, "__kato-wikilink-probe__.md"),
+      );
+      return {
+        wikilinkContextMode: context.mode,
+        dendronConfigPath: context.dendronConfigPath,
+        wikilinkifiableRoots: [...context.wikilinkifiableRoots],
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  async function augmentRows(
     rows: WorkspaceSummaryRow[],
     allowedWriteRoots: string[] | undefined,
-  ): WorkspaceManagementRow[] {
-    return rows.map((row) => {
+  ): Promise<WorkspaceManagementRow[]> {
+    return await Promise.all(rows.map(async (row) => {
       const recordings = [...(recordingsByWorkspace.get(row.workspaceId) ?? [])]
         .sort((a, b) => {
           const order = {
@@ -131,12 +214,14 @@ export async function loadWorkspacesPageData(
       const latestRecordingAt = recordings[0]?.lastWriteAt ??
         recordings[0]?.stoppedAt ??
         recordings[0]?.startedAt;
+      const wikilinkDiagnostics = await loadWikilinkDiagnostics(row);
       return {
         ...row,
         workspaceUsername: workspaceUsernames.get(row.workspaceId),
         writePathCovered: allowedWriteRoots
           ? isPathWithinRoots(row.workspaceRoot, allowedWriteRoots)
           : undefined,
+        ...wikilinkDiagnostics,
         activeRecordingCount: recordings.filter((recording) =>
           recording.state === "engaged-active"
         ).length,
@@ -149,20 +234,23 @@ export async function loadWorkspacesPageData(
         latestRecordingAt,
         recordings,
       };
-    });
+    }));
   }
 
   try {
     const sharedConfig = await sharedConfigStore.load();
     return {
       workspaceSummary,
-      rows: augmentRows(workspaceSummary.rows, sharedConfig.allowedWriteRoots),
+      rows: await augmentRows(
+        workspaceSummary.rows,
+        sharedConfig.allowedWriteRoots,
+      ),
       allowedWriteRoots: [...sharedConfig.allowedWriteRoots],
     };
   } catch (error) {
     return {
       workspaceSummary,
-      rows: augmentRows(workspaceSummary.rows, undefined),
+      rows: await augmentRows(workspaceSummary.rows, undefined),
       allowedWriteRoots: [],
       sharedConfigError: formatWorkspaceRegistryError(error),
     };
