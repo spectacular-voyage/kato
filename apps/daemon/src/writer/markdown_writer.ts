@@ -3,6 +3,10 @@ import { basename, dirname } from "@std/path";
 import * as posixPath from "@std/path/posix";
 import * as windowsPath from "@std/path/windows";
 import {
+  isPathWithinRoots,
+  resolveDendronWikilinkContext,
+} from "../../../runtime/src/mod.ts";
+import {
   mergeAccretiveFrontmatterFields,
   renderFrontmatter,
 } from "./frontmatter.ts";
@@ -52,6 +56,7 @@ export interface MarkdownRenderOptions {
   markdownLinkStyle?: MarkdownLinkStyle;
   relativizeLocalLinks?: boolean;
   renderOutputPath?: string;
+  wikilinkifiableRoots?: string[];
 }
 
 export interface ConversationWriterLike {
@@ -213,6 +218,7 @@ interface MarkdownLinkRenderContext {
   markdownLinkStyle: MarkdownLinkStyle;
   relativizeLocalLinks: boolean;
   renderOutputPath?: string;
+  wikilinkifiableRoots: string[];
 }
 
 function parseMarkdownLinkDestination(
@@ -338,6 +344,33 @@ function computeRelativeMarkdownPath(
     return null;
   }
   return normalized;
+}
+
+function resolveLocalDestinationAbsolutePath(
+  pathname: string,
+  renderOutputPath: string | undefined,
+): string | null {
+  if (pathname.length === 0) {
+    return null;
+  }
+  if (isAbsoluteLocalDestinationPath(pathname)) {
+    return pathname;
+  }
+  if (!renderOutputPath) {
+    return null;
+  }
+
+  const outputFlavor = detectPathFlavor(renderOutputPath);
+  if (!outputFlavor) {
+    return null;
+  }
+
+  const pathModule = outputFlavor === "windows" ? windowsPath : posixPath;
+  const resolvedPath = pathModule.resolve(
+    pathModule.dirname(renderOutputPath),
+    pathname,
+  );
+  return isAbsoluteLocalDestinationPath(resolvedPath) ? resolvedPath : null;
 }
 
 function rewriteMarkdownLinkDestination(
@@ -513,6 +546,10 @@ function applyMarkdownLinkTransform(
 
 function resolveDendronWikilinkTarget(
   rawDestination: string,
+  options: Pick<
+    MarkdownLinkRenderContext,
+    "renderOutputPath" | "wikilinkifiableRoots"
+  >,
 ): string | null {
   const destination = trimMarkdownLinkDestination(rawDestination);
   if (
@@ -526,19 +563,29 @@ function resolveDendronWikilinkTarget(
     return null;
   }
 
-  const hashIndex = destination.indexOf("#");
-  const pathWithQuery = hashIndex >= 0
-    ? destination.slice(0, hashIndex)
-    : destination;
-  const fragment = hashIndex >= 0 ? destination.slice(hashIndex + 1) : "";
-  if (pathWithQuery.includes("?")) {
+  const { pathname, search, hash } = splitDestinationPathQueryAndFragment(
+    destination,
+  );
+  if (search.length > 0) {
     return null;
   }
-  if (!/\.md$/i.test(pathWithQuery)) {
+  if (!/\.md$/i.test(pathname)) {
     return null;
   }
 
-  const filename = pathWithQuery.split(/[\\/]/).pop()?.trim() ?? "";
+  const resolvedPath = resolveLocalDestinationAbsolutePath(
+    pathname,
+    options.renderOutputPath,
+  );
+  if (
+    !resolvedPath ||
+    !isPathWithinRoots(resolvedPath, options.wikilinkifiableRoots)
+  ) {
+    return null;
+  }
+
+  const fragment = hash.startsWith("#") ? hash.slice(1) : "";
+  const filename = resolvedPath.split(/[\\/]/).pop()?.trim() ?? "";
   const noteName = filename.replace(/\.md$/i, "");
   if (noteName.length === 0) {
     return null;
@@ -562,7 +609,10 @@ function applyMarkdownLinkRendering(
     content,
     ({ isImage, label, rawDestination }) => {
       if (!isImage && options.markdownLinkStyle === "dendron-wikilink") {
-        const wikilinkTarget = resolveDendronWikilinkTarget(rawDestination);
+        const wikilinkTarget = resolveDendronWikilinkTarget(
+          rawDestination,
+          options,
+        );
         if (wikilinkTarget) {
           return `[[${wikilinkTarget}]]`;
         }
@@ -714,10 +764,16 @@ export function renderEventsToMarkdown(
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
   const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
+  const wikilinkifiableRoots = options.wikilinkifiableRoots !== undefined
+    ? [...options.wikilinkifiableRoots]
+    : options.renderOutputPath && markdownLinkStyle === "dendron-wikilink"
+    ? [dirname(options.renderOutputPath)]
+    : [];
   const linkRenderContext: MarkdownLinkRenderContext = {
     markdownLinkStyle,
     relativizeLocalLinks: options.relativizeLocalLinks ?? false,
     renderOutputPath: options.renderOutputPath,
+    wikilinkifiableRoots,
   };
 
   const parts: string[] = [];
@@ -1131,6 +1187,33 @@ async function writeTextFileCreateNew(
   }
 }
 
+async function resolveRenderOptionsForOutputPath(
+  outputPath: string,
+  options: MarkdownRenderOptions,
+): Promise<MarkdownRenderOptions> {
+  const renderOutputPath = options.renderOutputPath ?? outputPath;
+  if (options.markdownLinkStyle !== "dendron-wikilink") {
+    return {
+      ...options,
+      renderOutputPath,
+    };
+  }
+  if (options.wikilinkifiableRoots !== undefined) {
+    return {
+      ...options,
+      renderOutputPath,
+      wikilinkifiableRoots: [...options.wikilinkifiableRoots],
+    };
+  }
+
+  const dendronContext = await resolveDendronWikilinkContext(renderOutputPath);
+  return {
+    ...options,
+    renderOutputPath,
+    wikilinkifiableRoots: dendronContext.wikilinkifiableRoots,
+  };
+}
+
 export class MarkdownConversationWriter implements ConversationWriterLike {
   async appendEvents(
     outputPath: string,
@@ -1138,6 +1221,10 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     options: MarkdownRenderOptions = {},
   ): Promise<MarkdownWriteResult> {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
+    const baseRenderOptions = await resolveRenderOptionsForOutputPath(
+      outputPath,
+      options,
+    );
 
     let existing = await readExistingFile(outputPath);
     if (options.requireCreateNew && existing.exists) {
@@ -1149,10 +1236,9 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     if (!existing.exists) {
       const title = options.title ?? basename(outputPath, ".md");
       const rendered = renderEventsToMarkdown(events, {
-        ...options,
+        ...baseRenderOptions,
         includeFrontmatter,
         title,
-        renderOutputPath: outputPath,
       });
       const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
       try {
@@ -1198,9 +1284,8 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       nextFrontmatter !== existingFrontmatterView.frontmatter;
 
     const rendered = renderEventsToMarkdown(events, {
-      ...options,
+      ...baseRenderOptions,
       includeFrontmatter: false,
-      renderOutputPath: outputPath,
     });
     const content = rendered.trim();
     const hasBodyToAppend = content.length > 0;
@@ -1272,6 +1357,10 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     options: MarkdownRenderOptions = {},
   ): Promise<MarkdownWriteResult> {
     await Deno.mkdir(dirname(outputPath), { recursive: true });
+    const baseRenderOptions = await resolveRenderOptionsForOutputPath(
+      outputPath,
+      options,
+    );
 
     const existingFrontmatter = await extractExistingFrontmatter(outputPath);
     if (existingFrontmatter) {
@@ -1294,9 +1383,8 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         })
         : existingFrontmatter;
       const body = renderEventsToMarkdown(events, {
-        ...options,
+        ...baseRenderOptions,
         includeFrontmatter: false,
-        renderOutputPath: outputPath,
       }).trim();
       const content = body.length > 0
         ? `${mergedFrontmatter}\n\n${body}\n`
@@ -1313,10 +1401,9 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     const title = options.title ?? basename(outputPath, ".md");
     const includeFrontmatter = options.includeFrontmatter !== false;
     const rendered = renderEventsToMarkdown(events, {
-      ...options,
+      ...baseRenderOptions,
       includeFrontmatter,
       title,
-      renderOutputPath: outputPath,
     });
     const content = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
     await Deno.writeTextFile(outputPath, content);

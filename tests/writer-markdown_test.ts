@@ -543,15 +543,15 @@ Deno.test("MarkdownConversationWriter create respects includeFrontmatter false",
 });
 
 Deno.test(
-  "renderEventsToMarkdown rewrites local markdown note links to Dendron wikilinks",
+  "renderEventsToMarkdown rewrites only markdown note links inside wikilinkifiable roots",
   () => {
     const assistant = makeEvent(
       "assistant-dendron-links",
       "message.assistant",
       [
-        "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).",
-        "Also [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
-        "Windows path: [todo](C:\\Users\\djradon\\notes\\dev.todo.md).",
+        "See [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md).",
+        "Also [task note](../task.2026.2026-04-04-dendron-style-links.md#Goal).",
+        "Keep [README](/workspace/README.md#Intro).",
         "Protocol-relative stays [cdn](//example.com/dev.todo.md).",
         "External link stays [OpenAI](https://openai.com).",
         "Anchor stays [section](#local-anchor).",
@@ -562,6 +562,8 @@ Deno.test(
     const rendered = renderEventsToMarkdown([assistant], {
       includeFrontmatter: false,
       markdownLinkStyle: "dendron-wikilink",
+      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");
@@ -569,14 +571,12 @@ Deno.test(
       rendered,
       "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
     );
-    assertStringIncludes(rendered, "[[dev.todo]]");
+    assertStringIncludes(rendered, "[README](/workspace/README.md#Intro)");
     assertStringIncludes(rendered, "[cdn](//example.com/dev.todo.md)");
     assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
     assertStringIncludes(rendered, "[section](#local-anchor)");
     assertEquals(
-      rendered.includes(
-        "/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md",
-      ),
+      rendered.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
       false,
     );
   },
@@ -677,6 +677,7 @@ Deno.test(
       markdownLinkStyle: "dendron-wikilink",
       relativizeLocalLinks: true,
       renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");
@@ -688,6 +689,35 @@ Deno.test(
     assertEquals(
       rendered.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
       false,
+    );
+  },
+);
+
+Deno.test(
+  "renderEventsToMarkdown falls back to same-directory note rewriting without Dendron roots",
+  () => {
+    const assistant = makeEvent(
+      "assistant-dendron-fallback-links",
+      "message.assistant",
+      [
+        "Rewrite [peer](peer-note.md#Goal).",
+        "Keep [parent](../dev.general-guidance.md).",
+        "Keep [external root](/workspace/dev-docs/notes/dev.todo.md).",
+      ].join("\n"),
+      "2026-04-05T10:09:00.000Z",
+    );
+
+    const rendered = renderEventsToMarkdown([assistant], {
+      includeFrontmatter: false,
+      markdownLinkStyle: "dendron-wikilink",
+      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+    });
+
+    assertStringIncludes(rendered, "[[peer-note#Goal]]");
+    assertStringIncludes(rendered, "[parent](../dev.general-guidance.md)");
+    assertStringIncludes(
+      rendered,
+      "[external root](/workspace/dev-docs/notes/dev.todo.md)",
     );
   },
 );
@@ -717,7 +747,7 @@ Deno.test(
       timestamp: "2026-04-04T10:10:01.000Z",
       kind: "thinking",
       content:
-        "Need [dev.todo](dev-docs/notes/dev.todo.md#Next) but leave [query](dev-docs/notes/dev.todo.md?view=full) alone.",
+        "Need [dev.todo](../dev.todo.md#Next) but leave [query](../dev.todo.md?view=full) alone.",
       source: {
         providerEventType: "thinking",
         providerEventId: "thinking-dendron-extra-surfaces",
@@ -732,7 +762,7 @@ Deno.test(
       decisionId: "decision-questionnaire-dendron-extra-surfaces",
       decisionKey: "note-export-target",
       summary:
-        "Review [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal)",
+        "Review [task note](../task.2026.2026-04-04-dendron-style-links.md#Goal)",
       status: "proposed",
       decidedBy: "assistant",
       basisEventIds: ["tool-call-dendron-extra-surfaces"],
@@ -794,6 +824,8 @@ Deno.test(
       includeThinking: true,
       includeSystemEvents: true,
       markdownLinkStyle: "dendron-wikilink",
+      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");
@@ -801,7 +833,7 @@ Deno.test(
     assertStringIncludes(rendered, "[[dev.todo#Next]]");
     assertStringIncludes(
       rendered,
-      "[query](dev-docs/notes/dev.todo.md?view=full)",
+      "[query](../dev.todo.md?view=full)",
     );
     assertStringIncludes(
       rendered,
@@ -839,6 +871,7 @@ Deno.test(
     const rendered = renderEventsToMarkdown([assistant], {
       includeFrontmatter: false,
       markdownLinkStyle: "dendron-wikilink",
+      renderOutputPath: "/tmp/session.md",
     });
 
     assertStringIncludes(rendered, "Visible [[dev.todo]].");
@@ -1875,6 +1908,7 @@ Deno.test(
       includeFrontmatter: false,
       includeCommentary: true,
       markdownLinkStyle: "dendron-wikilink",
+      renderOutputPath: "/tmp/session.md",
     });
 
     assertEquals(rendered.split("See [[dev.todo]].").length - 1, 1);

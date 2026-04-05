@@ -33,6 +33,11 @@ export {
   WorkspaceRegistryFileStore,
 } from "./registry.ts";
 export type {
+  DendronWikilinkContext,
+  DendronWikilinkContextMode,
+} from "./dendron.ts";
+export { resolveDendronWikilinkContext } from "./dendron.ts";
+export type {
   RegisterWorkspaceMutationOptions,
   RegisterWorkspaceMutationResult,
   SetWorkspaceDisplayNameOptions,

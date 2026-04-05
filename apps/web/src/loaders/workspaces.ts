@@ -1,8 +1,13 @@
+import { isAbsolute, join, resolve } from "@std/path";
 import {
+  DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+  type DendronWikilinkContextMode,
   isPathWithinRoots,
   loadUserSettings,
+  loadWorkspaceConfigOverrides,
   resolveDefaultKatoDir,
   resolveDefaultSharedConfigPath,
+  resolveDendronWikilinkContext,
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
 import {
@@ -32,6 +37,9 @@ export interface WorkspaceRecordingEntry {
 export interface WorkspaceManagementRow extends WorkspaceSummaryRow {
   workspaceUsername?: string;
   writePathCovered?: boolean;
+  wikilinkContextMode?: DendronWikilinkContextMode;
+  dendronConfigPath?: string;
+  wikilinkifiableRoots?: string[];
   activeRecordingCount: number;
   staleRecordingCount: number;
   stoppedRecordingCount: number;
@@ -109,11 +117,43 @@ export async function loadWorkspacesPageData(
     }
   }
 
-  function augmentRows(
+  async function loadWikilinkDiagnostics(
+    row: WorkspaceSummaryRow,
+  ): Promise<
+    Pick<
+      WorkspaceManagementRow,
+      "wikilinkContextMode" | "dendronConfigPath" | "wikilinkifiableRoots"
+    >
+  > {
+    if (!row.valid) {
+      return {};
+    }
+
+    try {
+      const overrides = await loadWorkspaceConfigOverrides(row.configPath);
+      const defaultOutputDirTemplate = overrides.defaultOutputDir ??
+        DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE;
+      const resolvedDefaultOutputDir = isAbsolute(defaultOutputDirTemplate)
+        ? resolve(defaultOutputDirTemplate)
+        : resolve(row.workspaceRoot, defaultOutputDirTemplate);
+      const context = await resolveDendronWikilinkContext(
+        join(resolvedDefaultOutputDir, "__kato-wikilink-probe__.md"),
+      );
+      return {
+        wikilinkContextMode: context.mode,
+        dendronConfigPath: context.dendronConfigPath,
+        wikilinkifiableRoots: [...context.wikilinkifiableRoots],
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  async function augmentRows(
     rows: WorkspaceSummaryRow[],
     allowedWriteRoots: string[] | undefined,
-  ): WorkspaceManagementRow[] {
-    return rows.map((row) => {
+  ): Promise<WorkspaceManagementRow[]> {
+    return await Promise.all(rows.map(async (row) => {
       const recordings = [...(recordingsByWorkspace.get(row.workspaceId) ?? [])]
         .sort((a, b) => {
           const order = {
@@ -131,12 +171,14 @@ export async function loadWorkspacesPageData(
       const latestRecordingAt = recordings[0]?.lastWriteAt ??
         recordings[0]?.stoppedAt ??
         recordings[0]?.startedAt;
+      const wikilinkDiagnostics = await loadWikilinkDiagnostics(row);
       return {
         ...row,
         workspaceUsername: workspaceUsernames.get(row.workspaceId),
         writePathCovered: allowedWriteRoots
           ? isPathWithinRoots(row.workspaceRoot, allowedWriteRoots)
           : undefined,
+        ...wikilinkDiagnostics,
         activeRecordingCount: recordings.filter((recording) =>
           recording.state === "engaged-active"
         ).length,
@@ -149,20 +191,23 @@ export async function loadWorkspacesPageData(
         latestRecordingAt,
         recordings,
       };
-    });
+    }));
   }
 
   try {
     const sharedConfig = await sharedConfigStore.load();
     return {
       workspaceSummary,
-      rows: augmentRows(workspaceSummary.rows, sharedConfig.allowedWriteRoots),
+      rows: await augmentRows(
+        workspaceSummary.rows,
+        sharedConfig.allowedWriteRoots,
+      ),
       allowedWriteRoots: [...sharedConfig.allowedWriteRoots],
     };
   } catch (error) {
     return {
       workspaceSummary,
-      rows: augmentRows(workspaceSummary.rows, undefined),
+      rows: await augmentRows(workspaceSummary.rows, undefined),
       allowedWriteRoots: [],
       sharedConfigError: formatWorkspaceRegistryError(error),
     };

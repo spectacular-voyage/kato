@@ -752,6 +752,78 @@ Deno.test("loadWorkspacesPageData groups recordings by workspace and links back 
   });
 });
 
+Deno.test("loadWorkspacesPageData surfaces Dendron wikilink diagnostics for workspace note roots", async () => {
+  await withTestTempDir("web-activity-workspaces-dendron-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const sharedConfigPath = resolveDefaultSharedConfigPath(katoDir);
+    const alphaRoot = join(homeDir, "alpha");
+    const alphaNotesRoot = join(alphaRoot, "notes");
+    const sharedNotesRoot = join(homeDir, "shared-notes");
+    const alphaConfigPath = join(
+      alphaRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+
+    await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+    await Deno.mkdir(alphaNotesRoot, { recursive: true });
+    await Deno.mkdir(sharedNotesRoot, { recursive: true });
+    await Deno.writeTextFile(
+      alphaConfigPath,
+      [
+        "workspaceId: ws-alpha",
+        "defaultOutputDir: notes",
+        "workspaceFeatureFlags:",
+        "  writerUseDendronStyleWikilinks: true",
+      ].join("\n") + "\n",
+    );
+    await Deno.writeTextFile(
+      join(alphaRoot, "dendron.yml"),
+      [
+        "workspace:",
+        "  vaults:",
+        "    - fsPath: .",
+        "      selfContained: true",
+        "    - fsPath: ../shared-notes",
+        "      selfContained: false",
+      ].join("\n") + "\n",
+    );
+
+    await new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    ).save([{
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      workspaceRoot: alphaRoot,
+      configPath: alphaConfigPath,
+      registeredAt: "2026-03-07T15:00:00.000Z",
+    }]);
+
+    await new SharedBehaviorConfigFileStore(sharedConfigPath).save(
+      createDefaultSharedBehaviorConfig({
+        allowedWriteRoots: [alphaRoot],
+      }),
+    );
+    await new UserConfigFileStore(resolveDefaultUserConfigPath(katoDir)).save(
+      createDefaultUserConfig(),
+    );
+
+    const data = await loadWorkspacesPageData({ katoDir });
+    const row = data.rows[0];
+
+    assertExists(row);
+    assertEquals(row.wikilinkContextMode, "dendron-config");
+    assertEquals(row.dendronConfigPath, join(alphaRoot, "dendron.yml"));
+    assertEquals(
+      row.wikilinkifiableRoots?.includes(alphaNotesRoot),
+      true,
+    );
+    assertEquals(
+      row.wikilinkifiableRoots?.includes(sharedNotesRoot),
+      true,
+    );
+  });
+});
+
 Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", async () => {
   await withTestTempDir("web-activity-fallbacks-", async (homeDir) => {
     const katoDir = join(homeDir, ".kato");

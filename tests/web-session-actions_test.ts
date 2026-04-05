@@ -102,6 +102,7 @@ async function setupWorkspaceFixture(
   options: {
     writerUseDendronStyleWikilinks?: boolean;
     writerRelativizeLocalLinks?: boolean;
+    createDendronConfig?: boolean;
   } = {},
 ): Promise<{
   katoDir: string;
@@ -136,6 +137,17 @@ async function setupWorkspaceFixture(
         ]),
     ].join("\n") + "\n",
   );
+  if (options.createDendronConfig) {
+    await Deno.writeTextFile(
+      join(alphaRoot, "dendron.yml"),
+      [
+        "workspace:",
+        "  vaults:",
+        "    - fsPath: .",
+        "      selfContained: true",
+      ].join("\n") + "\n",
+    );
+  }
 
   const registry = new WorkspaceRegistryFileStore(
     resolveDefaultWorkspaceRegistryPath(katoDir),
@@ -527,6 +539,7 @@ Deno.test("runSessionRecordingAction capture writes Dendron wikilinks from twin-
     async (homeDir) => {
       const { katoDir, alphaRoot } = await setupWorkspaceFixture(homeDir, {
         writerUseDendronStyleWikilinks: true,
+        createDendronConfig: true,
       });
       const sessionFilePath = join(homeDir, "provider-session-dendron.jsonl");
       await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
@@ -558,8 +571,11 @@ Deno.test("runSessionRecordingAction capture writes Dendron wikilinks from twin-
           "assistant-dendron-1",
           "message.assistant",
           [
-            "Check [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md).",
-            "Then [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
+            `Check [dev.general-guidance.md](${
+              join(alphaRoot, "notes", "dev.general-guidance.md")
+            }).`,
+            "Then [task note](task.2026.2026-04-04-dendron-style-links.md#Goal).",
+            `Keep [workspace readme](${join(alphaRoot, "README.md")}#Intro).`,
             `Keep ![diagram](${join(alphaRoot, "assets", "diagram.png")}).`,
           ].join("\n"),
           "2026-03-17T17:00:01.000Z",
@@ -610,11 +626,10 @@ Deno.test("runSessionRecordingAction capture writes Dendron wikilinks from twin-
         written,
         "[[task.2026.2026-04-04-dendron-style-links#Goal]]",
       );
+      assertStringIncludes(written, "[workspace readme](../README.md#Intro)");
       assertStringIncludes(written, "![diagram](../assets/diagram.png)");
-      assertEquals(
-        written.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
-        false,
-      );
+      assertEquals(written.includes(join(alphaRoot, "notes")), false);
+      assertEquals(written.includes(join(alphaRoot, "README.md")), false);
       assertEquals(
         written.includes(join(alphaRoot, "assets", "diagram.png")),
         false,

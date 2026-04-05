@@ -94,6 +94,34 @@ export default function WorkspacesLive(
                             </div>
                           )
                           : null}
+                        {row.wikilinkContextMode
+                          ? (
+                            <>
+                              <div class="muted mono">
+                                wikilink scope: {row.wikilinkContextMode ===
+                                    "dendron-config"
+                                  ? "dendron config"
+                                  : "output dir fallback"}
+                              </div>
+                              {row.dendronConfigPath
+                                ? (
+                                  <div class="muted mono">
+                                    dendron config: {row.dendronConfigPath}
+                                  </div>
+                                )
+                                : null}
+                              {row.wikilinkifiableRoots &&
+                                  row.wikilinkifiableRoots.length > 0
+                                ? (
+                                  <div class="muted mono">
+                                    wikilink roots:{" "}
+                                    {row.wikilinkifiableRoots.join(" | ")}
+                                  </div>
+                                )
+                                : null}
+                            </>
+                          )
+                          : null}
                       </div>
                       <div class="workspace-row-actions">
                         <a

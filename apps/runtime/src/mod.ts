@@ -117,6 +117,8 @@ export {
 } from "./observability/mod.ts";
 
 export type {
+  DendronWikilinkContext,
+  DendronWikilinkContextMode,
   EnsureDefaultWorkspaceConfigResult,
   RegisteredWorkspace,
   ResolvedWorkspaceProfile,
@@ -145,6 +147,7 @@ export {
   registerWorkspace,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
+  resolveDendronWikilinkContext,
   resolveWorkspaceConfigPath,
   setWorkspaceDisplayName,
   unregisterWorkspace,

@@ -141,8 +141,14 @@ may target outside the workspace root.
 Workspace-local `workspaceFeatureFlags` also carry recording-render policy,
 including default-on relative sanitization for absolute local inline markdown
 destinations plus an optional Dendron wikilink rewrite for local `.md` note
-links in workspace-scoped markdown output. The sanitation is render-time only:
-twins and persisted source/history snapshots stay authoritative.
+links in workspace-scoped markdown output. Dendron rewriting is vault-aware:
+runtime discovery walks upward from the final output path to a matching
+`dendron.yml`, derives `wikilinkifiableRoots` from its mounted vaults, and
+falls back to the output file's own directory when no Dendron context matches.
+The sanitation is render-time only: twins and persisted source/history
+snapshots stay authoritative. The Workspaces page exposes the matched
+`dendron.yml` path plus the derived roots as read-only diagnostics for the
+workspace default output location.
 Operator-facing workspace `displayName` labels live in the shared workspace
 registry, while preferred per-workspace participant usernames remain in
 `kato-user-config.yaml`.
