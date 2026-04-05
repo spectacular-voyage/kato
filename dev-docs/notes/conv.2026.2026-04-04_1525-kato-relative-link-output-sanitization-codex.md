@@ -557,3 +557,257 @@ I have enough to draft this cleanly: one core product theme, one upgrade section
 Composed [[release-notes.v0.2.11]] from the `v0.2.10..HEAD` change range.
 
 It covers the workspace markdown changes, Dendron vault-awareness follow-up, the Codecov coverage fix, and the release/CI workflow updates. I did not run tests for this step since it was a release-note edit only.
+
+# djradon_2026-04-05_0922_06
+
+Why would we see this  on the github run but not locally:
+
+Task fmt:check deno fmt --check deno.json src tests
+
+from /home/runner/work/weave/weave/src/runtime/weave/weave.ts:
+324 | -      toPayloadHistoricalSnapshotPath(designatorPath, workingFilePath, "_s0001"),
+324 | +      toPayloadHistoricalSnapshotPath(
+325 | +        designatorPath,
+326 | +        workingFilePath,
+327 | +        "_s0001",
+328 | +      ),
+
+from /home/runner/work/weave/weave/tests/integration/weave_test.ts:
+203 | -  assertEquals(result.updatedPaths, ["alice/bio/_knop/_inventory/inventory.ttl"]);
+203 | +  assertEquals(result.updatedPaths, [
+204 | +    "alice/bio/_knop/_inventory/inventory.ttl",
+205 | +  ]);
+    | ...
+244 | -  await Deno.stat(join(workspaceRoot, "alice/bio/_history001/_s0002/index.html"));
+    | ...
+246 | -    join(workspaceRoot, "alice/bio/_history001/_s0002/alice-bio-ttl/index.html"),
+247 | +    join(workspaceRoot, "alice/bio/_history001/_s0002/index.html"),
+    | ...
+249 | -    join(workspaceRoot, "alice/bio/_knop/_inventory/_history001/_s0002/index.html"),
+250 | +    join(
+251 | +      workspaceRoot,
+252 | +      "alice/bio/_history001/_s0002/alice-bio-ttl/index.html",
+253 | +    ),
+254 | +  );
+255 | +  await Deno.stat(
+256 | +    join(
+257 | +      workspaceRoot,
+258 | +      "alice/bio/_knop/_inventory/_history001/_s0002/index.html",
+259 | +    ),
+
+error: Found 2 not formatted files in 63 files
+
+# gpt-5.4_2026-04-05_0922_24
+
+Most likely: CI and local are running different `deno fmt` versions.
+
+Those diffs are classic formatter-version drift, not logic drift. The changes are just line wrapping and argument/list layout. If the checked-out commit is the same and CI is literally running:
+
+```bash
+deno fmt --check deno.json src tests
+```
+
+then the usual causes are:
+
+- CI has a different Deno version than your machine
+- your editor formatted with something other than the repo’s Deno version
+- you didn’t actually run the exact same `fmt:check` command locally against the same files
+- local uncommitted changes differ from what got pushed
+
+The first one is by far the most likely here.
+
+What to check:
+
+1. Compare `deno --version` locally vs in GitHub Actions.
+2. Make sure the workflow pins Deno, instead of floating.
+3. Run locally with the CI version exactly:
+   ```bash
+   deno fmt --check deno.json src tests
+   ```
+4. If needed, reformat with that same version:
+   ```bash
+   deno fmt deno.json src tests
+   ```
+
+If you want, paste the workflow’s Deno setup step and your local `deno --version`, and I can tell you if that’s the mismatch.
+
+# djradon_2026-04-05_0923_30
+
+deno fmt --check deno.json src tests  doesn't report anything, except "checked 93 files". We are on deno 2.7.11 locally. Are we specifying deno version in our github action?
+
+# gpt-5.4_2026-04-05_0923_41
+
+I’m checking the workflow files directly. The failure pattern still looks like formatter-version drift, so I want to see whether CI pins Deno or is floating on whatever `setup-deno` resolves that day.
+
+# gpt-5.4_2026-04-05_0924_01
+
+Yes, in this repo we do specify Deno in GitHub Actions, but only loosely.
+
+CI uses `denoland/setup-deno@v2` with `deno-version: v2.x` in [ci.yml:20](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/ci.yml#L20), and the release workflow does the same in [release-manual.yml:61](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml#L61), [release-manual.yml:188](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml#L188), [release-manual.yml:264](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml#L264), and [release-manual.yml:313](/home/djradon/hub/spectacular-voyage/kato/.github/workflows/release-manual.yml#L313).
+
+So the answer is: yes, but it is not pinned. `v2.x` floats to whatever the latest Deno 2 release is on the runner. That absolutely can explain `deno fmt --check` passing locally on `2.7.11` and failing in GitHub with pure wrapping/layout diffs.
+
+If you want deterministic formatting, pin it to the exact local version, for example:
+
+```yaml
+with:
+  deno-version: 2.7.11
+```
+
+If you want, I can patch the workflows to pin Deno instead of floating on `v2.x`.
+
+# djradon_2026-04-05_0945_26
+
+It's okay. 
+
+Here's some coderabbit comments. Please evaluate whether they're worth doing, and implement the ones that are.
+
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@apps/daemon/src/writer/markdown_writer.ts`:
+- Around line 59-60: The current change collapses the resolver fallback mode
+into wikilinkifiableRoots and then uses isPathWithinRoots(), causing
+same-directory-only fallback (output-directory-fallback) to behave as
+descendant-inclusive; update the rendering options/context to carry the resolver
+mode (e.g., a field like resolverMode or mode) alongside renderOutputPath and
+wikilinkifiableRoots, and modify the logic that decides whether a target is
+allowed so that when resolverMode === 'output-directory-fallback' you perform an
+exact same-directory check against dirname(renderOutputPath) (not
+isPathWithinRoots), while preserving the descendant-inclusive
+isPathWithinRoots() behavior for the other modes; update all uses around
+wikilinkifiableRoots, isPathWithinRoots, and renderOutputPath to consult the new
+mode field (references: wikilinkifiableRoots, isPathWithinRoots(),
+renderOutputPath, output-directory-fallback).
+- Around line 1209-1214: The Dendron discovery call
+resolveDendronWikilinkContext(renderOutputPath) must not abort writes; wrap that
+call in a try/catch inside the code path used by appendEvents and
+overwriteEvents (where the snippet lives), and on error set a safe fallback for
+wikilinkifiableRoots (e.g., options.fallbackRoots || [] or an empty array) and
+optionally log a warning instead of rethrowing; then return the merged options
+object using that fallback (keep the same return shape with renderOutputPath and
+wikilinkifiableRoots) so appendEvents/overwriteEvents proceed even when
+resolveDendronWikilinkContext fails.
+
+In `@apps/runtime/src/workspace/dendron.ts`:
+- Around line 37-47: Change readMtimeMs to readConfigStat and make it return a
+FileInfo-like value (e.g., { exists: boolean, mtimeMs?: number | null } or a
+distinct FileInfo type) or undefined only when the file truly does not exist;
+specifically, when Deno.stat(path) succeeds but stat.mtime is null, return an
+object indicating the file exists with mtimeMs set to null rather than returning
+undefined. Then update the cache handling that currently uses sourceMtimeMs (the
+variables used around the previous lines 64–68, 71–73, and 125–129) to
+explicitly distinguish three cases: file missing (readConfigStat returned
+undefined), file exists with a numeric mtime (mtimeMs is a number), and file
+exists but mtime unavailable (mtimeMs === null or undefined): treat the “mtime
+unavailable” case as the config existing (do not fall back to
+output-directory-fallback) and force a conservative cache invalidation/update
+path rather than treating it as missing. Ensure references to readMtimeMs are
+replaced with readConfigStat across the file and adjust any type
+annotations/usages accordingly.
+
+In `@apps/web/src/loaders/workspaces.ts`:
+- Around line 133-141: The probe is using the raw defaultOutputDirTemplate when
+calling resolveDendronWikilinkContext, which fails for templated output dirs;
+after loadWorkspaceConfigOverrides returns, resolve/expand the
+defaultOutputDirTemplate using the same template-expansion logic used by the
+recording path generator (i.e., produce a concrete path relative to
+row.workspaceRoot or return undefined if it cannot be resolved), then set
+resolvedDefaultOutputDir to that expanded value (falling back to
+DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE only after expansion fails) and only call
+resolveDendronWikilinkContext(join(resolvedDefaultOutputDir,
+"__kato-wikilink-probe__.md")) when a concrete path exists; otherwise omit
+probing/diagnostics for that workspace.
+
+---
+
+Nitpick comments:
+In `@dev-docs/notes/dev.codebase-overview.md`:
+- Line 5: The frontmatter contains a manually set updated field ("updated:
+1772775700000"); remove or revert this manual updated field so Dendron can
+manage it automatically — locate the note's frontmatter (the "updated" key) and
+delete that line (or restore the original frontmatter without the updated
+timestamp) and save the note so the Dendron extension will populate the
+timestamp on next edit.
+
+# gpt-5.4_2026-04-05_0945_40
+
+I’m verifying each comment against the current implementation first. Then I’ll patch only the ones that are real issues and rerun the targeted tests for the affected writer/runtime/web paths.
+
+# gpt-5.4_2026-04-05_0945_50
+
+I’ve verified the three substantive comments against current code. Two look real in this codebase: the fallback mode is indeed too broad, and the mtime handling can treat an existing config with missing `mtime` as absent. The “don’t abort writes on Dendron discovery failure” point is also worth hardening. The templated-output-dir comment for the workspace page is real as well; the current probe resolves the template string literally.
+
+# gpt-5.4_2026-04-05_0946_46
+
+The web-loader comment is the only one that needs design judgment, not just a bug fix. It’s correct that the current probe treats template strings literally, but the workspace page also has no real provider/session context. I’m going to use the same path-expansion code with stable placeholder values so the probe path is concrete without inventing new product behavior.
+
+# gpt-5.4_2026-04-05_0946_51
+
+I’ve got enough context to patch cleanly. I’m changing the writer contract first so fallback mode is represented explicitly, then I’ll harden discovery/error handling and update the workspace loader probe to use expanded placeholder paths instead of literal templates.
+
+# gpt-5.4_2026-04-05_0947_55
+
+I’m editing the writer tests alongside the logic change so the fallback bug is locked down. The new case is a nested child note under the same folder fallback: that should stay markdown, not collapse to a wikilink.
+
+# gpt-5.4_2026-04-05_0948_20
+
+The writer contract is patched. Next is the runtime Dendron resolver: I’m changing the file-stat handling so “config exists but `mtime` is unavailable” no longer gets misclassified as “config missing,” which could silently drop a valid Dendron workspace.
+
+# gpt-5.4_2026-04-05_0948_51
+
+The workspace-page probe is the only place I’m intentionally using placeholder render inputs. That keeps the diagnostic path concrete enough to find a matching `dendron.yml` without pretending we know a real future provider/session tuple on the Workspaces screen.
+
+# gpt-5.4_2026-04-05_0949_12
+
+I’m updating the targeted tests now: one for the exact same-directory fallback, one for non-fatal discovery errors, and one for templated workspace output dirs on the Workspaces page.
+
+# gpt-5.4_2026-04-05_0949_46
+
+The code changes are in. I’m formatting and running the writer/runtime/web suites that cover exactly the touched paths, then I’ll tell you which CodeRabbit findings were real and which ones turned out not to need extra work beyond the fix set.
+
+# gpt-5.4_2026-04-05_0950_06
+
+The targeted fixes are clean. I’m doing one last status pass now so I can tell you exactly which CodeRabbit comments were worth acting on and note the unrelated local change I left alone.
+
+# gpt-5.4_2026-04-05_0950_33
+
+I verified all five comments against the current code. All five were worth addressing.
+
+Applied:
+- [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts): added explicit `wikilinkContextMode` handling so `output-directory-fallback` is now exact same-directory only, not descendant-inclusive; also made writer-side Dendron discovery non-fatal so writes continue with wikilinks disabled if discovery blows up.
+- [dendron.ts](/home/djradon/hub/spectacular-voyage/kato/apps/runtime/src/workspace/dendron.ts): fixed config-stat handling so an existing `dendron.yml` with missing `mtime` is no longer treated as missing; cache reuse now only short-circuits on numeric mtimes.
+- [workspaces.ts](/home/djradon/hub/spectacular-voyage/kato/apps/web/src/loaders/workspaces.ts): changed the workspace-page probe to expand `defaultOutputDir` with the same template logic used for real output paths, using stable placeholder values, instead of resolving raw template strings literally.
+- [[dev.codebase-overview]]: removed the manual `updated` frontmatter field.
+- Added regression coverage in [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts) and [web-activity-loader_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-activity-loader_test.ts).
+
+Verified with:
+- `deno test -A tests/workspace-dendron_test.ts tests/writer-markdown_test.ts tests/web-activity-loader_test.ts tests/web-session-actions_test.ts`
+- `deno task check --frozen`
+
+I left the unrelated local change in [[conv.2026.2026-04-04_1525-kato-relative-link-output-sanitization-codex]] untouched.
+
+# djradon_2026-04-05_0950_56
+
+commit mesg
+
+# gpt-5.4_2026-04-05_0951_02
+
+```text
+fix(writer): harden Dendron fallback and diagnostics handling
+
+- make markdown writer carry explicit Dendron wikilink context mode so
+  output-directory fallback only rewrites same-directory .md links instead of
+  treating descendants as implicitly eligible
+- keep append/overwrite writes non-fatal when Dendron context discovery fails
+  by falling back to empty wikilink roots instead of aborting the render
+- treat existing dendron.yml files with unavailable mtime as present in runtime
+  discovery/cache logic instead of misclassifying them as missing
+- expand workspace-page Dendron diagnostics through the real defaultOutputDir
+  template resolver using stable placeholder values instead of probing raw
+  template strings literally
+- add regression coverage for same-directory fallback, non-fatal discovery
+  failure, and templated workspace-output diagnostics
+- remove the manually managed updated timestamp from dev.codebase-overview
+  frontmatter so Dendron can own it again
+```

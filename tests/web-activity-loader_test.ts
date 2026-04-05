@@ -771,7 +771,7 @@ Deno.test("loadWorkspacesPageData surfaces Dendron wikilink diagnostics for work
       alphaConfigPath,
       [
         "workspaceId: ws-alpha",
-        "defaultOutputDir: notes",
+        "defaultOutputDir: notes/{provider}/{YYYY}/{snippetSlug}",
         "workspaceFeatureFlags:",
         "  writerUseDendronStyleWikilinks: true",
       ].join("\n") + "\n",

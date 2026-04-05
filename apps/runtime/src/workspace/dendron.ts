@@ -16,11 +16,15 @@ export interface DendronWikilinkContext {
 }
 
 interface CachedDendronConfig {
-  sourceMtimeMs?: number;
+  sourceMtimeMs: number | null;
   noteRoots: string[];
 }
 
 const cachedDendronConfigs = new Map<string, CachedDendronConfig>();
+
+interface DendronConfigStat {
+  mtimeMs: number | null;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -34,10 +38,14 @@ function trimOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-async function readMtimeMs(path: string): Promise<number | undefined> {
+async function readConfigStat(
+  path: string,
+): Promise<DendronConfigStat | undefined> {
   try {
     const stat = await Deno.stat(path);
-    return stat.mtime?.getTime();
+    return {
+      mtimeMs: stat.mtime?.getTime() ?? null,
+    };
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       return undefined;
@@ -61,14 +69,15 @@ async function isExistingDirectory(path: string): Promise<boolean> {
 async function loadDerivedNoteRoots(
   dendronConfigPath: string,
 ): Promise<string[] | undefined> {
-  const sourceMtimeMs = await readMtimeMs(dendronConfigPath);
-  if (sourceMtimeMs === undefined) {
+  const configStat = await readConfigStat(dendronConfigPath);
+  if (configStat === undefined) {
     cachedDendronConfigs.delete(dendronConfigPath);
     return undefined;
   }
 
+  const sourceMtimeMs = configStat.mtimeMs;
   const cached = cachedDendronConfigs.get(dendronConfigPath);
-  if (cached?.sourceMtimeMs === sourceMtimeMs) {
+  if (sourceMtimeMs !== null && cached?.sourceMtimeMs === sourceMtimeMs) {
     return [...cached.noteRoots];
   }
 

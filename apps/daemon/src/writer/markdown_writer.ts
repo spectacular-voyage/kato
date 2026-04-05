@@ -3,6 +3,7 @@ import { basename, dirname } from "@std/path";
 import * as posixPath from "@std/path/posix";
 import * as windowsPath from "@std/path/windows";
 import {
+  type DendronWikilinkContextMode,
   isPathWithinRoots,
   resolveDendronWikilinkContext,
 } from "../../../runtime/src/mod.ts";
@@ -56,6 +57,7 @@ export interface MarkdownRenderOptions {
   markdownLinkStyle?: MarkdownLinkStyle;
   relativizeLocalLinks?: boolean;
   renderOutputPath?: string;
+  wikilinkContextMode?: DendronWikilinkContextMode;
   wikilinkifiableRoots?: string[];
 }
 
@@ -218,6 +220,7 @@ interface MarkdownLinkRenderContext {
   markdownLinkStyle: MarkdownLinkStyle;
   relativizeLocalLinks: boolean;
   renderOutputPath?: string;
+  wikilinkContextMode?: DendronWikilinkContextMode;
   wikilinkifiableRoots: string[];
 }
 
@@ -371,6 +374,40 @@ function resolveLocalDestinationAbsolutePath(
     pathname,
   );
   return isAbsoluteLocalDestinationPath(resolvedPath) ? resolvedPath : null;
+}
+
+function isSameDirectoryPath(
+  candidatePath: string,
+  renderOutputPath: string | undefined,
+): boolean {
+  if (!renderOutputPath) {
+    return false;
+  }
+
+  const candidateFlavor = detectPathFlavor(candidatePath);
+  const outputFlavor = detectPathFlavor(renderOutputPath);
+  if (!candidateFlavor || !outputFlavor || candidateFlavor !== outputFlavor) {
+    return false;
+  }
+
+  const pathModule = candidateFlavor === "windows" ? windowsPath : posixPath;
+  return pathModule.relative(
+    pathModule.dirname(renderOutputPath),
+    pathModule.dirname(candidatePath),
+  ) === "";
+}
+
+function isWikilinkTargetAllowed(
+  candidatePath: string,
+  options: Pick<
+    MarkdownLinkRenderContext,
+    "renderOutputPath" | "wikilinkContextMode" | "wikilinkifiableRoots"
+  >,
+): boolean {
+  if (options.wikilinkContextMode === "output-directory-fallback") {
+    return isSameDirectoryPath(candidatePath, options.renderOutputPath);
+  }
+  return isPathWithinRoots(candidatePath, options.wikilinkifiableRoots);
 }
 
 function rewriteMarkdownLinkDestination(
@@ -548,7 +585,7 @@ function resolveDendronWikilinkTarget(
   rawDestination: string,
   options: Pick<
     MarkdownLinkRenderContext,
-    "renderOutputPath" | "wikilinkifiableRoots"
+    "renderOutputPath" | "wikilinkContextMode" | "wikilinkifiableRoots"
   >,
 ): string | null {
   const destination = trimMarkdownLinkDestination(rawDestination);
@@ -579,7 +616,7 @@ function resolveDendronWikilinkTarget(
   );
   if (
     !resolvedPath ||
-    !isPathWithinRoots(resolvedPath, options.wikilinkifiableRoots)
+    !isWikilinkTargetAllowed(resolvedPath, options)
   ) {
     return null;
   }
@@ -764,6 +801,12 @@ export function renderEventsToMarkdown(
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
   const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
+  const wikilinkContextMode = options.wikilinkContextMode ??
+    (options.wikilinkifiableRoots === undefined &&
+        options.renderOutputPath &&
+        markdownLinkStyle === "dendron-wikilink"
+      ? "output-directory-fallback"
+      : undefined);
   const wikilinkifiableRoots = options.wikilinkifiableRoots !== undefined
     ? [...options.wikilinkifiableRoots]
     : options.renderOutputPath && markdownLinkStyle === "dendron-wikilink"
@@ -773,6 +816,7 @@ export function renderEventsToMarkdown(
     markdownLinkStyle,
     relativizeLocalLinks: options.relativizeLocalLinks ?? false,
     renderOutputPath: options.renderOutputPath,
+    wikilinkContextMode,
     wikilinkifiableRoots,
   };
 
@@ -1202,14 +1246,27 @@ async function resolveRenderOptionsForOutputPath(
     return {
       ...options,
       renderOutputPath,
+      ...(options.wikilinkContextMode
+        ? { wikilinkContextMode: options.wikilinkContextMode }
+        : {}),
       wikilinkifiableRoots: [...options.wikilinkifiableRoots],
     };
   }
 
-  const dendronContext = await resolveDendronWikilinkContext(renderOutputPath);
+  let dendronContext;
+  try {
+    dendronContext = await resolveDendronWikilinkContext(renderOutputPath);
+  } catch {
+    return {
+      ...options,
+      renderOutputPath,
+      wikilinkifiableRoots: [],
+    };
+  }
   return {
     ...options,
     renderOutputPath,
+    wikilinkContextMode: dendronContext.mode,
     wikilinkifiableRoots: dendronContext.wikilinkifiableRoots,
   };
 }

@@ -543,6 +543,36 @@ Deno.test("MarkdownConversationWriter create respects includeFrontmatter false",
 });
 
 Deno.test(
+  "MarkdownConversationWriter continues writing when Dendron discovery fails",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(root, "notes", "conversation.md");
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(join(root, "dendron.yml"), { recursive: true });
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "e-dendron-discovery-error",
+          "message.assistant",
+          "Keep [peer](peer-note.md).",
+          "2026-04-05T11:00:00.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        markdownLinkStyle: "dendron-wikilink",
+      });
+
+      const content = await Deno.readTextFile(outputPath);
+      assertStringIncludes(content, "[peer](peer-note.md)");
+    } finally {
+      await removePathIfPresent(root);
+    }
+  },
+);
+
+Deno.test(
   "renderEventsToMarkdown rewrites only markdown note links inside wikilinkifiable roots",
   () => {
     const assistant = makeEvent(
@@ -701,6 +731,7 @@ Deno.test(
       "message.assistant",
       [
         "Rewrite [peer](peer-note.md#Goal).",
+        "Keep [child](nested/child-note.md).",
         "Keep [parent](../dev.general-guidance.md).",
         "Keep [external root](/workspace/dev-docs/notes/dev.todo.md).",
       ].join("\n"),
@@ -714,6 +745,7 @@ Deno.test(
     });
 
     assertStringIncludes(rendered, "[[peer-note#Goal]]");
+    assertStringIncludes(rendered, "[child](nested/child-note.md)");
     assertStringIncludes(rendered, "[parent](../dev.general-guidance.md)");
     assertStringIncludes(
       rendered,
