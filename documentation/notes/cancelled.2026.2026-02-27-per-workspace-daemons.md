@@ -92,7 +92,7 @@ Important path rule:
 
 - Relative paths in the template should be copied into the new workspace config
   as relative values, not resolved against `~/.kato/` at scaffold time.
-- That way a template value like `defaultOutputDir: dev-docs/notes` remains
+- That way a template value like `defaultOutputDir: documentation/notes` remains
   portable and resolves relative to each workspace config after initialization.
 
 ## Filename Template Contract

@@ -216,6 +216,6 @@ Ordering rule: `mappings` sorted by `workspaceAlias`, then `workspaceId`.
 ### F) Documentation + merge checklist
 
 - [x] Update README with new user config schema and privacy behavior.
-- [x] Update sample docs such as `dev-docs/notes/kato-workspace-config.yaml` to
+- [x] Update sample docs such as `documentation/notes/kato-workspace-config.yaml` to
       remove legacy key.
 - [ ] Update [[dev.codebase-overview]] and [[dev.decision-log]] before merge.

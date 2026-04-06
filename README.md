@@ -87,4 +87,4 @@ details.
 ## Development
 
 Deno 2.x is only required if you are developing Kato from source. Internal
-project notes live in `dev-docs/notes`.
+project notes live in `documentation/notes`.

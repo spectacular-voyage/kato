@@ -31,7 +31,7 @@ In `@apps/runtime/src/orchestrator/session_state_store.ts`:
   normalizeMetadataStoragePaths call followed by the daemon index healing/update
   routine so stale entries are repaired even when metadata is already canonical.
 
-In `@dev-docs/notes/dev.codebase-overview.md`:
+In `@documentation/notes/dev.codebase-overview.md`:
 
 - Around line 37-52: The docs mention the old workspace config filename
   "<workspace>/kato-workspace-config.yaml" but the codebase now expects
@@ -74,7 +74,7 @@ Nitpick comments: In `@apps/runtime/src/workspace/registry.ts`:
   present; log a deprecation/info message when the legacy file is used to guide
   users to rename it.
 
-In `@dev-docs/notes/dev.todo.md`:
+In `@documentation/notes/dev.todo.md`:
 
 - Line 104: Replace the ambiguous backlog item "[ ] rename workspace to
   destination and maybe sessions -> chats" with two explicit checklist tasks:
@@ -142,7 +142,7 @@ In `@tests/session-state-store_test.ts`:
       fast-path can miss stale `daemon-control.json` repair. We should ensure
       index entry healing runs even when metadata/twin paths are already
       canonical.
-- [x] `dev-docs/notes/dev.codebase-overview.md` old workspace filename docs:
+- [x] `documentation/notes/dev.codebase-overview.md` old workspace filename docs:
       Valid. Doc still says `<workspace>/kato-workspace-config.yaml` and should
       be updated to `<workspace>/.kato-workspace-config.yaml`.
 - [x] `README.md` zsh alias has extra quote: Valid bug in docs. Alias line is
@@ -153,7 +153,7 @@ In `@tests/session-state-store_test.ts`:
   Cancelled for now. This is a product-compatibility decision, not a clear bug.
   Adding dual-name discovery now risks ambiguity/long-tail behavior. Revisit
   only with explicit migration policy.
-- [x] `dev-docs/notes/dev.todo.md` split ambiguous terminology TODO: Reasonable
+- [x] `documentation/notes/dev.todo.md` split ambiguous terminology TODO: Reasonable
       cleanup; worthwhile as docs hygiene.
 - [c] `README.md` “In the meantime” -> “For now” wording: Cancelled. Pure style
   preference; no correctness impact.

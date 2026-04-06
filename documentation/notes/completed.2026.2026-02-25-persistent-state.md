@@ -115,7 +115,7 @@ Which of these would you like to lock down first?
 
 Let's discuss. 
 
-::capture dev-docs/notes/task.2026.2026-02-25-persistent-state.md
+::capture documentation/notes/task.2026.2026-02-25-persistent-state.md
 
 1. Maybe we want both a daemon-level control state and per-session? Session control states could keep track of multiple recordings. I'd like to support multiple recordings per session, but it's session->recordings... a recording couldn't have multiple sessions; it's just that a session could have multiple recordings. And then the daemon control state could link to multiple session control states? Separation would be good in the case that we go multi-threaded, to avoid contention over a single file.
 
@@ -159,7 +159,7 @@ A session could always come back to life, but we should have a clean command tha
 - [x] Added runtime E2E-style coverage for multi-recording cursor independence,
       ambiguous `::stop`, and default destination behavior.
 - [x] Fixed symlink-escape path policy coverage and verified deny behavior.
-- [x] Updated persistence docs in `README.md` and `dev-docs/notes/dev.*` notes.
+- [x] Updated persistence docs in `README.md` and `documentation/notes/dev.*` notes.
 - [x] Validation: `deno test -A` passes (`213 passed, 0 failed`).
 - [x] Follow-up: add dedicated clean command wiring for persisted twin cleanup
       (`clean --twins`, plus optional metadata deletion) with running-daemon

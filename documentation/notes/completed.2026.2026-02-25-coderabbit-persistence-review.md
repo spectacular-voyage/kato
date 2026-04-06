@@ -251,13 +251,13 @@ listener is removed when runLiveMode exits and prevent multiple listeners from
 stacking; reference Deno.addSignalListener, shouldExit, runLiveMode, and
 Deno.removeSignalListener when making the change.
 
-In `@dev-docs/notes/completed.2026.2026-02-25-persistent-state.md`:
+In `@documentation/notes/completed.2026.2026-02-25-persistent-state.md`:
 - [x] Line 118: The committed note contains an absolute local path in the capture
 directive ("::capture
-/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-25-persistent-state.md");
+/home/djradon/hub/spectacular-voyage/kato/documentation/notes/task.2026.2026-02-25-persistent-state.md");
 replace that absolute path with a repo-relative path or a placeholder (e.g.
-"::capture dev-docs/notes/task.2026.2026-02-25-persistent-state.md" or
-"::capture {{REPO_ROOT}}/dev-docs/...") so no user-local filesystem paths are
+"::capture documentation/notes/task.2026.2026-02-25-persistent-state.md" or
+"::capture {{REPO_ROOT}}/docs/...") so no user-local filesystem paths are
 committed, and update the string in the file where the "::capture
 /home/djradon/..." token appears.
 
@@ -326,7 +326,7 @@ this.daemonIndexCache = rebuilt (using the same rebuilt object so updatedAt
 remains consistent) before returning from rebuildDaemonControlIndex to ensure
 the in-memory cache matches the persisted index.
 
-In `@dev-docs/notes/completed.2026.2026-02-25-persistent-state.md`:
+In `@documentation/notes/completed.2026.2026-02-25-persistent-state.md`:
 - [x] Line 67: Fix the typos in the note text by replacing the misspelled tokens
 "alll" with "all" and "recordsings" with "recordings" wherever they appear (the
 context mentions autoGenerateSnapshots and session-state generation), and run a

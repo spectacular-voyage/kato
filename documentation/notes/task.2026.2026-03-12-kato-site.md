@@ -474,11 +474,11 @@ workspace root after template expansion.
 
 ## Development Notes
 
-- Project development notes live in `dev-docs/notes`.
+- Project development notes live in `documentation/notes`.
 - Main guidance docs:
-  - `dev-docs/notes/dev.general-guidance.md`
-  - `dev-docs/notes/dev.codebase-overview.md`
-  - `dev-docs/notes/dev.decision-log.md`
+  - `documentation/notes/dev.general-guidance.md`
+  - `documentation/notes/dev.codebase-overview.md`
+  - `documentation/notes/dev.decision-log.md`
 
 [![Coverage](https://codecov.io/gh/spectacular-voyage/kato/graph/badge.svg?branch=main)](https://codecov.io/gh/spectacular-voyage/kato)
 

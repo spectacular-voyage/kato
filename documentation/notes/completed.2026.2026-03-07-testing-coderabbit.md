@@ -42,7 +42,7 @@ In `@apps/daemon/src/orchestrator/runtime_workspace_paths.ts`:
 - [x] Around line 151-158: treat `"."` and `".."` the same as empty normalized
   filenames and fall back to the safe generated name.
 
-In `@dev-docs/notes/dev.feature-ideas.md`:
+In `@documentation/notes/dev.feature-ideas.md`:
 - [x] Around line 34-37: remove the empty list item under "Interoperability".
 - [x] Line 12: add the missing period after `etc`.
 - [x] Around line 14-15: fix the malformed parenthetical in the summary-file

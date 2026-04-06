@@ -30,7 +30,7 @@ Gemini support is currently working in this environment.
   - `provider: "gemini"`
   - `command: "capture"`
   - output path
-    `/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-03_0744-where-does-the-gemini-cli-store-its-conversations-now-wher-gemini.md`
+    `/home/djradon/hub/spectacular-voyage/kato/documentation/notes/conv.2026.2026-03-03_0744-where-does-the-gemini-cli-store-its-conversations-now-wher-gemini.md`
 
 ## Resolved Assumptions
 

@@ -170,7 +170,7 @@ Commands inside one `message.user` are processed in source order using parsed li
 - Still gate absolute canonical destination against allowed roots.
 7. Update docs:
 - Update command semantics in [README.md](/home/djradon/hub/spectacular-voyage/kato/README.md).
-- Update in-chat command references in [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).
+- Update in-chat command references in [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/dev.general-guidance.md).
 
 ## Tests and Scenarios
 1. Update parser tests in [command-detection_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/command-detection_test.ts):

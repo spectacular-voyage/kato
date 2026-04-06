@@ -13,7 +13,7 @@ Adjust markdown rendering so questionnaire-style decisions are concise and non-d
 1. Remove empty `Tool-request_user_input` (and equivalent questionnaire tool) headings.
 2. Keep two decision blocks (`proposed` and `accepted`), but avoid repeating `## Prompt` and `## Options` in the accepted block when they were already rendered in the proposed block.
 
-This targets the behavior seen in [conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md).
+This targets the behavior seen in [conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md).
 
 ## Implementation Changes
 1. Update questionnaire tool-call rendering in [markdown_writer.ts](/home/djradon/hub/spectacular-voyage/kato/apps/daemon/src/writer/markdown_writer.ts).
@@ -77,7 +77,7 @@ This targets the behavior seen in [conv.2026.2026-03-02_1209-for-the-output-of-t
 We want to guarantee that all user responses are captured reliably, including plain user messages and questionnaire selections, without depending on timing quirks around `::capture-k`.
 
 ## Observed state
-- The "PLEASE IMPLEMENT THIS PLAN" message is present in [conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md) at `:1587`.
+- The "PLEASE IMPLEMENT THIS PLAN" message is present in [conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/conv.2026.2026-03-02_1209-for-the-output-of-tool-calls-i-m-currently-seeing-codex.md) at `:1587`.
 - The follow-up message is also present in the same file at `:1653`.
 - This suggests we may be seeing a capture-window/timing issue in some runs rather than a permanent parse failure, but we should still harden event-type coverage and tests.
 

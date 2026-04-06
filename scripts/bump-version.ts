@@ -75,7 +75,7 @@ async function updateVersionedJsonFile(
 }
 
 function releaseNotesPath(root: string, version: string): string {
-  return join(root, "dev-docs", "notes", `release-notes.v${version}.md`);
+  return join(root, "docs", "notes", `release-notes.v${version}.md`);
 }
 
 function makeReleaseNotesStub(version: string, now: Date): string {

@@ -579,7 +579,7 @@ Deno.test(
       "assistant-dendron-links",
       "message.assistant",
       [
-        "See [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md).",
+        "See [dev.general-guidance.md](/workspace/documentation/notes/dev.general-guidance.md).",
         "Also [task note](../task.2026.2026-04-04-dendron-style-links.md#Goal).",
         "Keep [README](/workspace/README.md#Intro).",
         "Protocol-relative stays [cdn](//example.com/dev.todo.md).",
@@ -592,8 +592,8 @@ Deno.test(
     const rendered = renderEventsToMarkdown([assistant], {
       includeFrontmatter: false,
       markdownLinkStyle: "dendron-wikilink",
-      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
-      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
+      renderOutputPath: "/workspace/documentation/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/documentation/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");
@@ -606,7 +606,7 @@ Deno.test(
     assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
     assertStringIncludes(rendered, "[section](#local-anchor)");
     assertEquals(
-      rendered.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
+      rendered.includes("/workspace/documentation/notes/dev.general-guidance.md"),
       false,
     );
   },
@@ -619,8 +619,8 @@ Deno.test(
       "assistant-standard-links",
       "message.assistant",
       [
-        "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md).",
-        "Also [task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
+        "See [dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/dev.general-guidance.md).",
+        "Also [task note](documentation/notes/task.2026.2026-04-04-dendron-style-links.md#Goal).",
       ].join("\n"),
       "2026-04-04T10:05:00.000Z",
     );
@@ -632,11 +632,11 @@ Deno.test(
 
     assertStringIncludes(
       rendered,
-      "[dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/dev.general-guidance.md)",
+      "[dev.general-guidance.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/dev.general-guidance.md)",
     );
     assertStringIncludes(
       rendered,
-      "[task note](dev-docs/notes/task.2026.2026-04-04-dendron-style-links.md#Goal)",
+      "[task note](documentation/notes/task.2026.2026-04-04-dendron-style-links.md#Goal)",
     );
     assertEquals(rendered.includes("[[dev.general-guidance]]"), false);
     assertEquals(
@@ -655,9 +655,9 @@ Deno.test(
       "assistant-relative-links",
       "message.assistant",
       [
-        "See [guide](/workspace/dev-docs/notes/dev.general-guidance.md#Goal).",
-        "Asset [spec](/workspace/docs/spec.pdf?download=1#page=2).",
-        "Diagram ![diagram](/workspace/dev-docs/assets/diagram.png).",
+        "See [guide](/workspace/documentation/notes/dev.general-guidance.md#Goal).",
+        "Asset [spec](/workspace/documentation/spec.pdf?download=1#page=2).",
+        "Diagram ![diagram](/workspace/documentation/assets/diagram.png).",
         "Keep [relative](../notes/already-relative.md#Keep).",
         "External [OpenAI](https://openai.com).",
         "Anchor [section](#local-anchor).",
@@ -669,13 +669,13 @@ Deno.test(
       includeFrontmatter: false,
       markdownLinkStyle: "standard",
       relativizeLocalLinks: true,
-      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+      renderOutputPath: "/workspace/documentation/notes/sessions/session.md",
     });
 
     assertStringIncludes(rendered, "[guide](../dev.general-guidance.md#Goal)");
     assertStringIncludes(
       rendered,
-      "[spec](../../../docs/spec.pdf?download=1#page=2)",
+      "[spec](../../spec.pdf?download=1#page=2)",
     );
     assertStringIncludes(rendered, "![diagram](../../assets/diagram.png)");
     assertStringIncludes(
@@ -684,7 +684,7 @@ Deno.test(
     );
     assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
     assertStringIncludes(rendered, "[section](#local-anchor)");
-    assertEquals(rendered.includes("/workspace/dev-docs/notes/"), false);
+    assertEquals(rendered.includes("/workspace/documentation/notes/"), false);
   },
 );
 
@@ -695,9 +695,9 @@ Deno.test(
       "assistant-dendron-relative-links",
       "message.assistant",
       [
-        "See [guide](/workspace/dev-docs/notes/dev.general-guidance.md).",
-        "Leave [query](/workspace/dev-docs/notes/dev.general-guidance.md?view=full).",
-        "Keep ![diagram](/workspace/dev-docs/notes/assets/diagram.png).",
+        "See [guide](/workspace/documentation/notes/dev.general-guidance.md).",
+        "Leave [query](/workspace/documentation/notes/dev.general-guidance.md?view=full).",
+        "Keep ![diagram](/workspace/documentation/notes/assets/diagram.png).",
       ].join("\n"),
       "2026-04-04T10:08:00.000Z",
     );
@@ -706,8 +706,8 @@ Deno.test(
       includeFrontmatter: false,
       markdownLinkStyle: "dendron-wikilink",
       relativizeLocalLinks: true,
-      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
-      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
+      renderOutputPath: "/workspace/documentation/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/documentation/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");
@@ -717,7 +717,7 @@ Deno.test(
     );
     assertStringIncludes(rendered, "![diagram](../assets/diagram.png)");
     assertEquals(
-      rendered.includes("/workspace/dev-docs/notes/dev.general-guidance.md"),
+      rendered.includes("/workspace/documentation/notes/dev.general-guidance.md"),
       false,
     );
   },
@@ -733,7 +733,7 @@ Deno.test(
         "Rewrite [peer](peer-note.md#Goal).",
         "Keep [child](nested/child-note.md).",
         "Keep [parent](../dev.general-guidance.md).",
-        "Keep [external root](/workspace/dev-docs/notes/dev.todo.md).",
+        "Keep [external root](/workspace/documentation/notes/dev.todo.md).",
       ].join("\n"),
       "2026-04-05T10:09:00.000Z",
     );
@@ -741,7 +741,7 @@ Deno.test(
     const rendered = renderEventsToMarkdown([assistant], {
       includeFrontmatter: false,
       markdownLinkStyle: "dendron-wikilink",
-      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
+      renderOutputPath: "/workspace/documentation/notes/sessions/session.md",
     });
 
     assertStringIncludes(rendered, "[[peer-note#Goal]]");
@@ -749,7 +749,7 @@ Deno.test(
     assertStringIncludes(rendered, "[parent](../dev.general-guidance.md)");
     assertStringIncludes(
       rendered,
-      "[external root](/workspace/dev-docs/notes/dev.todo.md)",
+      "[external root](/workspace/documentation/notes/dev.todo.md)",
     );
   },
 );
@@ -766,7 +766,7 @@ Deno.test(
       toolCallId: "tool-dendron-extra-surfaces",
       name: "read_note",
       description:
-        "Inspect [dev.general-guidance.md](/workspace/dev-docs/notes/dev.general-guidance.md) and keep ![diagram](diagram.png).",
+        "Inspect [dev.general-guidance.md](/workspace/documentation/notes/dev.general-guidance.md) and keep ![diagram](diagram.png).",
       source: {
         providerEventType: "tool_call",
         providerEventId: "tool-call-dendron-extra-surfaces",
@@ -803,7 +803,7 @@ Deno.test(
         options: [{
           label: "Decision log",
           description:
-            "Cross-check [dev.decision-log.md](/workspace/dev-docs/notes/dev.decision-log.md).",
+            "Cross-check [dev.decision-log.md](/workspace/documentation/notes/dev.decision-log.md).",
         }],
       },
       source: {
@@ -820,7 +820,7 @@ Deno.test(
       decisionId: "decision-generic-dendron-extra-surfaces",
       decisionKey: "note-target",
       summary:
-        "Use [completed note](/workspace/dev-docs/notes/completed.2026.2026-04-04-dendron-style-links.md)",
+        "Use [completed note](/workspace/documentation/notes/completed.2026.2026-04-04-dendron-style-links.md)",
       status: "accepted",
       decidedBy: "assistant",
       basisEventIds: ["tool-call-dendron-extra-surfaces"],
@@ -837,7 +837,7 @@ Deno.test(
       kind: "provider.info",
       subtype: "notice",
       content:
-        "Indexed [product ideas](/workspace/dev-docs/notes/product-ideas.md) and kept ![diagram](diagram.png).",
+        "Indexed [product ideas](/workspace/documentation/notes/product-ideas.md) and kept ![diagram](diagram.png).",
       source: {
         providerEventType: "provider.info",
         providerEventId: "provider-info-dendron-extra-surfaces",
@@ -856,8 +856,8 @@ Deno.test(
       includeThinking: true,
       includeSystemEvents: true,
       markdownLinkStyle: "dendron-wikilink",
-      renderOutputPath: "/workspace/dev-docs/notes/sessions/session.md",
-      wikilinkifiableRoots: ["/workspace/dev-docs/notes"],
+      renderOutputPath: "/workspace/documentation/notes/sessions/session.md",
+      wikilinkifiableRoots: ["/workspace/documentation/notes"],
     });
 
     assertStringIncludes(rendered, "[[dev.general-guidance]]");

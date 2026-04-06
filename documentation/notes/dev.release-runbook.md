@@ -15,9 +15,9 @@ The primary release path is GitHub Actions workflow `.github/workflows/release-m
 ## Current Model
 
 - Release version is expected to stay aligned across `apps/cli/deno.json`, `apps/daemon/deno.json`, and `apps/web/deno.json`.
-- `deno task bump:version` is the supported way to bump those versions and ensure a matching `dev-docs/notes/release-notes.v<version>.md` stub exists.
+- `deno task bump:version` is the supported way to bump those versions and ensure a matching `documentation/notes/release-notes.v<version>.md` stub exists.
 - `Release Manual` builds native binaries, packages bundles, runs packaged-bundle smoke, assembles npm packages, runs native npm-install smoke, optionally publishes npm packages, and optionally creates or updates the GitHub Release.
-- The GitHub Release body comes from `dev-docs/notes/release-notes.v<version>.md` after stripping Dendron frontmatter.
+- The GitHub Release body comes from `documentation/notes/release-notes.v<version>.md` after stripping Dendron frontmatter.
 
 ### Tag behavior
 
@@ -38,7 +38,7 @@ deno task bump:version -- --minor
 deno task bump:version -- --major
 deno task bump:version -- --version 0.2.5
 ```
-2. Fill in `dev-docs/notes/release-notes.v<version>.md`. Do not leave the stub empty; the GitHub Release step fails if the body is empty after frontmatter stripping.
+2. Fill in `documentation/notes/release-notes.v<version>.md`. Do not leave the stub empty; the GitHub Release step fails if the body is empty after frontmatter stripping.
 3. Commit and push the release changes.
 4. Release from a commit on `main` with green CI. Running the full local quality gate first is still sensible:
 ```bash

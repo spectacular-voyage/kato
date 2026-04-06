@@ -1,7 +1,7 @@
 reviews:
   path_filters:
-    - "!dev-docs/notes/conv.*"
-    - "!dev-docs/notes/cancelled.*"
-    - "!dev-docs/notes/completed.*"
+    - "!documentation/notes/conv.*"
+    - "!documentation/notes/cancelled.*"
+    - "!documentation/notes/completed.*"
   auto_review:
     enabled: true

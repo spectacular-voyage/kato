@@ -25,10 +25,10 @@ In `@apps/runtime/src/workspace/registry.ts`:
       file), ensuring displayName is considered alongside workspaceRoot when deciding
       if a workspace is unchanged.
 
-In `@dev-docs/notes/dev.release-runbook.md`:
+In `@documentation/notes/dev.release-runbook.md`:
 
 - [c] Line 5: Remove the manual frontmatter timestamp edit by deleting or reverting
-  the "updated: 1773788589359" line in dev-docs/notes/dev.release-runbook.md so
+  the "updated: 1773788589359" line in documentation/notes/dev.release-runbook.md so
   the Dendron-managed 'updated' field is not modified by hand; ensure the file's
   frontmatter contains no manually-set 'updated' key and let Dendron populate it
   automatically. Dendron notes in this vault intentionally keep an `updated`

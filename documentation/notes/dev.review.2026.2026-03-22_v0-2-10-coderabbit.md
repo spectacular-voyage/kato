@@ -55,7 +55,7 @@ sleep, and ensure the test restores runtime env via
 snapshotRuntimeEnv/setRuntimeEnv only within its isolated factory-instantiated
 app lifecycle.
 
-In `@dev-docs/notes/dev.feature-ideas.distribution-phase-2.md`:
+In `@documentation/notes/dev.feature-ideas.distribution-phase-2.md`:
 - Line 5: Revert the manual change to the Dendron frontmatter by restoring the
 previous value of the updated field (or removing the manual timestamp so Dendron
 can regenerate it) — specifically undo the change to the "updated" frontmatter
@@ -63,7 +63,7 @@ entry (the line showing updated: 1774193915290) and ensure no manual edits are
 left in the frontmatter; add a brief commit message noting "Revert manual
 updated frontmatter — allow Dendron to manage" to prevent re-editing.
 
-In `@dev-docs/notes/dev.feature-ideas.md`:
+In `@documentation/notes/dev.feature-ideas.md`:
 - Line 5: Remove the manually edited frontmatter timestamp by deleting or
 reverting the `updated: 1774242249060` entry so the note relies on Dendron's
 automatic `updated` field management; search for the `updated` frontmatter key
@@ -78,8 +78,8 @@ and tools should, by default, use the settings in config
 adding flags to the '::' commands" — remove the extra "use" and correct
 "overides" to "overrides".
 
-In `@dev-docs/notes/dev.todo.md`:
-- Line 5: The frontmatter 'updated' value in dev-docs/notes/dev.todo.md was
+In `@documentation/notes/dev.todo.md`:
+- Line 5: The frontmatter 'updated' value in documentation/notes/dev.todo.md was
 manually changed (the "updated: 1774188215673" line); revert this manual edit so
 the 'updated' field is removed or left untouched and allow Dendron to manage it
 automatically, ensuring you do not modify the 'updated' frontmatter in the
@@ -162,7 +162,7 @@ centralized file-list provider (or call run-root-test-slices.ts) and remove the
 inlined duplicate file arguments and --ignore entries so future changes only
 need to be made in the single shared location.
 
-In `@dev-docs/notes/dev.feature-ideas.md`:
+In `@documentation/notes/dev.feature-ideas.md`:
 - Line 9: Change the feature description sentence "Workspace detail page that
 included config options, and the ability to change them." to present tense by
 replacing "included" with "includes" so it reads "Workspace detail page that
@@ -205,14 +205,14 @@ runtime defaults and path rather than hard-coded YAML.
       Added `apps/web/web_app.ts`, removed env mutation/dynamic import from the
       test, and kept the test under the web app’s own config instead of trying
       to force it into the repo-root test slice.
-- [c] `dev-docs/notes/dev.feature-ideas.distribution-phase-2.md` revert
+- [c] `documentation/notes/dev.feature-ideas.distribution-phase-2.md` revert
       `updated` frontmatter: Cancelled. The note has legitimate content changes;
       reverting only the timestamp would add churn without improving behavior.
-- [c] `dev-docs/notes/dev.feature-ideas.md` revert `updated` frontmatter:
+- [c] `documentation/notes/dev.feature-ideas.md` revert `updated` frontmatter:
       Cancelled for the same reason; no value in timestamp-only churn here.
-- [x] `dev-docs/notes/dev.feature-ideas.md` typo/redundant wording: Valid.
+- [x] `documentation/notes/dev.feature-ideas.md` typo/redundant wording: Valid.
       Cleaned up the sentence and corrected `overides` -> `overrides`.
-- [c] `dev-docs/notes/dev.todo.md` revert `updated` frontmatter: Cancelled.
+- [c] `documentation/notes/dev.todo.md` revert `updated` frontmatter: Cancelled.
       No behavior or documentation gain from timestamp-only changes.
 - [c] `scripts/run-root-test-slices.ts` missing env-boundary files such as
       `tests/web-auth_test.ts`: Audited current usage. The suggestion was stale;
@@ -236,9 +236,9 @@ runtime defaults and path rather than hard-coded YAML.
 - [x] `deno.json` duplicate env file lists across test tasks: Valid.
       Centralized the slice wiring in `scripts/run-root-test-slices.ts`, and
       the task entries now delegate there instead of duplicating the file list.
-- [x] `dev-docs/notes/dev.feature-ideas.md` `included` -> `includes`:
+- [x] `documentation/notes/dev.feature-ideas.md` `included` -> `includes`:
       Valid docs cleanup; fixed.
-- [c] `dev-docs/notes/dev.todo.md` move the two top-level backlog items into a
+- [c] `documentation/notes/dev.todo.md` move the two top-level backlog items into a
       `task.*` note: Cancelled. These are lightweight backlog bullets, not a
       concrete implementation task with plan/checklist value yet.
 - [x] `tests/web-cli_test.ts` assert `stale === false` for running web status:
@@ -332,7 +332,7 @@ contract are respected so the test compiles and matches runtime usage.
 
 ### PR-side note comments not worth carrying forward
 
-- [x] `dev-docs/notes/review.2026.20226-03-22_v0-2-10-coderabbit.md` title
+- [x] `documentation/notes/review.2026.20226-03-22_v0-2-10-coderabbit.md` title
       typo `20226` -> `2026`: Already resolved locally. The active review note
       has the corrected title and filename shape.
 - [c] review note `updated` frontmatter removal: Cancelled. The problem is

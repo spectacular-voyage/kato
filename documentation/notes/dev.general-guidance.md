@@ -52,7 +52,7 @@ see [[dev.testing]]
 
 ## Task notes
 
-Before start new implementation, a task note should be written and refined. Task notes live in `dev-docs/notes/`. Individual "To-Do" items should be included in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
+Before start new implementation, a task note should be written and refined. Task notes live in `documentation/notes/`. Individual "To-Do" items should be included in the `## Implementation Plan` section as, with markdown checkbox (`[ ]`) to track completion (`[x]`) or cancellation (`[x]`)
 
 Sections should include
 - Goal

@@ -875,7 +875,7 @@ Writer render lookup changes:
 - [ ] Document `::record [<path>]`, `::capture [<path>]`, and
       `::export [<path>]` path behavior.
 - [ ] Update
-      `dev-docs/notes/dev.general-guidance.md` to remove `::init`, allow
+      `documentation/notes/dev.general-guidance.md` to remove `::init`, allow
       `::record [<path>]`, and keep the command/state-machine scenario table in
       sync with the new design.
 - [ ] Document that attachment profiles auto-refresh from watched workspace

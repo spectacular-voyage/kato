@@ -6,7 +6,7 @@ updated: 1772415248669
 created: 1772395927887
 ---
 
-Supersedes [task.2026.2026-02-28-session-attach.md](/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/task.2026.2026-02-28-session-attach.md).
+Supersedes [task.2026.2026-02-28-session-attach.md](/home/djradon/hub/spectacular-voyage/kato/documentation/notes/task.2026.2026-02-28-session-attach.md).
 # Workspace Aliases: Live Registration Revision
 
 ## Summary

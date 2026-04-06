@@ -98,8 +98,8 @@ in the config itself.
 5. Update docs and operator guidance.
 
 - `README.md`: runtime files + config example as YAML.
-- `dev-docs/notes/dev.codebase-overview.md`: topology/config path updates.
-- `dev-docs/notes/dev.testing.md`: config edit instructions updated for YAML.
+- `documentation/notes/dev.codebase-overview.md`: topology/config path updates.
+- `documentation/notes/dev.testing.md`: config edit instructions updated for YAML.
 
 6. Follow-up (optional, separate task if needed).
 

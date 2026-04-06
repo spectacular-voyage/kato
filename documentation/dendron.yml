@@ -24,7 +24,7 @@ workspace:
   vaults:
     - fsPath: .
       selfContained: true
-      name: dev-docs
+      name: documentation
   journal:
     dailyDomain: daily
     name: journal
@@ -90,8 +90,8 @@ publishing:
   writeStubs: false
   siteRootDir: docs
   seo:
-    title: Dendron
-    description: Personal Knowledge Space
+    title: Kato Documentation
+    description: Kato documentation and release notes
   github:
     enableEditLink: true
     editLinkText: Edit this page on GitHub

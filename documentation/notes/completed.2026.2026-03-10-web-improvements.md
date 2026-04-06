@@ -24,8 +24,8 @@ created: 1773183637761
 
 - We don't need both these lines:
 
-/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes
-/home/djradon/hub/spectacular-voyage/kato/dev-docs/notes/.kato-workspace-config.yaml
+/home/djradon/hub/spectacular-voyage/kato/documentation/notes
+/home/djradon/hub/spectacular-voyage/kato/documentation/notes/.kato-workspace-config.yaml
 
 since there is a 1-to-1 correspondence, and the workspaceRoot is always the directory that conatins the config. I think we remove the yaml line.
 

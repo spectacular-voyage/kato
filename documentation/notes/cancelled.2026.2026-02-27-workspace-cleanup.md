@@ -43,8 +43,8 @@ Lock recording/export path behavior to deterministic no-UI semantics and defer w
 - Continue canonical root allowlist enforcement.
 3. Update docs.
 - Update `README.md` command semantics and limitations.
-- Update `dev-docs/notes/task.2026.2026-02-26-workspace-settings.md` to mark workspace defaults as deferred.
-- Add concise rationale in `dev-docs/notes/task.2026.2026-02-27-workspace-cleanup.md`.
+- Update `documentation/notes/task.2026.2026-02-26-workspace-settings.md` to mark workspace defaults as deferred.
+- Add concise rationale in `documentation/notes/task.2026.2026-02-27-workspace-cleanup.md`.
 4. Add cleanup guidance for stale persisted state.
 - Document use of existing session cleanup flow for stale metadata/twin issues.
 - Include Gemini hash/slug source-path churn troubleshooting notes.
