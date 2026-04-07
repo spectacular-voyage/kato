@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -119,6 +119,30 @@ kato workspace register --alias default
           <p>Local-only by default</p>
           <p>Markdown-native output</p>
           <p>Codex, Claude Code, and Gemini support</p>
+        </section>
+
+        <section class="section product-preview-section" id="console">
+          <div class="section-heading">
+            <p class="eyebrow">Operator Console</p>
+            <h2>
+              Keep discovered sessions, recordings, and workspace actions in one
+              local view.
+            </h2>
+            <p>
+              Kato's operator console gives you a grounded, local-first control
+              surface for active chats. You can see session inventory, recording
+              state, and the next action to take without digging through vendor
+              UIs.
+            </p>
+          </div>
+
+          <figure class="console-screenshot-frame">
+            <img
+              class="console-screenshot"
+              src="assets/2026-04-06_screencap.png"
+              alt="Kato operator console sessions view showing session inventory, recording state, and session actions."
+            />
+          </figure>
         </section>
 
         <section class="section" id="why-kato">
@@ -272,7 +296,9 @@ kato workspace register --alias default
           <div class="quickstart-grid">
             <article class="command-card quickstart-setup-card">
               <p class="card-label">Setup</p>
-              <pre class="quickstart-setup-terminal"><code>kato init
+              <pre
+                class="quickstart-setup-terminal"
+              ><code>kato init
 kato start
 mkdir chats-default
 cd chats-default
@@ -328,8 +354,7 @@ kato workspace register --alias default</code></pre>
                 See
                 <a
                   href="https://github.com/spectacular-voyage/kato?tab=readme-ov-file#in-chat-commands"
-                  >In-Chat Commands</a
-                >
+                >In-Chat Commands</a>
                 for the full command set.
               </p>
             </article>

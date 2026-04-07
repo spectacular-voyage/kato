@@ -1178,6 +1178,23 @@ a {
   font-weight: 700;
 }
 
+.summary-status-source {
+  display: grid;
+  gap: 4px;
+}
+
+.summary-status-source-label {
+  font-size: 1rem;
+}
+
+.summary-status-source-path {
+  display: block;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .log-entry-list {
   margin: 0;
   padding: 0;

@@ -197,7 +197,10 @@ export default function SummaryLive(
           Memory RSS: {formatBytes(data.memory?.process.rss)}
         </p>
         <p class="mono">PID: {data.daemonPid ?? "n/a"}</p>
-        <p class="mono">Source: {data.statusPath}</p>
+        <p class="summary-status-source">
+          <span class="mono summary-status-source-label">Source:</span>
+          <span class="mono summary-status-source-path">{data.statusPath}</span>
+        </p>
       </article>
 
       <article class="card span-4">

@@ -18,3 +18,7 @@ apps/web/node_modules/
 
 # Claude Code working directory
 .claude
+
+
+# Dendron
+.dendron.*
