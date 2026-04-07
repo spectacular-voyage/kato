@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Kato captures AI conversations from supported IDEs, CLIs, and local apps into durable Markdown files you control."
+    />
+    <meta name="theme-color" content="#f4efe6" />
+    <title>Kato | Own your AI conversations</title>
+    <link rel="icon" href="assets/kato-logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page-shell">
+      <header class="site-header">
+        <div class="site-header-inner">
+          <a class="brand" href="#top" aria-label="Kato home">
+            <img
+              class="brand-wordmark"
+              src="assets/kato-wordmark.png"
+              alt="Kato"
+            />
+          </a>
+          <nav class="site-nav" aria-label="Primary">
+            <a href="#why-kato">Why Kato</a>
+            <a href="#compatibility">Compatibility</a>
+            <a href="#quickstart">Quickstart</a>
+            <a href="https://github.com/spectacular-voyage/kato">Learn more</a>
+          </nav>
+        </div>
+      </header>
+
+      <main id="main">
+        <section class="hero" id="top">
+          <div class="hero-copy">
+            <p class="eyebrow">Local-first AI conversation capture</p>
+            <h1>Own your AI conversations.</h1>
+            <p class="hero-lede">
+              Kato captures supported AI chats from IDEs, CLIs, and local apps
+              into durable Markdown files you control. Your prompts, decisions,
+              dead ends, and breakthroughs stop being disposable UI state and
+              start becoming reusable project memory.
+            </p>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="https://github.com/spectacular-voyage/kato"
+              >
+                View on GitHub
+              </a>
+              <a
+                class="button button-secondary"
+                href="https://github.com/spectacular-voyage/kato/releases"
+              >
+                Download releases
+              </a>
+            </div>
+            <ul class="signal-list">
+              <li>
+                Keep chats in files you own, not locked inside one assistant.
+              </li>
+              <li>
+                Export clean, vendor-agnostic Markdown that fits team workflows.
+              </li>
+              <li>
+                Give humans and agents the same durable source of context.
+              </li>
+            </ul>
+          </div>
+
+          <div class="hero-visual" aria-label="Kato product highlights">
+            <article class="terminal-card" aria-label="Quickstart example">
+              <p class="terminal-title">Quickstart</p>
+              <pre><code>npm install -g @spectacular-voyage/kato
+kato init
+kato start
+kato workspace init
+kato workspace register --alias default
+# in your next chat, ::capture-default</code></pre>
+            </article>
+
+            <div class="orbit-panel">
+              <img
+                class="hero-logo"
+                src="assets/kato-logo.png"
+                alt=""
+                aria-hidden="true"
+              />
+              <div class="orbit-panel-grid">
+                <article class="floating-card">
+                  <p class="card-label">What changes with Kato</p>
+                  <h2>Disposable chat becomes durable project memory.</h2>
+                  <p>
+                    Capture once. Reuse across docs, handoffs, reviews, and the
+                    next agent session.
+                  </p>
+                </article>
+                <article class="floating-card">
+                  <p class="card-label">Built for AI-assisted development</p>
+                  <p class="mini-grid">
+                    <span>Local daemon</span>
+                    <span>Local web console</span>
+                    <span>Terminal console</span>
+                    <span>Markdown output</span>
+                    <span>JSONL output</span>
+                    <span>In-chat commands</span>
+                  </p>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="proof-band" aria-label="Kato highlights">
+          <p>Local-only by default</p>
+          <p>Markdown-native output</p>
+          <p>Codex, Claude Code, and Gemini support</p>
+        </section>
+
+        <section class="section" id="why-kato">
+          <div class="section-heading">
+            <p class="eyebrow">Why it matters</p>
+            <h2>
+              AI-assisted development gets much more valuable when the
+              conversation itself becomes part of the project.
+            </h2>
+            <p>
+              Most teams are already doing serious work inside AI chats:
+              debugging, planning, trying fixes, explaining tradeoffs, and
+              handing work between people and agents. Kato makes that work
+              durable instead of ephemeral.
+            </p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card">
+              <p class="card-number">01</p>
+              <h3>Stop losing expensive context</h3>
+              <p>
+                The useful part of an AI session is rarely just the final code.
+                Kato preserves the reasoning trail so you can revisit why a
+                decision happened instead of reprompting from scratch.
+              </p>
+            </article>
+            <article class="feature-card">
+              <p class="card-number">02</p>
+              <h3>Keep your workflow vendor-agnostic</h3>
+              <p>
+                Supported chats land in plain Markdown files you control. That
+                keeps your project memory portable across tools, repos, and
+                future assistant choices.
+              </p>
+            </article>
+            <article class="feature-card">
+              <p class="card-number">03</p>
+              <h3>Make handoffs cleaner for humans and agents</h3>
+              <p>
+                Durable conversation history is easier to search, review, quote,
+                commit, and reuse. Team memory stops living only in one
+                developer's IDE sidebar.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section story-section">
+          <div class="story-copy">
+            <p class="eyebrow">Why Kato feels different</p>
+            <h2>It treats AI conversations like first-class work product.</h2>
+            <p>
+              If you are already building with AI, you are already generating a
+              steady stream of useful project history. For most people, that
+              history ends up dispersed across workstations and vendor silos.
+              Kato lets you archive and organize it on your terms: per project
+              folder, per repository, in shared storage, or into multiple
+              destinations when the workflow calls for it.
+            </p>
+            <p>
+              That matters for solo builders who want better recall, and even
+              more for teams who need continuity across sessions, machines, and
+              assistants.
+            </p>
+          </div>
+
+          <div class="comparison-card">
+            <div class="comparison-pane comparison-pane-muted">
+              <p class="comparison-label">Without Kato</p>
+              <ul class="comparison-list">
+                <li>Important prompts disappear into tool-specific history.</li>
+                <li>Handoffs rely on screenshots, copy-paste, or memory.</li>
+                <li>Switching assistants means losing continuity.</li>
+              </ul>
+            </div>
+            <div class="comparison-pane comparison-pane-strong">
+              <p class="comparison-label">With Kato</p>
+              <ul class="comparison-list">
+                <li>Sessions become files you can keep, search, and reuse.</li>
+                <li>Markdown exports fit notes, repos, and team docs.</li>
+                <li>Conversation history stays yours as tools change.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="compatibility">
+          <div class="section-heading">
+            <p class="eyebrow">Compatibility</p>
+            <h2>Works with the assistants people are already using.</h2>
+            <p>
+              Kato currently supports the following capture targets from the
+              README-backed compatibility list.
+            </p>
+          </div>
+
+          <div class="compatibility-grid">
+            <article class="compat-card">
+              <h3>Codex</h3>
+              <p>VS Code, CLI, local app</p>
+            </article>
+            <article class="compat-card">
+              <h3>Claude Code</h3>
+              <p>VS Code, CLI, local app</p>
+            </article>
+            <article class="compat-card">
+              <h3>Gemini</h3>
+              <p>VS Code, CLI</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section install-section" id="install">
+          <div class="section-heading">
+            <p class="eyebrow">Install</p>
+            <h2>
+              Start with a prebuilt binary. No local compile step required.
+            </h2>
+            <p>
+              The npm package installs prebuilt binaries. You can also download
+              a bundle from GitHub Releases and place it on your <code
+              >PATH</code>.
+            </p>
+          </div>
+
+          <div class="install-grid">
+            <article class="command-card">
+              <p class="card-label">Primary install</p>
+              <pre><code>npm install -g @spectacular-voyage/kato</code></pre>
+            </article>
+            <article class="command-card">
+              <p class="card-label">Or with pnpm</p>
+              <pre><code>pnpm add -g @spectacular-voyage/kato</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section quickstart-section" id="quickstart">
+          <div class="section-heading">
+            <p class="eyebrow">Quickstart</p>
+            <h2>Get from install to your first captured conversation fast.</h2>
+            <p>
+              The public command is <code>kato</code>. Bundled
+              <code>kato-daemon</code> and <code>kato-web</code> are managed for
+              you.
+            </p>
+          </div>
+
+          <div class="quickstart-grid">
+            <article class="command-card quickstart-setup-card">
+              <p class="card-label">Setup</p>
+              <pre
+                class="quickstart-setup-terminal"
+              ><code>kato init
+kato start
+mkdir chats-default
+cd chats-default
+kato workspace init
+kato workspace register --alias default</code></pre>
+              <div class="quickstart-command-guide" aria-label="Setup guide">
+                <div class="quickstart-command-row">
+                  <code>kato init</code>
+                  <p>Create Kato's base local configuration.</p>
+                </div>
+                <div class="quickstart-command-row">
+                  <code>kato start</code>
+                  <p>Start the local daemon that watches supported chats.</p>
+                </div>
+                <div class="quickstart-command-row">
+                  <code>mkdir chats-default</code>
+                  <p>Create a folder to hold your first workspace outputs.</p>
+                </div>
+                <div class="quickstart-command-row">
+                  <code>cd chats-default</code>
+                  <p>Move into that workspace folder before initializing it.</p>
+                </div>
+                <div class="quickstart-command-row">
+                  <code>kato workspace init</code>
+                  <p>Create the workspace-local Kato config.</p>
+                </div>
+                <div class="quickstart-command-row">
+                  <code>kato workspace register --alias default</code>
+                  <p>
+                    Register this workspace under the alias used by
+                    <code>::capture-default</code>.
+                  </p>
+                </div>
+              </div>
+            </article>
+
+            <div
+              class="quickstart-divider"
+              aria-label="Two easy control mechanisms"
+            >
+              <span>two easy control mechanisms</span>
+            </div>
+
+            <article class="command-card quickstart-control-card">
+              <p class="card-label">Capture from chat</p>
+              <p>
+                Start a supported AI chat and put
+                <code>::capture-default</code> on its own line in a user
+                message. It also helps to tell the model to ignore lines that
+                start with <code>::</code>.
+              </p>
+              <p>
+                See
+                <a
+                  href="https://github.com/spectacular-voyage/kato?tab=readme-ov-file#in-chat-commands"
+                >In-Chat Commands</a>
+                for the full command set.
+              </p>
+            </article>
+            <article class="command-card quickstart-control-card">
+              <p class="card-label">Or use the local web UI</p>
+              <pre><code>kato web init --username &lt;username&gt;
+kato web start</code></pre>
+              <p>
+                Then open <code>http://127.0.0.1:5173/login</code> in your
+                browser and start recordings from the Sessions page.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section cta-section" id="learn-more">
+          <div class="cta-panel">
+            <div class="cta-copy">
+              <p class="eyebrow">Learn more</p>
+              <h2>Use Kato if AI conversations are part of how you build.</h2>
+              <p>
+                The repository has current install details, release artifacts,
+                and the rest of the command surface. Start there, then make your
+                AI workflow durable.
+              </p>
+              <div class="cta-actions cta-actions-tiles">
+                <a
+                  class="button button-primary button-tile"
+                  href="https://github.com/spectacular-voyage/kato"
+                >
+                  Open the repository
+                </a>
+                <a
+                  class="button button-secondary button-tile"
+                  href="https://github.com/spectacular-voyage/kato/releases"
+                >
+                  Browse releases
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p>
+          Kato is a
+          <a href="https://spectacular.voyage/">Spectacular Voyage</a> product
+          for local AI conversation capture.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

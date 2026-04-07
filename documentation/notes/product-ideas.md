@@ -2,12 +2,11 @@
 id: ve1xd8l46p0r7zkh6gvrjir
 title: Product Ideas
 desc: ''
-updated: 1775331930490
+updated: 1775506192357
 created: 1773431441018
 ---
 
-- kato has a dendron/wikilinks setting to translate markdown links to something legible. security benefit of no absolute paths.
-
+- kato has a dendron/wikilinks setting to disable links in output.
 - brew packaging
 - review entire twin or file (i.e. markdown viewer)
 - heading templates

@@ -1,6 +1,6 @@
 ---
 id: 072ugh6pvxoycs3gqy31fhz
-title: Benefits
+title: Features
 desc: ''
 updated: 1774326458974
 created: 1774326332892

@@ -2,10 +2,9 @@
 
 ## Own your AI conversations.
 
-Kato captures AI conversations from supported IDEs, CLIs, and local apps into files you
-control. A local daemon creates vendor-agnostic chat "twins" and monitors chats for kato commands like "record" or "stop". It can serve a local web console, and also has a terminal-based status console.
+Kato captures AI conversations from supported IDEs, CLIs, and local apps into files you control. A local daemon creates vendor-agnostic chat "twins" and monitors chats for kato commands like "record" or "stop". It can serve a local web console, and also has a terminal-based status console.
 
-## Supported Today
+## Compatibility
 
 - `Codex`: VS Code, CLI, local app
 - `Claude Code`: VS Code, CLI, local app
@@ -59,7 +58,7 @@ You can also trigger recording from the "Sessions" page in the web UI.
 ## In-Chat Commands
 
 - `::capture-<alias> [path]`: snapshot the full conversation, then keep
-  recording there
+  recording
 - `::record-<alias> [path]`: start recording from this point forward
 - `::export-<alias> [path]`: write a one-off export
 - `::stop`: stop all active recordings
