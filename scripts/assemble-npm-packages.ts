@@ -83,6 +83,7 @@ interface PlatformPackageDefinition {
 const DEFAULT_WRAPPER_PACKAGE_NAME = "@spectacular-voyage/kato";
 const DEFAULT_COMMAND_NAME = "kato";
 const DEFAULT_PLATFORM_PACKAGE_PREFIX = "@spectacular-voyage/kato";
+const PACKAGE_HOMEPAGE = "https://spectacular.voyage/kato/";
 const REQUIRED_BINARY_BASENAMES = ["kato", "kato-daemon", "kato-web"] as const;
 
 function repoRoot(): string {
@@ -466,7 +467,7 @@ function makeWrapperPackageJson(
     description: "Kato npm wrapper that launches the packaged native binary",
     license: "Apache-2.0",
     repository: packageRepositoryMetadata(),
-    homepage: "https://github.com/spectacular-voyage/kato",
+    homepage: PACKAGE_HOMEPAGE,
     bin: { [commandName]: "bin/kato.cjs" },
     files: ["bin", "package-map.json", "README.md", "LICENSE"],
     optionalDependencies: Object.fromEntries(
@@ -495,7 +496,7 @@ function makePlatformPackageJson(
     description: `Native Kato binaries for ${definition.label}`,
     license: "Apache-2.0",
     repository: packageRepositoryMetadata(),
-    homepage: "https://github.com/spectacular-voyage/kato",
+    homepage: PACKAGE_HOMEPAGE,
     os: [definition.os],
     cpu: [definition.cpu],
     ...(definition.libc ? { libc: [definition.libc] } : {}),
