@@ -63,22 +63,6 @@ pre {
     "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
-.skip-link {
-  position: absolute;
-  left: 1rem;
-  top: -3rem;
-  z-index: 20;
-  padding: 0.75rem 1rem;
-  border-radius: 999px;
-  background: var(--ink);
-  color: #fff;
-  text-decoration: none;
-}
-
-.skip-link:focus {
-  top: 1rem;
-}
-
 .page-shell {
   position: relative;
   overflow: hidden;
