@@ -44,6 +44,6 @@
   ],
   "fmt": {
     "proseWrap": "preserve",
-    "exclude": ["dev-docs/notes/**", "**/*.md"]
+    "exclude": ["documentation/notes/**", "**/*.md"]
   }
 }

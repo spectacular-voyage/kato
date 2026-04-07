@@ -403,7 +403,7 @@ jobs:
 
           tag="v${version}"
           title="${tag}"
-          notes_source="dev-docs/notes/release-notes.v${version}.md"
+           notes_source="documentation/notes/release-notes.v${version}.md"
           if [ ! -f "$notes_source" ]; then
             echo "Release notes file not found: $notes_source"
             exit 1
