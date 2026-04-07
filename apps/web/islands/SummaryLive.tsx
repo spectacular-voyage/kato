@@ -181,16 +181,11 @@ export default function SummaryLive(
 
       <article class="card span-5">
         <h2>Daemon</h2>
-        <p class={data.stale ? "mono stale" : "mono ok"}>
-          {data.stale
-            ? "Snapshot is stale or daemon heartbeat is unavailable."
-            : "Snapshot heartbeat is current."}
-        </p>
         <p class="mono">
           Heartbeat:{" "}
           <TimestampText value={data.heartbeatAt} timeZone={timeZone} />
         </p>
-        <p class={data.stale ? "mono stale" : "mono muted"}>
+        <p class={data.stale ? "mono stale" : "mono ok"}>
           Age: {heartbeatAge}
         </p>
         <p class="mono">

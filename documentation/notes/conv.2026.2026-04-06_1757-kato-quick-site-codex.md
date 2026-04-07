@@ -1,21 +1,30 @@
 ---
 id: kato-quick-site-7908befa
-title: 'kato quick site'
+title: kato quick site
 desc: ''
-created: 1775523469116
 updated: 1775523469116
-participants: [djradon, codex.gpt-5.4]
-kato-sessionIds: [019d6516-fdbc-7000-9aab-9ddc6858abf5]
-kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [7908befa-c51f-4135-98da-4233c39146c6]
-conversationEventKinds: [message.assistant, message.user, tool.call, tool.result]
+created: 1775523469116
+participants:
+  - djradon
+  - codex.gpt-5.4
+kato-sessionIds:
+  - 019d6516-fdbc-7000-9aab-9ddc6858abf5
+kato-workspaceIds:
+  - cd940f00-5558-40dc-bead-46f904ab937b
+kato-recordingIds:
+  - 7908befa-c51f-4135-98da-4233c39146c6
+conversationEventKinds:
+  - message.assistant
+  - message.user
+  - tool.call
+  - tool.result
 ---
 
 # djradon_2026-04-06_1621_19
 
 kato quick site
 
-Let's implement [[task.2026.2026-04-06_1613-simple-kato-site]] 
+Let's implement [[completed.2026.2026-04-06_1613-simple-kato-site]] 
 
 Regarding open issues, hand-authored meaning LLM-authored? That's fine. In fact, no generation is necessary, you can just author it the whole thing. It'll be hand-maintained artifact. "Learn more" can just go to the github repo. We should focus on WHY kato is game-changing, and why everyone doing AI-assisted development should want to use it.
 
@@ -58,7 +67,7 @@ I found a couple of stale phrases in the task note that still implied generation
 
 Implemented the quick site as a hand-maintained static page in [docs/index.html](../../docs/index.html#L1) with supporting styling in [docs/styles.css](../../docs/styles.css#L1) and copied public brand assets under `docs/assets/`. The page leads with the “why Kato matters for AI-assisted development” angle you wanted: durable local ownership of chats, vendor-agnostic Markdown, and better human/agent handoffs, while keeping the factual surface grounded in the README.
 
-I also updated the task note in [[task.2026.2026-04-06_1613-simple-kato-site#L157]] to resolve the open issues in favor of the hand-authored `docs/` approach, point “Learn more” at the GitHub repo, and mark the implementation checklist complete.
+I also updated the task note in [[completed.2026.2026-04-06_1613-simple-kato-site#L157]] to resolve the open issues in favor of the hand-authored `docs/` approach, point “Learn more” at the GitHub repo, and mark the implementation checklist complete.
 
 Verification: I ran `deno fmt docs/index.html docs/styles.css`, checked the page with headless Chrome at desktop and mobile widths, confirmed local `200` responses for `/`, `/styles.css`, and the logo asset, and confirmed the GitHub repo and releases links return `200`. I did not run repo-wide `deno task check` or `deno task test` because this change only touched static HTML/CSS/assets and the task note.
 

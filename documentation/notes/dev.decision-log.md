@@ -72,6 +72,10 @@ created: 1771779490894
     outside the derived roots as standard markdown links; and leave external
     URLs, fragment-only links, query-bearing links, and non-markdown assets
     unchanged by the wikilink rewrite.
+  - When a Dendron-enabled recording appends to an existing markdown file,
+    normalize the preexisting body through the same rewrite pass so legacy
+    markdown note links converge to wikilinks instead of staying mixed
+    indefinitely.
   - Expose the matched `dendron.yml` path and derived
     `wikilinkifiableRoots` on the Workspaces page as read-only diagnostics for
     the workspace default output location.

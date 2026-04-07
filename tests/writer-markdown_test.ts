@@ -122,6 +122,81 @@ Deno.test("MarkdownConversationWriter overwrite preserves existing frontmatter",
 });
 
 Deno.test(
+  "MarkdownConversationWriter normalizes existing body note links when Dendron mode is later enabled",
+  async () => {
+    const root = makeSandboxRoot();
+    const outputPath = join(
+      root,
+      "documentation",
+      "notes",
+      "conversation.md",
+    );
+    const writer = new MarkdownConversationWriter();
+
+    try {
+      await Deno.mkdir(root, { recursive: true });
+      await Deno.writeTextFile(
+        join(root, "dendron.yml"),
+        [
+          "workspace:",
+          "  vaults:",
+          "    - fsPath: documentation",
+          "      selfContained: true",
+        ].join("\n"),
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "legacy-link",
+          "message.assistant",
+          "Legacy [wd.task.2026.2026-04-07-sample.md](wd.task.2026.2026-04-07-sample.md).",
+          "2026-04-07T12:00:00.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        markdownLinkStyle: "standard",
+      });
+
+      const legacyContent = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        legacyContent,
+        "[wd.task.2026.2026-04-07-sample.md](wd.task.2026.2026-04-07-sample.md)",
+      );
+
+      await writer.appendEvents(outputPath, [
+        makeEvent(
+          "new-link",
+          "message.assistant",
+          "Current [wd.completed.2026.2026-04-07-sample.md](wd.completed.2026.2026-04-07-sample.md).",
+          "2026-04-07T12:05:00.000Z",
+        ),
+      ], {
+        includeFrontmatter: false,
+        markdownLinkStyle: "dendron-wikilink",
+      });
+
+      const normalizedContent = await Deno.readTextFile(outputPath);
+      assertStringIncludes(
+        normalizedContent,
+        "Legacy [[wd.task.2026.2026-04-07-sample]].",
+      );
+      assertStringIncludes(
+        normalizedContent,
+        "Current [[wd.completed.2026.2026-04-07-sample]].",
+      );
+      assertEquals(
+        normalizedContent.includes(
+          "[wd.task.2026.2026-04-07-sample.md](wd.task.2026.2026-04-07-sample.md)",
+        ),
+        false,
+      );
+    } finally {
+      await removePathIfPresent(root);
+    }
+  },
+);
+
+Deno.test(
   "MarkdownConversationWriter create can render rich frontmatter and omit updated",
   async () => {
     const root = makeSandboxRoot();

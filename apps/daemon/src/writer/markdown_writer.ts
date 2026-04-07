@@ -669,6 +669,30 @@ function applyMarkdownLinkRendering(
   );
 }
 
+function resolveMarkdownLinkRenderContext(
+  options: MarkdownRenderOptions,
+): MarkdownLinkRenderContext {
+  const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
+  const wikilinkContextMode = options.wikilinkContextMode ??
+    (options.wikilinkifiableRoots === undefined &&
+        options.renderOutputPath &&
+        markdownLinkStyle === "dendron-wikilink"
+      ? "output-directory-fallback"
+      : undefined);
+  const wikilinkifiableRoots = options.wikilinkifiableRoots !== undefined
+    ? [...options.wikilinkifiableRoots]
+    : options.renderOutputPath && markdownLinkStyle === "dendron-wikilink"
+    ? [dirname(options.renderOutputPath)]
+    : [];
+  return {
+    markdownLinkStyle,
+    relativizeLocalLinks: options.relativizeLocalLinks ?? false,
+    renderOutputPath: options.renderOutputPath,
+    wikilinkContextMode,
+    wikilinkifiableRoots,
+  };
+}
+
 function parseQuestionnaireOptionLines(
   metadata: Record<string, unknown> | undefined,
   linkRenderContext: MarkdownLinkRenderContext,
@@ -800,25 +824,7 @@ export function renderEventsToMarkdown(
   const italicizeUserMessages = options.italicizeUserMessages ?? false;
   const includeSystemEvents = options.includeSystemEvents ?? false;
   const truncateToolResults = options.truncateToolResults ?? 4_000;
-  const markdownLinkStyle = options.markdownLinkStyle ?? "standard";
-  const wikilinkContextMode = options.wikilinkContextMode ??
-    (options.wikilinkifiableRoots === undefined &&
-        options.renderOutputPath &&
-        markdownLinkStyle === "dendron-wikilink"
-      ? "output-directory-fallback"
-      : undefined);
-  const wikilinkifiableRoots = options.wikilinkifiableRoots !== undefined
-    ? [...options.wikilinkifiableRoots]
-    : options.renderOutputPath && markdownLinkStyle === "dendron-wikilink"
-    ? [dirname(options.renderOutputPath)]
-    : [];
-  const linkRenderContext: MarkdownLinkRenderContext = {
-    markdownLinkStyle,
-    relativizeLocalLinks: options.relativizeLocalLinks ?? false,
-    renderOutputPath: options.renderOutputPath,
-    wikilinkContextMode,
-    wikilinkifiableRoots,
-  };
+  const linkRenderContext = resolveMarkdownLinkRenderContext(options);
 
   const parts: string[] = [];
   const questionnaireContextByKey = new Map<
@@ -1346,7 +1352,14 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
     });
     const content = rendered.trim();
     const hasBodyToAppend = content.length > 0;
-    if (!hasBodyToAppend && !frontmatterChanged) {
+    const existingBody = existingFrontmatterView?.body ?? existing.content;
+    const normalizedExistingBody = applyMarkdownLinkRendering(
+      existingBody,
+      resolveMarkdownLinkRenderContext(baseRenderOptions),
+    );
+    const existingBodyChanged = normalizedExistingBody !== existingBody;
+
+    if (!hasBodyToAppend && !frontmatterChanged && !existingBodyChanged) {
       return {
         mode: "append",
         outputPath,
@@ -1355,10 +1368,9 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       };
     }
 
-    const existingBody = existingFrontmatterView?.body ?? existing.content;
-    const existingTrimmed = existing.content.trimEnd();
+    const existingTrimmed = normalizedExistingBody.trimEnd();
     const deduped = hasBodyToAppend && existingTrimmed.endsWith(content);
-    if (deduped && !frontmatterChanged) {
+    if (deduped && !frontmatterChanged && !existingBodyChanged) {
       return {
         mode: "append",
         outputPath,
@@ -1367,8 +1379,8 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
       };
     }
 
-    if (frontmatterChanged && existingFrontmatterView && nextFrontmatter) {
-      let nextBody = existingBody;
+    if (frontmatterChanged || existingBodyChanged) {
+      let nextBody = normalizedExistingBody;
       if (hasBodyToAppend && !deduped) {
         const separator = nextBody.length === 0
           ? ""
@@ -1380,11 +1392,20 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         nextBody = `${nextBody}${separator}${content}`;
       }
       const normalizedBody = nextBody.replace(/^\n+/, "");
-      const nextContent = normalizedBody.length > 0
-        ? `${nextFrontmatter}\n\n${
-          normalizedBody.endsWith("\n") ? normalizedBody : `${normalizedBody}\n`
-        }`
-        : `${nextFrontmatter}\n`;
+      const contentPrefix = existingFrontmatterView
+        ? nextFrontmatter ?? existingFrontmatterView.frontmatter
+        : undefined;
+      const nextContent = contentPrefix
+        ? normalizedBody.length > 0
+          ? `${contentPrefix}\n\n${
+            normalizedBody.endsWith("\n")
+              ? normalizedBody
+              : `${normalizedBody}\n`
+          }`
+          : `${contentPrefix}\n`
+        : normalizedBody.length > 0
+        ? normalizedBody.endsWith("\n") ? normalizedBody : `${normalizedBody}\n`
+        : "";
       await Deno.writeTextFile(outputPath, nextContent);
     } else if (hasBodyToAppend && !deduped) {
       const separator = existing.content.length === 0

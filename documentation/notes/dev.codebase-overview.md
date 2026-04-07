@@ -144,8 +144,11 @@ links in workspace-scoped markdown output. Dendron rewriting is vault-aware:
 runtime discovery walks upward from the final output path to a matching
 `dendron.yml`, derives `wikilinkifiableRoots` from its mounted vaults, and
 falls back to the output file's own directory when no Dendron context matches.
-The sanitation is render-time only: twins and persisted source/history
-snapshots stay authoritative. The Workspaces page exposes the matched
+When a recording append touches an existing markdown file, the writer also
+normalizes the already-written body through that same link-policy pass so
+legacy standard note links collapse to Dendron wikilinks once the workspace
+flag is enabled. Twins and persisted source/history snapshots stay
+authoritative. The Workspaces page exposes the matched
 `dendron.yml` path plus the derived roots as read-only diagnostics for the
 workspace default output location.
 Operator-facing workspace `displayName` labels live in the shared workspace
@@ -237,18 +240,18 @@ graph TD
 
 ## Responsibility Map
 
-| Area                | Primary responsibility                                                                             | Key modules                                            |
-| ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status        | `apps/cli/src/*`                                       |
-| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows      | `apps/web/{routes,islands,src}/*`                      |
-| Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                | `apps/runtime/src/orchestrator/launcher.ts`            |
-| Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                            | `apps/daemon/src/main.ts`                              |
-| Control plane       | Persist/list/mark control requests, persist/load status snapshots                                  | `apps/runtime/src/orchestrator/control_plane.ts`       |
+| Area                | Primary responsibility                                                                                 | Key modules                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| CLI surface         | Parse commands, load/init CLI+daemon+shared config, enqueue control requests, render status            | `apps/cli/src/*`                                       |
+| Web app             | Render authenticated operator views, serve local JSON endpoints, and run small guided workflows        | `apps/web/{routes,islands,src}/*`                      |
+| Launcher            | Spawn daemon with narrowed read/write permissions and env overrides                                    | `apps/runtime/src/orchestrator/launcher.ts`            |
+| Daemon bootstrap    | Load daemon/shared/user config, init loggers/stores, enter runtime loop                                | `apps/daemon/src/main.ts`                              |
+| Control plane       | Persist/list/mark control requests, persist/load status snapshots                                      | `apps/runtime/src/orchestrator/control_plane.ts`       |
 | Provider ingestion  | Discover/watch provider source files, parse incremental events, and project provider-session snapshots | `apps/daemon/src/orchestrator/provider_ingestion.ts`   |
-| Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache             | `apps/runtime/src/orchestrator/session_state_store.ts` |
-| Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                 | `apps/daemon/src/writer/*`                             |
-| Workspace layer     | Registry + workspace profile/template resolution                                                   | `apps/runtime/src/workspace/*`                         |
-| Observability       | Structured operational/audit events for CLI, daemon, and web                                       | `apps/runtime/src/observability/*`                     |
+| Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache                 | `apps/runtime/src/orchestrator/session_state_store.ts` |
+| Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                     | `apps/daemon/src/writer/*`                             |
+| Workspace layer     | Registry + workspace profile/template resolution                                                       | `apps/runtime/src/workspace/*`                         |
+| Observability       | Structured operational/audit events for CLI, daemon, and web                                           | `apps/runtime/src/observability/*`                     |
 
 ## Daemon Subsystems
 
