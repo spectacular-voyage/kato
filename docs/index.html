@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -27,6 +27,7 @@
           <nav class="site-nav" aria-label="Primary">
             <a href="#why-kato">Why Kato</a>
             <a href="#compatibility">Compatibility</a>
+            <a href="#install">Install</a>
             <a href="#quickstart">Quickstart</a>
             <a href="https://github.com/spectacular-voyage/kato">Learn more</a>
           </nav>
@@ -168,8 +169,8 @@ kato workspace register --alias default
 
         <section class="section story-section">
           <div class="story-copy">
-            <p class="eyebrow">Why Kato feels different</p>
-            <h2>It treats AI conversations like first-class work product.</h2>
+            <p class="eyebrow">What Kato Changes</p>
+            <h2>Kato treats AI conversations like first-class work product.</h2>
             <p>
               If you are already building with AI, you are already generating a
               steady stream of useful project history. For most people, that
@@ -180,8 +181,8 @@ kato workspace register --alias default
             </p>
             <p>
               That matters for solo builders who want better recall, and even
-              more for teams who need continuity across sessions, machines, and
-              assistants.
+              more for teams who need continuity across sessions, machines,
+              contributors, and assistants.
             </p>
           </div>
 
@@ -198,7 +199,11 @@ kato workspace register --alias default
               <p class="comparison-label">With Kato</p>
               <ul class="comparison-list">
                 <li>Sessions become files you can keep, search, and reuse.</li>
-                <li>Markdown exports fit notes, repos, and team docs.</li>
+                <li>
+                  Conversation outputs can land in local folders, checked-out
+                  repos, or shared team folders. They can fan out to multiple
+                  destinations when you need that.
+                </li>
                 <li>Conversation history stays yours as tools change.</li>
               </ul>
             </div>
@@ -209,10 +214,7 @@ kato workspace register --alias default
           <div class="section-heading">
             <p class="eyebrow">Compatibility</p>
             <h2>Works with the assistants people are already using.</h2>
-            <p>
-              Kato currently supports the following capture targets from the
-              README-backed compatibility list.
-            </p>
+            <p>Kato currently supports the following capture targets:</p>
           </div>
 
           <div class="compatibility-grid">
@@ -238,9 +240,9 @@ kato workspace register --alias default
               Start with a prebuilt binary. No local compile step required.
             </h2>
             <p>
-              The npm package installs prebuilt binaries. You can also download
-              a bundle from GitHub Releases and place it on your <code
-              >PATH</code>.
+              The npm package installs prebuilt binaries for Windows, MacOS or
+              Linux. You can also download a bundle from GitHub Releases and
+              place it on your <code>PATH</code>.
             </p>
           </div>
 
@@ -270,9 +272,7 @@ kato workspace register --alias default
           <div class="quickstart-grid">
             <article class="command-card quickstart-setup-card">
               <p class="card-label">Setup</p>
-              <pre
-                class="quickstart-setup-terminal"
-              ><code>kato init
+              <pre class="quickstart-setup-terminal"><code>kato init
 kato start
 mkdir chats-default
 cd chats-default
@@ -328,7 +328,8 @@ kato workspace register --alias default</code></pre>
                 See
                 <a
                   href="https://github.com/spectacular-voyage/kato?tab=readme-ov-file#in-chat-commands"
-                >In-Chat Commands</a>
+                  >In-Chat Commands</a
+                >
                 for the full command set.
               </p>
             </article>
@@ -354,20 +355,20 @@ kato web start</code></pre>
                 and the rest of the command surface. Start there, then make your
                 AI workflow durable.
               </p>
-              <div class="cta-actions cta-actions-tiles">
-                <a
-                  class="button button-primary button-tile"
-                  href="https://github.com/spectacular-voyage/kato"
-                >
-                  Open the repository
-                </a>
-                <a
-                  class="button button-secondary button-tile"
-                  href="https://github.com/spectacular-voyage/kato/releases"
-                >
-                  Browse releases
-                </a>
-              </div>
+            </div>
+            <div class="cta-actions cta-actions-tiles">
+              <a
+                class="button button-primary button-tile"
+                href="https://github.com/spectacular-voyage/kato"
+              >
+                Open the repository
+              </a>
+              <a
+                class="button button-secondary button-tile"
+                href="https://github.com/spectacular-voyage/kato/releases"
+              >
+                Browse releases
+              </a>
             </div>
           </div>
         </section>

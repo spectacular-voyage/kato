@@ -719,10 +719,15 @@ p {
 }
 
 .cta-panel {
-  padding: 1.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  padding: 2.1rem 2.25rem;
 }
 
 .cta-copy {
+  flex: 1;
   max-width: 46rem;
 }
 
@@ -747,9 +752,11 @@ p {
 }
 
 .cta-actions-tiles {
+  flex-direction: column;
   justify-content: flex-start;
-  align-items: stretch;
-  margin-top: 1.3rem;
+  align-items: flex-end;
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .button-tile {
@@ -802,6 +809,10 @@ p {
   .cta-panel,
   .site-footer {
     display: grid;
+  }
+
+  .cta-actions-tiles {
+    align-items: flex-start;
   }
 }
 
@@ -882,8 +893,8 @@ p {
   }
 
   .cta-actions-tiles .button-tile {
-    width: calc(50% - 0.45rem);
-    min-height: 8.5rem;
+    width: 100%;
+    min-height: 8rem;
   }
 
   .comparison-card {

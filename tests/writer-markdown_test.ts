@@ -606,7 +606,9 @@ Deno.test(
     assertStringIncludes(rendered, "[OpenAI](https://openai.com)");
     assertStringIncludes(rendered, "[section](#local-anchor)");
     assertEquals(
-      rendered.includes("/workspace/documentation/notes/dev.general-guidance.md"),
+      rendered.includes(
+        "/workspace/documentation/notes/dev.general-guidance.md",
+      ),
       false,
     );
   },
@@ -717,7 +719,9 @@ Deno.test(
     );
     assertStringIncludes(rendered, "![diagram](../assets/diagram.png)");
     assertEquals(
-      rendered.includes("/workspace/documentation/notes/dev.general-guidance.md"),
+      rendered.includes(
+        "/workspace/documentation/notes/dev.general-guidance.md",
+      ),
       false,
     );
   },
