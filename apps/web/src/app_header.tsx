@@ -2,6 +2,7 @@ import type { AppChromeStatus } from "./loaders/status.ts";
 import HeaderStatusLive from "../islands/HeaderStatusLive.tsx";
 import { BRAND_ASSET_PUBLIC_PATHS } from "./brand_assets.ts";
 import { HeaderStatusStack } from "./header_status.tsx";
+import { WEB_APP_VERSION } from "./version.ts";
 
 interface AppHeaderProps {
   title: string;
@@ -50,7 +51,9 @@ export default function AppHeader(props: AppHeaderProps) {
             )
             : null}
           <div class="app-header-copy">
-            <p class="mono muted app-eyebrow">kato operator console</p>
+            <p class="mono muted app-eyebrow">
+              kato web console v{WEB_APP_VERSION}
+            </p>
             <h1>{props.title}</h1>
             <p class="app-description">{props.description}</p>
           </div>
