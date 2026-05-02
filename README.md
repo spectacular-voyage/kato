@@ -10,9 +10,9 @@ Kato captures AI conversations from supported IDEs, CLIs, and local apps into fi
 - `Claude Code`: VS Code, CLI, local app
 - `Gemini`: VS Code, CLI
 
-## Install
+## Install / Upgrade
 
-Primary install:
+Use the same command to install or upgrade Kato:
 
 ```bash
 npm install -g @spectacular-voyage/kato

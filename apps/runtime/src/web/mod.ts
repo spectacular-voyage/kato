@@ -31,8 +31,16 @@ export interface WebServerStatusStoreLike {
   save(status: WebServerStatus): Promise<void>;
 }
 
+export interface WebProcessLaunchResult {
+  pid: number;
+  buildLatencyMs?: number;
+}
+
 export interface WebProcessLauncherLike {
   launchDetached(options: { hostname: string; port: number }): Promise<number>;
+  launchDetachedDetailed?(
+    options: { hostname: string; port: number },
+  ): Promise<WebProcessLaunchResult>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -291,6 +299,73 @@ function resolveWebAppRoot(workspaceRoot: string): string {
   return join(workspaceRoot, "apps", "web");
 }
 
+async function isSourceWebBuildCurrent(
+  workspaceRoot: string,
+  webAppRoot: string,
+): Promise<boolean> {
+  const outputStat = await statOptional(
+    join(webAppRoot, "_fresh", "server.js"),
+  );
+  const outputMtimeMs = outputStat?.mtime?.getTime();
+  if (!outputStat?.isFile || outputMtimeMs === undefined) {
+    return false;
+  }
+
+  const sourceRoots = [
+    webAppRoot,
+    join(workspaceRoot, "apps", "runtime", "src"),
+    join(workspaceRoot, "shared", "src"),
+  ];
+
+  for (const root of sourceRoots) {
+    if (await hasFileNewerThan(root, outputMtimeMs)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function statOptional(path: string): Promise<Deno.FileInfo | undefined> {
+  try {
+    return await Deno.stat(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function hasFileNewerThan(
+  root: string,
+  timestampMs: number,
+): Promise<boolean> {
+  const rootStat = await statOptional(root);
+  if (!rootStat) {
+    return false;
+  }
+  if (rootStat.isFile) {
+    return (rootStat.mtime?.getTime() ?? 0) > timestampMs;
+  }
+  if (!rootStat.isDirectory) {
+    return false;
+  }
+
+  for await (const entry of Deno.readDir(root)) {
+    if (
+      entry.name === "_fresh" ||
+      entry.name === "node_modules" ||
+      entry.name === ".git"
+    ) {
+      continue;
+    }
+    if (await hasFileNewerThan(join(root, entry.name), timestampMs)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function toShellSingleQuoted(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
@@ -327,6 +402,15 @@ function parseDetachedPid(stdoutText: string): number | undefined {
   return undefined;
 }
 
+function parseBuildLatencyMs(stdoutText: string): number | undefined {
+  const match = stdoutText.match(/^KATO_BUILD_MS=(\d+)$/m);
+  if (!match) {
+    return undefined;
+  }
+  const value = Number.parseInt(match[1], 10);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
   constructor(
     private readonly denoExecPath: string = Deno.execPath(),
@@ -341,7 +425,7 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     executablePath: string,
     args: string[],
     workingDirectory: string,
-  ): Promise<number> {
+  ): Promise<WebProcessLaunchResult> {
     const quotedCommand = [executablePath, ...args].map(
       toShellSingleQuoted,
     ).join(" ");
@@ -374,11 +458,13 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return pid;
+      return { pid };
     });
   }
 
-  private launchDetachedScriptViaShell(script: string): Promise<number> {
+  private launchDetachedScriptViaShell(
+    script: string,
+  ): Promise<WebProcessLaunchResult> {
     const command = this.commandFactory("sh", {
       args: ["-lc", script],
       stdin: "null",
@@ -405,7 +491,10 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return pid;
+      return {
+        pid,
+        buildLatencyMs: parseBuildLatencyMs(stdoutText),
+      };
     });
   }
 
@@ -413,7 +502,7 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     executablePath: string,
     args: string[],
     workingDirectory: string,
-  ): Promise<number> {
+  ): Promise<WebProcessLaunchResult> {
     const startProcessArgs = args.length > 0
       ? `$argList = @(${args.map(toPowerShellSingleQuoted).join(", ")});
 $proc = Start-Process -FilePath ${
@@ -461,11 +550,13 @@ ${startProcessArgs}
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return pid;
+      return { pid };
     });
   }
 
-  private launchDetachedScriptViaPowerShell(script: string): Promise<number> {
+  private launchDetachedScriptViaPowerShell(
+    script: string,
+  ): Promise<WebProcessLaunchResult> {
     const encodedCommand = toPowerShellEncodedCommand(script);
     const command = this.commandFactory("powershell.exe", {
       args: [
@@ -498,13 +589,22 @@ ${startProcessArgs}
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return pid;
+      return {
+        pid,
+        buildLatencyMs: parseBuildLatencyMs(stdoutText),
+      };
     });
   }
 
   launchDetached(
     options: { hostname: string; port: number },
   ): Promise<number> {
+    return this.launchDetachedDetailed(options).then((result) => result.pid);
+  }
+
+  async launchDetachedDetailed(
+    options: { hostname: string; port: number },
+  ): Promise<WebProcessLaunchResult> {
     const installedExecutablePath = this.options.installedExecutablePath;
     const webAppRoot = installedExecutablePath
       ? dirname(installedExecutablePath)
@@ -522,14 +622,24 @@ ${startProcessArgs}
       Deno.build.os === "windows"
     ) {
       if (!installedExecutablePath) {
-        const script = `$ErrorActionPreference = 'Stop';
-Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
+        const buildCurrent = await isSourceWebBuildCurrent(
+          this.workspaceRoot,
+          webAppRoot,
+        );
+        const buildScript = buildCurrent
+          ? `[Console]::Out.WriteLine("KATO_BUILD_MS=0");`
+          : `$buildStartedAt = Get-Date;
 & ${
-          toPowerShellSingleQuoted(executablePath)
-        } 'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build';
+            toPowerShellSingleQuoted(executablePath)
+          } 'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build';
 if ($LASTEXITCODE -ne 0) {
   throw "vite build failed with exit code $LASTEXITCODE"
 }
+$buildLatencyMs = [int]((Get-Date) - $buildStartedAt).TotalMilliseconds;
+[Console]::Out.WriteLine("KATO_BUILD_MS=$buildLatencyMs");`;
+        const script = `$ErrorActionPreference = 'Stop';
+Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
+${buildScript}
 $argList = @('serve', '--node-modules-dir=auto', '-A', '--host', ${
           toPowerShellSingleQuoted(options.hostname)
         }, '--port', ${
@@ -551,6 +661,10 @@ $proc = Start-Process -FilePath ${
     }
 
     if (!installedExecutablePath) {
+      const buildCurrent = await isSourceWebBuildCurrent(
+        this.workspaceRoot,
+        webAppRoot,
+      );
       const quotedBuildCommand = [
         executablePath,
         "run",
@@ -571,9 +685,17 @@ $proc = Start-Process -FilePath ${
         String(options.port),
         "_fresh/server.js",
       ].map(toShellSingleQuoted).join(" ");
+      const quotedEpochMsCommand = [
+        executablePath,
+        "eval",
+        "console.log(Date.now())",
+      ].map(toShellSingleQuoted).join(" ");
+      const buildScript = buildCurrent
+        ? "printf 'KATO_BUILD_MS=0\\n'"
+        : `build_started_ms=$(${quotedEpochMsCommand}) && ${quotedBuildCommand} >/dev/null && build_finished_ms=$(${quotedEpochMsCommand}) && printf 'KATO_BUILD_MS=%s\\n' "$((build_finished_ms - build_started_ms))"`;
       const script = `cd ${
         toShellSingleQuoted(webAppRoot)
-      } && ${quotedBuildCommand} >/dev/null && if command -v setsid >/dev/null 2>&1; then setsid ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
+      } && ${buildScript} && if command -v setsid >/dev/null 2>&1; then setsid ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
       return this.launchDetachedScriptViaShell(script);
     }
 

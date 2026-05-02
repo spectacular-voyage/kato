@@ -560,7 +560,7 @@ Deno.test(
       assertEquals(startCode, 0);
       assertStringIncludes(
         startHarness.stdout.join(""),
-        "kato web started in background",
+        `kato web started in background (pid: ${launchedPid}) at http://127.0.0.1:3187/ in 0ms (build 0ms, launch 0ms, ack 0ms)`,
       );
       const savedStatus = await webStatusStore.load();
       assertEquals(savedStatus.running, true);
@@ -662,7 +662,7 @@ Deno.test(
         );
         assertStringIncludes(
           harness.stdout.join(""),
-          "kato web started in background",
+          `kato web started in background (pid: ${Deno.pid}) at http://127.0.0.1:3187/ in 1000ms (build 0ms, launch 0ms, ack 1000ms)`,
         );
         assertEquals(isProcessAlive(runningChild.pid), false);
         const savedStatus = await webStatusStore.load();

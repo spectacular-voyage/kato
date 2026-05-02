@@ -26,10 +26,12 @@ async function waitForWebStartupAck(
   ctx: DaemonCliCommandContext,
   launchedPid: number,
   launchedAtMs: number,
+  ackWaitStartedAtMs: number,
   url: string,
 ): Promise<{
   heartbeatAt: string;
-  ackLatencyMs: number;
+  totalLatencyMs: number;
+  ackWaitMs: number;
   version?: string;
 }> {
   const deadline = Date.now() + STARTUP_ACK_TIMEOUT_MS;
@@ -58,7 +60,8 @@ async function waitForWebStartupAck(
       if (Number.isFinite(heartbeatMs) && heartbeatMs >= launchedAtMs) {
         return {
           heartbeatAt: status.heartbeatAt,
-          ackLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
+          totalLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
+          ackWaitMs: Math.max(0, heartbeatMs - ackWaitStartedAtMs),
           version: status.version,
         };
       }
@@ -78,7 +81,8 @@ async function waitForWebStartupAck(
       response.body?.cancel();
       return {
         heartbeatAt: new Date().toISOString(),
-        ackLatencyMs: Math.max(0, Date.now() - launchedAtMs),
+        totalLatencyMs: Math.max(0, Date.now() - launchedAtMs),
+        ackWaitMs: Math.max(0, Date.now() - ackWaitStartedAtMs),
         version: status?.version,
       };
     } catch {
@@ -306,14 +310,32 @@ export async function runWebStartCommand(
     return;
   }
 
-  const launchedAtMs = ctx.runtime.now().getTime();
-  const pid = await ctx.webLauncher.launchDetached({
-    hostname: ctx.webConfig.hostname,
-    port: ctx.webConfig.port,
-  });
+  const launchStartedAtMs = ctx.runtime.now().getTime();
+  const launchResult = ctx.webLauncher.launchDetachedDetailed
+    ? await ctx.webLauncher.launchDetachedDetailed({
+      hostname: ctx.webConfig.hostname,
+      port: ctx.webConfig.port,
+    })
+    : {
+      pid: await ctx.webLauncher.launchDetached({
+        hostname: ctx.webConfig.hostname,
+        port: ctx.webConfig.port,
+      }),
+    };
+  const pid = launchResult.pid;
+  const launchCompletedAtMs = ctx.runtime.now().getTime();
+  const launchLatencyMs = Math.max(0, launchCompletedAtMs - launchStartedAtMs);
+  const buildLatencyMs = launchResult.buildLatencyMs ?? 0;
+  const detachLatencyMs = Math.max(0, launchLatencyMs - buildLatencyMs);
   const url = `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`;
-  const startedAt = new Date(launchedAtMs).toISOString();
-  const ack = await waitForWebStartupAck(ctx, pid, launchedAtMs, url).catch(
+  const startedAt = new Date(launchStartedAtMs).toISOString();
+  const ack = await waitForWebStartupAck(
+    ctx,
+    pid,
+    launchStartedAtMs,
+    launchCompletedAtMs,
+    url,
+  ).catch(
     async (error) => {
       await ctx.webStatusStore.save({
         schemaVersion: 1,
@@ -347,7 +369,11 @@ export async function runWebStartCommand(
       port: ctx.webConfig.port,
       url,
       startupAckHeartbeatAt: ack.heartbeatAt,
-      startupAckLatencyMs: ack.ackLatencyMs,
+      startupAckLatencyMs: ack.totalLatencyMs,
+      startupLaunchLatencyMs: launchLatencyMs,
+      startupBuildLatencyMs: buildLatencyMs,
+      startupDetachLatencyMs: detachLatencyMs,
+      startupAckWaitMs: ack.ackWaitMs,
       version: ack.version,
     },
   );
@@ -357,11 +383,15 @@ export async function runWebStartCommand(
     port: ctx.webConfig.port,
     url,
     startupAckHeartbeatAt: ack.heartbeatAt,
-    startupAckLatencyMs: ack.ackLatencyMs,
+    startupAckLatencyMs: ack.totalLatencyMs,
+    startupLaunchLatencyMs: launchLatencyMs,
+    startupBuildLatencyMs: buildLatencyMs,
+    startupDetachLatencyMs: detachLatencyMs,
+    startupAckWaitMs: ack.ackWaitMs,
     version: ack.version,
   });
   ctx.runtime.writeStdout(
-    `kato web started in background (pid: ${pid}) at ${url}\n`,
+    `kato web started in background (pid: ${pid}) at ${url} in ${ack.totalLatencyMs}ms (build ${buildLatencyMs}ms, launch ${detachLatencyMs}ms, ack ${ack.ackWaitMs}ms)\n`,
   );
 }
 

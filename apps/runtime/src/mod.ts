@@ -208,6 +208,7 @@ export {
 } from "./session_history.ts";
 export type {
   WebProcessLauncherLike,
+  WebProcessLaunchResult,
   WebServerStatus,
   WebServerStatusStoreLike,
 } from "./web/mod.ts";

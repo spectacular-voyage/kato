@@ -86,12 +86,81 @@ Deno.test(
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
+        "KATO_BUILD_MS",
+      );
+      assertStringIncludes(
+        capturedOptions?.args?.[1] ?? "",
         "setsid '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
         "nohup '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
+    });
+  },
+);
+
+Deno.test(
+  "DenoDetachedWebLauncher skips source build when Fresh output is current",
+  async () => {
+    if (Deno.build.os === "windows") {
+      return;
+    }
+
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+
+    await withTestTempDir("web-launcher-current-", async (workspaceRoot) => {
+      const webRoot = join(workspaceRoot, "apps", "web");
+      await Deno.mkdir(join(webRoot, "_fresh"), { recursive: true });
+      await Deno.mkdir(join(webRoot, "routes"), { recursive: true });
+      await Deno.mkdir(join(workspaceRoot, "apps", "runtime", "src"), {
+        recursive: true,
+      });
+      await Deno.mkdir(join(workspaceRoot, "shared", "src"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(join(webRoot, "routes", "index.tsx"), "route");
+      await Deno.writeTextFile(
+        join(workspaceRoot, "apps", "runtime", "src", "mod.ts"),
+        "runtime",
+      );
+      await Deno.writeTextFile(
+        join(workspaceRoot, "shared", "src", "mod.ts"),
+        "shared",
+      );
+      await Deno.writeTextFile(join(webRoot, "_fresh", "server.js"), "server");
+
+      const launcher = new DenoDetachedWebLauncher(
+        "/fake/deno",
+        workspaceRoot,
+        (_command, options) => {
+          capturedOptions = options;
+          return {
+            spawn() {
+              throw new Error("unexpected spawn call");
+            },
+            output() {
+              return Promise.resolve({
+                code: 0,
+                stdout: new TextEncoder().encode("12345\n"),
+                stderr: new Uint8Array(),
+              });
+            },
+          };
+        },
+      );
+
+      const result = await launcher.launchDetachedDetailed({
+        hostname: "127.0.0.1",
+        port: 5173,
+      });
+
+      assertEquals(result.pid, 12345);
+      const script = capturedOptions?.args?.[1] ?? "";
+      assertStringIncludes(script, "KATO_BUILD_MS=0");
+      assertEquals(script.includes("'vite' 'build'"), false);
     });
   },
 );
@@ -143,6 +212,7 @@ Deno.test(
       decoded,
       "'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build'",
     );
+    assertStringIncludes(decoded, "KATO_BUILD_MS");
     assertStringIncludes(decoded, "$LASTEXITCODE -ne 0");
     assertStringIncludes(
       decoded,
@@ -186,13 +256,13 @@ Deno.test(
           executablePath: string,
           args: string[],
           workingDirectory: string,
-        ): Promise<number>;
+        ): Promise<{ pid: number }>;
       }
     ).launchDetachedViaPowerShell(
       "/fake/deno",
       ["run", "--ext=js", "-A", "vite", "--port", "3173"],
       "C:\\repo\\apps\\web",
-    );
+    ).then((result) => result.pid);
 
     assertEquals(pid, 4321);
     assertEquals(capturedCommand, "powershell.exe");
@@ -237,7 +307,7 @@ Deno.test(
               executablePath: string,
               args: string[],
               workingDirectory: string,
-            ): Promise<number>;
+            ): Promise<{ pid: number }>;
           }
         ).launchDetachedViaPowerShell(
           "/fake/deno",
@@ -273,7 +343,7 @@ Deno.test(
               executablePath: string,
               args: string[],
               workingDirectory: string,
-            ): Promise<number>;
+            ): Promise<{ pid: number }>;
           }
         ).launchDetachedViaPowerShell(
           "/fake/deno",
@@ -304,6 +374,7 @@ Deno.test(
                 "vite v7.3.1 building client environment for production...",
                 "transforming...",
                 "✓ 2 modules transformed.",
+                "KATO_BUILD_MS=1234",
                 "29284",
                 "",
               ].join("\n"),
@@ -314,13 +385,16 @@ Deno.test(
       }),
     );
 
-    const pid = await (
+    const result = await (
       launcher as unknown as {
-        launchDetachedScriptViaPowerShell(script: string): Promise<number>;
+        launchDetachedScriptViaPowerShell(
+          script: string,
+        ): Promise<{ pid: number; buildLatencyMs?: number }>;
       }
     ).launchDetachedScriptViaPowerShell("Write-Output 'stub'");
 
-    assertEquals(pid, 29284);
+    assertEquals(result.pid, 29284);
+    assertEquals(result.buildLatencyMs, 1234);
   },
 );
 
