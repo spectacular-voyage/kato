@@ -345,3 +345,73 @@ perf(web): skip unchanged source builds on web start
 ```
 
 I’d exclude `documentation/notes/conv.2026.2026-05-02_1224-kato-tweaks-codex.md` unless you intentionally want the conversation note in this commit.
+
+# djradon_2026-05-03_1008_23
+
+Is "pnpm add -g @spectacular-voyage/kato" really the right command to install and update kato? I tried it for upgrade and the command succeeded but the upgrade didn't happen. But maybe I'd installed with both npm and pnpm
+
+# gpt-5.5_2026-05-03_1008_23
+
+I’ll verify what the local toolchain says and check which `kato` binary your shell is actually resolving. That should distinguish “wrong pnpm command” from “npm and pnpm both installed different copies.”
+
+Your active `kato` is coming from pnpm, not npm: `/home/djradon/.local/share/pnpm/kato`, and it reports `0.2.11`. npm’s global list does not show Kato. I’m checking pnpm’s global package metadata directly because `pnpm list -g` hit a local write-access check in this sandbox.
+
+The README wording should be stricter. Plain `pnpm add -g @spectacular-voyage/kato` is a valid install command, but it can preserve the existing global dependency range/lock state instead of forcing the newest published version. I’m updating the README to use `@latest` for install/upgrade and call out `pnpm update -g --latest` for already-installed pnpm globals.
+
+Short answer: `pnpm add -g @spectacular-voyage/kato` is valid for install, but it is not the best upgrade instruction. For upgrades, use:
+
+```bash
+pnpm update -g @spectacular-voyage/kato --latest
+```
+
+or force the tag explicitly:
+
+```bash
+pnpm add -g @spectacular-voyage/kato@latest
+```
+
+On your machine, the active `kato` is pnpm-managed:
+
+```text
+/home/djradon/.local/share/pnpm/kato
+kato 0.2.11
+```
+
+npm’s global list did not show Kato, so this does not look like npm shadowing pnpm right now.
+
+I updated [README.md](../../README.md:13) to use `@latest` for installs and `pnpm update -g ... --latest` for pnpm upgrades. No tests run; docs-only change.
+
+# djradon_2026-05-03_1008_23
+
+Is "pnpm add -g @spectacular-voyage/kato" really the right command to install and update kato? I tried it for upgrade and the command succeeded but the upgrade didn't happen. But maybe I'd installed with both npm and pnpm
+
+# gpt-5.5_2026-05-03_1008_23
+
+I’ll verify what the local toolchain says and check which `kato` binary your shell is actually resolving. That should distinguish “wrong pnpm command” from “npm and pnpm both installed different copies.”
+
+Your active `kato` is coming from pnpm, not npm: `/home/djradon/.local/share/pnpm/kato`, and it reports `0.2.11`. npm’s global list does not show Kato. I’m checking pnpm’s global package metadata directly because `pnpm list -g` hit a local write-access check in this sandbox.
+
+The README wording should be stricter. Plain `pnpm add -g @spectacular-voyage/kato` is a valid install command, but it can preserve the existing global dependency range/lock state instead of forcing the newest published version. I’m updating the README to use `@latest` for install/upgrade and call out `pnpm update -g --latest` for already-installed pnpm globals.
+
+Short answer: `pnpm add -g @spectacular-voyage/kato` is valid for install, but it is not the best upgrade instruction. For upgrades, use:
+
+```bash
+pnpm update -g @spectacular-voyage/kato --latest
+```
+
+or force the tag explicitly:
+
+```bash
+pnpm add -g @spectacular-voyage/kato@latest
+```
+
+On your machine, the active `kato` is pnpm-managed:
+
+```text
+/home/djradon/.local/share/pnpm/kato
+kato 0.2.11
+```
+
+npm’s global list did not show Kato, so this does not look like npm shadowing pnpm right now.
+
+I updated [README.md](../../README.md:13) to use `@latest` for installs and `pnpm update -g ... --latest` for pnpm upgrades. No tests run; docs-only change.

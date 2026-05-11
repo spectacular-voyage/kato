@@ -21,6 +21,7 @@ import {
   type DaemonProcessLauncherLike,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
+  defaultWebPortSelector,
   DenoDetachedDaemonLauncher,
   DenoDetachedWebLauncher,
   resolveDefaultCliConfigPath,
@@ -36,6 +37,7 @@ import {
   type SharedBehaviorConfigStoreLike,
   WebConfigFileStore,
   type WebConfigStoreLike,
+  type WebPortSelectorLike,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
   type WebServerStatusStoreLike,
@@ -102,6 +104,7 @@ export interface RunDaemonCliOptions {
   webConfigStore?: WebConfigStoreLike;
   webStatusStore?: WebServerStatusStoreLike;
   webLauncher?: WebProcessLauncherLike;
+  webPortSelector?: WebPortSelectorLike;
   autoInitOnStart?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -599,6 +602,7 @@ export async function runDaemonCli(
   const daemonLauncher = options.daemonLauncher ??
     createDefaultDaemonLauncher(effectiveRuntime);
   const webLauncher = options.webLauncher ?? createDefaultWebLauncher();
+  const webPortSelector = options.webPortSelector ?? defaultWebPortSelector;
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
       allowedRoots: sharedConfig.allowedWriteRoots,
@@ -645,6 +649,7 @@ export async function runDaemonCli(
     webConfig,
     webStatusStore,
     webLauncher,
+    webPortSelector,
     statusStore,
     controlStore,
     daemonLauncher,

@@ -5,6 +5,8 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
 const WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS = 250;
+const DEFAULT_WEB_PORT_SCAN_LIMIT = 100;
+const WSL_OS_RELEASE_PATH = "/proc/sys/kernel/osrelease";
 const UTF8_DECODER = new TextDecoder();
 
 type CachedPowerShellResult = {
@@ -41,6 +43,16 @@ export interface WebProcessLauncherLike {
   launchDetachedDetailed?(
     options: { hostname: string; port: number },
   ): Promise<WebProcessLaunchResult>;
+}
+
+export interface WebPortSelectionOptions {
+  hostname: string;
+  preferredPort: number;
+  maxAttempts?: number;
+}
+
+export interface WebPortSelectorLike {
+  selectAvailablePort(options: WebPortSelectionOptions): Promise<number>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -284,6 +296,168 @@ type DenoCommandFactory = (
   command: string,
   options: DenoCommandOptions,
 ) => CommandLike;
+interface WebTcpListenOptions {
+  hostname?: string;
+  port: number;
+  transport?: "tcp";
+}
+type DenoListenFactory = (options: WebTcpListenOptions) => Deno.Listener;
+
+export interface SelectAvailableWebPortDeps {
+  listen?: DenoListenFactory;
+  readTextFile?: (path: string) => Promise<string>;
+  commandFactory?: DenoCommandFactory;
+  buildOs?: typeof Deno.build.os;
+}
+
+function validatePort(value: number, source: string): void {
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error(`${source} must be an integer between 1 and 65535`);
+  }
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  return error instanceof Deno.errors.AddrInUse ||
+    (error instanceof Error &&
+      (error.name === "AddrInUse" ||
+        error.message.toLowerCase().includes("address already in use")));
+}
+
+function canBindWebPort(
+  hostname: string,
+  port: number,
+  listen: DenoListenFactory,
+): boolean {
+  let listener: Deno.Listener | undefined;
+  try {
+    listener = listen({ hostname, port, transport: "tcp" });
+    return true;
+  } catch (error) {
+    if (isAddressInUseError(error)) {
+      return false;
+    }
+    throw error;
+  } finally {
+    try {
+      listener?.close();
+    } catch {
+      // The probe listener is best-effort and has no accepted connections.
+    }
+  }
+}
+
+function shouldProbeWindowsHostForPort(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "0.0.0.0" ||
+    normalized === "::";
+}
+
+async function isWslLinuxHost(
+  buildOs: typeof Deno.build.os,
+  readTextFile: (path: string) => Promise<string>,
+): Promise<boolean> {
+  if (buildOs !== "linux") {
+    return false;
+  }
+  try {
+    return /microsoft|wsl/i.test(await readTextFile(WSL_OS_RELEASE_PATH));
+  } catch {
+    return false;
+  }
+}
+
+function buildWindowsTcpListenerProbeScript(port: number): string {
+  return `$ErrorActionPreference = 'Stop';
+$port = ${port};
+$listeners = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners();
+foreach ($listener in $listeners) {
+  if ($listener.Port -eq $port) {
+    exit 0
+  }
+}
+exit 1`;
+}
+
+async function isWindowsHostPortListening(
+  port: number,
+  commandFactory: DenoCommandFactory,
+): Promise<boolean> {
+  let command: CommandLike;
+  try {
+    command = commandFactory("powershell.exe", {
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        toPowerShellEncodedCommand(buildWindowsTcpListenerProbeScript(port)),
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+      env: { CI: "true" },
+    });
+  } catch {
+    return false;
+  }
+
+  if (typeof command.output !== "function") {
+    return false;
+  }
+
+  try {
+    return (await command.output()).code === 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function selectAvailableWebPort(
+  options: WebPortSelectionOptions,
+  deps: SelectAvailableWebPortDeps = {},
+): Promise<number> {
+  validatePort(options.preferredPort, "preferredPort");
+  const maxAttempts = options.maxAttempts ?? DEFAULT_WEB_PORT_SCAN_LIMIT;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error("maxAttempts must be a positive integer");
+  }
+
+  const listen = deps.listen ?? ((listenOptions) => Deno.listen(listenOptions));
+  const readTextFile = deps.readTextFile ?? ((path) => Deno.readTextFile(path));
+  const commandFactory = deps.commandFactory ??
+    ((command, commandOptions) => new Deno.Command(command, commandOptions));
+  const buildOs = deps.buildOs ?? Deno.build.os;
+  const shouldProbeWindowsHost = shouldProbeWindowsHostForPort(
+    options.hostname,
+  ) && await isWslLinuxHost(buildOs, readTextFile);
+  const lastPort = Math.min(
+    65_535,
+    options.preferredPort + maxAttempts - 1,
+  );
+
+  for (let port = options.preferredPort; port <= lastPort; port += 1) {
+    if (!canBindWebPort(options.hostname, port, listen)) {
+      continue;
+    }
+    if (
+      shouldProbeWindowsHost &&
+      await isWindowsHostPortListening(port, commandFactory)
+    ) {
+      continue;
+    }
+    return port;
+  }
+
+  throw new Error(
+    `No available Kato Web port found from ${options.preferredPort} through ${lastPort}`,
+  );
+}
+
+export const defaultWebPortSelector: WebPortSelectorLike = {
+  selectAvailablePort: selectAvailableWebPort,
+};
 
 export interface DetachedWebLauncherOptions {
   installedExecutablePath?: string;

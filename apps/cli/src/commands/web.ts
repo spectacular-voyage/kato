@@ -293,7 +293,8 @@ export async function runWebInitCommand(
 export async function runWebStartCommand(
   ctx: DaemonCliCommandContext,
 ): Promise<void> {
-  if (!ctx.webConfig) {
+  const webConfig = ctx.webConfig;
+  if (!webConfig) {
     throw new Error(
       "Web config not found. Run `kato web init` before `kato web start`.",
     );
@@ -310,16 +311,21 @@ export async function runWebStartCommand(
     return;
   }
 
+  const selectedPort = await ctx.webPortSelector.selectAvailablePort({
+    hostname: webConfig.hostname,
+    preferredPort: webConfig.port,
+  });
+  const portFallback = selectedPort !== webConfig.port;
   const launchStartedAtMs = ctx.runtime.now().getTime();
   const launchResult = ctx.webLauncher.launchDetachedDetailed
     ? await ctx.webLauncher.launchDetachedDetailed({
-      hostname: ctx.webConfig.hostname,
-      port: ctx.webConfig.port,
+      hostname: webConfig.hostname,
+      port: selectedPort,
     })
     : {
       pid: await ctx.webLauncher.launchDetached({
-        hostname: ctx.webConfig.hostname,
-        port: ctx.webConfig.port,
+        hostname: webConfig.hostname,
+        port: selectedPort,
       }),
     };
   const pid = launchResult.pid;
@@ -327,7 +333,7 @@ export async function runWebStartCommand(
   const launchLatencyMs = Math.max(0, launchCompletedAtMs - launchStartedAtMs);
   const buildLatencyMs = launchResult.buildLatencyMs ?? 0;
   const detachLatencyMs = Math.max(0, launchLatencyMs - buildLatencyMs);
-  const url = `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`;
+  const url = `http://${webConfig.hostname}:${selectedPort}/`;
   const startedAt = new Date(launchStartedAtMs).toISOString();
   const ack = await waitForWebStartupAck(
     ctx,
@@ -340,8 +346,8 @@ export async function runWebStartCommand(
       await ctx.webStatusStore.save({
         schemaVersion: 1,
         running: false,
-        hostname: ctx.webConfig?.hostname,
-        port: ctx.webConfig?.port,
+        hostname: webConfig.hostname,
+        port: selectedPort,
         heartbeatAt: ctx.runtime.now().toISOString(),
         url,
       });
@@ -351,8 +357,8 @@ export async function runWebStartCommand(
   await ctx.webStatusStore.save({
     schemaVersion: 1,
     running: true,
-    hostname: ctx.webConfig.hostname,
-    port: ctx.webConfig.port,
+    hostname: webConfig.hostname,
+    port: selectedPort,
     pid,
     startedAt,
     heartbeatAt: ack.heartbeatAt,
@@ -365,8 +371,10 @@ export async function runWebStartCommand(
     "Web server startup acknowledged by runtime heartbeat",
     {
       pid,
-      hostname: ctx.webConfig.hostname,
-      port: ctx.webConfig.port,
+      hostname: webConfig.hostname,
+      port: selectedPort,
+      configuredPort: webConfig.port,
+      portFallback,
       url,
       startupAckHeartbeatAt: ack.heartbeatAt,
       startupAckLatencyMs: ack.totalLatencyMs,
@@ -379,8 +387,10 @@ export async function runWebStartCommand(
   );
   await ctx.auditLogger.command("web.start", {
     pid,
-    hostname: ctx.webConfig.hostname,
-    port: ctx.webConfig.port,
+    hostname: webConfig.hostname,
+    port: selectedPort,
+    configuredPort: webConfig.port,
+    portFallback,
     url,
     startupAckHeartbeatAt: ack.heartbeatAt,
     startupAckLatencyMs: ack.totalLatencyMs,
@@ -447,18 +457,29 @@ export async function runWebStatusCommand(
   const status = await ctx.webStatusStore.load();
   const alive = status.running && isProcessAlive(status.pid);
   const stale = status.running && !alive;
+  const useStoredEndpoint = alive || stale;
+  const hostname = useStoredEndpoint
+    ? status.hostname ?? ctx.webConfig?.hostname
+    : ctx.webConfig?.hostname ?? status.hostname;
+  const port = useStoredEndpoint
+    ? status.port ?? ctx.webConfig?.port
+    : ctx.webConfig?.port ?? status.port;
+  const url = useStoredEndpoint
+    ? status.url ??
+      (hostname && port ? `http://${hostname}:${port}/` : undefined)
+    : ctx.webConfig
+    ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
+    : status.url;
   const effective = {
     configured: ctx.webConfig !== undefined,
     running: alive,
     stale,
     state: alive ? "running" : "stopped",
-    hostname: ctx.webConfig?.hostname ?? status.hostname,
-    port: ctx.webConfig?.port ?? status.port,
+    hostname,
+    port,
     pid: alive || stale ? status.pid : undefined,
     heartbeatAt: status.heartbeatAt,
-    url: ctx.webConfig
-      ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
-      : status.url,
+    url,
     startedAt: alive || stale ? status.startedAt : undefined,
     version: status.version,
   };

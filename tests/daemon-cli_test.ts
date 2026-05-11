@@ -1603,7 +1603,7 @@ Deno.test(
       });
       const webConfig = createDefaultWebConfig({
         hostname: "127.0.0.1",
-        port: 3173,
+        port: 5173,
       });
       const webConfigStore = {
         getPath() {

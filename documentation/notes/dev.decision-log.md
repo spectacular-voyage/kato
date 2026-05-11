@@ -17,6 +17,37 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Kato Web Startup Selects an Available Local Port
+
+- Decision:
+  - Treat `kato-web-config.yaml` port as the preferred startup port, not a
+    guarantee.
+  - At `kato web start`, probe the configured port and then successive higher
+    ports until an available port is found.
+  - Use a local bind probe for the current OS namespace.
+  - When running under WSL on Linux and targeting localhost-style hosts, also
+    perform a best-effort Windows listener probe via `powershell.exe` so a
+    Windows-owned browser-visible localhost port is skipped.
+  - Do not rewrite the saved web config when a fallback port is selected.
+  - While Kato Web is running or stale, status surfaces report the actual
+    heartbeat/status endpoint rather than the configured preferred endpoint.
+- Owner: Kato engineering
+- Date: 2026-05-11
+- Why:
+  - Windows and WSL2 Kato Web instances can otherwise both believe they are
+    using `http://127.0.0.1:5173/`, while the browser-visible URL resolves to
+    the Windows process.
+  - Startup-time selection preserves a stable preferred config while adapting
+    to whichever local service is already running.
+- Tradeoffs:
+  - The Windows-side WSL probe is best-effort; if PowerShell interop is absent
+    or blocked, Kato falls back to the local bind probe instead of failing.
+  - Operators may see a running URL that differs from the configured preferred
+    port.
+- Follow-up tasks:
+  - Revisit exposing a configurable scan limit only if operators need more
+    than the default bounded upward scan.
+
 ### Workspace Markdown Output Relativizes Absolute Local Inline Links
 
 - Decision:

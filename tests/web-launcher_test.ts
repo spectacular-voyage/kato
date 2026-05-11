@@ -9,6 +9,7 @@ import {
   createDefaultWebServerStatus,
   DenoDetachedWebLauncher,
   isProcessAlive,
+  selectAvailableWebPort,
   WebServerStatusFileStore,
 } from "../apps/runtime/src/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
@@ -23,6 +24,119 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
   }
   return script;
 }
+
+function makeFakeListener(onClose: () => void = () => {}): Deno.Listener {
+  return {
+    addr: { transport: "tcp", hostname: "127.0.0.1", port: 0 },
+    accept() {
+      return Promise.reject(new Error("unused test listener"));
+    },
+    close() {
+      onClose();
+    },
+    ref() {},
+    unref() {},
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return Promise.resolve({
+            done: true,
+            value: undefined,
+          });
+        },
+      };
+    },
+  } as unknown as Deno.Listener;
+}
+
+Deno.test("selectAvailableWebPort returns the preferred port when it can bind", async () => {
+  let closed = false;
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile: () => Promise.resolve("Linux"),
+      listen(options) {
+        assertEquals((options as { port: number }).port, 5173);
+        return makeFakeListener(() => {
+          closed = true;
+        });
+      },
+    },
+  );
+
+  assertEquals(selected, 5173);
+  assertEquals(closed, true);
+});
+
+Deno.test("selectAvailableWebPort tries the next port after a local bind collision", async () => {
+  const attempts: number[] = [];
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile: () => Promise.resolve("Linux"),
+      listen(options) {
+        const port = (options as { port: number }).port;
+        attempts.push(port);
+        if (port === 5173) {
+          const error = new Error("Address already in use");
+          error.name = "AddrInUse";
+          throw error;
+        }
+        return makeFakeListener();
+      },
+    },
+  );
+
+  assertEquals(selected, 5174);
+  assertEquals(attempts, [5173, 5174]);
+});
+
+Deno.test("selectAvailableWebPort skips a Windows-host listener when running under WSL", async () => {
+  const bindAttempts: number[] = [];
+  const windowsProbePorts: number[] = [];
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile(path) {
+        assertEquals(path, "/proc/sys/kernel/osrelease");
+        return Promise.resolve("5.15.167.4-microsoft-standard-WSL2");
+      },
+      listen(options) {
+        bindAttempts.push((options as { port: number }).port);
+        return makeFakeListener();
+      },
+      commandFactory(_command, options) {
+        const decoded = decodePowerShellEncodedCommand(
+          String(options?.args?.[3] ?? ""),
+        );
+        const port = Number.parseInt(
+          decoded.match(/\$port = (\d+);/)?.[1] ?? "",
+          10,
+        );
+        windowsProbePorts.push(port);
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: port === 5173 ? 0 : 1,
+              stdout: new Uint8Array(),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+    },
+  );
+
+  assertEquals(selected, 5174);
+  assertEquals(bindAttempts, [5173, 5174]);
+  assertEquals(windowsProbePorts, [5173, 5174]);
+});
 
 Deno.test(
   "DenoDetachedWebLauncher builds then launches the bundled web server via detached shell",

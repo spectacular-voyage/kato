@@ -207,6 +207,9 @@ export {
   replayProviderSourceEvents,
 } from "./session_history.ts";
 export type {
+  SelectAvailableWebPortDeps,
+  WebPortSelectionOptions,
+  WebPortSelectorLike,
   WebProcessLauncherLike,
   WebProcessLaunchResult,
   WebServerStatus,
@@ -214,9 +217,11 @@ export type {
 } from "./web/mod.ts";
 export {
   createDefaultWebServerStatus,
+  defaultWebPortSelector,
   DenoDetachedWebLauncher,
   isProcessAlive,
   resolveDefaultWebStatusPath,
+  selectAvailableWebPort,
   terminateProcess,
   WebServerStatusFileStore,
 } from "./web/mod.ts";

@@ -592,6 +592,104 @@ Deno.test(
 );
 
 Deno.test(
+  "runDaemonCli web start uses selected fallback port and status reports it",
+  async () => {
+    await withTestTempDir("web-cli-port-fallback-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      const webStatusStore = new WebServerStatusFileStore(
+        join(rootDir, "web", "kato-web-status.json"),
+        () => new Date("2026-03-07T20:00:00.000Z"),
+      );
+      await webConfigStore.ensureInitialized(
+        await createInitializedWebConfig({
+          hostname: "127.0.0.1",
+          port: 3187,
+          username: "dj",
+          password: "secret-pass",
+        }),
+      );
+
+      const launchedPid = Deno.pid;
+      const selectedPorts: number[] = [];
+      const webLauncher: WebProcessLauncherLike = {
+        async launchDetached({ hostname, port }) {
+          await webStatusStore.save({
+            schemaVersion: 1,
+            running: true,
+            hostname,
+            port,
+            pid: launchedPid,
+            startedAt: "2026-03-07T20:00:00.000Z",
+            heartbeatAt: "2026-03-07T20:00:00.000Z",
+            url: `http://${hostname}:${port}/`,
+            version: "test-build",
+          });
+          return launchedPid;
+        },
+      };
+      const webPortSelector = {
+        selectAvailablePort(
+          { hostname, preferredPort }: {
+            hostname: string;
+            preferredPort: number;
+          },
+        ) {
+          assertEquals(hostname, "127.0.0.1");
+          assertEquals(preferredPort, 3187);
+          selectedPorts.push(3188);
+          return Promise.resolve(3188);
+        },
+      };
+
+      const startHarness = makeRuntimeHarness(runtimeDir);
+      const startCode = await runDaemonCli(["web", "start"], {
+        runtime: startHarness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+        webLauncher,
+        webPortSelector,
+      });
+
+      assertEquals(startCode, 0);
+      assertEquals(selectedPorts, [3188]);
+      assertStringIncludes(
+        startHarness.stdout.join(""),
+        "at http://127.0.0.1:3188/",
+      );
+      const savedStatus = await webStatusStore.load();
+      assertEquals(savedStatus.port, 3188);
+      assertEquals(savedStatus.url, "http://127.0.0.1:3188/");
+
+      const statusHarness = makeRuntimeHarness(runtimeDir);
+      const statusCode = await runDaemonCli(["web", "status", "--json"], {
+        runtime: statusHarness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+        webLauncher,
+        webPortSelector,
+      });
+
+      assertEquals(statusCode, 0);
+      const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
+        port: number;
+        url: string;
+      };
+      assertEquals(statusPayload.port, 3188);
+      assertEquals(statusPayload.url, "http://127.0.0.1:3188/");
+      assertEquals((await webConfigStore.load()).port, 3187);
+    });
+  },
+);
+
+Deno.test(
   "runDaemonCli web restart stops a running web process and starts it again",
   async () => {
     await withTestTempDir("web-cli-restart-", async (rootDir) => {
