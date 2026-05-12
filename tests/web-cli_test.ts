@@ -789,8 +789,35 @@ Deno.test(
         join(rootDir, "web", "kato-web-status.json"),
         () => new Date("2026-03-07T20:00:00.000Z"),
       );
+      const startupStdoutLogPath = join(
+        rootDir,
+        "web",
+        "logs",
+        "startup.stdout.log",
+      );
+      const startupStderrLogPath = join(
+        rootDir,
+        "web",
+        "logs",
+        "startup.stderr.log",
+      );
+      await Deno.mkdir(join(rootDir, "web", "logs"), { recursive: true });
+      await Deno.writeTextFile(
+        startupStdoutLogPath,
+        "deno serve: preparing\n",
+      );
+      await Deno.writeTextFile(
+        startupStderrLogPath,
+        "deno serve failed before listen\n",
+      );
       const webLauncher: WebProcessLauncherLike = {
         launchDetached: () => Promise.resolve(999999),
+        launchDetachedDetailed: () =>
+          Promise.resolve({
+            pid: 999999,
+            startupStdoutLogPath,
+            startupStderrLogPath,
+          }),
       };
 
       const initHarness = makeRuntimeHarness(runtimeDir, {
@@ -830,6 +857,12 @@ Deno.test(
       assertStringIncludes(
         startHarness.stderr.join(""),
         "startup acknowledgement",
+      );
+      assertStringIncludes(startHarness.stderr.join(""), startupStdoutLogPath);
+      assertStringIncludes(startHarness.stderr.join(""), startupStderrLogPath);
+      assertStringIncludes(
+        startHarness.stderr.join(""),
+        "deno serve failed before listen",
       );
 
       const savedStatus = await webStatusStore.load();

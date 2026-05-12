@@ -30,6 +30,8 @@ import {
   resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
   resolveDefaultWebConfigPath,
+  resolveDefaultWebStartupStderrLogPath,
+  resolveDefaultWebStartupStdoutLogPath,
   resolveDefaultWebStatusPath,
   resolveHomeDir,
   resolveInstalledExecutablePath,
@@ -301,7 +303,7 @@ function createDefaultDaemonLauncher(
   );
 }
 
-function createDefaultWebLauncher(): DenoDetachedWebLauncher {
+function createDefaultWebLauncher(katoDir: string): DenoDetachedWebLauncher {
   const launcherExecutablePath = Deno.execPath();
   const installedExecutablePath = resolveInstalledExecutablePath({
     envVarName: "KATO_WEB_BIN",
@@ -313,7 +315,11 @@ function createDefaultWebLauncher(): DenoDetachedWebLauncher {
     undefined,
     undefined,
     undefined,
-    { installedExecutablePath },
+    {
+      installedExecutablePath,
+      startupStdoutLogPath: resolveDefaultWebStartupStdoutLogPath(katoDir),
+      startupStderrLogPath: resolveDefaultWebStartupStderrLogPath(katoDir),
+    },
   );
 }
 
@@ -601,7 +607,8 @@ export async function runDaemonCli(
     );
   const daemonLauncher = options.daemonLauncher ??
     createDefaultDaemonLauncher(effectiveRuntime);
-  const webLauncher = options.webLauncher ?? createDefaultWebLauncher();
+  const webLauncher = options.webLauncher ??
+    createDefaultWebLauncher(effectiveKatoDir);
   const webPortSelector = options.webPortSelector ?? defaultWebPortSelector;
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({

@@ -220,6 +220,8 @@ export {
   defaultWebPortSelector,
   DenoDetachedWebLauncher,
   isProcessAlive,
+  resolveDefaultWebStartupStderrLogPath,
+  resolveDefaultWebStartupStdoutLogPath,
   resolveDefaultWebStatusPath,
   selectAvailableWebPort,
   terminateProcess,

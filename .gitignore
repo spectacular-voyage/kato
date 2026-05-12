@@ -15,6 +15,7 @@ apps/web/node_modules/
 # Editor and OS artifacts
 .DS_Store
 *.swp
+/Microsoft/Windows/PowerShell/ModuleAnalysisCache
 
 # Claude Code working directory
 .claude

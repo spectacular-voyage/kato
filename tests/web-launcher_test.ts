@@ -336,6 +336,76 @@ Deno.test(
 );
 
 Deno.test(
+  "DenoDetachedWebLauncher shell helper redirects startup output when log paths are provided",
+  async () => {
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+    const startupLogPaths = {
+      startupStdoutLogPath: "/tmp/kato startup stdout.log",
+      startupStderrLogPath: "/tmp/kato startup stderr.log",
+    };
+
+    const launcher = new DenoDetachedWebLauncher(
+      "/fake/deno",
+      "/repo",
+      (_command, options) => {
+        capturedOptions = options;
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: 0,
+              stdout: new TextEncoder().encode("4321\n"),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+    );
+
+    const result = await (
+      launcher as unknown as {
+        launchDetachedViaShell(
+          executablePath: string,
+          args: string[],
+          workingDirectory: string,
+          startupLogPaths: {
+            startupStdoutLogPath?: string;
+            startupStderrLogPath?: string;
+          },
+        ): Promise<{
+          pid: number;
+          startupStdoutLogPath?: string;
+          startupStderrLogPath?: string;
+        }>;
+      }
+    ).launchDetachedViaShell(
+      "/opt/kato/kato-web",
+      ["--host", "127.0.0.1", "--port", "5173"],
+      "/opt/kato",
+      startupLogPaths,
+    );
+
+    assertEquals(result.pid, 4321);
+    assertEquals(
+      result.startupStdoutLogPath,
+      startupLogPaths.startupStdoutLogPath,
+    );
+    assertEquals(
+      result.startupStderrLogPath,
+      startupLogPaths.startupStderrLogPath,
+    );
+    assertStringIncludes(
+      capturedOptions?.args?.[1] ?? "",
+      "> '/tmp/kato startup stdout.log' 2> '/tmp/kato startup stderr.log'",
+    );
+  },
+);
+
+Deno.test(
   "DenoDetachedWebLauncher PowerShell helper encodes Start-Process and returns the pid",
   async () => {
     let capturedCommand: string | undefined;
@@ -363,22 +433,43 @@ Deno.test(
         };
       },
     );
+    const startupLogPaths = {
+      startupStdoutLogPath: "C:\\logs\\kato startup stdout.log",
+      startupStderrLogPath: "C:\\logs\\kato startup stderr.log",
+    };
 
-    const pid = await (
+    const result = await (
       launcher as unknown as {
         launchDetachedViaPowerShell(
           executablePath: string,
           args: string[],
           workingDirectory: string,
-        ): Promise<{ pid: number }>;
+          startupLogPaths: {
+            startupStdoutLogPath?: string;
+            startupStderrLogPath?: string;
+          },
+        ): Promise<{
+          pid: number;
+          startupStdoutLogPath?: string;
+          startupStderrLogPath?: string;
+        }>;
       }
     ).launchDetachedViaPowerShell(
       "/fake/deno",
       ["run", "--ext=js", "-A", "vite", "--port", "3173"],
       "C:\\repo\\apps\\web",
-    ).then((result) => result.pid);
+      startupLogPaths,
+    );
 
-    assertEquals(pid, 4321);
+    assertEquals(result.pid, 4321);
+    assertEquals(
+      result.startupStdoutLogPath,
+      startupLogPaths.startupStdoutLogPath,
+    );
+    assertEquals(
+      result.startupStderrLogPath,
+      startupLogPaths.startupStderrLogPath,
+    );
     assertEquals(capturedCommand, "powershell.exe");
     assertEquals(capturedOptions?.args?.[0], "-NoProfile");
     assertEquals(capturedOptions?.args?.[1], "-NonInteractive");
@@ -387,9 +478,21 @@ Deno.test(
     const decoded = decodePowerShellEncodedCommand(
       capturedOptions?.args?.[3] ?? "",
     );
-    assertStringIncludes(decoded, "Start-Process -FilePath '/fake/deno'");
+    assertStringIncludes(decoded, "Start-Process -FilePath 'cmd.exe'");
     assertStringIncludes(decoded, "-WorkingDirectory 'C:\\repo\\apps\\web'");
-    assertStringIncludes(decoded, "'run', '--ext=js', '-A', 'vite'");
+    assertStringIncludes(
+      decoded,
+      "'/d', '/s', '/c'",
+    );
+    assertStringIncludes(
+      decoded,
+      '1> "C:\\logs\\kato startup stdout.log"',
+    );
+    assertStringIncludes(
+      decoded,
+      '2> "C:\\logs\\kato startup stderr.log"',
+    );
+    assertStringIncludes(decoded, '""/fake/deno" "run" "--ext=js" "-A" "vite"');
   },
 );
 

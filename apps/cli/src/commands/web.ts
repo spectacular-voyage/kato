@@ -12,14 +12,111 @@ import {
 
 const STARTUP_ACK_TIMEOUT_MS = 10_000;
 const STARTUP_ACK_POLL_INTERVAL_MS = 100;
+const STARTUP_LOG_TAIL_LINE_LIMIT = 20;
+const STARTUP_LOG_TAIL_CHAR_LIMIT = 4_000;
 const WEB_STOP_TIMEOUT_MS = 5_000;
 const WEB_STOP_KILL_TIMEOUT_MS = 1_000;
 const WEB_PASSWORD_ENV_VAR = "KATO_WEB_PASSWORD";
+
+interface WebStartupLogPaths {
+  startupStdoutLogPath?: string;
+  startupStderrLogPath?: string;
+}
+
+interface AcknowledgedWebStatus {
+  pid?: number;
+  version?: string;
+  heartbeatAt: string;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function readStartupLogTail(
+  path: string | undefined,
+): Promise<string | undefined> {
+  if (!path) {
+    return undefined;
+  }
+
+  let raw: string;
+  try {
+    raw = await Deno.readTextFile(path);
+  } catch {
+    return undefined;
+  }
+
+  const trimmed = raw.trimEnd();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const lineTail = trimmed.split(/\r?\n/).slice(-STARTUP_LOG_TAIL_LINE_LIMIT)
+    .join("\n");
+  if (lineTail.length <= STARTUP_LOG_TAIL_CHAR_LIMIT) {
+    return lineTail;
+  }
+  return lineTail.slice(lineTail.length - STARTUP_LOG_TAIL_CHAR_LIMIT);
+}
+
+async function buildWebStartupAckFailureMessage(
+  baseMessage: string,
+  startupLogPaths: WebStartupLogPaths,
+): Promise<string> {
+  const lines = [baseMessage];
+  if (startupLogPaths.startupStdoutLogPath) {
+    lines.push(`Startup stdout log: ${startupLogPaths.startupStdoutLogPath}`);
+  }
+  if (startupLogPaths.startupStderrLogPath) {
+    lines.push(`Startup stderr log: ${startupLogPaths.startupStderrLogPath}`);
+  }
+
+  const stderrTail = await readStartupLogTail(
+    startupLogPaths.startupStderrLogPath,
+  );
+  if (stderrTail) {
+    lines.push("Recent startup stderr output:", stderrTail);
+  }
+  const stdoutTail = await readStartupLogTail(
+    startupLogPaths.startupStdoutLogPath,
+  );
+  if (stdoutTail) {
+    lines.push("Recent startup stdout output:", stdoutTail);
+  }
+
+  return lines.join("\n");
+}
+
+function getAcknowledgedWebStatus(
+  status:
+    | Awaited<ReturnType<DaemonCliCommandContext["webStatusStore"]["load"]>>
+    | undefined,
+  launchedAtMs: number,
+  url: string,
+): AcknowledgedWebStatus | undefined {
+  if (!status?.running) {
+    return undefined;
+  }
+  const heartbeatMs = Date.parse(status.heartbeatAt);
+  if (!Number.isFinite(heartbeatMs) || heartbeatMs < launchedAtMs) {
+    return undefined;
+  }
+  const expectedUrl = new URL(url);
+  const expectedPort = Number.parseInt(expectedUrl.port, 10);
+  if (
+    status.hostname !== expectedUrl.hostname ||
+    status.port !== expectedPort
+  ) {
+    return undefined;
+  }
+  return {
+    pid: status.pid,
+    version: status.version,
+    heartbeatAt: status.heartbeatAt,
+  };
 }
 
 async function waitForWebStartupAck(
@@ -28,10 +125,12 @@ async function waitForWebStartupAck(
   launchedAtMs: number,
   ackWaitStartedAtMs: number,
   url: string,
+  startupLogPaths: WebStartupLogPaths = {},
 ): Promise<{
   heartbeatAt: string;
   totalLatencyMs: number;
   ackWaitMs: number;
+  pid?: number;
   version?: string;
 }> {
   const deadline = Date.now() + STARTUP_ACK_TIMEOUT_MS;
@@ -55,21 +154,24 @@ async function waitForWebStartupAck(
       continue;
     }
 
-    if (status.running && status.pid === launchedPid) {
-      const heartbeatMs = Date.parse(status.heartbeatAt);
-      if (Number.isFinite(heartbeatMs) && heartbeatMs >= launchedAtMs) {
-        return {
-          heartbeatAt: status.heartbeatAt,
-          totalLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
-          ackWaitMs: Math.max(0, heartbeatMs - ackWaitStartedAtMs),
-          version: status.version,
-        };
-      }
+    const acknowledged = getAcknowledgedWebStatus(status, launchedAtMs, url);
+    if (acknowledged) {
+      const heartbeatMs = Date.parse(acknowledged.heartbeatAt);
+      return {
+        heartbeatAt: acknowledged.heartbeatAt,
+        totalLatencyMs: Math.max(0, heartbeatMs - launchedAtMs),
+        ackWaitMs: Math.max(0, heartbeatMs - ackWaitStartedAtMs),
+        pid: acknowledged.pid,
+        version: acknowledged.version,
+      };
     }
 
     if (!isProcessAlive(launchedPid)) {
       throw new Error(
-        `Web server exited before startup acknowledgement (pid: ${launchedPid})`,
+        await buildWebStartupAckFailureMessage(
+          `Web server exited before startup acknowledgement (pid: ${launchedPid})`,
+          startupLogPaths,
+        ),
       );
     }
 
@@ -79,11 +181,26 @@ async function waitForWebStartupAck(
         signal: AbortSignal.timeout(STARTUP_ACK_POLL_INTERVAL_MS),
       });
       response.body?.cancel();
+      let refreshedStatus:
+        | Awaited<ReturnType<typeof ctx.webStatusStore.load>>
+        | undefined;
+      try {
+        refreshedStatus = await ctx.webStatusStore.load();
+      } catch {
+        refreshedStatus = undefined;
+      }
+      const acknowledgedAfterFetch = getAcknowledgedWebStatus(
+        refreshedStatus ?? status,
+        launchedAtMs,
+        url,
+      );
       return {
-        heartbeatAt: new Date().toISOString(),
+        heartbeatAt: acknowledgedAfterFetch?.heartbeatAt ??
+          new Date().toISOString(),
         totalLatencyMs: Math.max(0, Date.now() - launchedAtMs),
         ackWaitMs: Math.max(0, Date.now() - ackWaitStartedAtMs),
-        version: status?.version,
+        pid: acknowledgedAfterFetch?.pid,
+        version: acknowledgedAfterFetch?.version ?? status?.version,
       };
     } catch {
       // Keep polling until the process either responds or exits.
@@ -93,7 +210,10 @@ async function waitForWebStartupAck(
   }
 
   throw new Error(
-    `Timed out waiting for web startup acknowledgement (pid: ${launchedPid})`,
+    await buildWebStartupAckFailureMessage(
+      `Timed out waiting for web startup acknowledgement (pid: ${launchedPid})`,
+      startupLogPaths,
+    ),
   );
 }
 
@@ -333,6 +453,10 @@ export async function runWebStartCommand(
   const launchLatencyMs = Math.max(0, launchCompletedAtMs - launchStartedAtMs);
   const buildLatencyMs = launchResult.buildLatencyMs ?? 0;
   const detachLatencyMs = Math.max(0, launchLatencyMs - buildLatencyMs);
+  const startupLogPaths = {
+    startupStdoutLogPath: launchResult.startupStdoutLogPath,
+    startupStderrLogPath: launchResult.startupStderrLogPath,
+  };
   const url = `http://${webConfig.hostname}:${selectedPort}/`;
   const startedAt = new Date(launchStartedAtMs).toISOString();
   const ack = await waitForWebStartupAck(
@@ -341,6 +465,7 @@ export async function runWebStartCommand(
     launchStartedAtMs,
     launchCompletedAtMs,
     url,
+    startupLogPaths,
   ).catch(
     async (error) => {
       await ctx.webStatusStore.save({
@@ -354,12 +479,13 @@ export async function runWebStartCommand(
       throw error;
     },
   );
+  const serverPid = ack.pid ?? pid;
   await ctx.webStatusStore.save({
     schemaVersion: 1,
     running: true,
     hostname: webConfig.hostname,
     port: selectedPort,
-    pid,
+    pid: serverPid,
     startedAt,
     heartbeatAt: ack.heartbeatAt,
     url,
@@ -370,7 +496,8 @@ export async function runWebStartCommand(
     "web.start",
     "Web server startup acknowledged by runtime heartbeat",
     {
-      pid,
+      pid: serverPid,
+      launcherPid: pid,
       hostname: webConfig.hostname,
       port: selectedPort,
       configuredPort: webConfig.port,
@@ -382,11 +509,14 @@ export async function runWebStartCommand(
       startupBuildLatencyMs: buildLatencyMs,
       startupDetachLatencyMs: detachLatencyMs,
       startupAckWaitMs: ack.ackWaitMs,
+      startupStdoutLogPath: launchResult.startupStdoutLogPath,
+      startupStderrLogPath: launchResult.startupStderrLogPath,
       version: ack.version,
     },
   );
   await ctx.auditLogger.command("web.start", {
-    pid,
+    pid: serverPid,
+    launcherPid: pid,
     hostname: webConfig.hostname,
     port: selectedPort,
     configuredPort: webConfig.port,
@@ -401,7 +531,7 @@ export async function runWebStartCommand(
     version: ack.version,
   });
   ctx.runtime.writeStdout(
-    `kato web started in background (pid: ${pid}) at ${url} in ${ack.totalLatencyMs}ms (build ${buildLatencyMs}ms, launch ${detachLatencyMs}ms, ack ${ack.ackWaitMs}ms)\n`,
+    `kato web started in background (pid: ${serverPid}) at ${url} in ${ack.totalLatencyMs}ms (build ${buildLatencyMs}ms, launch ${detachLatencyMs}ms, ack ${ack.ackWaitMs}ms)\n`,
   );
 }
 

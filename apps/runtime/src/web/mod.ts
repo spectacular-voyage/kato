@@ -4,6 +4,8 @@ import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
+const WEB_STARTUP_STDOUT_LOG_FILENAME = "startup.stdout.log";
+const WEB_STARTUP_STDERR_LOG_FILENAME = "startup.stderr.log";
 const WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS = 250;
 const DEFAULT_WEB_PORT_SCAN_LIMIT = 100;
 const WSL_OS_RELEASE_PATH = "/proc/sys/kernel/osrelease";
@@ -36,6 +38,8 @@ export interface WebServerStatusStoreLike {
 export interface WebProcessLaunchResult {
   pid: number;
   buildLatencyMs?: number;
+  startupStdoutLogPath?: string;
+  startupStderrLogPath?: string;
 }
 
 export interface WebProcessLauncherLike {
@@ -114,6 +118,18 @@ export function resolveDefaultWebStatusPath(
   katoDir: string = resolveDefaultKatoDir(),
 ): string {
   return join(katoDir, "web", WEB_STATUS_FILENAME);
+}
+
+export function resolveDefaultWebStartupStdoutLogPath(
+  katoDir: string = resolveDefaultKatoDir(),
+): string {
+  return join(katoDir, "web", "logs", WEB_STARTUP_STDOUT_LOG_FILENAME);
+}
+
+export function resolveDefaultWebStartupStderrLogPath(
+  katoDir: string = resolveDefaultKatoDir(),
+): string {
+  return join(katoDir, "web", "logs", WEB_STARTUP_STDERR_LOG_FILENAME);
 }
 
 function runPowerShellSync(script: string): Deno.CommandOutput {
@@ -461,7 +477,14 @@ export const defaultWebPortSelector: WebPortSelectorLike = {
 
 export interface DetachedWebLauncherOptions {
   installedExecutablePath?: string;
+  startupStdoutLogPath?: string;
+  startupStderrLogPath?: string;
 }
+
+type WebStartupLogPaths = Pick<
+  WebProcessLaunchResult,
+  "startupStdoutLogPath" | "startupStderrLogPath"
+>;
 
 function resolveWorkspaceRoot(): string {
   return dirname(
@@ -548,6 +571,75 @@ function toPowerShellSingleQuoted(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+function buildShellStartupRedirection(paths: WebStartupLogPaths): string {
+  const stdout = paths.startupStdoutLogPath
+    ? `> ${toShellSingleQuoted(paths.startupStdoutLogPath)}`
+    : ">/dev/null";
+  const stderr = paths.startupStderrLogPath
+    ? `2> ${toShellSingleQuoted(paths.startupStderrLogPath)}`
+    : "2>&1";
+  return `${stdout} ${stderr}`;
+}
+
+function toWindowsCmdDoubleQuoted(value: string): string {
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+function hasStartupLogRedirection(paths: WebStartupLogPaths): boolean {
+  return paths.startupStdoutLogPath !== undefined ||
+    paths.startupStderrLogPath !== undefined;
+}
+
+function buildWindowsCmdRedirectCommand(
+  executablePath: string,
+  args: string[],
+  paths: WebStartupLogPaths,
+): string {
+  const command = [executablePath, ...args].map(toWindowsCmdDoubleQuoted).join(
+    " ",
+  );
+  const stdout = paths.startupStdoutLogPath
+    ? `1> ${toWindowsCmdDoubleQuoted(paths.startupStdoutLogPath)}`
+    : "1> NUL";
+  const stderr = paths.startupStderrLogPath
+    ? `2> ${toWindowsCmdDoubleQuoted(paths.startupStderrLogPath)}`
+    : "2>&1";
+  return `"${command} ${stdout} ${stderr}"`;
+}
+
+function buildPowerShellStartProcessScript(
+  executablePath: string,
+  args: string[],
+  workingDirectory: string,
+  startupLogPaths: WebStartupLogPaths,
+): string {
+  const useCmdRedirect = hasStartupLogRedirection(startupLogPaths);
+  const filePath = useCmdRedirect ? "cmd.exe" : executablePath;
+  const processArgs = useCmdRedirect
+    ? [
+      "/d",
+      "/s",
+      "/c",
+      buildWindowsCmdRedirectCommand(executablePath, args, startupLogPaths),
+    ]
+    : args;
+
+  if (processArgs.length === 0) {
+    return `$proc = Start-Process -FilePath ${
+      toPowerShellSingleQuoted(filePath)
+    } -WorkingDirectory ${
+      toPowerShellSingleQuoted(workingDirectory)
+    } -WindowStyle Hidden -PassThru;`;
+  }
+
+  return `$argList = @(${processArgs.map(toPowerShellSingleQuoted).join(", ")});
+$proc = Start-Process -FilePath ${
+    toPowerShellSingleQuoted(filePath)
+  } -ArgumentList $argList -WorkingDirectory ${
+    toPowerShellSingleQuoted(workingDirectory)
+  } -WindowStyle Hidden -PassThru;`;
+}
+
 function toPowerShellEncodedCommand(script: string): string {
   const bytes = new Uint8Array(script.length * 2);
   for (let i = 0; i < script.length; i += 1) {
@@ -599,13 +691,15 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     executablePath: string,
     args: string[],
     workingDirectory: string,
+    startupLogPaths: WebStartupLogPaths = {},
   ): Promise<WebProcessLaunchResult> {
     const quotedCommand = [executablePath, ...args].map(
       toShellSingleQuoted,
     ).join(" ");
+    const redirection = buildShellStartupRedirection(startupLogPaths);
     const script = `cd ${
       toShellSingleQuoted(workingDirectory)
-    } && if command -v setsid >/dev/null 2>&1; then setsid ${quotedCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
+    } && if command -v setsid >/dev/null 2>&1; then setsid ${quotedCommand} ${redirection} < /dev/null & else nohup ${quotedCommand} ${redirection} < /dev/null & fi; printf '%s\\n' $!`;
     const command = this.commandFactory("sh", {
       args: ["-lc", script],
       stdin: "null",
@@ -632,12 +726,13 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
           `Detached shell launch did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return { pid };
+      return { pid, ...startupLogPaths };
     });
   }
 
   private launchDetachedScriptViaShell(
     script: string,
+    startupLogPaths: WebStartupLogPaths = {},
   ): Promise<WebProcessLaunchResult> {
     const command = this.commandFactory("sh", {
       args: ["-lc", script],
@@ -668,6 +763,7 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
       return {
         pid,
         buildLatencyMs: parseBuildLatencyMs(stdoutText),
+        ...startupLogPaths,
       };
     });
   }
@@ -676,19 +772,14 @@ export class DenoDetachedWebLauncher implements WebProcessLauncherLike {
     executablePath: string,
     args: string[],
     workingDirectory: string,
+    startupLogPaths: WebStartupLogPaths = {},
   ): Promise<WebProcessLaunchResult> {
-    const startProcessArgs = args.length > 0
-      ? `$argList = @(${args.map(toPowerShellSingleQuoted).join(", ")});
-$proc = Start-Process -FilePath ${
-        toPowerShellSingleQuoted(executablePath)
-      } -ArgumentList $argList -WorkingDirectory ${
-        toPowerShellSingleQuoted(workingDirectory)
-      } -WindowStyle Hidden -PassThru;`
-      : `$proc = Start-Process -FilePath ${
-        toPowerShellSingleQuoted(executablePath)
-      } -WorkingDirectory ${
-        toPowerShellSingleQuoted(workingDirectory)
-      } -WindowStyle Hidden -PassThru;`;
+    const startProcessArgs = buildPowerShellStartProcessScript(
+      executablePath,
+      args,
+      workingDirectory,
+      startupLogPaths,
+    );
     const script = `$ErrorActionPreference = 'Stop';
 ${startProcessArgs}
 [Console]::Out.WriteLine($proc.Id);`;
@@ -724,12 +815,13 @@ ${startProcessArgs}
           `PowerShell Start-Process did not return a valid PID: '${stdoutText}'`,
         );
       }
-      return { pid };
+      return { pid, ...startupLogPaths };
     });
   }
 
   private launchDetachedScriptViaPowerShell(
     script: string,
+    startupLogPaths: WebStartupLogPaths = {},
   ): Promise<WebProcessLaunchResult> {
     const encodedCommand = toPowerShellEncodedCommand(script);
     const command = this.commandFactory("powershell.exe", {
@@ -766,8 +858,35 @@ ${startProcessArgs}
       return {
         pid,
         buildLatencyMs: parseBuildLatencyMs(stdoutText),
+        ...startupLogPaths,
       };
     });
+  }
+
+  private async prepareStartupLogPath(
+    path: string | undefined,
+  ): Promise<string | undefined> {
+    if (!path) {
+      return undefined;
+    }
+    try {
+      await Deno.mkdir(dirname(path), { recursive: true });
+      await Deno.writeTextFile(path, "");
+      return path;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async prepareStartupLogs(): Promise<WebStartupLogPaths> {
+    const [stdoutPath, stderrPath] = await Promise.all([
+      this.prepareStartupLogPath(this.options.startupStdoutLogPath),
+      this.prepareStartupLogPath(this.options.startupStderrLogPath),
+    ]);
+    return {
+      ...(stdoutPath ? { startupStdoutLogPath: stdoutPath } : {}),
+      ...(stderrPath ? { startupStderrLogPath: stderrPath } : {}),
+    };
   }
 
   launchDetached(
@@ -784,6 +903,7 @@ ${startProcessArgs}
       ? dirname(installedExecutablePath)
       : resolveWebAppRoot(this.workspaceRoot);
     const executablePath = installedExecutablePath ?? this.denoExecPath;
+    const startupLogPaths = await this.prepareStartupLogs();
     const installedArgs = [
       "--host",
       options.hostname,
@@ -814,23 +934,31 @@ $buildLatencyMs = [int]((Get-Date) - $buildStartedAt).TotalMilliseconds;
         const script = `$ErrorActionPreference = 'Stop';
 Set-Location ${toPowerShellSingleQuoted(webAppRoot)};
 ${buildScript}
-$argList = @('serve', '--node-modules-dir=auto', '-A', '--host', ${
-          toPowerShellSingleQuoted(options.hostname)
-        }, '--port', ${
-          toPowerShellSingleQuoted(String(options.port))
-        }, '_fresh/server.js');
-$proc = Start-Process -FilePath ${
-          toPowerShellSingleQuoted(executablePath)
-        } -ArgumentList $argList -WorkingDirectory ${
-          toPowerShellSingleQuoted(webAppRoot)
-        } -WindowStyle Hidden -PassThru;
+${
+          buildPowerShellStartProcessScript(
+            executablePath,
+            [
+              "serve",
+              "--node-modules-dir=auto",
+              "-A",
+              "--host",
+              options.hostname,
+              "--port",
+              String(options.port),
+              "_fresh/server.js",
+            ],
+            webAppRoot,
+            startupLogPaths,
+          )
+        }
 [Console]::Out.WriteLine($proc.Id);`;
-        return this.launchDetachedScriptViaPowerShell(script);
+        return this.launchDetachedScriptViaPowerShell(script, startupLogPaths);
       }
       return this.launchDetachedViaPowerShell(
         executablePath,
         installedArgs,
         webAppRoot,
+        startupLogPaths,
       );
     }
 
@@ -869,14 +997,19 @@ $proc = Start-Process -FilePath ${
         : `build_started_ms=$(${quotedEpochMsCommand}) && ${quotedBuildCommand} >/dev/null && build_finished_ms=$(${quotedEpochMsCommand}) && printf 'KATO_BUILD_MS=%s\\n' "$((build_finished_ms - build_started_ms))"`;
       const script = `cd ${
         toShellSingleQuoted(webAppRoot)
-      } && ${buildScript} && if command -v setsid >/dev/null 2>&1; then setsid ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & else nohup ${quotedServeCommand} >/dev/null 2>&1 < /dev/null & fi; printf '%s\\n' $!`;
-      return this.launchDetachedScriptViaShell(script);
+      } && ${buildScript} && if command -v setsid >/dev/null 2>&1; then setsid ${quotedServeCommand} ${
+        buildShellStartupRedirection(startupLogPaths)
+      } < /dev/null & else nohup ${quotedServeCommand} ${
+        buildShellStartupRedirection(startupLogPaths)
+      } < /dev/null & fi; printf '%s\\n' $!`;
+      return this.launchDetachedScriptViaShell(script, startupLogPaths);
     }
 
     return this.launchDetachedViaShell(
       executablePath,
       installedArgs,
       webAppRoot,
+      startupLogPaths,
     );
   }
 }
