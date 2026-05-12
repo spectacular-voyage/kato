@@ -1,14 +1,23 @@
 ---
 id: kato-dendron-style-wikil-ef03ac0a
-title: 'kato dendron-style wikilinks converter'
+title: kato dendron-style wikilinks converter
 desc: ''
-created: 1775336292360
 updated: 1775336292360
-participants: [djradon, codex.gpt-5.4]
-kato-sessionIds: [019d5a1d-ef40-7281-8b4d-2ed953574d72]
-kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [ef03ac0a-6b0b-4e43-9679-495092ee074e]
-conversationEventKinds: [message.assistant, message.user, tool.call, tool.result]
+created: 1775336292360
+participants:
+  - djradon
+  - codex.gpt-5.4
+kato-sessionIds:
+  - 019d5a1d-ef40-7281-8b4d-2ed953574d72
+kato-workspaceIds:
+  - cd940f00-5558-40dc-bead-46f904ab937b
+kato-recordingIds:
+  - ef03ac0a-6b0b-4e43-9679-495092ee074e
+conversationEventKinds:
+  - message.assistant
+  - message.user
+  - tool.call
+  - tool.result
 ---
 
 # djradon_2026-04-04_1313_15
@@ -188,7 +197,7 @@ The check passed. I’m doing a quick diff/status pass so I can report exactly w
 
 Added focused coverage in [writer-markdown_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/writer-markdown_test.ts) and [web-session-actions_test.ts](/home/djradon/hub/spectacular-voyage/kato/tests/web-session-actions_test.ts). The writer tests now lock down both sides of the switch: standard mode leaves local `.md` links alone, and Dendron mode rewrites not just assistant message bodies but also tool descriptions, thinking, decision prompt/summary/options, and `provider.info`. The web test goes through `new-capture` with twin-backed history and asserts the final file on disk contains `[[...]]`, so this is no longer just an intermediate-option check.
 
-I also updated [[completed.2026.2026-04-04-dendron-style-links]] before the follow-up test work to record the added coverage.
+I also updated [[ka.completed.2026.2026-04-04-dendron-style-links]] before the follow-up test work to record the added coverage.
 
 Validation passed:
 - `deno test -A --quiet tests/writer-markdown_test.ts`

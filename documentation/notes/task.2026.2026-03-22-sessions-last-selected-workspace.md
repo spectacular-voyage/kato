@@ -1,7 +1,7 @@
 ---
 id: 7m9q2vk4p3w8x1n6r5t0ybz
 title: 2026 03 22 Sessions Last Selected Workspace
-desc: ""
+desc: ''
 updated: 1774242282542
 created: 1774242282542
 ---
@@ -34,7 +34,7 @@ last workspace used and preselect it the next time the popover opens.
   workspace options, fall back cleanly to the existing default selection
   logic.
 - This roadmap item already exists in [[roadmap]] and fits as a small follow-up
-  to [[completed.2026.2026-03-17-web-commands-phase2]].
+  to [[ka.completed.2026.2026-03-17-web-commands-phase2]].
 
 ## Open Issues
 

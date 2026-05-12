@@ -14,7 +14,7 @@ directory, and expose the derived roots in the web workspace page for debugging.
 
 ## Summary
 
-This is a follow-up to [[completed.2026.2026-04-04-dendron-style-links]] and
+This is a follow-up to [[ka.completed.2026.2026-04-04-dendron-style-links]] and
 [[task.2026.2026-04-04-relative-link-output-sanitization]].
 
 Kato currently treats any local `.md` inline link as Dendron-wikilinkable when
