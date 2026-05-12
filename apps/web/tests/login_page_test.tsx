@@ -9,3 +9,10 @@ Deno.test("login page autofocuses the username input", () => {
   assertStringIncludes(html, 'name="username"');
   assertStringIncludes(html, "autofocus");
 });
+
+Deno.test("login page shows error message when error is true", () => {
+  const html = renderToString(<LoginForm error />);
+
+  assertStringIncludes(html, 'class="danger"');
+  assertStringIncludes(html, "Invalid username or password");
+});

@@ -9,6 +9,7 @@ import {
   isProcessAlive,
   terminateProcess,
 } from "@kato/runtime";
+import { resolveWebEndpoint } from "./web_endpoint.ts";
 
 const STARTUP_ACK_TIMEOUT_MS = 10_000;
 const STARTUP_ACK_POLL_INTERVAL_MS = 100;
@@ -196,7 +197,7 @@ async function waitForWebStartupAck(
       );
       return {
         heartbeatAt: acknowledgedAfterFetch?.heartbeatAt ??
-          new Date().toISOString(),
+          ctx.runtime.now().toISOString(),
         totalLatencyMs: Math.max(0, Date.now() - launchedAtMs),
         ackWaitMs: Math.max(0, Date.now() - ackWaitStartedAtMs),
         pid: acknowledgedAfterFetch?.pid,
@@ -587,19 +588,12 @@ export async function runWebStatusCommand(
   const status = await ctx.webStatusStore.load();
   const alive = status.running && isProcessAlive(status.pid);
   const stale = status.running && !alive;
-  const useStoredEndpoint = alive || stale;
-  const hostname = useStoredEndpoint
-    ? status.hostname ?? ctx.webConfig?.hostname
-    : ctx.webConfig?.hostname ?? status.hostname;
-  const port = useStoredEndpoint
-    ? status.port ?? ctx.webConfig?.port
-    : ctx.webConfig?.port ?? status.port;
-  const url = useStoredEndpoint
-    ? status.url ??
-      (hostname && port ? `http://${hostname}:${port}/` : undefined)
-    : ctx.webConfig
-    ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
-    : status.url;
+  const { hostname, port, url } = resolveWebEndpoint(
+    status,
+    ctx.webConfig,
+    alive,
+    stale,
+  );
   const effective = {
     configured: ctx.webConfig !== undefined,
     running: alive,

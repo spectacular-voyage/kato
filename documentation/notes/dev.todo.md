@@ -16,7 +16,7 @@ created: 1771812869620
       Deferred for post-`v0.2.0`: behavior expansion outside low-churn release
       scope.
 
-## Runtime And Ingestion Follow-upst
+## Runtime And Ingestion Follow-ups
 
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into
       `clean` command behavior. Deferred for post-`v0.2.0`: medium

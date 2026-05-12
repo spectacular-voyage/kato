@@ -6,6 +6,7 @@ const WEB_STATUS_FILENAME = "kato-web-status.json";
 const WEB_STATUS_SCHEMA_VERSION = 1;
 const WEB_STARTUP_STDOUT_LOG_FILENAME = "startup.stdout.log";
 const WEB_STARTUP_STDERR_LOG_FILENAME = "startup.stderr.log";
+const WINDOWS_HOST_PORT_PROBE_TIMEOUT_MS = 1_500;
 const WINDOWS_POWERSHELL_PROBE_CACHE_TTL_MS = 250;
 const DEFAULT_WEB_PORT_SCAN_LIMIT = 100;
 const WSL_OS_RELEASE_PATH = "/proc/sys/kernel/osrelease";
@@ -401,6 +402,7 @@ async function isWindowsHostPortListening(
   port: number,
   commandFactory: DenoCommandFactory,
 ): Promise<boolean> {
+  const abortController = new AbortController();
   let command: CommandLike;
   try {
     command = commandFactory("powershell.exe", {
@@ -414,6 +416,7 @@ async function isWindowsHostPortListening(
       stdout: "piped",
       stderr: "piped",
       env: { CI: "true" },
+      signal: abortController.signal,
     });
   } catch {
     return false;
@@ -423,10 +426,24 @@ async function isWindowsHostPortListening(
     return false;
   }
 
+  let timeoutId: number | undefined;
   try {
-    return (await command.output()).code === 0;
+    const output = await Promise.race([
+      command.output().catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        timeoutId = setTimeout(() => {
+          abortController.abort();
+          resolve(undefined);
+        }, WINDOWS_HOST_PORT_PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    return output?.code === 0;
   } catch {
     return false;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
