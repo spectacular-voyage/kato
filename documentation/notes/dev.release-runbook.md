@@ -22,6 +22,11 @@ The primary release path is GitHub Actions workflow `.github/workflows/release-m
 ### Tag behavior
 
 - For the normal workflow path, manual `git tag -a ...` / `git push origin ...` is no longer required.
+- If you ever need to create and push the release tag manually from the intended release commit, use:
+```bash
+git tag -a "v<version>" -m "v<version>"
+git push origin "v<version>"
+```
 - The workflow derives `v<version>` from bundled release metadata and calls `gh release create <tag> --target "$GITHUB_SHA"` when the release does not already exist.
 - Current `gh release create` behavior auto-creates the tag remotely if it does not already exist; annotated tags are only needed if you explicitly want an annotated-tag-based release flow.
 - If you want the auto-created tag locally after release, run `git fetch --tags origin`.
