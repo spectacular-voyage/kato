@@ -24,7 +24,13 @@ workspace:
   vaults:
     - fsPath: .
       selfContained: true
-      name: documentation
+      name: kato
+    - fsPath: ../dependencies/github.com/spectacular-voyage/kato-dev-archive
+      remote:
+        type: git
+        url: git@github.com:spectacular-voyage/kato-dev-archive.git
+      name: kato-dev-archive
+      selfContained: true
   journal:
     dailyDomain: daily
     name: journal
@@ -69,7 +75,7 @@ workspace:
   enableAutoFoldFrontmatter: false
   enableEditorDecorations: true
   maxPreviewsCached: 10
-  maxNoteLength: 204800
+  maxNoteLength: 404800
   enableFullHierarchyNoteTitle: false
 preview:
   enableFMTitle: true
