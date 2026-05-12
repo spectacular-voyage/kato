@@ -4,8 +4,10 @@ title: 2026 02 24 Fix Capture Command
 desc: ''
 updated: 1771971110351
 created: 1771971110351
-recordingIds: [bcfc5da5-b9f6-4388-b979-d525c7c641b1]
-tags: [provider.codex]
+tags:
+  - provider.codex
+recordingIds:
+  - bcfc5da5-b9f6-4388-b979-d525c7c641b1
 ---
 
 # User_2026-02-24_1345_17

@@ -1,6 +1,6 @@
 workspaceId: cd940f00-5558-40dc-bead-46f904ab937b
 defaultOutputDir: "."
-filenameTemplate: "conv.{YYYY}.{timestampHumane}-{snippetSlug}-{provider}.md"
+filenameTemplate: "ka.conv.{YYYY}.{timestampHumane}-{snippetSlug}-{provider}.md"
 workspaceTimezone: "local"
 markdownFrontmatter:
   includeFrontmatterInMarkdownRecordings: true

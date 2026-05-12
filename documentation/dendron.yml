@@ -75,7 +75,7 @@ workspace:
   enableAutoFoldFrontmatter: false
   enableEditorDecorations: true
   maxPreviewsCached: 10
-  maxNoteLength: 404800
+  maxNoteLength: 204805
   enableFullHierarchyNoteTitle: false
 preview:
   enableFMTitle: true

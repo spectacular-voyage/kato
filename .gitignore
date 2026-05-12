@@ -23,4 +23,4 @@ apps/web/node_modules/
 
 # Dendron
 .dendron.*
-/dependencies/
+/dependencies/**

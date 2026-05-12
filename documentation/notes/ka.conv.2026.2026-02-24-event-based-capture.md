@@ -4,8 +4,11 @@ title: 2026 02 24 Event Based Capture
 desc: ''
 updated: 1771963694807
 created: 1771963694807
-recordingIds: [c235e826-5ff5-4b85-bd2c-3b3f9474e012, 84022f77-b0a4-4ddf-a043-ca7fb6cf25d9]
-tags: [provider.claude]
+tags:
+  - provider.claude
+recordingIds:
+  - c235e826-5ff5-4b85-bd2c-3b3f9474e012
+  - 84022f77-b0a4-4ddf-a043-ca7fb6cf25d9
 ---
 
 # claude-sonnet-4.6_2026-02-24_1240_46
