@@ -93,7 +93,7 @@ export async function watchFsDebounced(
   options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const accumulator = new DebouncedPathAccumulator(debounceMs);
-  let timer: number | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
   const flush = async () => {
     const batch = accumulator.flush(now());
