@@ -139,7 +139,7 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   assertEquals(wrapperPackageJson["name"], "@spectacular-voyage/kato");
   assertEquals(
     wrapperPackageJson["homepage"],
-    "https://spectacular.voyage/kato/",
+    "https://spectacular-voyage.github.io/kato/",
   );
   assertEquals(
     (wrapperPackageJson["bin"] as Record<string, string>)["kato"],
@@ -163,7 +163,7 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   );
   assertEquals(
     platformPackageJson["homepage"],
-    "https://spectacular.voyage/kato/",
+    "https://spectacular-voyage.github.io/kato/",
   );
   assertEquals(platformPackageJson["os"], ["linux"]);
   assertEquals(platformPackageJson["cpu"], ["x64"]);

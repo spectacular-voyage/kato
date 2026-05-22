@@ -65,7 +65,7 @@ site under `docs/`, while the internal Dendron vault lives under
   `documentation/notes/release-notes.v<version>.md` for GitHub Release bodies
   after Dendron frontmatter stripping.
 - npm wrapper and platform package metadata now use the public Kato homepage
-  URL, `https://spectacular.voyage/kato/`.
+  URL, `https://spectacular-voyage.github.io/kato/`.
 - Web dependencies were refreshed to Fresh `2.3.3`, Fresh Vite plugin `1.1.2`,
   Preact `10.29.2`, and Vite `7.3.3`, clearing the high-severity audit
   advisories in the release gate.
