@@ -74,8 +74,13 @@ async function updateVersionedJsonFile(
   await Deno.writeTextFile(path, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
-function releaseNotesPath(root: string, version: string): string {
-  return join(root, "docs", "notes", `release-notes.v${version}.md`);
+export function releaseNotesPath(root: string, version: string): string {
+  return join(
+    root,
+    "documentation",
+    "notes",
+    `release-notes.v${version}.md`,
+  );
 }
 
 function makeReleaseNotesStub(version: string, now: Date): string {

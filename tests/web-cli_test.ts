@@ -20,6 +20,7 @@ import {
   isProcessAlive,
   terminateProcess,
   WebConfigFileStore,
+  type WebPortSelectorLike,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
 } from "../apps/runtime/src/mod.ts";
@@ -80,6 +81,12 @@ function spawnLongRunningProcess(): Deno.ChildProcess {
     stdout: "null",
     stderr: "null",
   }).spawn();
+}
+
+function makeFixedWebPortSelector(): WebPortSelectorLike {
+  return {
+    selectAvailablePort: ({ preferredPort }) => Promise.resolve(preferredPort),
+  };
 }
 
 function makeDefaultRuntimeConfig(
@@ -517,6 +524,7 @@ Deno.test(
           return launchedPid;
         },
       };
+      const webPortSelector = makeFixedWebPortSelector();
 
       const initHarness = makeRuntimeHarness(runtimeDir, {
         webInitPassword: {
@@ -541,6 +549,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         },
       );
       assertEquals(initCode, 0);
@@ -556,6 +565,7 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
       assertEquals(startCode, 0);
       assertStringIncludes(
@@ -574,6 +584,7 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
       assertEquals(statusCode, 0);
       const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
@@ -742,6 +753,7 @@ Deno.test(
             return Deno.pid;
           },
         };
+        const webPortSelector = makeFixedWebPortSelector();
 
         const harness = makeRuntimeHarness(runtimeDir);
         const code = await runDaemonCli(["web", "restart"], {
@@ -751,6 +763,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         });
 
         assertEquals(code, 0);
@@ -819,6 +832,7 @@ Deno.test(
             startupStderrLogPath,
           }),
       };
+      const webPortSelector = makeFixedWebPortSelector();
 
       const initHarness = makeRuntimeHarness(runtimeDir, {
         webInitPassword: {
@@ -839,6 +853,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         },
       );
       assertEquals(initCode, 0);
@@ -851,6 +866,7 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
 
       assertEquals(startCode, 1);
