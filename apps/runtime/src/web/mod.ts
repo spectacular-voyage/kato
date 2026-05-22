@@ -426,7 +426,7 @@ async function isWindowsHostPortListening(
     return false;
   }
 
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const output = await Promise.race([
       command.output().catch(() => undefined),
