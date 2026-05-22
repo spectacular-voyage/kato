@@ -235,6 +235,11 @@ function makeCommandContext(root: string, options: {
         return Promise.resolve(9002);
       },
     },
+    webPortSelector: {
+      selectAvailablePort({ preferredPort }) {
+        return Promise.resolve(preferredPort);
+      },
+    },
     statusStore: statusStore.store,
     controlStore: {
       list() {

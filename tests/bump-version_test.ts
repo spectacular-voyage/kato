@@ -1,5 +1,6 @@
 import { assertEquals, assertMatch } from "@std/assert";
-import { incrementVersion } from "../scripts/bump-version.ts";
+import { join } from "@std/path";
+import { incrementVersion, releaseNotesPath } from "../scripts/bump-version.ts";
 
 Deno.test("incrementVersion bumps patch version", () => {
   assertEquals(incrementVersion("0.2.4", "patch"), "0.2.5");
@@ -21,4 +22,11 @@ Deno.test("incrementVersion rejects invalid versions", () => {
     return;
   }
   throw new Error("expected invalid semver error");
+});
+
+Deno.test("releaseNotesPath targets the internal documentation vault", () => {
+  assertEquals(
+    releaseNotesPath("repo-root", "0.2.12"),
+    join("repo-root", "documentation", "notes", "release-notes.v0.2.12.md"),
+  );
 });

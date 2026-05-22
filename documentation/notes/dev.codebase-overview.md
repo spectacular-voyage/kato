@@ -131,6 +131,12 @@ Supporting web files worth knowing:
 - `~/.kato/web/logs/operational.jsonl`
 - `~/.kato/web/logs/security-audit.jsonl`
 
+The web config stores the preferred local host/port. `kato web start` selects
+the effective port at launch time, scanning upward when the preferred port is
+already in use; under WSL it also performs a best-effort Windows localhost
+listener probe for browser-visible port conflicts. The web status file is the
+source of truth for the actual running or stale web URL.
+
 Workspace-local config remains `<workspace>/.kato-workspace-config.yaml`.
 Captured/exported conversation files are workspace-root data and do not belong
 under `~/.kato` by default.

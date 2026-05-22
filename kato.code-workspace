@@ -2,6 +2,9 @@
   "folders": [
     {
       "path": "."
+    },
+    {
+      "path": "dependencies/github.com/spectacular-voyage/kato-dev-archive"
     }
   ],
   "settings": {

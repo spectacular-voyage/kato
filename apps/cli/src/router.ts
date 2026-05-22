@@ -21,6 +21,7 @@ import {
   type DaemonProcessLauncherLike,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
+  defaultWebPortSelector,
   DenoDetachedDaemonLauncher,
   DenoDetachedWebLauncher,
   resolveDefaultCliConfigPath,
@@ -29,6 +30,8 @@ import {
   resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
   resolveDefaultWebConfigPath,
+  resolveDefaultWebStartupStderrLogPath,
+  resolveDefaultWebStartupStdoutLogPath,
   resolveDefaultWebStatusPath,
   resolveHomeDir,
   resolveInstalledExecutablePath,
@@ -36,6 +39,7 @@ import {
   type SharedBehaviorConfigStoreLike,
   WebConfigFileStore,
   type WebConfigStoreLike,
+  type WebPortSelectorLike,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
   type WebServerStatusStoreLike,
@@ -102,6 +106,7 @@ export interface RunDaemonCliOptions {
   webConfigStore?: WebConfigStoreLike;
   webStatusStore?: WebServerStatusStoreLike;
   webLauncher?: WebProcessLauncherLike;
+  webPortSelector?: WebPortSelectorLike;
   autoInitOnStart?: boolean;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
@@ -298,7 +303,7 @@ function createDefaultDaemonLauncher(
   );
 }
 
-function createDefaultWebLauncher(): DenoDetachedWebLauncher {
+function createDefaultWebLauncher(katoDir: string): DenoDetachedWebLauncher {
   const launcherExecutablePath = Deno.execPath();
   const installedExecutablePath = resolveInstalledExecutablePath({
     envVarName: "KATO_WEB_BIN",
@@ -310,7 +315,11 @@ function createDefaultWebLauncher(): DenoDetachedWebLauncher {
     undefined,
     undefined,
     undefined,
-    { installedExecutablePath },
+    {
+      installedExecutablePath,
+      startupStdoutLogPath: resolveDefaultWebStartupStdoutLogPath(katoDir),
+      startupStderrLogPath: resolveDefaultWebStartupStderrLogPath(katoDir),
+    },
   );
 }
 
@@ -598,7 +607,9 @@ export async function runDaemonCli(
     );
   const daemonLauncher = options.daemonLauncher ??
     createDefaultDaemonLauncher(effectiveRuntime);
-  const webLauncher = options.webLauncher ?? createDefaultWebLauncher();
+  const webLauncher = options.webLauncher ??
+    createDefaultWebLauncher(effectiveKatoDir);
+  const webPortSelector = options.webPortSelector ?? defaultWebPortSelector;
   const pathPolicyGate = options.pathPolicyGate ??
     new WritePathPolicyGate({
       allowedRoots: sharedConfig.allowedWriteRoots,
@@ -645,6 +656,7 @@ export async function runDaemonCli(
     webConfig,
     webStatusStore,
     webLauncher,
+    webPortSelector,
     statusStore,
     controlStore,
     daemonLauncher,

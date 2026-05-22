@@ -20,6 +20,7 @@ import {
   isProcessAlive,
   terminateProcess,
   WebConfigFileStore,
+  type WebPortSelectorLike,
   type WebProcessLauncherLike,
   WebServerStatusFileStore,
 } from "../apps/runtime/src/mod.ts";
@@ -80,6 +81,12 @@ function spawnLongRunningProcess(): Deno.ChildProcess {
     stdout: "null",
     stderr: "null",
   }).spawn();
+}
+
+function makeFixedWebPortSelector(): WebPortSelectorLike {
+  return {
+    selectAvailablePort: ({ preferredPort }) => Promise.resolve(preferredPort),
+  };
 }
 
 function makeDefaultRuntimeConfig(
@@ -517,6 +524,7 @@ Deno.test(
           return launchedPid;
         },
       };
+      const webPortSelector = makeFixedWebPortSelector();
 
       const initHarness = makeRuntimeHarness(runtimeDir, {
         webInitPassword: {
@@ -541,6 +549,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         },
       );
       assertEquals(initCode, 0);
@@ -556,11 +565,12 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
       assertEquals(startCode, 0);
       assertStringIncludes(
         startHarness.stdout.join(""),
-        "kato web started in background",
+        `kato web started in background (pid: ${launchedPid}) at http://127.0.0.1:3187/ in 0ms (build 0ms, launch 0ms, ack 0ms)`,
       );
       const savedStatus = await webStatusStore.load();
       assertEquals(savedStatus.running, true);
@@ -574,6 +584,7 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
       assertEquals(statusCode, 0);
       const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
@@ -587,6 +598,104 @@ Deno.test(
       assertEquals(statusPayload.state, "running");
       assertEquals(statusPayload.stale, false);
       assertEquals(statusPayload.port, 3187);
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli web start uses selected fallback port and status reports it",
+  async () => {
+    await withTestTempDir("web-cli-port-fallback-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      const webStatusStore = new WebServerStatusFileStore(
+        join(rootDir, "web", "kato-web-status.json"),
+        () => new Date("2026-03-07T20:00:00.000Z"),
+      );
+      await webConfigStore.ensureInitialized(
+        await createInitializedWebConfig({
+          hostname: "127.0.0.1",
+          port: 3187,
+          username: "dj",
+          password: "secret-pass",
+        }),
+      );
+
+      const launchedPid = Deno.pid;
+      const selectedPorts: number[] = [];
+      const webLauncher: WebProcessLauncherLike = {
+        async launchDetached({ hostname, port }) {
+          await webStatusStore.save({
+            schemaVersion: 1,
+            running: true,
+            hostname,
+            port,
+            pid: launchedPid,
+            startedAt: "2026-03-07T20:00:00.000Z",
+            heartbeatAt: "2026-03-07T20:00:00.000Z",
+            url: `http://${hostname}:${port}/`,
+            version: "test-build",
+          });
+          return launchedPid;
+        },
+      };
+      const webPortSelector = {
+        selectAvailablePort(
+          { hostname, preferredPort }: {
+            hostname: string;
+            preferredPort: number;
+          },
+        ) {
+          assertEquals(hostname, "127.0.0.1");
+          assertEquals(preferredPort, 3187);
+          selectedPorts.push(3188);
+          return Promise.resolve(3188);
+        },
+      };
+
+      const startHarness = makeRuntimeHarness(runtimeDir);
+      const startCode = await runDaemonCli(["web", "start"], {
+        runtime: startHarness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+        webLauncher,
+        webPortSelector,
+      });
+
+      assertEquals(startCode, 0);
+      assertEquals(selectedPorts, [3188]);
+      assertStringIncludes(
+        startHarness.stdout.join(""),
+        "at http://127.0.0.1:3188/",
+      );
+      const savedStatus = await webStatusStore.load();
+      assertEquals(savedStatus.port, 3188);
+      assertEquals(savedStatus.url, "http://127.0.0.1:3188/");
+
+      const statusHarness = makeRuntimeHarness(runtimeDir);
+      const statusCode = await runDaemonCli(["web", "status", "--json"], {
+        runtime: statusHarness.runtime,
+        defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+        defaultSharedConfig: makeDefaultSharedConfig(),
+        webConfigStore,
+        webStatusStore,
+        webLauncher,
+        webPortSelector,
+      });
+
+      assertEquals(statusCode, 0);
+      const statusPayload = JSON.parse(statusHarness.stdout.join("")) as {
+        port: number;
+        url: string;
+      };
+      assertEquals(statusPayload.port, 3188);
+      assertEquals(statusPayload.url, "http://127.0.0.1:3188/");
+      assertEquals((await webConfigStore.load()).port, 3187);
     });
   },
 );
@@ -644,6 +753,7 @@ Deno.test(
             return Deno.pid;
           },
         };
+        const webPortSelector = makeFixedWebPortSelector();
 
         const harness = makeRuntimeHarness(runtimeDir);
         const code = await runDaemonCli(["web", "restart"], {
@@ -653,6 +763,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         });
 
         assertEquals(code, 0);
@@ -662,7 +773,7 @@ Deno.test(
         );
         assertStringIncludes(
           harness.stdout.join(""),
-          "kato web started in background",
+          `kato web started in background (pid: ${Deno.pid}) at http://127.0.0.1:3187/ in 1000ms (build 0ms, launch 0ms, ack 1000ms)`,
         );
         assertEquals(isProcessAlive(runningChild.pid), false);
         const savedStatus = await webStatusStore.load();
@@ -691,9 +802,37 @@ Deno.test(
         join(rootDir, "web", "kato-web-status.json"),
         () => new Date("2026-03-07T20:00:00.000Z"),
       );
+      const startupStdoutLogPath = join(
+        rootDir,
+        "web",
+        "logs",
+        "startup.stdout.log",
+      );
+      const startupStderrLogPath = join(
+        rootDir,
+        "web",
+        "logs",
+        "startup.stderr.log",
+      );
+      await Deno.mkdir(join(rootDir, "web", "logs"), { recursive: true });
+      await Deno.writeTextFile(
+        startupStdoutLogPath,
+        "deno serve: preparing\n",
+      );
+      await Deno.writeTextFile(
+        startupStderrLogPath,
+        "deno serve failed before listen\n",
+      );
       const webLauncher: WebProcessLauncherLike = {
         launchDetached: () => Promise.resolve(999999),
+        launchDetachedDetailed: () =>
+          Promise.resolve({
+            pid: 999999,
+            startupStdoutLogPath,
+            startupStderrLogPath,
+          }),
       };
+      const webPortSelector = makeFixedWebPortSelector();
 
       const initHarness = makeRuntimeHarness(runtimeDir, {
         webInitPassword: {
@@ -714,6 +853,7 @@ Deno.test(
           webConfigStore,
           webStatusStore,
           webLauncher,
+          webPortSelector,
         },
       );
       assertEquals(initCode, 0);
@@ -726,12 +866,19 @@ Deno.test(
         webConfigStore,
         webStatusStore,
         webLauncher,
+        webPortSelector,
       });
 
       assertEquals(startCode, 1);
       assertStringIncludes(
         startHarness.stderr.join(""),
         "startup acknowledgement",
+      );
+      assertStringIncludes(startHarness.stderr.join(""), startupStdoutLogPath);
+      assertStringIncludes(startHarness.stderr.join(""), startupStderrLogPath);
+      assertStringIncludes(
+        startHarness.stderr.join(""),
+        "deno serve failed before listen",
       );
 
       const savedStatus = await webStatusStore.load();

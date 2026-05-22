@@ -9,6 +9,7 @@ import {
   createDefaultWebServerStatus,
   DenoDetachedWebLauncher,
   isProcessAlive,
+  selectAvailableWebPort,
   WebServerStatusFileStore,
 } from "../apps/runtime/src/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
@@ -23,6 +24,119 @@ function decodePowerShellEncodedCommand(encodedCommand: string): string {
   }
   return script;
 }
+
+function makeFakeListener(onClose: () => void = () => {}): Deno.Listener {
+  return {
+    addr: { transport: "tcp", hostname: "127.0.0.1", port: 0 },
+    accept() {
+      return Promise.reject(new Error("unused test listener"));
+    },
+    close() {
+      onClose();
+    },
+    ref() {},
+    unref() {},
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return Promise.resolve({
+            done: true,
+            value: undefined,
+          });
+        },
+      };
+    },
+  } as unknown as Deno.Listener;
+}
+
+Deno.test("selectAvailableWebPort returns the preferred port when it can bind", async () => {
+  let closed = false;
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile: () => Promise.resolve("Linux"),
+      listen(options) {
+        assertEquals((options as { port: number }).port, 5173);
+        return makeFakeListener(() => {
+          closed = true;
+        });
+      },
+    },
+  );
+
+  assertEquals(selected, 5173);
+  assertEquals(closed, true);
+});
+
+Deno.test("selectAvailableWebPort tries the next port after a local bind collision", async () => {
+  const attempts: number[] = [];
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile: () => Promise.resolve("Linux"),
+      listen(options) {
+        const port = (options as { port: number }).port;
+        attempts.push(port);
+        if (port === 5173) {
+          const error = new Error("Address already in use");
+          error.name = "AddrInUse";
+          throw error;
+        }
+        return makeFakeListener();
+      },
+    },
+  );
+
+  assertEquals(selected, 5174);
+  assertEquals(attempts, [5173, 5174]);
+});
+
+Deno.test("selectAvailableWebPort skips a Windows-host listener when running under WSL", async () => {
+  const bindAttempts: number[] = [];
+  const windowsProbePorts: number[] = [];
+  const selected = await selectAvailableWebPort(
+    { hostname: "127.0.0.1", preferredPort: 5173 },
+    {
+      buildOs: "linux",
+      readTextFile(path) {
+        assertEquals(path, "/proc/sys/kernel/osrelease");
+        return Promise.resolve("5.15.167.4-microsoft-standard-WSL2");
+      },
+      listen(options) {
+        bindAttempts.push((options as { port: number }).port);
+        return makeFakeListener();
+      },
+      commandFactory(_command, options) {
+        const decoded = decodePowerShellEncodedCommand(
+          String(options?.args?.[3] ?? ""),
+        );
+        const port = Number.parseInt(
+          decoded.match(/\$port = (\d+);/)?.[1] ?? "",
+          10,
+        );
+        windowsProbePorts.push(port);
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: port === 5173 ? 0 : 1,
+              stdout: new Uint8Array(),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+    },
+  );
+
+  assertEquals(selected, 5174);
+  assertEquals(bindAttempts, [5173, 5174]);
+  assertEquals(windowsProbePorts, [5173, 5174]);
+});
 
 Deno.test(
   "DenoDetachedWebLauncher builds then launches the bundled web server via detached shell",
@@ -86,12 +200,81 @@ Deno.test(
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
+        "KATO_BUILD_MS",
+      );
+      assertStringIncludes(
+        capturedOptions?.args?.[1] ?? "",
         "setsid '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
       assertStringIncludes(
         capturedOptions?.args?.[1] ?? "",
         "nohup '/fake/deno' 'serve' '--node-modules-dir=auto' '-A' '--host' '127.0.0.1' '--port' '5173' '_fresh/server.js'",
       );
+    });
+  },
+);
+
+Deno.test(
+  "DenoDetachedWebLauncher skips source build when Fresh output is current",
+  async () => {
+    if (Deno.build.os === "windows") {
+      return;
+    }
+
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+
+    await withTestTempDir("web-launcher-current-", async (workspaceRoot) => {
+      const webRoot = join(workspaceRoot, "apps", "web");
+      await Deno.mkdir(join(webRoot, "_fresh"), { recursive: true });
+      await Deno.mkdir(join(webRoot, "routes"), { recursive: true });
+      await Deno.mkdir(join(workspaceRoot, "apps", "runtime", "src"), {
+        recursive: true,
+      });
+      await Deno.mkdir(join(workspaceRoot, "shared", "src"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(join(webRoot, "routes", "index.tsx"), "route");
+      await Deno.writeTextFile(
+        join(workspaceRoot, "apps", "runtime", "src", "mod.ts"),
+        "runtime",
+      );
+      await Deno.writeTextFile(
+        join(workspaceRoot, "shared", "src", "mod.ts"),
+        "shared",
+      );
+      await Deno.writeTextFile(join(webRoot, "_fresh", "server.js"), "server");
+
+      const launcher = new DenoDetachedWebLauncher(
+        "/fake/deno",
+        workspaceRoot,
+        (_command, options) => {
+          capturedOptions = options;
+          return {
+            spawn() {
+              throw new Error("unexpected spawn call");
+            },
+            output() {
+              return Promise.resolve({
+                code: 0,
+                stdout: new TextEncoder().encode("12345\n"),
+                stderr: new Uint8Array(),
+              });
+            },
+          };
+        },
+      );
+
+      const result = await launcher.launchDetachedDetailed({
+        hostname: "127.0.0.1",
+        port: 5173,
+      });
+
+      assertEquals(result.pid, 12345);
+      const script = capturedOptions?.args?.[1] ?? "";
+      assertStringIncludes(script, "KATO_BUILD_MS=0");
+      assertEquals(script.includes("'vite' 'build'"), false);
     });
   },
 );
@@ -143,10 +326,81 @@ Deno.test(
       decoded,
       "'run' '--node-modules-dir=auto' '--ext=js' '-A' 'vite' 'build'",
     );
+    assertStringIncludes(decoded, "KATO_BUILD_MS");
     assertStringIncludes(decoded, "$LASTEXITCODE -ne 0");
     assertStringIncludes(
       decoded,
       "$argList = @('serve', '--node-modules-dir=auto', '-A', '--host', '127.0.0.1', '--port', '5173', '_fresh/server.js');",
+    );
+  },
+);
+
+Deno.test(
+  "DenoDetachedWebLauncher shell helper redirects startup output when log paths are provided",
+  async () => {
+    let capturedOptions:
+      | ConstructorParameters<typeof Deno.Command>[1]
+      | undefined;
+    const startupLogPaths = {
+      startupStdoutLogPath: "/tmp/kato startup stdout.log",
+      startupStderrLogPath: "/tmp/kato startup stderr.log",
+    };
+
+    const launcher = new DenoDetachedWebLauncher(
+      "/fake/deno",
+      "/repo",
+      (_command, options) => {
+        capturedOptions = options;
+        return {
+          spawn() {
+            throw new Error("unexpected spawn call");
+          },
+          output() {
+            return Promise.resolve({
+              code: 0,
+              stdout: new TextEncoder().encode("4321\n"),
+              stderr: new Uint8Array(),
+            });
+          },
+        };
+      },
+    );
+
+    const result = await (
+      launcher as unknown as {
+        launchDetachedViaShell(
+          executablePath: string,
+          args: string[],
+          workingDirectory: string,
+          startupLogPaths: {
+            startupStdoutLogPath?: string;
+            startupStderrLogPath?: string;
+          },
+        ): Promise<{
+          pid: number;
+          startupStdoutLogPath?: string;
+          startupStderrLogPath?: string;
+        }>;
+      }
+    ).launchDetachedViaShell(
+      "/opt/kato/kato-web",
+      ["--host", "127.0.0.1", "--port", "5173"],
+      "/opt/kato",
+      startupLogPaths,
+    );
+
+    assertEquals(result.pid, 4321);
+    assertEquals(
+      result.startupStdoutLogPath,
+      startupLogPaths.startupStdoutLogPath,
+    );
+    assertEquals(
+      result.startupStderrLogPath,
+      startupLogPaths.startupStderrLogPath,
+    );
+    assertStringIncludes(
+      capturedOptions?.args?.[1] ?? "",
+      "> '/tmp/kato startup stdout.log' 2> '/tmp/kato startup stderr.log'",
     );
   },
 );
@@ -179,22 +433,43 @@ Deno.test(
         };
       },
     );
+    const startupLogPaths = {
+      startupStdoutLogPath: "C:\\logs\\kato startup stdout.log",
+      startupStderrLogPath: "C:\\logs\\kato startup stderr.log",
+    };
 
-    const pid = await (
+    const result = await (
       launcher as unknown as {
         launchDetachedViaPowerShell(
           executablePath: string,
           args: string[],
           workingDirectory: string,
-        ): Promise<number>;
+          startupLogPaths: {
+            startupStdoutLogPath?: string;
+            startupStderrLogPath?: string;
+          },
+        ): Promise<{
+          pid: number;
+          startupStdoutLogPath?: string;
+          startupStderrLogPath?: string;
+        }>;
       }
     ).launchDetachedViaPowerShell(
       "/fake/deno",
       ["run", "--ext=js", "-A", "vite", "--port", "3173"],
       "C:\\repo\\apps\\web",
+      startupLogPaths,
     );
 
-    assertEquals(pid, 4321);
+    assertEquals(result.pid, 4321);
+    assertEquals(
+      result.startupStdoutLogPath,
+      startupLogPaths.startupStdoutLogPath,
+    );
+    assertEquals(
+      result.startupStderrLogPath,
+      startupLogPaths.startupStderrLogPath,
+    );
     assertEquals(capturedCommand, "powershell.exe");
     assertEquals(capturedOptions?.args?.[0], "-NoProfile");
     assertEquals(capturedOptions?.args?.[1], "-NonInteractive");
@@ -203,9 +478,21 @@ Deno.test(
     const decoded = decodePowerShellEncodedCommand(
       capturedOptions?.args?.[3] ?? "",
     );
-    assertStringIncludes(decoded, "Start-Process -FilePath '/fake/deno'");
+    assertStringIncludes(decoded, "Start-Process -FilePath 'cmd.exe'");
     assertStringIncludes(decoded, "-WorkingDirectory 'C:\\repo\\apps\\web'");
-    assertStringIncludes(decoded, "'run', '--ext=js', '-A', 'vite'");
+    assertStringIncludes(
+      decoded,
+      "'/d', '/s', '/c'",
+    );
+    assertStringIncludes(
+      decoded,
+      '1> "C:\\logs\\kato startup stdout.log"',
+    );
+    assertStringIncludes(
+      decoded,
+      '2> "C:\\logs\\kato startup stderr.log"',
+    );
+    assertStringIncludes(decoded, '""/fake/deno" "run" "--ext=js" "-A" "vite"');
   },
 );
 
@@ -237,7 +524,7 @@ Deno.test(
               executablePath: string,
               args: string[],
               workingDirectory: string,
-            ): Promise<number>;
+            ): Promise<{ pid: number }>;
           }
         ).launchDetachedViaPowerShell(
           "/fake/deno",
@@ -273,7 +560,7 @@ Deno.test(
               executablePath: string,
               args: string[],
               workingDirectory: string,
-            ): Promise<number>;
+            ): Promise<{ pid: number }>;
           }
         ).launchDetachedViaPowerShell(
           "/fake/deno",
@@ -304,6 +591,7 @@ Deno.test(
                 "vite v7.3.1 building client environment for production...",
                 "transforming...",
                 "✓ 2 modules transformed.",
+                "KATO_BUILD_MS=1234",
                 "29284",
                 "",
               ].join("\n"),
@@ -314,13 +602,16 @@ Deno.test(
       }),
     );
 
-    const pid = await (
+    const result = await (
       launcher as unknown as {
-        launchDetachedScriptViaPowerShell(script: string): Promise<number>;
+        launchDetachedScriptViaPowerShell(
+          script: string,
+        ): Promise<{ pid: number; buildLatencyMs?: number }>;
       }
     ).launchDetachedScriptViaPowerShell("Write-Output 'stub'");
 
-    assertEquals(pid, 29284);
+    assertEquals(result.pid, 29284);
+    assertEquals(result.buildLatencyMs, 1234);
   },
 );
 

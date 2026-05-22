@@ -13,6 +13,7 @@ import type {
   DaemonStatusSnapshotStoreLike,
   SharedBehaviorConfigStoreLike,
   WebConfigStoreLike,
+  WebPortSelectorLike,
   WebProcessLauncherLike,
   WebServerStatusStoreLike,
 } from "@kato/runtime";
@@ -37,6 +38,7 @@ export interface DaemonCliCommandContext {
   webConfig?: WebConfig;
   webStatusStore: WebServerStatusStoreLike;
   webLauncher: WebProcessLauncherLike;
+  webPortSelector: WebPortSelectorLike;
   statusStore: DaemonStatusSnapshotStoreLike;
   controlStore: DaemonControlRequestStoreLike;
   daemonLauncher: DaemonProcessLauncherLike;

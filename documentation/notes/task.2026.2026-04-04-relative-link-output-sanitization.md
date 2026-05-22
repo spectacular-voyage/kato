@@ -1,7 +1,7 @@
 ---
 id: 6m2r8z1k4p9t5v7n3q1w0yx
 title: 2026 04 04 Relative Link Output Sanitization
-desc: ""
+desc: ''
 updated: 1775333389593
 created: 1775333389593
 ---
@@ -15,7 +15,7 @@ rewriting existing rendered files.
 ## Summary
 
 This is the follow-up to
-[[completed.2026.2026-04-04-dendron-style-links]] for the standard markdown
+[[ka.completed.2026.2026-04-04-dendron-style-links]] for the standard markdown
 case.
 
 Kato should support a workspace writer flag that relativizes local link

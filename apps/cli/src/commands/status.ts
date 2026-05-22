@@ -30,6 +30,7 @@ import {
   loadWorkspaceStatusSummary,
   type WorkspaceStatusSummary,
 } from "./status_workspace.ts";
+import { resolveWebEndpoint } from "./web_endpoint.ts";
 export type {
   WorkspaceStatusRow,
   WorkspaceStatusSummary,
@@ -481,9 +482,12 @@ async function loadStatusWebState(
   const alive = stored.running && isProcessAlive(stored.pid);
   const stale = stored.running && !alive;
   const configured = ctx.webConfig !== undefined;
-  const url = ctx.webConfig
-    ? `http://${ctx.webConfig.hostname}:${ctx.webConfig.port}/`
-    : stored.url;
+  const { hostname, port, url } = resolveWebEndpoint(
+    stored,
+    ctx.webConfig,
+    alive,
+    stale,
+  );
   const state = alive ? "running" : configured ? "stopped" : "unconfigured";
 
   return {
@@ -491,8 +495,8 @@ async function loadStatusWebState(
     running: alive,
     stale,
     state,
-    hostname: ctx.webConfig?.hostname ?? stored.hostname,
-    port: ctx.webConfig?.port ?? stored.port,
+    hostname,
+    port,
     pid: stored.pid,
     startedAt: stored.startedAt,
     heartbeatAt: stored.heartbeatAt,

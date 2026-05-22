@@ -15,13 +15,13 @@ Kato captures AI conversations from supported IDEs, CLIs, and local apps into fi
 Primary install:
 
 ```bash
-npm install -g @spectacular-voyage/kato
+npm install -g @spectacular-voyage/kato@latest
 ```
 
 Or with pnpm:
 
 ```bash
-pnpm add -g @spectacular-voyage/kato
+pnpm add -g @spectacular-voyage/kato@latest
 ```
 
 The npm package installs prebuilt binaries. It does not compile Kato on your
@@ -36,6 +36,26 @@ glibc.
 
 The public command is `kato`. Bundled `kato-daemon` and `kato-web` are managed
 for you.
+
+## Upgrade
+
+With npm:
+
+```bash
+npm install -g @spectacular-voyage/kato@latest
+```
+
+With pnpm:
+
+```bash
+pnpm update -g @spectacular-voyage/kato --latest
+```
+
+Then confirm the active `kato` on your `PATH`:
+
+```bash
+kato --version
+```
 
 ## Quickstart
 

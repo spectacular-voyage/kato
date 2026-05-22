@@ -8,7 +8,7 @@ created: 1773375447431
 
 ## Purpose
 
-- Capture post-Phase-1 distribution ideas that are worth keeping, but are not part of the current binary/npm closeout tracked in [[completed.2026.2026-03-11-binary-distributions]] and [[completed.2026.2026-03-11-npmjs-install]].
+- Capture post-Phase-1 distribution ideas that are worth keeping, but are not part of the current binary/npm closeout tracked in [[ka.completed.2026.2026-03-11-binary-distributions]] and [[ka.completed.2026.2026-03-11-npmjs-install]].
 - brew distribution
 
 ## Carry-Forward Constraints

@@ -38,6 +38,37 @@ export const handler = define.handlers({
   },
 });
 
+export function LoginForm({ error }: { error: boolean }) {
+  return (
+    <>
+      <h2>Sign In</h2>
+      {error ? <p class="danger">Invalid username or password.</p> : null}
+      <form method="post" class="login-form">
+        <label class="form-label" for="username">Username</label>
+        <input
+          class="form-input"
+          id="username"
+          name="username"
+          type="text"
+          autocomplete="username"
+          autofocus
+          required
+        />
+        <label class="form-label" for="password">Password</label>
+        <input
+          class="form-input"
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+        <button class="form-button" type="submit">Sign In</button>
+      </form>
+    </>
+  );
+}
+
 export default define.page(async function LoginPage(ctx) {
   const error = ctx.url.searchParams.get("error") === "1";
   const appStatus = await loadAppChromeStatus();
@@ -56,29 +87,7 @@ export default define.page(async function LoginPage(ctx) {
 
       <section class="grid login-grid">
         <article class="card login-card">
-          <h2>Sign In</h2>
-          {error ? <p class="danger">Invalid username or password.</p> : null}
-          <form method="post" class="login-form">
-            <label class="form-label" for="username">Username</label>
-            <input
-              class="form-input"
-              id="username"
-              name="username"
-              type="text"
-              autocomplete="username"
-              required
-            />
-            <label class="form-label" for="password">Password</label>
-            <input
-              class="form-input"
-              id="password"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              required
-            />
-            <button class="form-button" type="submit">Sign In</button>
-          </form>
+          <LoginForm error={error} />
         </article>
       </section>
     </div>

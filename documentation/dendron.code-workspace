@@ -3,6 +3,10 @@
     {
       "path": "notes",
       "name": "documentation"
+    },
+    {
+      "path": "../dependencies/github.com/spectacular-voyage/kato-dev-archive/notes",
+      "name": "kato-dev-archive"
     }
   ],
   "settings": {
