@@ -180,8 +180,19 @@ Deno.test("assembleNpmPackages creates wrapper and platform package directories"
   assert(wrapperReadme.includes("# @spectacular-voyage/kato"));
   assert(
     wrapperReadme.includes(
+      "Kato captures AI conversations from supported IDEs, CLIs, and local apps",
+    ),
+  );
+  assert(
+    wrapperReadme.includes(
       "platform-native Kato binary package selected by npm optional dependencies.",
     ),
+  );
+  assertEquals(
+    wrapperReadme.includes(
+      "This package is generated from the native binary release bundles",
+    ),
+    false,
   );
 
   const platformReadme = await Deno.readTextFile(

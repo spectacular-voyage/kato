@@ -320,13 +320,13 @@ function makeWrapperReadme(
   return [
     `# ${wrapperPackageName}`,
     "",
-    "Generated npm wrapper package for Kato.",
+    "Kato captures AI conversations from supported IDEs, CLIs, and local apps",
+    'into files you control. A local daemon creates vendor-agnostic chat "twins"',
+    'and monitors chats for kato commands like "record" or "stop". It can serve',
+    "a local web console, and also has a terminal-based status console.",
     "",
     `This package installs the \`${commandName}\` command and launches the`,
     "platform-native Kato binary package selected by npm optional dependencies.",
-    "",
-    "This package is generated from the native binary release bundles and should",
-    "not contain source-build or postinstall download logic.",
     "",
   ].join("\n");
 }
