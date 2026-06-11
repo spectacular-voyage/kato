@@ -8,9 +8,9 @@ created: 1773868244789
 
 ## Purpose
 
-This note is the consolidated roadmap and engineering backlog for Kato.
+This note is the consolidated product roadmap for Kato.
 
-Use [[features]] for shipped behavior and [[product-ideas]] for ideas that are not yet committed. Detailed execution plans belong in dated `task.*` notes.
+Use [[features]] for shipped behavior, [[product-ideas]] for ideas that are not yet committed, and [[dev.todo]] for technical or administrative nits. Detailed execution plans belong in dated `task.*` notes.
 
 ## Current Focus
 
@@ -46,45 +46,16 @@ The next product arc is making Kato's saved outputs easier to configure, describ
 
 ## Runtime And Ingestion Backlog
 
-- [ ] Add schema fail-closed checks when persisted snapshot files are added, with a `kato clean --all` remediation hint for v1 data.
-- [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into `clean` behavior.
-- [ ] Add permission-boundary tests proving provider reads are denied outside `providerSessionRoots`.
-- [ ] Harden provider-aware lookup paths where CLI/runtime reads can still be ambiguous by provider session id alone.
-- [ ] Decide whether to redesign mid-turn cursor advancement so polling cannot split one logical assistant turn into separate snapshot entries.
 - [ ] Add an explicit SessionTwin compaction/retention policy.
-- [ ] Optimize `resolveConversationTitle` dedup/memoization in daemon runtime if profiling shows it matters.
-
-## Config And Compatibility Backlog
-
-- [ ] Define runtime config versioning/migration strategy for `featureFlags`, `providerSessionRoots`, and future schema changes.
-- [ ] Document compatibility policy for newer config fields versus older daemon builds.
-- [ ] Add migration tests for older/newer config compatibility scenarios.
-- [ ] Re-evaluate centralized/OpenFeature provider integration once cloud control-plane work begins.
-- [ ] Remove compatibility-layer cruft once supported migrations make it safe.
-
-## Observability And Security Backlog
-
-- [ ] Define event schema/version contract for operational and audit logs.
-- [ ] Add sensitive-field redaction tests for log sinks.
-- [ ] Add audit-completeness tests for critical allow/deny decisions.
 - [ ] Add `ConversationEventKind` support for Codex plan documents or other provider-native document types once their semantics are clear.
 
 ## Distribution Backlog
 
 - [ ] Finalize least-privilege compile permissions for `kato`, `kato-daemon`, and `kato-web`, with launcher-only spawning power where possible.
-- [ ] Expand packaged-bundle smoke checks to full daemon lifecycle and full web lifecycle coverage.
-- [ ] Add downloadable-archive smoke checks that extract real `.tar.gz` and `.zip` artifacts and rerun core binary/web assertions.
-- [ ] Add automated tests for `scripts/package-binaries.ts` covering bundle contents, emitted metadata, archives, and checksums.
-- [ ] Add permission regression checks proving compiled binaries honor app-level path policy outside configured roots.
 - [ ] Add signing/notarization before direct binary installs become the default documented path.
 - [ ] Add Homebrew packaging.
 - [ ] Design channel-aware upgrade/uninstall metadata before adding any `kato upgrade` command.
 - [ ] Add explicit per-user background integration for `systemd --user`, launchd LaunchAgents, and Windows startup mechanisms.
-
-## Deferred Evaluations
-
-- [ ] Re-evaluate additional CLI framework features only if command UX outgrows the current router.
-- [ ] Re-evaluate `zod` only if boundary validation complexity materially increases.
 
 ## Known Risks
 
