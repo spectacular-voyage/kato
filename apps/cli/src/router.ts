@@ -565,7 +565,8 @@ export async function runDaemonCli(
     }
   }
 
-  const commandShouldTryLoadingWebConfig = intent.command.name === "status" ||
+  const commandShouldTryLoadingWebConfig = intent.command.name === "restart" ||
+    intent.command.name === "status" ||
     intent.command.name === "web-start" ||
     intent.command.name === "web-restart" ||
     intent.command.name === "web-status";

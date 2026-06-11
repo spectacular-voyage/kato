@@ -2,6 +2,7 @@ import type { DaemonCliCommandContext } from "./context.ts";
 import { isStatusSnapshotStale } from "@kato/runtime";
 import { runStartCommand } from "./start.ts";
 import { runStopCommand } from "./stop.ts";
+import { runWebRestartCommand } from "./web.ts";
 
 const DEFAULT_STOP_WAIT_TIMEOUT_MS = 10_000;
 const DEFAULT_STOP_WAIT_POLL_INTERVAL_MS = 100;
@@ -60,6 +61,7 @@ export async function runRestartCommand(
     });
 
     await runStartCommand(ctx);
+    await restartWebIfConfigured(ctx);
     return;
   }
 
@@ -78,4 +80,14 @@ export async function runRestartCommand(
     previousPid: snapshot.daemonPid,
     restartMode: "stop-then-start",
   });
+  await restartWebIfConfigured(ctx);
+}
+
+async function restartWebIfConfigured(
+  ctx: DaemonCliCommandContext,
+): Promise<void> {
+  if (!ctx.webConfig) {
+    return;
+  }
+  await runWebRestartCommand(ctx);
 }

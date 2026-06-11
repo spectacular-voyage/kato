@@ -2,11 +2,10 @@
 id: mhthe39ktidk76iy77kcxbn
 title: Todo
 desc: ""
-updated: 1775331871767
+updated: 1781196292514
 created: 1771812869620
 ---
 
-This note is kept as a historical backlink target.
+## Toolchain And Dependency Maintenance
 
-The active backlog has been consolidated into [[roadmap]]. Detailed execution
-plans should continue to live in dated `task.*` notes.
+- [ ] Plan and test a Deno 2.8.x upgrade, including root and app-local lockfiles, Fresh/web build behavior, binary compilation, npm package assembly, smoke installs, and release workflow parity.

@@ -13,6 +13,7 @@ import type {
   MarkdownFrontmatterConfig,
   RuntimeConfig as DaemonRuntimeConfig,
   UserConfig,
+  WebConfig,
 } from "@kato/shared";
 import {
   createDefaultDaemonFeatureFlags,
@@ -36,6 +37,9 @@ import {
   createDefaultWebConfig,
   createDefaultWebServerStatus,
   PersistentSessionStateStore,
+  type WebConfigStoreLike,
+  type WebPortSelectorLike,
+  type WebProcessLauncherLike,
 } from "../apps/runtime/src/mod.ts";
 import {
   CliUsageError,
@@ -428,6 +432,54 @@ function makeInMemoryWebStatusStore(
       state = { ...next };
       return Promise.resolve();
     },
+  };
+}
+
+function cloneWebConfig(config: WebConfig): WebConfig {
+  return {
+    schemaVersion: config.schemaVersion,
+    hostname: config.hostname,
+    port: config.port,
+    auth: { ...config.auth },
+  };
+}
+
+function makeInMemoryWebConfigStore(
+  initial: WebConfig | undefined,
+  path = ".test-tmp/kato-web-config.yaml",
+): WebConfigStoreLike {
+  let state = initial ? cloneWebConfig(initial) : undefined;
+  return {
+    getPath() {
+      return path;
+    },
+    load() {
+      if (!state) {
+        return Promise.reject(new Deno.errors.NotFound("missing web config"));
+      }
+      return Promise.resolve(cloneWebConfig(state));
+    },
+    ensureInitialized(defaultConfig: WebConfig) {
+      if (!state) {
+        state = cloneWebConfig(defaultConfig);
+        return Promise.resolve({
+          created: true,
+          config: cloneWebConfig(state),
+          path,
+        });
+      }
+      return Promise.resolve({
+        created: false,
+        config: cloneWebConfig(state),
+        path,
+      });
+    },
+  };
+}
+
+function makeFixedWebPortSelector(): WebPortSelectorLike {
+  return {
+    selectAvailablePort: ({ preferredPort }) => Promise.resolve(preferredPort),
   };
 }
 
@@ -3539,6 +3591,69 @@ Deno.test("runDaemonCli restart starts daemon when not running", async () => {
   assertEquals(controlStore.requests.length, 0);
   assertEquals(daemonLauncher.launchedCount.value, 1);
   assertStringIncludes(harness.stdout.join(""), "started in background");
+});
+
+Deno.test("runDaemonCli restart also restarts configured web", async () => {
+  const controlStore = makeInMemoryControlStore();
+  const statusStore = makeInMemoryStatusStore();
+  const daemonLauncher = makeDaemonLauncher(
+    31337,
+    makeStartupAckCallback(statusStore, 31337),
+  );
+  const runtimeDir = makeFilesystemRuntimeDir();
+  const defaultRuntimeConfig = makeDefaultRuntimeConfig(runtimeDir);
+  const { store: configStore } = makeInMemoryConfigStore(defaultRuntimeConfig);
+  const webConfig = createDefaultWebConfig({
+    hostname: "127.0.0.1",
+    port: 3187,
+  });
+  const webConfigStore = makeInMemoryWebConfigStore(webConfig);
+  const webStatusStore = makeInMemoryWebStatusStore();
+  let webLaunchCount = 0;
+  const webLauncher: WebProcessLauncherLike = {
+    async launchDetached({ hostname, port }) {
+      webLaunchCount += 1;
+      await webStatusStore.save({
+        schemaVersion: 1,
+        running: true,
+        hostname,
+        port,
+        pid: 4243,
+        startedAt: "2026-02-22T10:00:00.000Z",
+        heartbeatAt: "2026-02-22T10:00:00.000Z",
+        url: `http://${hostname}:${port}/`,
+        version: "test-web",
+      });
+      return 4243;
+    },
+  };
+
+  const harness = makeRuntimeHarness(runtimeDir);
+  const code = await runDaemonCli(["restart"], {
+    runtime: harness.runtime,
+    defaultRuntimeConfig,
+    configStore,
+    statusStore,
+    controlStore: controlStore.store,
+    daemonLauncher: daemonLauncher.launcher,
+    webConfigStore,
+    webStatusStore,
+    webLauncher,
+    webPortSelector: makeFixedWebPortSelector(),
+  });
+
+  assertEquals(code, 0);
+  assertEquals(controlStore.requests.length, 0);
+  assertEquals(daemonLauncher.launchedCount.value, 1);
+  assertEquals(webLaunchCount, 1);
+  assertStringIncludes(
+    harness.stdout.join(""),
+    "kato daemon started in background",
+  );
+  assertStringIncludes(
+    harness.stdout.join(""),
+    "kato web started in background (pid: 4243) at http://127.0.0.1:3187/",
+  );
 });
 
 Deno.test("runDaemonCli restart queues stop and then starts daemon when running", async () => {
