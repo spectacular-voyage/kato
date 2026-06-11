@@ -311,6 +311,12 @@ Ingestion runners:
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
 
+Session snippets (the operator-facing session labels) always reflect the
+conversation's first user message: when a snapshot is created from a mid-file
+resume without twin hydration, the runner does a one-time bounded read of the
+source-file head (cached per run, secrets policy applied) instead of letting
+the label drift to the first post-restart message.
+
 Freshly parsed events pass the shared secrets policy
 (`apps/runtime/src/policy/secrets_redaction.ts`) before snapshot projection,
 twin append, or snippet extraction — and the same transform guards

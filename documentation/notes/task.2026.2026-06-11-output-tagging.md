@@ -14,6 +14,8 @@ created: 1781187417804
 - Let users add or edit tags after recording has started.
 - Support both shared workspace tag libraries and personal user-level tag
   libraries.
+- Build on the session/output metadata foundation in
+  [[task.2026.2026-06-11-session-output-metadata]].
 - Keep tagging separate from persona/model support in
   [[task.2026.2026-05-28-persona-support]].
 
@@ -24,6 +26,7 @@ created: 1781187417804
 - What is missing is a product contract around where tags come from, how they
   persist, and how users edit them after output creation.
 - This task should follow the source-of-truth model from
+  [[task.2026.2026-06-11-session-output-metadata]] and
   [[task.2026.2026-05-11-per-output-writer-controls]]:
   - persisted output metadata drives live Kato behavior;
   - markdown frontmatter records descriptive output metadata;
@@ -33,6 +36,9 @@ created: 1781187417804
   [[task.2026.2026-06-11-workspace-config-editing]].
 - Personal tag library editing belongs on `/settings` and in user-level CLI
   commands, not in the shared workspace editor.
+- Session-level tags are inherited output defaults. A tag added to a session
+  should translate into effective tags for each workspace output/recording,
+  while output-specific tags remain stored directly on the output.
 
 ## Discussion
 
@@ -56,6 +62,10 @@ created: 1781187417804
   tags should merge or rewrite markdown frontmatter immediately when the file
   is markdown and frontmatter is present, but the persisted output metadata
   remains authoritative either way.
+- Session-level tag edits should use the metadata layer from
+  [[task.2026.2026-06-11-session-output-metadata]]. The tagging task should
+  add tag-specific validation, suggestions, and UI, not invent another session
+  mutation mechanism.
 - First-slice tag semantics should be simple:
   - workspace defaults always apply;
   - per-output tags are additive;
@@ -76,6 +86,9 @@ created: 1781187417804
 
 - Should users be able to suppress a workspace default tag for one output?
   Recommendation: no for the first slice; keep defaults additive.
+- Should users be able to suppress a session-level inherited tag for one
+  output? Recommendation: no for the first slice; inherited and direct tags are
+  additive until a concrete need for negative metadata appears.
 - Should user-level tags ever be automatic defaults? Recommendation: not in the
   first slice; keep personal libraries as suggestions unless the user
   explicitly selects tags for an output.
@@ -93,8 +106,12 @@ created: 1781187417804
 ## Decisions
 
 - Split output tagging from persona/model support.
-- Store per-output tag choices in persisted session metadata near the output
+- Depend on [[task.2026.2026-06-11-session-output-metadata]] for the shared
+  session/output metadata containers and mutation path.
+- Store per-output tag choices in persisted output metadata near the output
   state.
+- Treat session-level tags as inherited defaults that resolve into effective
+  output tags.
 - Support shared workspace tag libraries and personal user-level tag libraries.
 - Treat markdown frontmatter `tags` as descriptive output metadata, not the
   source of truth.
@@ -124,11 +141,14 @@ created: 1781187417804
   - do not automatically write user-level tags unless a later explicit default
     mechanism is added.
 - `SessionWorkspaceOutputStateV1`
-  - add optional persisted output metadata, for example
-    `outputMetadata?: { tags?: string[] }`;
-  - if persona support also adds `outputMetadata`, use one shared container
-    rather than competing fields.
+  - use the shared `outputMetadata.tags` field from
+    [[task.2026.2026-06-11-session-output-metadata]];
+  - do not add a parallel tag-only field.
+- `SessionMetadataV1`
+  - use the shared `outputMetadataDefaults.tags` field from
+    [[task.2026.2026-06-11-session-output-metadata]] for session-level tags.
 - Effective output tags resolve as:
+  - session-level inherited tags from `outputMetadataDefaults.tags`;
   - workspace default tags from the current workspace profile, when available;
   - otherwise any persisted workspace-default snapshot needed for re-arm;
   - plus persisted per-output tags;
@@ -162,6 +182,8 @@ created: 1781187417804
 | Scenario | Persistent Covered | Non-Persistent Covered | Expected Same? | Intentional Divergence Notes |
 | --- | --- | --- | --- | --- |
 | New web recording with selected tags | Yes | Not applicable | Yes | Persist output tags and write effective tags to the new markdown frontmatter. |
+| Session tag added before recording starts | Yes | Not applicable | Yes | Future outputs inherit the session tag and write it as an effective output tag. |
+| Session tag added while recording is active | Yes | Not applicable | Yes | Persist the session default and update active output frontmatter best-effort. |
 | New in-chat recording with workspace default tags | Yes | Yes | Yes | Defaults should apply even without explicit output tags. |
 | New web recording with user-level suggested tags not selected | Yes | Not applicable | Yes | Suggestions alone must not write personal tags to output files. |
 | Active output tag edit from web | Yes | Not applicable | Yes | Persist metadata and update frontmatter immediately when possible. |
@@ -181,7 +203,8 @@ created: 1781187417804
   - normalize and dedupe tags;
   - verify suggestions do not become automatic defaults.
 - Contract/session-state tests:
-  - accept metadata with and without `outputMetadata.tags`;
+  - accept metadata with and without `outputMetadataDefaults.tags`;
+  - accept outputs with and without `outputMetadata.tags`;
   - reject malformed tag metadata.
 - Effective tag resolver tests:
   - merge workspace defaults and per-output tags in stable order;
@@ -218,6 +241,9 @@ created: 1781187417804
 
 ## Implementation Plan
 
+- [ ] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its
+      shared contract/mutation layer to avoid adding tag-specific metadata
+      plumbing.
 - [ ] Add workspace config fields for `defaultTags` and `tagSuggestions`.
 - [ ] Add user config fields for personal tag libraries and migration behavior.
 - [ ] Extend `/settings` with user-level tag library management.

@@ -164,6 +164,8 @@ interface GeminiSessionDiscovery {
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
+/** Upper bound on events scanned from the source head for a stable snippet. */
+const HEAD_SNIPPET_MAX_EVENTS = 200;
 const CODEX_COMPACTION_BACKTRACK_BYTES = 4 * 1024;
 type ProviderReadOperation = "stat" | "readDir" | "open";
 
@@ -698,6 +700,12 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private watchTask: Promise<void> | undefined;
   private readonly failedClosedSessions = new Set<string>();
   private readonly secretsRedactor: SecretsRedactor;
+  /**
+   * Per-run cache of first-user-message snippets read from source heads,
+   * keyed by `sessionId:filePath`. Caches `undefined` results too so a
+   * session with no user message is not re-scanned every poll.
+   */
+  private readonly headSnippets = new Map<string, string | undefined>();
 
   constructor(options: FileProviderIngestionRunnerOptions) {
     this.provider = options.provider;
@@ -780,6 +788,62 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       );
     }
     return result.events;
+  }
+
+  /**
+   * Bounded read of the source-file head to recover the conversation's first
+   * user message as a stable session snippet when no full-history snapshot
+   * (twin hydration) is available. Secrets policy applies before extraction
+   * so a credential in the opening message cannot leak via the label. Never
+   * fails ingestion: any error resolves to `undefined`.
+   */
+  private async resolveHeadSnippet(
+    sessionId: string,
+    filePath: string,
+  ): Promise<string | undefined> {
+    const cacheKey = `${sessionId}:${filePath}`;
+    if (this.headSnippets.has(cacheKey)) {
+      return this.headSnippets.get(cacheKey);
+    }
+
+    let snippet: string | undefined;
+    try {
+      let scanned = 0;
+      for await (
+        const { event } of this.parseEvents(filePath, 0, {
+          provider: this.provider,
+          sessionId,
+        })
+      ) {
+        scanned += 1;
+        if (event.kind === "message.user") {
+          const candidate = extractSnippet(
+            await this.applySecretsPolicy([event], sessionId),
+          );
+          if (candidate) {
+            snippet = candidate;
+            break;
+          }
+        }
+        if (scanned >= HEAD_SNIPPET_MAX_EVENTS) {
+          break;
+        }
+      }
+    } catch (error) {
+      await this.operationalLogger.debug(
+        "provider.ingestion.head_snippet_failed",
+        "Source head read for session snippet failed; label stays unset",
+        {
+          provider: this.provider,
+          sessionId,
+          filePath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+
+    this.headSnippets.set(cacheKey, snippet);
+    return snippet;
   }
 
   async start(): Promise<void> {
@@ -1504,6 +1568,22 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       : undefined;
     if (!snippetOverride && fromOffset === 0) {
       snippetOverride = extractSnippet(incomingEvents);
+    }
+    if (
+      !snippetOverride &&
+      fromOffset > 0 &&
+      !currentSnapshot &&
+      !twinAvailableForHydration
+    ) {
+      // Creating a snapshot from a mid-file resume with no full-history twin
+      // hydration: without this, the snapshot window starts at the resume
+      // cursor and the session label drifts to whatever the user typed after
+      // the latest daemon restart. Read the source head once to pin the
+      // conversation's true first user message.
+      snippetOverride = await this.resolveHeadSnippet(
+        sessionId,
+        session.filePath,
+      );
     }
 
     if (stateMetadata && this.sessionStateStore) {

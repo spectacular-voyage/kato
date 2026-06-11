@@ -1557,3 +1557,193 @@ Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", asyn
     );
   });
 });
+
+function makeUserContentEvent(
+  id: string,
+  content: string,
+  timestamp: string,
+): ConversationEvent {
+  return {
+    eventId: id,
+    provider: "test-provider",
+    sessionId: "sess-test",
+    timestamp,
+    kind: "message.user",
+    role: "user",
+    content,
+    source: { providerEventType: "user", providerEventId: id },
+  } as unknown as ConversationEvent;
+}
+
+Deno.test("FileProviderIngestionRunner pins snippet to redacted source-head first user message when no twin exists", async () => {
+  await withTempDir("provider-ingestion-head-snippet-", async (dir) => {
+    const sessionFile = join(dir, "session-head.jsonl");
+    await Deno.writeTextFile(sessionFile, "placeholder\n");
+    const stateRoot = join(dir, ".kato");
+    const parseOffsets: number[] = [];
+    let phase: "initial" | "after-restart" = "initial";
+    // split so scanners never see a contiguous key-shaped literal
+    const fakeAwsKey = "AKIA" + "IOSFODNN7EXAMPLE";
+    const firstQuestion = `my key ${fakeAwsKey} starts the conversation`;
+    const latestQuestion = "latest question after restart";
+
+    function makeRunner(store: InMemorySessionSnapshotStore) {
+      return makeFileProviderTestRunner({
+        dir,
+        provider: "test-provider",
+        sessionSnapshotStore: store,
+        sessionStateStore: makeSessionStateStore(
+          stateRoot,
+          "session-uuid-head-1",
+        ),
+        autoGenerateTwins: false,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "session-head",
+            filePath: sessionFile,
+            modifiedAtMs: Date.now(),
+          }]);
+        },
+        parseEvents(
+          _filePath: string,
+          fromOffset: number,
+          _ctx: { provider: string; sessionId: string },
+        ) {
+          parseOffsets.push(fromOffset);
+          const currentPhase = phase;
+          return (async function* () {
+            if (fromOffset === 0) {
+              yield {
+                event: makeUserContentEvent(
+                  "head-1",
+                  firstQuestion,
+                  "2026-06-11T10:00:00.000Z",
+                ),
+                cursor: { kind: "byte-offset" as const, value: 10 },
+              };
+              if (currentPhase === "after-restart") {
+                yield {
+                  event: makeUserContentEvent(
+                    "head-2",
+                    latestQuestion,
+                    "2026-06-11T10:01:00.000Z",
+                  ),
+                  cursor: { kind: "byte-offset" as const, value: 20 },
+                };
+              }
+            }
+            if (currentPhase === "after-restart" && fromOffset === 10) {
+              yield {
+                event: makeUserContentEvent(
+                  "head-2",
+                  latestQuestion,
+                  "2026-06-11T10:01:00.000Z",
+                ),
+                cursor: { kind: "byte-offset" as const, value: 20 },
+              };
+            }
+          })();
+        },
+      });
+    }
+
+    const firstStore = new InMemorySessionSnapshotStore();
+    const firstRunner = makeRunner(firstStore);
+    await firstRunner.start();
+    await firstRunner.poll();
+    await firstRunner.stop();
+
+    const firstSnapshot = firstStore.get("session-head");
+    assertExists(firstSnapshot);
+    assertEquals(
+      firstSnapshot.metadata.snippet,
+      "my key [REDACTED:aws-access-key-id] starts the conversation",
+    );
+
+    phase = "after-restart";
+    const secondStore = new InMemorySessionSnapshotStore();
+    const secondRunner = makeRunner(secondStore);
+    await secondRunner.start();
+    await secondRunner.poll();
+    await secondRunner.stop();
+
+    const secondSnapshot = secondStore.get("session-head");
+    assertExists(secondSnapshot);
+    // window holds only the post-restart increment...
+    assertEquals(secondSnapshot.events.length, 1);
+    // ...but the label is pinned to the conversation's first user message,
+    // redacted, instead of drifting to the latest one.
+    assertEquals(
+      secondSnapshot.metadata.snippet,
+      "my key [REDACTED:aws-access-key-id] starts the conversation",
+    );
+    // live resume read at 10, then exactly one head read at 0
+    assertEquals(parseOffsets, [0, 10, 0]);
+  });
+});
+
+Deno.test("FileProviderIngestionRunner caches empty head-snippet reads across polls", async () => {
+  await withTempDir("provider-ingestion-head-cache-", async (dir) => {
+    const sessionFile = join(dir, "session-head-cache.jsonl");
+    await Deno.writeTextFile(sessionFile, "placeholder\n");
+    const stateRoot = join(dir, ".kato");
+    const parseOffsets: number[] = [];
+
+    const stateStore = makeSessionStateStore(stateRoot, "session-uuid-head-2");
+    await stateStore.getOrCreateSessionMetadata({
+      provider: "test-provider",
+      providerSessionId: "session-head-cache",
+      sourceFilePath: sessionFile,
+      initialCursor: { kind: "byte-offset", value: 10 },
+    });
+
+    const harness = makeWatchHarness();
+    const store = new InMemorySessionSnapshotStore();
+    const runner = makeFileProviderTestRunner({
+      dir,
+      provider: "test-provider",
+      sessionSnapshotStore: store,
+      sessionStateStore: makeSessionStateStore(
+        stateRoot,
+        "session-uuid-head-2",
+      ),
+      autoGenerateTwins: false,
+      watchFs: harness.watchFn,
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-head-cache",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        parseOffsets.push(fromOffset);
+        return (async function* () {
+          if (fromOffset === 0) {
+            // assistant-only head: no user message to derive a snippet from
+            yield {
+              event: makeEvent("head-a1", "2026-06-11T10:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+          }
+          // nothing new at the resume cursor: no snapshot gets created, so
+          // every poll retries the head read and must hit the cache
+        })();
+      },
+    });
+
+    await runner.start();
+    await runner.poll();
+    await harness.emitModify(sessionFile);
+    await runner.poll();
+    await runner.stop();
+
+    // one head read total: the empty result is cached, not re-scanned
+    assertEquals(parseOffsets.filter((offset) => offset === 0).length, 1);
+    assertEquals(store.get("session-head-cache"), undefined);
+  });
+});

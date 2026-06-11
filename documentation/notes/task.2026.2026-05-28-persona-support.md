@@ -17,6 +17,8 @@ created: 1780029060020
 - Split assistant model provenance out of `participants` so frontmatter
   participants remain human/persona labels, while model identifiers live in a
   dedicated `models` field.
+- Build on the shared session/output metadata layer in
+  [[task.2026.2026-06-11-session-output-metadata]].
 
 ## Summary
 
@@ -29,7 +31,9 @@ created: 1780029060020
   - recording pipeline currently derives assistant model labels like
     `codex.gpt-5.3-codex` and stores them in `participants`.
 - Recommended first implementation slice:
-  - introduce an output metadata resolver,
+  - use the shared output metadata container from
+    [[task.2026.2026-06-11-session-output-metadata]],
+  - introduce a persona metadata resolver,
   - parse configured `persona-name:` line prefixes into an output-scoped
     persona override,
   - move assistant model identifiers to a plural `models` frontmatter field,
@@ -41,9 +45,9 @@ created: 1780029060020
   - persist resolved output metadata with workspace output state so future
     appends and re-arms keep the same metadata.
 - Tagging is split into [[task.2026.2026-06-11-output-tagging]]. The output
-  metadata persistence shape should line up with
-  [[task.2026.2026-05-11-per-output-writer-controls]] so persona metadata,
-  tags, and writer-policy overrides do not become three unrelated mechanisms.
+  metadata persistence shape should come from
+  [[task.2026.2026-06-11-session-output-metadata]] so persona metadata, tags,
+  and writer-policy overrides do not become three unrelated mechanisms.
 - Shared workspace persona editing should build on
   [[task.2026.2026-06-11-workspace-config-editing]] rather than adding another
   custom mutation surface. Personal persona editing belongs on `/settings` and
@@ -130,7 +134,9 @@ Current model handling:
   popover should not mutate `kato-user-config.yaml` or the workspace config
   unless the user performs a separate explicit settings action.
 - Like [[task.2026.2026-05-11-per-output-writer-controls]], persisted output
-  metadata should be authoritative for live Kato behavior. Markdown
+  metadata should be authoritative for live Kato behavior. The shared
+  persistence/mutation substrate is covered by
+  [[task.2026.2026-06-11-session-output-metadata]]. Markdown
   frontmatter is useful descriptive metadata, but it should not become the
   source of truth for active recordings or future re-arms.
 
@@ -168,6 +174,8 @@ Current model handling:
   store personal persona definitions in shared workspace config.
 - Store assistant model provenance in a dedicated plural frontmatter field
   named `models`, rather than in `participants`.
+- Depend on [[task.2026.2026-06-11-session-output-metadata]] for the
+  persisted output metadata container and generic mutation path.
 - Treat frontmatter `participants` as human/persona labels only. If a persona
   is detected, list the persona there instead of the model name.
 - Keep persona-derived metadata output-scoped; do not persist it to user config
@@ -216,8 +224,10 @@ Superseded decisions from the earlier sketch:
   - derive sorted model labels from assistant events and pass them as
     `frontmatterModels`;
 - `SessionWorkspaceOutputStateV1`
-  - add optional persisted output metadata, for example
-    `outputMetadata?: { personaName?: string; participantUsername?: string }`.
+  - use the shared `outputMetadata` container from
+    [[task.2026.2026-06-11-session-output-metadata]];
+  - persona support owns the meaning of `personaName` and
+    `participantUsername`, but not the generic persistence/mutation mechanism.
 - Workspace config
   - add optional persona definitions, for example
     `personas: { jimbo: { displayName?: string } }`;
@@ -304,6 +314,9 @@ Superseded decisions from the earlier sketch:
 
 ## Implementation Plan
 
+- [ ] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its
+      shared output metadata contract to avoid adding persona-specific
+      persistence plumbing.
 - [ ] Add workspace-config persona definitions.
 - [ ] Add user-config persona definitions and migration behavior.
 - [ ] Extend `/settings` with user-level persona name/library management.
@@ -321,8 +334,8 @@ Superseded decisions from the earlier sketch:
 - [ ] Update markdown heading rendering so detected persona outputs render
       persona-plus-model headings while non-persona outputs keep current
       model-only headings.
-- [ ] Persist resolved output metadata on workspace output state and use it
-      when appending to active persisted outputs.
+- [ ] Persist resolved persona metadata through the shared output metadata
+      container and use it when appending to active persisted outputs.
 - [ ] Wire persona extraction into persistent in-chat record/capture flows.
 - [ ] Wire persona extraction into live/session-state in-chat record/capture
       flows.
