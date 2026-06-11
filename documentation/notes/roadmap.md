@@ -17,10 +17,10 @@ Use [[features]] for shipped behavior, [[product-ideas]] for ideas that are not 
 The next product arc is making Kato's saved outputs easier to configure, describe, and review after capture starts.
 
 - [ ] Land the shared session/output metadata foundation in [[task.2026.2026-06-11-session-output-metadata]].
+- [ ] Validate the first editable-recording path with per-output writer controls in [[task.2026.2026-05-11-per-output-writer-controls]].
 - [ ] Add web-based shared workspace config editing in [[task.2026.2026-06-11-workspace-config-editing]].
 - [ ] Add output tagging in [[task.2026.2026-06-11-output-tagging]].
 - [ ] Add persona support in [[task.2026.2026-05-28-persona-support]].
-- [ ] Update CLI flows to match newer web summary, session, and ingestion distinctions.
 
 ## Product Roadmap
 
@@ -42,6 +42,7 @@ The next product arc is making Kato's saved outputs easier to configure, describ
 - [ ] Add `kato config validate` for preflight runtime and shared config checks.
 - [ ] Improve startup error UX for config/schema failures with actionable remediation hints.
 - [ ] Add an interactive `kato init` prompt for common user defaults such as participant username.
+- [ ] Update CLI flows to match newer web summary, session, recording-output, and ingestion distinctions after the web path settles.
 - [ ] Support relative paths for in-chat command arguments and config `allowedWriteRoots` only after the path-policy contract is explicit.
 
 ## Runtime And Ingestion Backlog

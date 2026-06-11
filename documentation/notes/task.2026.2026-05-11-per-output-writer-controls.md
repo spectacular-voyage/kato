@@ -30,6 +30,8 @@ should update those overrides on a specific workspace output. Runtime rendering
 should resolve effective writer flags from current workspace defaults plus the
 per-output overrides.
 
+This task should build on [[task.2026.2026-06-11-session-output-metadata]] for shared mutation, loader, and metadata-only frontmatter update patterns. The writer override field can remain separate from `outputMetadata`, because it is render policy rather than descriptive output metadata.
+
 Frontmatter should optionally record the effective writer policy for portability
 and auditability, but frontmatter must not be the source of truth. Outputs may
 have frontmatter disabled, may be JSONL, or may not be writable when the user
@@ -139,6 +141,7 @@ needed to regenerate historical output under a new policy.
 
 - Store per-output writer choices in persisted session metadata under each
   `workspaceOutputs[]` entry.
+- Reuse the shared session/output metadata foundation for mutation locking, loader projection, and metadata-only frontmatter update patterns.
 - Use override semantics rather than copying full effective flags into the
   override field.
 - Keep `workspaceOutputs[].writerFeatureFlags` as the workspace-default
@@ -220,6 +223,7 @@ export interface SessionWorkspaceOutputStateV1 {
 
 ## Implementation Plan
 
+- [ ] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its shared mutation/loader/frontmatter-update helpers to avoid duplicate plumbing.
 - [ ] Add persisted contract type and validation for output writer flag overrides.
 - [ ] Add helpers to resolve effective output writer flags from defaults plus overrides.
 - [ ] Preserve overrides when applying workspace profile snapshots.
