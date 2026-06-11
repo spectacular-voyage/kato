@@ -149,10 +149,14 @@ export async function loadPersistedSessionHistoryEvents(
   const twinEvents = await sessionStateStore.readTwinEvents(metadata, 1);
   const twinConversation = mapTwinEventsToConversation(twinEvents);
   if (twinConversation.length > 0) {
-    // Twin history was already redacted at ingestion time.
+    const processed = applyReplaySecretsPolicy(
+      twinConversation,
+      options?.secretsPolicy,
+    );
     return {
-      events: twinConversation,
+      events: processed.events,
       source: "twin",
+      ...(processed.redaction ? { redaction: processed.redaction } : {}),
     };
   }
 

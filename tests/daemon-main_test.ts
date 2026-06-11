@@ -29,6 +29,8 @@ import {
 
 type RuntimeConfig = DaemonRuntimeConfig;
 
+const PLANTED_AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE";
+
 function makeRuntimeConfig(
   runtimeDir = makeTestTempPath("daemon-main-runtime-"),
 ): RuntimeConfig {
@@ -354,6 +356,76 @@ Deno.test("runDaemonSubprocess wires export feature flag into runtime loop optio
       hasSessionSnapshotStore: true,
     }]);
     assertEquals(stderr.length, 0);
+  });
+});
+
+Deno.test("runDaemonSubprocess snapshot loader falls back to redacted persisted history", async () => {
+  await withIsolatedDaemonPathEnv(async () => {
+    const rootDir = await makeTestTempDir("daemon-main-snapshot-loader-");
+
+    try {
+      const runtimeDir = join(rootDir, "runtime");
+      const katoDir = join(rootDir, ".kato");
+      const sourceDir = join(rootDir, "sources");
+      const sourcePath = join(sourceDir, "session-claude.jsonl");
+      const config = makeRuntimeConfig(runtimeDir);
+      config.katoDir = katoDir;
+      const configStore: RuntimeConfigStoreLike = {
+        load() {
+          return Promise.resolve(config);
+        },
+        ensureInitialized(_defaultConfig) {
+          throw new Error("not used");
+        },
+      };
+      let loadedProvider: string | undefined;
+      let loadedEventsJson = "";
+
+      const exitCode = await runDaemonSubprocess({
+        configStore,
+        sharedConfigStore: makeSharedConfigStore(),
+        userConfigStore: makeUserConfigStore(),
+        async runtimeLoop(options = {}) {
+          const store = options.sessionStateStore;
+          const loadSessionSnapshot = options.loadSessionSnapshot;
+          if (!store || !loadSessionSnapshot) {
+            throw new Error("session stores should be wired");
+          }
+          await Deno.mkdir(sourceDir, { recursive: true });
+          await Deno.writeTextFile(
+            sourcePath,
+            JSON.stringify({
+              type: "user",
+              uuid: "u1",
+              timestamp: "2026-06-10T10:00:00.000Z",
+              message: {
+                role: "user",
+                content: [{ type: "text", text: `key ${PLANTED_AWS_KEY}` }],
+              },
+            }) + "\n",
+          );
+          const metadata = await store.getOrCreateSessionMetadata({
+            provider: "claude",
+            providerSessionId: "session-claude",
+            sourceFilePath: sourcePath,
+            initialCursor: { kind: "byte-offset", value: 0 },
+          });
+          const loaded = await loadSessionSnapshot(metadata.providerSessionId);
+          loadedProvider = loaded?.provider;
+          loadedEventsJson = JSON.stringify(loaded?.events ?? []);
+        },
+      });
+
+      assertEquals(exitCode, 0);
+      assertEquals(loadedProvider, "claude");
+      assertEquals(loadedEventsJson.includes(PLANTED_AWS_KEY), false);
+      assertStringIncludes(
+        loadedEventsJson,
+        "[REDACTED:aws-access-key-id]",
+      );
+    } finally {
+      await removePathIfPresent(rootDir);
+    }
   });
 });
 

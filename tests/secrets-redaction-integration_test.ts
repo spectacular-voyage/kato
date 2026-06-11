@@ -513,6 +513,48 @@ Deno.test("persisted history falls back to redacted source replay when no twin e
   });
 });
 
+Deno.test("persisted history redacts legacy twin history by default", async () => {
+  await withTestTempDir("secrets-history-twin-", async (dir) => {
+    const { mapConversationEventsToTwin } = await import(
+      "../apps/daemon/src/mod.ts"
+    );
+    const stateStore = new PersistentSessionStateStore({
+      katoDir: join(dir, ".kato"),
+      now: testNow,
+      makeSessionId: () => "session-uuid-history-twin-1",
+    });
+    const metadata = await stateStore.getOrCreateSessionMetadata({
+      provider: "test-provider",
+      providerSessionId: "session-legacy-twin",
+      sourceFilePath: join(dir, "source.jsonl"),
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+    await stateStore.appendTwinEvents(
+      metadata,
+      mapConversationEventsToTwin({
+        provider: "test-provider",
+        providerSessionId: "session-legacy-twin",
+        sessionId: metadata.sessionId,
+        events: [makeUserEvent("evt-legacy-twin", `key ${PLANTED_AWS_KEY}`)],
+        mode: "live",
+        capturedAt: TEST_NOW_ISO,
+      }),
+    );
+
+    const history = await loadPersistedSessionHistoryEvents(
+      metadata,
+      stateStore,
+    );
+
+    assertEquals(history.source, "twin");
+    assertExists(history.redaction);
+    assertEquals(history.redaction.mode, "redact");
+    const serialized = JSON.stringify(history.events);
+    assert(!serialized.includes(PLANTED_AWS_KEY));
+    assert(serialized.includes("[REDACTED:aws-access-key-id]"));
+  });
+});
+
 Deno.test("in-chat commands still parse in messages that also carry secrets", async () => {
   const { detectInChatControlCommands, createSecretsRedactor } = await import(
     "../apps/runtime/src/mod.ts"

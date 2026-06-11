@@ -50,11 +50,11 @@ created: 1771779490894
     events as new on anchor replay (bounded by existing dedupe).
   - Generic rules accept some false-positive risk by design; the escape
     hatches are `disabledRules`, `allowlist`, and `mode: detect`.
-  - Measured overhead ~3-4 µs/KB (see the 2026-05-26 secrets-suppression task
-    note for the recorded `deno task bench` baseline).
+  - Measured overhead ~3-4 µs/KB (see the
+    [[ka.completed.2026.2026-05-26-secrets-suppression]] note for the recorded
+    `deno task bench` baseline).
 - Follow-up tasks:
   - Periodically re-sync ported rules against upstream gitleaks releases.
-
 
 ### Kato Web Startup Selects an Available Local Port
 

@@ -671,9 +671,6 @@ async function resolveBoundaryEventsFromSessionStart(
               match,
             ) => [match.ruleId, match.count]),
           ),
-          ...(history.redaction.droppedEventIds.length > 0
-            ? { droppedEventIds: history.redaction.droppedEventIds }
-            : {}),
         },
       );
     }

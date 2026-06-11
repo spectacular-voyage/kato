@@ -142,7 +142,7 @@ export class SecretsRedactor {
   private readonly rules: SecretsRule[];
   private readonly isAllowlisted: AllowlistMatcher;
   /** Single-pass prefilter over all rule keywords (alternation, longest first). */
-  private readonly combinedKeywordPattern: RegExp;
+  private readonly combinedKeywordPattern: RegExp | undefined;
   /**
    * Longest-first alternation means a match like `sk-ant-` shadows the
    * shorter `sk-` at the same position; this maps each keyword to every
@@ -165,7 +165,9 @@ export class SecretsRedactor {
     const escaped = keywords.map((keyword) =>
       keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     );
-    this.combinedKeywordPattern = new RegExp(escaped.join("|"), "gi");
+    this.combinedKeywordPattern = escaped.length > 0
+      ? new RegExp(escaped.join("|"), "gi")
+      : undefined;
     this.keywordExpansions = new Map(
       keywords.map((
         keyword,
@@ -175,6 +177,9 @@ export class SecretsRedactor {
 
   private collectMatchedKeywords(text: string): Set<string> {
     const matched = new Set<string>();
+    if (!this.combinedKeywordPattern) {
+      return matched;
+    }
     this.combinedKeywordPattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = this.combinedKeywordPattern.exec(text)) !== null) {

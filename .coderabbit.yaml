@@ -3,5 +3,12 @@ reviews:
     - "!documentation/notes/conv.*"
     - "!documentation/notes/cancelled.*"
     - "!documentation/notes/completed.*"
+  path_instructions:
+    - path: "documentation/notes/**.md"
+      instructions: |
+        This directory is a Dendron vault. YAML frontmatter commonly includes an `updated` field managed automatically by Dendron.
+        Do not flag existing or changed numeric `updated` values as manually edited timestamps, stale metadata, or cleanup opportunities.
+        Only comment on frontmatter if it is malformed YAML, missing required delimiters, or a change breaks Dendron note conventions.
+        For internal note links, prefer Dendron wikilinks like [[dev.general-guidance]] without a `.md` extension.
   auto_review:
     enabled: true

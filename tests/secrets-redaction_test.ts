@@ -399,6 +399,18 @@ Deno.test("redactConversationEvents in off mode passes events through", () => {
   assertEquals(result.redactedEvents, []);
 });
 
+Deno.test("redactConversationEvents with all rules disabled reports no matches", () => {
+  const redactor = createSecretsRedactor(
+    makePolicy({ disabledRules: SECRETS_RULES.map((rule) => rule.id) }),
+  );
+  const events = [makeUserEvent("key " + FAKE_AWS_KEY)];
+  const result = redactConversationEvents(events, redactor);
+
+  assertEquals(result.events, events);
+  assertEquals(result.redactedEvents, []);
+  assertEquals(result.droppedEventIds, []);
+});
+
 Deno.test("redactConversationEvents leaves kato commands intact", () => {
   const redactor = createSecretsRedactor(makePolicy());
   const result = redactConversationEvents(

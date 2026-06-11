@@ -2,6 +2,7 @@ import {
   type ConversationEvent,
   extractSnippet,
   type MarkdownFrontmatterConfig,
+  type SecretsPolicyConfig,
   type SessionMetadataV1,
   type UserConfig,
 } from "@kato/shared";
@@ -471,6 +472,7 @@ async function stopConflictingActiveOutputsAtPath(
   sessionStore: PersistentSessionStateStore,
   targetPath: string,
   nowIso: string,
+  secretsPolicy: SecretsPolicyConfig,
   excludeSessionId?: string,
 ): Promise<
   { pendingMetadataSaves: SessionMetadataV1[]; stoppedCount: number }
@@ -499,6 +501,7 @@ async function stopConflictingActiveOutputsAtPath(
         const history = await loadPersistedSessionHistoryEvents(
           metadata,
           sessionStore,
+          { secretsPolicy },
         );
         writeCursor = history.events.length;
       }
@@ -535,6 +538,12 @@ export async function runSessionRecordingStopAction(
     const now = options.now ?? (() => new Date());
     const katoDir = options.katoDir ?? resolveDefaultKatoDir();
     const sessionStore = new PersistentSessionStateStore({ katoDir, now });
+    const sharedConfigStore = new SharedBehaviorConfigFileStore(
+      resolveDefaultSharedConfigPath(katoDir),
+    );
+    const sharedConfig = (await sharedConfigStore.ensureInitialized(
+      createDefaultSharedBehaviorConfig({ allowedWriteRoots: [] }),
+    )).config;
     return await withSessionMutationLock(options.sessionId, async () => {
       const nowIso = now().toISOString();
       const metadata = await resolveSessionMetadata(
@@ -544,6 +553,7 @@ export async function runSessionRecordingStopAction(
       const history = await loadPersistedSessionHistoryEvents(
         metadata,
         sessionStore,
+        { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
 
@@ -720,6 +730,7 @@ export async function runSessionRecordingRestartAction(
         sessionStore,
         output.currentResolvedPath,
         nowIso,
+        sharedConfig.secretsPolicy,
         metadata.sessionId,
       );
 
@@ -890,6 +901,7 @@ export async function runSessionRecordingAction(
             sessionStore,
             targetPath,
             nowIso,
+            sharedConfig.secretsPolicy,
             metadata.sessionId,
           );
         const resolvedTargetPath = resolve(targetPath);

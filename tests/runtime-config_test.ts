@@ -883,6 +883,7 @@ Deno.test("SharedBehaviorConfigFileStore rejects invalid secretsPolicy values", 
   const invalidCases: Array<Record<string, unknown>> = [
     { mode: "audit" },
     { mode: 1 },
+    { mode: null },
     { unknownKey: true },
     { disabledRules: "jwt" },
     { disabledRules: [1] },

@@ -298,7 +298,11 @@ function parseSecretsPolicy(value: unknown): SecretsPolicyConfig | undefined {
     }
   }
 
-  const mode = value["mode"] ?? "redact";
+  const rawMode = value["mode"];
+  if (rawMode === null) {
+    return undefined;
+  }
+  const mode = rawMode === undefined ? "redact" : rawMode;
   if (!SECRETS_POLICY_MODES.includes(mode as SecretsPolicyMode)) {
     return undefined;
   }
