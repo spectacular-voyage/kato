@@ -6,10 +6,6 @@ updated: 1781196292514
 created: 1771812869620
 ---
 
-## Toolchain And Dependency Maintenance
-
-- [ ] Plan and test a Deno 2.8.x upgrade, including root and app-local lockfiles, Fresh/web build behavior, binary compilation, npm package assembly, smoke installs, and release workflow parity.
-
 ## Runtime And Ingestion Nits
 
 - [ ] Add schema fail-closed checks when persisted snapshot files are added, with a `kato clean --all` remediation hint for v1 data.

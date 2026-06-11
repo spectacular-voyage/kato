@@ -4,11 +4,17 @@ reviews:
     - "!documentation/notes/cancelled.*"
     - "!documentation/notes/completed.*"
   path_instructions:
-    - path: "documentation/notes/**.md"
+    - path: "documentation/notes/**"
       instructions: |
-        This directory is a Dendron vault. YAML frontmatter commonly includes an `updated` field managed automatically by Dendron.
-        Do not flag existing or changed numeric `updated` values as manually edited timestamps, stale metadata, or cleanup opportunities.
-        Only comment on frontmatter if it is malformed YAML, missing required delimiters, or a change breaks Dendron note conventions.
+        This path is part of a Dendron vault. YAML frontmatter commonly includes an `updated` field managed automatically by Dendron.
+        Treat `updated:` line changes as expected editor-generated metadata churn. Do not flag existing or changed numeric `updated` values as manually edited timestamps, stale metadata, cleanup opportunities, or changes that should be removed/reverted.
+        Only comment on Dendron frontmatter if it is malformed YAML, missing required delimiters, or a change breaks Dendron note conventions other than the `updated:` timestamp value changing.
+        For internal note links, prefer Dendron wikilinks like [[dev.general-guidance]] without a `.md` extension.
+    - path: "dependencies/github.com/spectacular-voyage/kato-dev-archive/notes/**"
+      instructions: |
+        This path is a Dendron-style archive vault. YAML frontmatter commonly includes an `updated` field managed automatically by Dendron.
+        Treat `updated:` line changes as expected editor-generated metadata churn. Do not flag existing or changed numeric `updated` values as manually edited timestamps, stale metadata, cleanup opportunities, or changes that should be removed/reverted.
+        Only comment on Dendron frontmatter if it is malformed YAML, missing required delimiters, or a change breaks Dendron note conventions other than the `updated:` timestamp value changing.
         For internal note links, prefer Dendron wikilinks like [[dev.general-guidance]] without a `.md` extension.
   auto_review:
     enabled: true

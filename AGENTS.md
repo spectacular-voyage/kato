@@ -3,7 +3,7 @@
 - The README.md file is for user-facing documentation. Keep anything developer-targeted in the documentation/notes/.
 
 - `documentation/notes/` is a Dendron vault that uses wikilinks-style links (i.e., double square brackets, no '.md' extension) and a standardized YAML frontmatter
-  - you do not need to update the "updated" field in Dendron note frontmatter; Dendron does that automatically
+  - `updated` is Dendron-managed frontmatter. Do not intentionally maintain it by hand, but if Dendron changes an `updated:` value while a note is being edited, leave that diff alone and do not ask to remove, revert, or normalize it unless the frontmatter is invalid YAML.
   - Keep any developer-targeting notes in `documentation/notes/dev*`
   - release notes are in (`documentation/notes/release-notes.*`)
 

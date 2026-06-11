@@ -8,15 +8,20 @@
     "jsr:@fresh/core@2": "2.3.3",
     "jsr:@fresh/core@^2.3.3": "2.3.3",
     "jsr:@fresh/plugin-vite@^1.1.2": "1.1.2",
+    "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
+    "jsr:@std/cli@1": "1.0.29",
     "jsr:@std/dotenv@~0.225.5": "0.225.7",
     "jsr:@std/encoding@^1.0.10": "1.0.10",
+    "jsr:@std/fmt@^1.0.10": "1.0.10",
     "jsr:@std/fmt@^1.0.7": "1.0.10",
     "jsr:@std/fmt@^1.0.8": "1.0.10",
     "jsr:@std/fs@^1.0.19": "1.0.24",
     "jsr:@std/html@^1.0.5": "1.0.7",
     "jsr:@std/http@^1.0.21": "1.1.1",
     "jsr:@std/http@^1.1.1": "1.1.1",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/internal@^1.0.13": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/json@^1.0.2": "1.1.0",
     "jsr:@std/jsonc@^1.0.2": "1.0.2",
@@ -42,6 +47,7 @@
     "npm:esbuild-wasm@~0.25.11": "0.25.12",
     "npm:esbuild@0.25.7": "0.25.7",
     "npm:esbuild@~0.25.5": "0.25.7",
+    "npm:loglayer@9.1.0": "9.1.0",
     "npm:preact-render-to-string@^6.6.3": "6.7.0_preact@10.29.2",
     "npm:preact@^10.28.2": "10.29.2",
     "npm:preact@^10.29.1": "10.29.2",
@@ -115,8 +121,21 @@
         "npm:vite@^7.1.4"
       ]
     },
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
     "@std/bytes@1.0.6": {
       "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
+    },
+    "@std/cli@1.0.29": {
+      "integrity": "fa4ef29130baa834d8a13b7d138240c3a2fcfba740bfb7afa646a360a15ec84f",
+      "dependencies": [
+        "jsr:@std/fmt@^1.0.10",
+        "jsr:@std/internal@^1.0.13"
+      ]
     },
     "@std/dotenv@0.225.7": {
       "integrity": "11d8db03ca4ad5aba9eba809f2e8058b2a4f320b7b09fea4b360e162928329e3"
@@ -163,7 +182,7 @@
     "@std/path@1.1.5": {
       "integrity": "ccea00982ea28c36becaf6e62f855406c76a8c32d462f66f415bbb7d83a271bc",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.14"
       ]
     },
     "@std/semver@1.0.8": {
@@ -648,6 +667,33 @@
         "@jridgewell/sourcemap-codec"
       ]
     },
+    "@loglayer/context-manager@2.0.2": {
+      "integrity": "sha512-IVt/iqACGw2GnucKOpyJ69MbGQSRzsArOwsTNMuOAfzm36zTphGIH4K7g7lhRvcd2jY0dZzvWA6tCqannpgXXg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/log-level-manager@2.0.2": {
+      "integrity": "sha512-hq6hjkXzrYyz0DwYUqizP0hS3jhPl5S/7U33Cd0EPbfLmDjYWzzcM0mQKUdtBi6qNX4DAPpag3oBGytB2zmghg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/plugin@3.0.2": {
+      "integrity": "sha512-ghIYpuPw/Q0jdlr7ErkaySfsSCsIigwIb1lvR5qhZrz3oEqGotDFZzhgU1YeO7BacA042ygv/xww3Ip3ROokeg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/shared@4.1.0": {
+      "integrity": "sha512-hGSWhLhMF9L7sB0rXippvKhku9D9dT8imZ5OFpa4VHAVnclY0DQ+3wIPE37rzu0QAiBbyR3/HH03Q1Cgik8zYA=="
+    },
+    "@loglayer/transport@3.0.2": {
+      "integrity": "sha512-5t0lj/ibQQxGPpghNta8u10zl8owU0my/i2fHF/LdcCAtpw/IHblmpKSgOzdH9XE19Ub/i0VYj0JrFrFv8/NXw==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
     "@opentelemetry/api@1.9.1": {
       "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
     },
@@ -985,6 +1031,16 @@
     "json5@2.2.3": {
       "integrity": "sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==",
       "bin": true
+    },
+    "loglayer@9.1.0": {
+      "integrity": "sha512-KFCtoydUtfshszDMIEMa180MMT4jDgBz7FkkO0r3mLDzOkfqGUCbtH9DRszK/pEPrG7999FXfBsyv4DNhvmrag==",
+      "dependencies": [
+        "@loglayer/context-manager",
+        "@loglayer/log-level-manager",
+        "@loglayer/plugin",
+        "@loglayer/shared",
+        "@loglayer/transport"
+      ]
     },
     "lru-cache@5.1.1": {
       "integrity": "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==",

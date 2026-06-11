@@ -60,7 +60,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.8.x
 
       - name: Verify Native Runner Architecture
         env:
@@ -187,7 +187,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.8.x
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -263,7 +263,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.8.x
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -312,7 +312,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v2.8.x
 
       - name: Setup Node
         uses: actions/setup-node@v6
