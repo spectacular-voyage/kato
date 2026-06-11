@@ -915,3 +915,27 @@ created: 1771779490894
     we later expand frontend test infrastructure.
   - Revisit whether any Maintenance filter state should be preserved across the
     other cleanup forms.
+
+### Shared Session/Output Metadata Layer And Per-Output Writer Controls
+
+- Decision:
+  - Add a shared user-editable metadata layer to persisted session state: `SessionMetadataV1.outputMetadataDefaults` (session-level inherited defaults) and `workspaceOutputs[].outputMetadata` (per-output values), both shaped as `SessionOutputMetadataV1` (`displayTitle`, `tags`, `personaName`, `participantUsername`).
+  - Treat user-facing "recordings" as durable workspace outputs; do not introduce a separate persisted Recording entity, and keep `recordingCycles[]` as lifecycle history only.
+  - Resolve effective output metadata at read/write time: output scalar values win over session defaults; tag arrays merge additively with stable dedupe (`resolveEffectiveOutputMetadata` in `shared/src/output_metadata.ts`).
+  - Add `workspaceOutputs[].writerFeatureFlagOverrides` (`writerIncludeCommentary`, `writerIncludeThinking`) as per-output render policy; missing keys inherit workspace defaults, and `workspaceOutputs[].writerFeatureFlags` remains a refreshable snapshot of workspace defaults that profile application may overwrite.
+  - Resolve effective writer flags as current registered workspace profile flags (falling back to the persisted snapshot) plus per-output overrides (`resolveEffectiveWriterFeatureFlags`); the daemon persisted append loop and persistent `::record`/`::capture` continuation writes honor the overrides.
+  - Persisted session metadata is the source of truth; markdown frontmatter stays descriptive. Metadata-only frontmatter updates (`title`, accretive `tags`, `kato-writerFeatureFlags` effective-policy snapshot) are synchronous best-effort and never rewrite body content or rename files.
+  - Web mutations run under the existing session mutation locks (`runSessionOutputMetadataUpdateAction`, `runSessionWriterOverridesAction` in `apps/web/src/session_metadata_actions.ts`); Sessions/Recordings loaders project inherited vs direct metadata plus default/override/effective writer policy, and the Recordings page exposes compact tri-state (default/include/exclude) controls per output row.
+- Owner: Kato engineering
+- Date: 2026-06-11
+- Why:
+  - Persona, tagging, and writer-control tasks all need user-editable state near persisted output state; without a shared layer each task would add its own mutation path and resolver semantics.
+  - Storing per-output render choices in the workspace-default snapshot would lose them on profile refresh, and storing them only in frontmatter would fail for JSONL outputs, disabled frontmatter, or unavailable files.
+- Tradeoffs:
+  - The non-persistent in-memory command state path intentionally keeps workspace-default rendering until it is retired or migrated, so persistent and non-persistent flows can briefly diverge for overridden outputs.
+  - The `kato-writerFeatureFlags` frontmatter snapshot is only written for outputs that actually carry overrides, keeping default outputs byte-stable but meaning unoverridden files do not advertise their render policy.
+  - Sessions rows carry writer-policy/metadata projections but the first tri-state UI lives only on the Recordings page rows.
+- Follow-up tasks:
+  - Build tag library/output tagging UI on this layer ([[task.2026.2026-06-11-output-tagging]]).
+  - Build persona selection/detection on `personaName`/`participantUsername` ([[task.2026.2026-05-28-persona-support]]).
+  - Decide whether Sessions rows should also expose the tri-state controls once the Recordings-page UI has soaked.

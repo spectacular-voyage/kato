@@ -15,6 +15,7 @@ import {
   type MarkdownWriteResult,
 } from "./markdown_writer.ts";
 import type { JsonlConversationWriter } from "./jsonl_writer.ts";
+import type { FrontmatterWriterPolicy } from "./frontmatter.ts";
 
 export type ExportFormat = "markdown" | "jsonl";
 export type RecordingRenderOptionOverrides = Pick<
@@ -42,6 +43,9 @@ export interface RecordingOutputOverrides {
   includeRecordingIds?: boolean;
   includeConversationEventKinds?: boolean;
   participantUsername?: string;
+  // Descriptive effective render-policy snapshot for frontmatter; persisted
+  // session metadata remains the source of truth for render behavior.
+  frontmatterWriterPolicy?: FrontmatterWriterPolicy;
   renderOptions?: Partial<RecordingRenderOptionOverrides>;
 }
 
@@ -711,6 +715,12 @@ export class RecordingPipeline implements RecordingPipelineLike {
       now: this.now,
       includeFrontmatter,
       includeUpdatedInFrontmatter,
+      ...(includeFrontmatter && options.outputOverrides?.frontmatterWriterPolicy
+        ? {
+          frontmatterWriterPolicy:
+            options.outputOverrides.frontmatterWriterPolicy,
+        }
+        : {}),
       ...(includeSessionIds
         ? { frontmatterSessionIds: [options.sessionId] }
         : {}),

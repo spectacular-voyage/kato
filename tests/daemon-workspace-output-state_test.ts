@@ -290,6 +290,14 @@ Deno.test(
       startedAt: "2026-02-22T09:59:00.000Z",
     });
 
+    output.outputMetadata = {
+      displayTitle: "Pinned Title",
+      tags: ["alpha-tag"],
+    };
+    output.writerFeatureFlagOverrides = {
+      writerIncludeThinking: false,
+    };
+
     applyWorkspaceProfileSnapshot(
       output,
       updatedProfile,
@@ -306,6 +314,13 @@ Deno.test(
     assertEquals(output.filenameTemplate, "{timestampHumane}-{provider}.md");
     assertEquals(output.writerFeatureFlags.writerIncludeCommentary, false);
     assertEquals(output.recordingCycles.length, 1);
+    assertEquals(output.outputMetadata, {
+      displayTitle: "Pinned Title",
+      tags: ["alpha-tag"],
+    });
+    assertEquals(output.writerFeatureFlagOverrides, {
+      writerIncludeThinking: false,
+    });
   },
 );
 

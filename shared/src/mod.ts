@@ -79,6 +79,8 @@ export {
   DAEMON_CONTROL_SCHEMA_VERSION,
   isDaemonControlIndexV1,
   isSessionMetadataV1,
+  isSessionOutputMetadataV1,
+  isSessionWorkspaceOutputWriterFeatureFlagOverridesV1,
   SESSION_METADATA_SCHEMA_VERSION,
 } from "./contracts/session_state.ts";
 export type {
@@ -88,8 +90,15 @@ export type {
   SessionCommandCursorAnchorV1,
   SessionIngestAnchorV1,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
+  SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
 } from "./contracts/session_state.ts";
+export {
+  hasWriterFeatureFlagOverrides,
+  resolveEffectiveOutputMetadata,
+  resolveEffectiveWriterFeatureFlags,
+} from "./output_metadata.ts";
 export {
   formatWorkspaceLabel,
   normalizeWorkspaceDisplayName,

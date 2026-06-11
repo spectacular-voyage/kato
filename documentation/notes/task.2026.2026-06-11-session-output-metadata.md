@@ -218,20 +218,20 @@ export interface SessionOutputMetadataV1 {
 
 ## Implementation Plan
 
-- [ ] Add shared metadata contract types for session defaults and per-output
+- [x] Add shared metadata contract types for session defaults and per-output
       metadata.
-- [ ] Extend `SessionMetadataV1` validation for optional
+- [x] Extend `SessionMetadataV1` validation for optional
       `outputMetadataDefaults`.
-- [ ] Extend `SessionWorkspaceOutputStateV1` validation for optional
+- [x] Extend `SessionWorkspaceOutputStateV1` validation for optional
       `outputMetadata`.
-- [ ] Add effective metadata resolver tests and implementation.
-- [ ] Preserve output metadata during workspace profile snapshot refresh.
-- [ ] Add session metadata mutation helpers under the existing mutation lock.
-- [ ] Add a writer helper for metadata-only markdown frontmatter updates where
+- [x] Add effective metadata resolver tests and implementation.
+- [x] Preserve output metadata during workspace profile snapshot refresh.
+- [x] Add session metadata mutation helpers under the existing mutation lock.
+- [x] Add a writer helper for metadata-only markdown frontmatter updates where
       the current writer already supports the target field.
-- [ ] Project inherited/direct metadata into Sessions and Recordings loaders.
-- [ ] Add minimal web mutation plumbing for session-level and output-level
+- [x] Project inherited/direct metadata into Sessions and Recordings loaders.
+- [x] Add minimal web mutation plumbing for session-level and output-level
       metadata edits, even if the first visible UI only exposes tags later.
-- [ ] Add focused contract, output-state, mutation, writer, and loader tests.
+- [x] Add focused contract, output-state, mutation, writer, and loader tests.
 - [ ] Update dependent task notes as persona/tagging implementation choices
       settle.

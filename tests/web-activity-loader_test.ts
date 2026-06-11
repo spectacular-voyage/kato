@@ -28,6 +28,11 @@ function makeWorkspaceOutput(options: {
   relativePathHint?: string;
   desiredState: "on" | "off";
   activeRecordingCycleId?: string;
+  outputMetadata?: { displayTitle?: string; tags?: string[] };
+  writerFeatureFlagOverrides?: {
+    writerIncludeCommentary?: boolean;
+    writerIncludeThinking?: boolean;
+  };
   recordingCycles: Array<{
     recordingCycleId: string;
     startedCursor: number;
@@ -54,6 +59,12 @@ function makeWorkspaceOutput(options: {
     resolvedDefaultOutputDir: join(options.workspaceRoot, "notes"),
     filenameTemplate: "{provider}.md",
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(),
+    ...(options.writerFeatureFlagOverrides
+      ? { writerFeatureFlagOverrides: options.writerFeatureFlagOverrides }
+      : {}),
+    ...(options.outputMetadata
+      ? { outputMetadata: options.outputMetadata }
+      : {}),
     ...(options.activeRecordingCycleId
       ? { activeRecordingCycleId: options.activeRecordingCycleId }
       : {}),
@@ -71,6 +82,7 @@ async function createSessionFixture(options: {
   updatedAt: string;
   sourceFilePath: string;
   workspaceOutputs?: ReturnType<typeof makeWorkspaceOutput>[];
+  outputMetadataDefaults?: { displayTitle?: string; tags?: string[] };
   lastObservedMtimeMs?: number;
   nextTwinSeq?: number;
   commandCursor?: number;
@@ -88,6 +100,9 @@ async function createSessionFixture(options: {
   });
   metadata.updatedAt = options.updatedAt;
   metadata.workspaceOutputs = options.workspaceOutputs;
+  if (options.outputMetadataDefaults) {
+    metadata.outputMetadataDefaults = options.outputMetadataDefaults;
+  }
   metadata.lastObservedMtimeMs = options.lastObservedMtimeMs;
   if (options.nextTwinSeq !== undefined) {
     metadata.nextTwinSeq = options.nextTwinSeq;
@@ -1040,5 +1055,101 @@ Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", a
         .map((row) => row.recordingCycleId),
       ["cycle-newest"],
     );
+  });
+});
+
+Deno.test("loadSessionsPageData projects writer policy and inherited/direct output metadata", async () => {
+  await withTestTempDir("web-activity-policy-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const alphaRoot = join(homeDir, "alpha");
+    const alphaConfigPath = join(alphaRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+    await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+    await Deno.mkdir(alphaRoot, { recursive: true });
+    await Deno.writeTextFile(
+      alphaConfigPath,
+      [
+        "workspaceId: ws-alpha",
+        "workspaceFeatureFlags:",
+        "  writerIncludeCommentary: false",
+      ].join("\n") + "\n",
+    );
+    const registry = new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
+    await registry.save([{
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      workspaceRoot: alphaRoot,
+      configPath: alphaConfigPath,
+      registeredAt: "2026-06-11T10:00:00.000Z",
+    }]);
+
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-policy",
+      providerSessionId: "provider-policy",
+      snippet: "policy session",
+      updatedAt: "2026-06-11T10:30:00.000Z",
+      sourceFilePath: join(homeDir, "session-fixtures", "policy.jsonl"),
+      outputMetadataDefaults: {
+        displayTitle: "Session Default Title",
+        tags: ["session-tag"],
+      },
+      workspaceOutputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceAlias: "alpha",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          resolvedPath: join(alphaRoot, "notes", "policy.md"),
+          desiredState: "off",
+          outputMetadata: {
+            displayTitle: "Direct Output Title",
+            tags: ["output-tag"],
+          },
+          writerFeatureFlagOverrides: {
+            writerIncludeThinking: false,
+          },
+          recordingCycles: [{
+            recordingCycleId: "cycle-policy",
+            startedCursor: 1,
+            stoppedCursor: 2,
+            startedAt: "2026-06-11T10:10:00.000Z",
+            stoppedAt: "2026-06-11T10:20:00.000Z",
+          }],
+        }),
+      ],
+    });
+
+    const data = await loadSessionsPageData({ katoDir });
+    const row = data.rows.find((entry) => entry.sessionId === "sess-policy");
+    assertExists(row);
+    assertEquals(row.outputMetadataDefaults, {
+      displayTitle: "Session Default Title",
+      tags: ["session-tag"],
+    });
+
+    const recording = row.recordings[0];
+    assertExists(recording);
+    assertEquals(recording.directMetadata, {
+      displayTitle: "Direct Output Title",
+      tags: ["output-tag"],
+    });
+    assertEquals(recording.effectiveMetadata, {
+      displayTitle: "Direct Output Title",
+      tags: ["session-tag", "output-tag"],
+    });
+
+    assertExists(recording.writerPolicy);
+    // Current registered workspace config wins over the persisted snapshot.
+    assertEquals(recording.writerPolicy.commentary, {
+      defaultValue: false,
+      effective: false,
+    });
+    assertEquals(recording.writerPolicy.thinking, {
+      defaultValue: true,
+      override: false,
+      effective: false,
+    });
   });
 });

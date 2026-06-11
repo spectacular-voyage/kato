@@ -3,6 +3,7 @@ import type {
   DaemonControlSessionIndexEntryV1,
   ProviderCursor,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
   SessionTwinEventV1,
 } from "@kato/shared";
 import {
@@ -118,6 +119,15 @@ function cloneCursor(cursor: ProviderCursor): ProviderCursor {
   return { ...cursor };
 }
 
+function cloneOutputMetadata(
+  metadata: SessionOutputMetadataV1,
+): SessionOutputMetadataV1 {
+  return {
+    ...metadata,
+    ...(metadata.tags ? { tags: [...metadata.tags] } : {}),
+  };
+}
+
 function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
   return {
     schemaVersion: metadata.schemaVersion,
@@ -146,6 +156,13 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
       : {}),
     ...(metadata.commandCursorAnchor
       ? { commandCursorAnchor: { ...metadata.commandCursorAnchor } }
+      : {}),
+    ...(metadata.outputMetadataDefaults
+      ? {
+        outputMetadataDefaults: cloneOutputMetadata(
+          metadata.outputMetadataDefaults,
+        ),
+      }
       : {}),
     ...(metadata.workspaceOutputs
       ? {
@@ -177,6 +194,16 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
           writerFeatureFlags: {
             ...entry.writerFeatureFlags,
           },
+          ...(entry.writerFeatureFlagOverrides
+            ? {
+              writerFeatureFlagOverrides: {
+                ...entry.writerFeatureFlagOverrides,
+              },
+            }
+            : {}),
+          ...(entry.outputMetadata
+            ? { outputMetadata: cloneOutputMetadata(entry.outputMetadata) }
+            : {}),
           ...(entry.activeRecordingCycleId
             ? { activeRecordingCycleId: entry.activeRecordingCycleId }
             : {}),

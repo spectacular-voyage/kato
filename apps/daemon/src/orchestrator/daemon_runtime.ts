@@ -4,9 +4,15 @@ import type {
   MarkdownFrontmatterConfig,
   SecretsPolicyConfig,
   SessionMetadataV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
+  SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
   UserConfig,
 } from "@kato/shared";
-import { extractSnippet } from "@kato/shared";
+import {
+  extractSnippet,
+  hasWriterFeatureFlagOverrides,
+  resolveEffectiveWriterFeatureFlags,
+} from "@kato/shared";
 import {
   AuditLogger,
   NoopSink,
@@ -446,6 +452,8 @@ function createOutputOverridesFromWorkspaceProfile(
   profile: ResolvedWorkspaceProfile,
   captureIncludeSystemEvents: boolean,
   userConfig: UserConfig,
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
 ): RecordingOutputOverrides {
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig,
@@ -455,6 +463,7 @@ function createOutputOverridesFromWorkspaceProfile(
     workspaceId: profile.workspaceId,
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
+    writerFeatureFlagOverrides,
     workspaceTimezone: profile.workspaceTimezone,
     preferredUsername,
     captureIncludeSystemEvents,
@@ -465,23 +474,18 @@ function createOutputOverridesFromWorkspaceProfile(
 function createOutputOverrides(options: {
   workspaceId?: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
-  writerFeatureFlags: {
-    writerIncludeCommentary: boolean;
-    writerIncludeThinking: boolean;
-    writerIncludeToolCalls: boolean;
-    writerIncludeToolResults?: boolean;
-    writerIncludeDecisionPrompt?: boolean;
-    writerIncludeDecisionOptions?: boolean;
-    writerIncludeDecisionSelection?: boolean;
-    writerItalicizeUserMessages: boolean;
-    writerRelativizeLocalLinks?: boolean;
-    writerUseDendronStyleWikilinks?: boolean;
-  };
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
   workspaceTimezone: string;
   preferredUsername?: string;
   captureIncludeSystemEvents: boolean;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
+  const writerFeatureFlags = resolveEffectiveWriterFeatureFlags(
+    options.writerFeatureFlags,
+    options.writerFeatureFlagOverrides,
+  );
   return {
     includeFrontmatter:
       options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
@@ -499,26 +503,32 @@ function createOutputOverrides(options: {
         workspaceId: options.workspaceId,
       },
     ),
+    ...(hasWriterFeatureFlagOverrides(options.writerFeatureFlagOverrides)
+      ? {
+        frontmatterWriterPolicy: {
+          writerIncludeCommentary: writerFeatureFlags.writerIncludeCommentary,
+          writerIncludeThinking: writerFeatureFlags.writerIncludeThinking,
+        },
+      }
+      : {}),
     renderOptions: {
-      includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
-      includeThinking: options.writerFeatureFlags.writerIncludeThinking,
-      includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
-      includeToolResults: options.writerFeatureFlags.writerIncludeToolResults ??
+      includeCommentary: writerFeatureFlags.writerIncludeCommentary,
+      includeThinking: writerFeatureFlags.writerIncludeThinking,
+      includeToolCalls: writerFeatureFlags.writerIncludeToolCalls,
+      includeToolResults: writerFeatureFlags.writerIncludeToolResults ??
         false,
-      includeDecisionPrompt:
-        options.writerFeatureFlags.writerIncludeDecisionPrompt ?? true,
-      includeDecisionOptions:
-        options.writerFeatureFlags.writerIncludeDecisionOptions ?? true,
+      includeDecisionPrompt: writerFeatureFlags.writerIncludeDecisionPrompt ??
+        true,
+      includeDecisionOptions: writerFeatureFlags.writerIncludeDecisionOptions ??
+        true,
       includeDecisionSelection:
-        options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
-      italicizeUserMessages:
-        options.writerFeatureFlags.writerItalicizeUserMessages,
-      relativizeLocalLinks:
-        options.writerFeatureFlags.writerRelativizeLocalLinks ?? true,
-      markdownLinkStyle:
-        options.writerFeatureFlags.writerUseDendronStyleWikilinks
-          ? "dendron-wikilink"
-          : "standard",
+        writerFeatureFlags.writerIncludeDecisionSelection ?? true,
+      italicizeUserMessages: writerFeatureFlags.writerItalicizeUserMessages,
+      relativizeLocalLinks: writerFeatureFlags.writerRelativizeLocalLinks ??
+        true,
+      markdownLinkStyle: writerFeatureFlags.writerUseDendronStyleWikilinks
+        ? "dendron-wikilink"
+        : "standard",
       includeSystemEvents: options.captureIncludeSystemEvents,
       headingTimestampTimezone: options.workspaceTimezone,
       ...(options.markdownFrontmatter.addParticipantUsernameToHeadings &&
@@ -531,7 +541,10 @@ function createOutputOverrides(options: {
   };
 }
 
-async function resolvePersistedWorkspaceOutputOverrides(options: {
+// Resolves effective writer behavior for a persisted workspace output: current
+// registered workspace profile flags when the workspace still exists,
+// otherwise the persisted snapshot, plus per-output writer flag overrides.
+export async function resolvePersistedWorkspaceOutputOverrides(options: {
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number];
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
@@ -542,6 +555,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     userConfig: options.userConfig,
     workspaceId: options.output.workspaceId,
   });
+  const writerFeatureFlagOverrides = options.output.writerFeatureFlagOverrides;
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
   );
@@ -553,6 +567,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
       profile,
       options.captureIncludeSystemEvents,
       options.userConfig,
+      writerFeatureFlagOverrides,
     );
   }
 
@@ -571,6 +586,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
             overrides.writerFeatureFlags,
           ),
+          writerFeatureFlagOverrides,
           workspaceTimezone: overrides.workspaceTimezone ??
             DEFAULT_WORKSPACE_TIMEZONE,
           preferredUsername,
@@ -591,6 +607,7 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
       options.output.writerFeatureFlags,
     ),
+    writerFeatureFlagOverrides,
     workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
     preferredUsername,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
@@ -972,6 +989,16 @@ async function applyPersistentControlCommandsForEvent(
                   "Recording pipeline does not support appendToDestination",
                 );
               }
+              const seedOutputOverrides = hasWriterFeatureFlagOverrides(
+                  output.writerFeatureFlagOverrides,
+                )
+                ? createOutputOverridesFromWorkspaceProfile(
+                  profile,
+                  captureIncludeSystemEvents,
+                  userConfig,
+                  output.writerFeatureFlagOverrides,
+                )
+                : outputOverrides;
               const writeResult = await recordingPipeline.appendToDestination({
                 provider,
                 sessionId: providerSessionId,
@@ -981,7 +1008,7 @@ async function applyPersistentControlCommandsForEvent(
                 recordingId: cycleId,
                 recordingCycleIds: [cycleId],
                 workspaceIds: [workspace.workspaceId],
-                outputOverrides,
+                outputOverrides: seedOutputOverrides,
               });
               if (writeResult.wrote) {
                 updateWorkspaceOutputCycleLastWrite(
@@ -1026,6 +1053,15 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
             { snapshotSnippet },
           );
+          const captureOutputOverrides = output &&
+              hasWriterFeatureFlagOverrides(output.writerFeatureFlagOverrides)
+            ? createOutputOverridesFromWorkspaceProfile(
+              profile,
+              captureIncludeSystemEvents,
+              userConfig,
+              output.writerFeatureFlagOverrides,
+            )
+            : outputOverrides;
           const captureResult = await captureSnapshotWithRetries({
             recordingPipeline,
             provider,
@@ -1034,7 +1070,7 @@ async function applyPersistentControlCommandsForEvent(
             events: captureEvents,
             title: captureTitle,
             workspaceId: workspace.workspaceId,
-            outputOverrides,
+            outputOverrides: captureOutputOverrides,
             allowGeneratedDestinationRetries: resolved.usesGeneratedFilename,
             resolveCycleIdForAttempt: (targetPathForAttempt) => {
               const destinationChangedForAttempt = !output ||
@@ -1119,7 +1155,7 @@ async function applyPersistentControlCommandsForEvent(
               ...(activeCycleId ? { recordingId: activeCycleId } : {}),
               recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
-              outputOverrides,
+              outputOverrides: captureOutputOverrides,
             });
             if (writeResult.wrote && activeCycleId) {
               updateWorkspaceOutputCycleLastWrite(
@@ -2259,6 +2295,16 @@ function mergeMatchingWorkspaceOutputPreferringLatest(
   }
   if (!merged.createdAt && current.createdAt) {
     merged.createdAt = current.createdAt;
+  }
+  if (
+    !merged.writerFeatureFlagOverrides && current.writerFeatureFlagOverrides
+  ) {
+    merged.writerFeatureFlagOverrides = structuredClone(
+      current.writerFeatureFlagOverrides,
+    );
+  }
+  if (!merged.outputMetadata && current.outputMetadata) {
+    merged.outputMetadata = structuredClone(current.outputMetadata);
   }
 
   merged.writeCursor = Math.max(merged.writeCursor, current.writeCursor);

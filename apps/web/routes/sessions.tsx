@@ -9,6 +9,7 @@ import {
   runSessionRecordingAction,
   runSessionRecordingStopAction,
 } from "../src/session_recording_actions.ts";
+import { runSessionOutputMetadataUpdateAction } from "../src/session_metadata_actions.ts";
 import { buildSessionInventoryHref } from "../src/session_routes.ts";
 import { define } from "../utils.ts";
 
@@ -136,6 +137,58 @@ export const handler = define.handlers({
             includeStale,
             workspaceFilter,
             notice: buildSessionRecordingStopNotice(result),
+          }),
+          303,
+        );
+      }
+
+      if (
+        action === "update-session-metadata-defaults" ||
+        action === "update-recording-metadata"
+      ) {
+        const readScalarEdit = (name: string): string | null | undefined => {
+          if (!form.has(name)) {
+            return undefined;
+          }
+          const value = String(form.get(name) ?? "").trim();
+          return value.length > 0 ? value : null;
+        };
+        const tags = form.has("tags")
+          ? String(form.get("tags") ?? "")
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter((tag) => tag.length > 0)
+          : undefined;
+        const result = await runSessionOutputMetadataUpdateAction({
+          scope: action === "update-session-metadata-defaults"
+            ? "session-defaults"
+            : "output",
+          sessionId,
+          selector: {
+            workspaceId: String(form.get("workspaceId") ?? "").trim() ||
+              undefined,
+            outputPath: String(form.get("outputPath") ?? "").trim() ||
+              undefined,
+            recordingCycleId:
+              String(form.get("recordingCycleId") ?? "").trim() ||
+              undefined,
+          },
+          edits: {
+            displayTitle: readScalarEdit("displayTitle"),
+            personaName: readScalarEdit("personaName"),
+            participantUsername: readScalarEdit("participantUsername"),
+            ...(tags !== undefined ? { tags } : {}),
+          },
+          operationalLogger,
+          auditLogger,
+        });
+        return Response.redirect(
+          buildRedirectUrl(ctx.req.url, {
+            includeStale,
+            workspaceFilter,
+            notice: result.scope === "session-defaults"
+              ? `session metadata updated (${result.sessionShortId})`
+              : `recording metadata updated (${result.sessionShortId})`,
           }),
           303,
         );

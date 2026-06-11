@@ -7,6 +7,8 @@ import {
   runSessionRecordingRestartAction,
   runSessionRecordingStopAction,
 } from "./session_recording_actions.ts";
+import { runSessionWriterOverridesAction } from "./session_metadata_actions.ts";
+import { parseWriterFlagChoice } from "./output_writer_policy.ts";
 import { buildRecordingsRecordingHref } from "./session_routes.ts";
 
 function normalizeRecordingsStateFilter(value: string): RecordingStateFilter {
@@ -66,6 +68,20 @@ function buildRecordingRestartNotice(
     : `recording re-armed (${result.sessionShortId})`;
 }
 
+function buildWriterOverridesNotice(
+  result: Awaited<ReturnType<typeof runSessionWriterOverridesAction>>,
+): string {
+  const describe = (label: string, override: boolean | undefined) =>
+    override === undefined
+      ? `${label} default`
+      : `${label} ${override ? "include" : "exclude"}`;
+  return `render policy updated: ${
+    describe("commentary", result.overrides?.writerIncludeCommentary)
+  }, ${
+    describe("thinking", result.overrides?.writerIncludeThinking)
+  } (${result.sessionShortId})`;
+}
+
 function buildRecordingsMutationErrorToken(
   action: string,
   error: unknown,
@@ -78,6 +94,9 @@ function buildRecordingsMutationErrorToken(
   }
   if (action === "restart-recording") {
     return "restart_failed";
+  }
+  if (action === "set-writer-overrides") {
+    return "writer_overrides_failed";
   }
   return "internal_error";
 }
@@ -174,6 +193,36 @@ export async function handleRecordingsPagePost(
           recordingCycleId: result.recordingCycleId ?? recordingCycleId,
           rowKey,
           notice: buildRecordingRestartNotice(result),
+        }),
+        303,
+      );
+    }
+
+    if (action === "set-writer-overrides") {
+      const workspaceId = String(form.get("workspaceId") ?? "").trim() ||
+        undefined;
+      const outputPath = String(form.get("outputPath") ?? "").trim() ||
+        undefined;
+      const result = await runSessionWriterOverridesAction({
+        sessionId,
+        selector: { workspaceId, outputPath, recordingCycleId },
+        commentary: parseWriterFlagChoice(
+          String(form.get("commentary") ?? "").trim() || undefined,
+        ),
+        thinking: parseWriterFlagChoice(
+          String(form.get("thinking") ?? "").trim() || undefined,
+        ),
+        katoDir: options.katoDir,
+        operationalLogger,
+        auditLogger,
+      });
+      return Response.redirect(
+        buildRedirectUrl(req.url, {
+          stateFilter,
+          workspaceFilter,
+          recordingCycleId,
+          rowKey,
+          notice: buildWriterOverridesNotice(result),
         }),
         303,
       );

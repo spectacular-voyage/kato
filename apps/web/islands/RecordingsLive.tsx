@@ -13,6 +13,10 @@ import {
   buildRecordingsHref,
 } from "../src/session_routes.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
+import {
+  WriterPolicyControls,
+  writerPolicyFlagSummary,
+} from "../src/writer_policy_controls.tsx";
 import SessionSnippet from "./SessionSnippet.tsx";
 import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
@@ -276,6 +280,44 @@ export default function RecordingsLive(
                           ({row.sessionShortId})
                         </a>
                       </div>
+                      {row.writerPolicy
+                        ? (
+                          <div class="recording-detail-line recording-writer-policy-line">
+                            <span class="mono recording-detail-label">
+                              Render:
+                            </span>{" "}
+                            <WriterPolicyControls
+                              writerPolicy={row.writerPolicy}
+                              hiddenFields={
+                                <RecordingsPageActionFields
+                                  sessionId={row.sessionId}
+                                  recordingCycleId={row.recordingCycleId}
+                                  rowKey={row.key}
+                                  workspaceId={row.workspaceId}
+                                  outputPath={row.outputPath}
+                                />
+                              }
+                            />
+                            {[
+                              writerPolicyFlagSummary(
+                                "Commentary",
+                                row.writerPolicy.commentary,
+                              ),
+                              writerPolicyFlagSummary(
+                                "Thinking",
+                                row.writerPolicy.thinking,
+                              ),
+                            ].filter(Boolean).map((summary) => (
+                              <span
+                                key={summary}
+                                class="muted writer-policy-summary"
+                              >
+                                {summary}
+                              </span>
+                            ))}
+                          </div>
+                        )
+                        : null}
                     </div>
                     <div class="session-activity-meta recording-row-meta">
                       <div

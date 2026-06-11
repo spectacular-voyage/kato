@@ -2,8 +2,14 @@ import type {
   DaemonRecordingStatus,
   DaemonSessionStatus,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
-import { DEFAULT_STATUS_STALE_AFTER_MS, isSessionStale } from "@kato/shared";
+import {
+  DEFAULT_STATUS_STALE_AFTER_MS,
+  isSessionStale,
+  resolveEffectiveOutputMetadata,
+} from "@kato/shared";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
@@ -12,6 +18,7 @@ import {
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
   resolveDefaultWorkspaceRegistryPath,
+  WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
 } from "@kato/runtime";
 import { relative } from "@std/path";
@@ -22,6 +29,10 @@ import {
 } from "../activity_state.ts";
 import { loadRuntimeConfigOrDefault } from "./activity_state.ts";
 import { buildSessionInventorySessionHref } from "../session_routes.ts";
+import {
+  type OutputWriterPolicyProjection,
+  projectOutputWriterPolicy,
+} from "../output_writer_policy.ts";
 import { resolveKatoDirFromStatusPath } from "./logs.ts";
 
 export interface SessionRecordingActivityRow {
@@ -37,6 +48,9 @@ export interface SessionRecordingActivityRow {
   stoppedAt?: string;
   lastWriteAt?: string;
   recordingCycleId?: string;
+  effectiveMetadata?: SessionOutputMetadataV1;
+  directMetadata?: SessionOutputMetadataV1;
+  writerPolicy?: OutputWriterPolicyProjection;
 }
 
 export interface SessionActivityRow {
@@ -53,6 +67,7 @@ export interface SessionActivityRow {
   activeRecordingCount: number;
   staleRecordingCount: number;
   stoppedRecordingCount: number;
+  outputMetadataDefaults?: SessionOutputMetadataV1;
   recordings: SessionRecordingActivityRow[];
 }
 
@@ -214,6 +229,38 @@ async function loadRegisteredWorkspaces(
   }
 }
 
+async function resolveWorkspaceDefaultWriterFlagsById(
+  workspaceEntries: RegisteredWorkspace[],
+  metadataList: SessionMetadataV1[],
+): Promise<Map<string, SessionWorkspaceAttachmentWriterFeatureFlagsV1>> {
+  const usedWorkspaceIds = new Set<string>();
+  for (const metadata of metadataList) {
+    for (const output of metadata.workspaceOutputs ?? []) {
+      usedWorkspaceIds.add(output.workspaceId);
+    }
+  }
+  const flagsById = new Map<
+    string,
+    SessionWorkspaceAttachmentWriterFeatureFlagsV1
+  >();
+  if (usedWorkspaceIds.size === 0) {
+    return flagsById;
+  }
+  const resolver = new WorkspaceProfileResolver();
+  for (const entry of workspaceEntries) {
+    if (!usedWorkspaceIds.has(entry.workspaceId)) {
+      continue;
+    }
+    try {
+      const profile = await resolver.resolveForCommand(entry);
+      flagsById.set(entry.workspaceId, { ...profile.writerFeatureFlags });
+    } catch {
+      // Unresolvable workspaces fall back to per-output snapshots.
+    }
+  }
+  return flagsById;
+}
+
 function sortRecordings(
   rows: SessionRecordingActivityRow[],
 ): SessionRecordingActivityRow[] {
@@ -355,11 +402,46 @@ function findLatestStoppedCycle(
   )[0];
 }
 
+interface OutputRowProjectionContext {
+  outputMetadataDefaults?: SessionOutputMetadataV1;
+  workspaceDefaultWriterFlagsById: ReadonlyMap<
+    string,
+    SessionWorkspaceAttachmentWriterFeatureFlagsV1
+  >;
+}
+
+function buildOutputRowProjection(
+  output: SessionWorkspaceOutputState,
+  context: OutputRowProjectionContext,
+): Pick<
+  SessionRecordingActivityRow,
+  "effectiveMetadata" | "directMetadata" | "writerPolicy"
+> {
+  const effectiveMetadata = resolveEffectiveOutputMetadata(
+    context.outputMetadataDefaults,
+    output.outputMetadata,
+  );
+  const workspaceDefaultFlags = context.workspaceDefaultWriterFlagsById.get(
+    output.workspaceId,
+  ) ?? output.writerFeatureFlags;
+  return {
+    ...(Object.keys(effectiveMetadata).length > 0 ? { effectiveMetadata } : {}),
+    ...(output.outputMetadata
+      ? { directMetadata: structuredClone(output.outputMetadata) }
+      : {}),
+    writerPolicy: projectOutputWriterPolicy(
+      workspaceDefaultFlags,
+      output.writerFeatureFlagOverrides,
+    ),
+  };
+}
+
 function buildRecordingRowsForOutput(
   output: SessionWorkspaceOutputState,
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
   now: Date,
+  projectionContext: OutputRowProjectionContext,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -370,6 +452,7 @@ function buildRecordingRowsForOutput(
     output.workspaceRootSnapshot,
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
+  const projection = buildOutputRowProjection(output, projectionContext);
   const activeStartedAt = activeCycle?.startedAt ?? liveRecording?.startedAt;
   const activeLastWriteAt = liveRecording?.lastWriteAt ??
     activeCycle?.lastWriteAt;
@@ -396,6 +479,7 @@ function buildRecordingRowsForOutput(
       startedAt: activeStartedAt,
       lastWriteAt: activeLastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId,
+      ...projection,
     }];
   }
 
@@ -417,6 +501,7 @@ function buildRecordingRowsForOutput(
       lastWriteAt: latestStoppedCycle.lastWriteAt,
       stoppedAt: latestStoppedCycle.stoppedAt,
       recordingCycleId: latestStoppedCycle.recordingCycleId,
+      ...projection,
     }];
   }
 
@@ -445,6 +530,7 @@ function buildRecordingRowsForOutput(
     startedAt: liveRecording.startedAt,
     lastWriteAt: liveRecording.lastWriteAt,
     recordingCycleId: liveRecording.recordingId,
+    ...projection,
   }];
 }
 
@@ -453,6 +539,7 @@ function buildAllRecordingRowsForOutput(
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
   now: Date,
+  projectionContext: OutputRowProjectionContext,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -463,6 +550,7 @@ function buildAllRecordingRowsForOutput(
     output.workspaceRootSnapshot,
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
+  const projection = buildOutputRowProjection(output, projectionContext);
   const rows: SessionRecordingActivityRow[] = [];
 
   for (const cycle of output.recordingCycles) {
@@ -496,6 +584,7 @@ function buildAllRecordingRowsForOutput(
       stoppedAt: active ? undefined : cycle.stoppedAt,
       lastWriteAt,
       recordingCycleId: cycle.recordingCycleId,
+      ...projection,
     });
   }
 
@@ -526,6 +615,7 @@ function buildAllRecordingRowsForOutput(
       lastWriteAt: liveRecording?.lastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId ??
         liveRecording?.recordingId,
+      ...projection,
     });
   }
 
@@ -537,11 +627,18 @@ function buildRecordingRows(
   live: DaemonSessionStatus | undefined,
   recordingsMode: "latest" | "all" = "latest",
   now: Date,
+  workspaceDefaultWriterFlagsById: OutputRowProjectionContext[
+    "workspaceDefaultWriterFlagsById"
+  ] = new Map(),
 ): SessionRecordingActivityRow[] {
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
   const seenOutputPaths = new Set<string>();
   const sessionStale = live?.stale ?? true;
+  const projectionContext: OutputRowProjectionContext = {
+    outputMetadataDefaults: session.outputMetadataDefaults,
+    workspaceDefaultWriterFlagsById,
+  };
 
   for (const output of session.workspaceOutputs ?? []) {
     const outputRows = recordingsMode === "all"
@@ -550,12 +647,14 @@ function buildRecordingRows(
         liveRecordings,
         sessionStale,
         now,
+        projectionContext,
       )
       : buildRecordingRowsForOutput(
         output,
         liveRecordings,
         sessionStale,
         now,
+        projectionContext,
       );
     for (const row of outputRows) {
       rows.push(row);
@@ -684,6 +783,11 @@ export async function loadSessionActivityRows(
       normalizePersistedTwinMetadata(sessionStore, metadata)
     ),
   );
+  const workspaceDefaultWriterFlagsById =
+    await resolveWorkspaceDefaultWriterFlagsById(
+      workspaceEntries,
+      normalizedMetadataList,
+    );
 
   const liveBySessionId = new Map(
     (snapshot.sessions ?? []).map((session) => [session.sessionId, session]),
@@ -715,6 +819,7 @@ export async function loadSessionActivityRows(
       live,
       recordingsMode,
       statusClock,
+      workspaceDefaultWriterFlagsById,
     );
     const filteredRecordings = resolvedWorkspaceFilter
       ? recordings.filter((row) =>
@@ -768,6 +873,13 @@ export async function loadSessionActivityRows(
       staleRecordingCount,
       stoppedRecordingCount:
         filteredRecordings.filter((row) => row.state === "stopped").length,
+      ...(metadata.outputMetadataDefaults
+        ? {
+          outputMetadataDefaults: structuredClone(
+            metadata.outputMetadataDefaults,
+          ),
+        }
+        : {}),
       recordings: displayRecordings,
     };
   }))).filter((row) => includeStale || !row.stale).filter((row) =>

@@ -28,6 +28,25 @@ export interface SessionWorkspaceOutputDestinationV1 {
   absolutePath?: string;
 }
 
+// User-editable descriptive metadata. Session-level values are inherited
+// defaults for outputs; per-output values win for scalar fields and tags are
+// additive. Persisted session metadata is the source of truth; markdown
+// frontmatter derived from it stays descriptive.
+export interface SessionOutputMetadataV1 {
+  displayTitle?: string;
+  tags?: string[];
+  personaName?: string;
+  participantUsername?: string;
+}
+
+// Per-output render-policy overrides. Missing keys inherit the workspace
+// default; present booleans override it. Distinct from `writerFeatureFlags`,
+// which stays a refreshable snapshot of workspace defaults.
+export interface SessionWorkspaceOutputWriterFeatureFlagOverridesV1 {
+  writerIncludeCommentary?: boolean;
+  writerIncludeThinking?: boolean;
+}
+
 export interface SessionWorkspaceOutputStateV1 {
   workspaceId: string;
   workspaceAliasSnapshot?: string;
@@ -39,6 +58,9 @@ export interface SessionWorkspaceOutputStateV1 {
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
+  outputMetadata?: SessionOutputMetadataV1;
   activeRecordingCycleId?: string;
   writeCursor: number;
   createdAt?: string;
@@ -88,6 +110,7 @@ export interface SessionMetadataV1 {
   ingestionActivatedAt?: string;
   commandCursor?: number;
   commandCursorAnchor?: SessionCommandCursorAnchorV1;
+  outputMetadataDefaults?: SessionOutputMetadataV1;
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
 }
 
@@ -189,6 +212,52 @@ function isWorkspaceRecordingCycle(
   return true;
 }
 
+export function isSessionOutputMetadataV1(
+  value: unknown,
+): value is SessionOutputMetadataV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    value["displayTitle"] !== undefined &&
+    !isNonEmptyString(value["displayTitle"])
+  ) {
+    return false;
+  }
+  if (
+    value["tags"] !== undefined &&
+    (!Array.isArray(value["tags"]) ||
+      value["tags"].some((tag) => typeof tag !== "string"))
+  ) {
+    return false;
+  }
+  if (
+    value["personaName"] !== undefined &&
+    !isNonEmptyString(value["personaName"])
+  ) {
+    return false;
+  }
+  if (
+    value["participantUsername"] !== undefined &&
+    !isNonEmptyString(value["participantUsername"])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isSessionWorkspaceOutputWriterFeatureFlagOverridesV1(
+  value: unknown,
+): value is SessionWorkspaceOutputWriterFeatureFlagOverridesV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (value["writerIncludeCommentary"] === undefined ||
+    typeof value["writerIncludeCommentary"] === "boolean") &&
+    (value["writerIncludeThinking"] === undefined ||
+      typeof value["writerIncludeThinking"] === "boolean");
+}
+
 function isWorkspaceOutputDestination(
   value: unknown,
 ): value is SessionWorkspaceOutputDestinationV1 {
@@ -266,6 +335,20 @@ function isWorkspaceOutputState(
     return false;
   }
   if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
+    return false;
+  }
+  if (
+    value["writerFeatureFlagOverrides"] !== undefined &&
+    !isSessionWorkspaceOutputWriterFeatureFlagOverridesV1(
+      value["writerFeatureFlagOverrides"],
+    )
+  ) {
+    return false;
+  }
+  if (
+    value["outputMetadata"] !== undefined &&
+    !isSessionOutputMetadataV1(value["outputMetadata"])
+  ) {
     return false;
   }
   if (
@@ -405,6 +488,12 @@ export function isSessionMetadataV1(
     ) {
       return false;
     }
+  }
+  if (
+    value["outputMetadataDefaults"] !== undefined &&
+    !isSessionOutputMetadataV1(value["outputMetadataDefaults"])
+  ) {
+    return false;
   }
   if (
     value["workspaceOutputs"] !== undefined &&

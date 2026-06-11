@@ -8,7 +8,9 @@ import {
   resolveDendronWikilinkContext,
 } from "../../../runtime/src/mod.ts";
 import {
+  type FrontmatterWriterPolicy,
   mergeAccretiveFrontmatterFields,
+  mergeFrontmatterWriterPolicySnapshot,
   renderFrontmatter,
 } from "./frontmatter.ts";
 
@@ -41,6 +43,7 @@ export interface MarkdownRenderOptions {
   frontmatterParticipants?: string[];
   frontmatterTags?: string[];
   frontmatterConversationEventKinds?: string[];
+  frontmatterWriterPolicy?: FrontmatterWriterPolicy;
   includeCommentary?: boolean;
   includeToolCalls?: boolean;
   includeToolResults?: boolean;
@@ -845,6 +848,7 @@ export function renderEventsToMarkdown(
         participants: options.frontmatterParticipants,
         tags: options.frontmatterTags,
         conversationEventKinds: options.frontmatterConversationEventKinds,
+        writerPolicy: options.frontmatterWriterPolicy,
         includeUpdated: options.includeUpdatedInFrontmatter,
       }),
       "",
@@ -1331,7 +1335,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0);
-    const nextFrontmatter = shouldMergeFrontmatter
+    let nextFrontmatter = shouldMergeFrontmatter
       ? mergeAccretiveFrontmatterFields({
         frontmatter: existingFrontmatterView.frontmatter,
         sessionIds: options.frontmatterSessionIds,
@@ -1342,6 +1346,12 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         conversationEventKinds: options.frontmatterConversationEventKinds,
       })
       : existingFrontmatterView?.frontmatter;
+    if (nextFrontmatter !== undefined && options.frontmatterWriterPolicy) {
+      nextFrontmatter = mergeFrontmatterWriterPolicySnapshot({
+        frontmatter: nextFrontmatter,
+        writerPolicy: options.frontmatterWriterPolicy,
+      });
+    }
     const frontmatterChanged = existingFrontmatterView !== null &&
       nextFrontmatter !== undefined &&
       nextFrontmatter !== existingFrontmatterView.frontmatter;
@@ -1449,7 +1459,7 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
         (options.frontmatterParticipants?.length ?? 0) > 0 ||
         (options.frontmatterTags?.length ?? 0) > 0 ||
         (options.frontmatterConversationEventKinds?.length ?? 0) > 0;
-      const mergedFrontmatter = hasAccretiveInputs
+      let mergedFrontmatter = hasAccretiveInputs
         ? mergeAccretiveFrontmatterFields({
           frontmatter: existingFrontmatter,
           sessionIds: options.frontmatterSessionIds,
@@ -1460,6 +1470,12 @@ export class MarkdownConversationWriter implements ConversationWriterLike {
           conversationEventKinds: options.frontmatterConversationEventKinds,
         })
         : existingFrontmatter;
+      if (options.frontmatterWriterPolicy) {
+        mergedFrontmatter = mergeFrontmatterWriterPolicySnapshot({
+          frontmatter: mergedFrontmatter,
+          writerPolicy: options.frontmatterWriterPolicy,
+        });
+      }
       const body = renderEventsToMarkdown(events, {
         ...baseRenderOptions,
         includeFrontmatter: false,

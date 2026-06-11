@@ -159,6 +159,94 @@ Deno.test(
   },
 );
 
+function makeWorkspaceOutput(): NonNullable<
+  SessionMetadataV1["workspaceOutputs"]
+>[number] {
+  return {
+    workspaceId: "workspace-1",
+    desiredState: "off",
+    currentDestination: {
+      kind: "workspace-relative",
+    },
+    currentResolvedPath: "C:/workspace/notes/output.md",
+    workspaceRootSnapshot: "C:/workspace",
+    resolvedDefaultOutputDir: "C:/workspace/notes",
+    filenameTemplate: "{provider}.md",
+    writerFeatureFlags: {
+      writerIncludeCommentary: true,
+      writerIncludeThinking: true,
+      writerIncludeToolCalls: true,
+      writerItalicizeUserMessages: false,
+    },
+    writeCursor: 0,
+    recordingCycles: [],
+  };
+}
+
+Deno.test(
+  "isSessionMetadataV1 accepts optional output metadata defaults, per-output metadata, and writer flag overrides",
+  () => {
+    const metadata = makeSessionMetadata();
+    assert(isSessionMetadataV1(metadata));
+
+    metadata.outputMetadataDefaults = {
+      displayTitle: "Session Title",
+      tags: ["alpha", "beta"],
+      personaName: "Investigator",
+      participantUsername: "dave",
+    };
+    const output = makeWorkspaceOutput();
+    output.outputMetadata = {
+      displayTitle: "Output Title",
+      tags: ["gamma"],
+    };
+    output.writerFeatureFlagOverrides = {
+      writerIncludeCommentary: false,
+    };
+    metadata.workspaceOutputs = [output];
+
+    assert(isSessionMetadataV1(metadata));
+  },
+);
+
+Deno.test(
+  "isSessionMetadataV1 rejects malformed output metadata and writer flag overrides",
+  () => {
+    const blankDefaults = makeSessionMetadata();
+    blankDefaults.outputMetadataDefaults = {
+      displayTitle: "   ",
+    };
+    assertEquals(isSessionMetadataV1(blankDefaults), false);
+
+    const nonStringTags = makeSessionMetadata();
+    nonStringTags.outputMetadataDefaults = {
+      tags: ["fine", 42 as unknown as string],
+    };
+    assertEquals(isSessionMetadataV1(nonStringTags), false);
+
+    const badOutputMetadata = makeSessionMetadata();
+    const output = makeWorkspaceOutput();
+    output.outputMetadata = {
+      personaName: "" as unknown as string,
+    };
+    badOutputMetadata.workspaceOutputs = [output];
+    assertEquals(isSessionMetadataV1(badOutputMetadata), false);
+
+    const badOverrides = makeSessionMetadata();
+    const overrideOutput = makeWorkspaceOutput();
+    overrideOutput.writerFeatureFlagOverrides = {
+      writerIncludeThinking: "yes" as unknown as boolean,
+    };
+    badOverrides.workspaceOutputs = [overrideOutput];
+    assertEquals(isSessionMetadataV1(badOverrides), false);
+
+    const nonRecordMetadata = makeSessionMetadata();
+    nonRecordMetadata.outputMetadataDefaults =
+      "tagged" as unknown as SessionMetadataV1["outputMetadataDefaults"];
+    assertEquals(isSessionMetadataV1(nonRecordMetadata), false);
+  },
+);
+
 Deno.test(
   "isSessionTwinEventV1 rejects empty-string optional metadata that should be omitted instead",
   () => {

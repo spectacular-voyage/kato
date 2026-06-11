@@ -508,3 +508,92 @@ Deno.test("handleRecordingsPagePost rejects unsupported actions with a 400 respo
     },
   );
 });
+
+Deno.test("handleRecordingsPagePost sets per-output writer overrides and redirects with a notice", async () => {
+  await withTestTempDir("web-recordings-post-overrides-", async (homeDir) => {
+    const { katoDir, alphaRoot, alphaConfigPath } = await setupWorkspaceFixture(
+      homeDir,
+    );
+    const webConfig = await setupWebAuthFixture(katoDir);
+    const sessionPath = join(homeDir, "provider-session-overrides.jsonl");
+    const outputPath = join(alphaRoot, "notes", "overrides-target.md");
+    await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+    await Deno.writeTextFile(
+      outputPath,
+      [
+        "---",
+        "id: overrides-abc123",
+        "title: 'Overrides Target'",
+        "---",
+        "",
+        "Existing body.",
+        "",
+      ].join("\n"),
+    );
+
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-web-route-overrides",
+      providerSessionId: "provider-session-route-overrides",
+      sourceFilePath: sessionPath,
+      workspaceOutputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceAlias: "alpha",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          resolvedPath: outputPath,
+          desiredState: "on",
+          activeRecordingCycleId: "cycle-overrides-route",
+          writeCursor: 4,
+          recordingCycles: [{
+            recordingCycleId: "cycle-overrides-route",
+            startedCursor: 4,
+            startedAt: "2026-03-17T17:00:00.000Z",
+            startedBySeq: 4,
+          }],
+        }),
+      ],
+    });
+
+    const response = await handleRecordingsPagePost(
+      await buildAuthenticatedPostRequest("http://kato.local/recordings", {
+        action: "set-writer-overrides",
+        sessionId: "sess-web-route-overrides",
+        workspaceId: "ws-alpha",
+        recordingCycleId: "cycle-overrides-route",
+        outputPath,
+        commentary: "inherit",
+        thinking: "exclude",
+        stateFilter: "engaged-active",
+        workspaceFilter: "ws-alpha",
+        rowKey: "row-overrides-route",
+      }, webConfig),
+      { katoDir },
+    );
+
+    assertEquals(response.status, 303);
+    const location = response.headers.get("location");
+    assertExists(location);
+    const redirectUrl = new URL(location);
+    const notice = redirectUrl.searchParams.get("notice");
+    assertExists(notice);
+    assertEquals(notice.includes("render policy updated"), true);
+    assertEquals(notice.includes("thinking exclude"), true);
+
+    const store = new PersistentSessionStateStore({ katoDir });
+    const metadata = (await store.listSessionMetadata()).find((entry) =>
+      entry.sessionId === "sess-web-route-overrides"
+    );
+    assertExists(metadata);
+    assertEquals(
+      metadata.workspaceOutputs?.[0]?.writerFeatureFlagOverrides,
+      { writerIncludeThinking: false },
+    );
+
+    const content = await Deno.readTextFile(outputPath);
+    assertEquals(content.includes("kato-writerFeatureFlags:"), true);
+    assertEquals(content.includes("writerIncludeThinking: false"), true);
+    assertEquals(content.includes("Existing body."), true);
+  });
+});

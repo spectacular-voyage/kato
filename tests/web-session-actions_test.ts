@@ -5,7 +5,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
-import type { ConversationEvent } from "@kato/shared";
+import type { ConversationEvent, SessionMetadataV1 } from "@kato/shared";
 import { mapConversationEventsToTwin } from "../apps/daemon/src/mod.ts";
 import {
   createDefaultSharedBehaviorConfig,
@@ -182,7 +182,7 @@ async function createSessionFixture(options: {
   sessionId: string;
   providerSessionId: string;
   sourceFilePath: string;
-  workspaceOutputs?: ReturnType<typeof makeWorkspaceOutput>[];
+  workspaceOutputs?: NonNullable<SessionMetadataV1["workspaceOutputs"]>;
 }) {
   const store = new PersistentSessionStateStore({
     katoDir: options.katoDir,
@@ -1388,6 +1388,84 @@ Deno.test("runSessionRecordingAction keeps the output-dir snapshot aligned with 
         dirname(result.targetPath),
         output.resolvedDefaultOutputDir,
       );
+    },
+  );
+});
+
+Deno.test("runSessionRecordingRestartAction preserves output metadata and writer flag overrides", async () => {
+  await withTestTempDir(
+    "web-session-restart-overrides-",
+    async (homeDir) => {
+      const { katoDir, alphaRoot, alphaConfigPath } =
+        await setupWorkspaceFixture(homeDir);
+      const outputPath = join(alphaRoot, "notes", "stopped.md");
+      const sessionPath = join(homeDir, "provider-session-a.jsonl");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+      await Deno.writeTextFile(outputPath, "# existing recording\n");
+
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-restart-overrides",
+        providerSessionId: "provider-session-restart-overrides",
+        sourceFilePath: sessionPath,
+        workspaceOutputs: [
+          {
+            ...makeWorkspaceOutput({
+              workspaceId: "ws-alpha",
+              workspaceAlias: "alpha",
+              workspaceRoot: alphaRoot,
+              configPath: alphaConfigPath,
+              resolvedPath: outputPath,
+              desiredState: "off",
+              writeCursor: 4,
+              recordingCycles: [{
+                recordingCycleId: "cycle-stopped",
+                startedCursor: 1,
+                stoppedCursor: 4,
+                startedAt: "2026-03-17T16:00:00.000Z",
+                stoppedAt: "2026-03-17T16:30:00.000Z",
+              }],
+            }),
+            writerFeatureFlagOverrides: {
+              writerIncludeThinking: false,
+            },
+            outputMetadata: {
+              displayTitle: "Kept Title",
+              tags: ["kept-tag"],
+            },
+          },
+        ],
+      });
+
+      const result = await runSessionRecordingRestartAction({
+        action: "restart-recording",
+        sessionId: "sess-web-restart-overrides",
+        workspaceId: "ws-alpha",
+        recordingCycleId: "cycle-stopped",
+        outputPath,
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+      assertEquals(result.noOp, false);
+
+      const sessionStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+      const restarted = (await sessionStore.listSessionMetadata()).find(
+        (entry) => entry.sessionId === "sess-web-restart-overrides",
+      );
+      assertExists(restarted);
+      const output = restarted.workspaceOutputs?.[0];
+      assertExists(output);
+      assertEquals(output.desiredState, "on");
+      assertEquals(output.writerFeatureFlagOverrides, {
+        writerIncludeThinking: false,
+      });
+      assertEquals(output.outputMetadata, {
+        displayTitle: "Kept Title",
+        tags: ["kept-tag"],
+      });
     },
   );
 });

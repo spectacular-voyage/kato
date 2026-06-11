@@ -1098,6 +1098,43 @@ a {
   white-space: nowrap;
 }
 
+.recording-writer-policy-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.writer-policy-form {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.writer-policy-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.76rem;
+}
+
+.writer-policy-label {
+  white-space: nowrap;
+}
+
+.writer-policy-select {
+  width: auto;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 0.76rem;
+}
+
+.writer-policy-summary {
+  font-size: 0.72rem;
+}
+
 .activity-state-dot {
   font-size: 0.9rem;
   line-height: 1;

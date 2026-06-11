@@ -59,7 +59,9 @@ Related notes:
 - `apps/runtime/src`: shared Deno runtime modules (config stores/path
   resolvers/control-plane/policy/workspace/observability).
 - `shared/src`: contracts and projection utilities (`config`, `status`,
-  `session_state`, `events`, `messages`, `ipc`, etc.).
+  `session_state`, `events`, `messages`, `ipc`, etc.), including
+  `output_metadata.ts` resolvers for effective output metadata and effective
+  writer feature flags (session defaults + per-output overrides).
 - `apps/web`: local Fresh-based operator console (routes, loaders, API
   handlers, islands, auth/session handling, and small guided workflows).
 - `apps/cloud/src`: placeholder.
@@ -96,6 +98,8 @@ Supporting web files worth knowing:
 - `apps/web/src/session_recording_actions.ts`: shared web mutation flows for
   Sessions and Recordings recording/capture start-stop-`Re-start` actions,
   including same-file exclusivity guards.
+- `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync.
+- `apps/web/src/output_writer_policy.ts` + `apps/web/src/writer_policy_controls.tsx`: default/override/effective writer-policy projection and the compact tri-state (default/include/exclude) controls rendered on Recordings rows.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/maintenance`, `/sessions`, and session anchor links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for
