@@ -31,7 +31,7 @@ created: 1781187417804
   - stopped outputs can still be edited for future re-arm/restart.
 - Workspace tag library editing should build on
   [[task.2026.2026-06-11-workspace-config-editing]].
-- Personal tag library editing belongs in user settings and user-level CLI
+- Personal tag library editing belongs on `/settings` and in user-level CLI
   commands, not in the shared workspace editor.
 
 ## Discussion
@@ -154,7 +154,7 @@ created: 1781187417804
   - add CLI commands for shared workspace tag libraries and user-level tag
     libraries;
   - expose shared workspace tag libraries through the workspace edit surface;
-  - expose personal tag libraries through user settings rather than
+  - extend `/settings` to edit personal tag libraries rather than
     `/workspaces`.
 
 ## Scenario Table
@@ -196,7 +196,8 @@ created: 1781187417804
 - Web action tests:
   - new capture/recording accepts selected tags;
   - active and stopped output tag edits persist;
-  - frontmatter updates immediately when markdown is available.
+  - frontmatter updates immediately when markdown is available;
+  - `/settings` can add, update, and remove user-level tag-library entries.
 - Runtime tests:
   - active persisted appends keep effective tags;
   - re-armed output keeps per-output tags.
@@ -219,7 +220,8 @@ created: 1781187417804
 
 - [ ] Add workspace config fields for `defaultTags` and `tagSuggestions`.
 - [ ] Add user config fields for personal tag libraries and migration behavior.
-- [ ] Add CLI/user-settings management for personal tag libraries.
+- [ ] Extend `/settings` with user-level tag library management.
+- [ ] Add CLI management for personal tag libraries.
 - [ ] Add shared workspace tag library management through the workspace config
       edit surface once [[task.2026.2026-06-11-workspace-config-editing]]
       exists.

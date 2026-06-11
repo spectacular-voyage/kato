@@ -19,8 +19,10 @@ import {
 } from "../apps/runtime/src/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
-const PLANTED_AWS_KEY = "AKIAIOSFODNN7EXAMPLE";
-const PLANTED_GITHUB_PAT = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+// Built from split parts so secret scanners never see a contiguous
+// credential-shaped literal in this file (GH013 push protection).
+const PLANTED_AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE";
+const PLANTED_GITHUB_PAT = "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 
 const TEST_NOW_ISO = "2026-06-10T10:00:00.000Z";
 

@@ -46,8 +46,8 @@ created: 1780029060020
   tags, and writer-policy overrides do not become three unrelated mechanisms.
 - Shared workspace persona editing should build on
   [[task.2026.2026-06-11-workspace-config-editing]] rather than adding another
-  custom mutation surface. Personal persona editing belongs in user settings
-  and user-level CLI commands.
+  custom mutation surface. Personal persona editing belongs on `/settings` and
+  in user-level CLI commands.
 
 Current model handling:
 
@@ -231,7 +231,7 @@ Superseded decisions from the earlier sketch:
 - CLI/Web management
   - add CLI commands for shared workspace personas and user-level personas;
   - expose shared workspace persona editing through the workspace edit surface;
-  - expose personal persona editing through user settings rather than
+  - extend `/settings` to edit personal persona names/libraries rather than
     `/workspaces`.
 - Web session actions
   - accept optional output metadata from New Capture/New Recording pre-edit;
@@ -278,7 +278,8 @@ Superseded decisions from the earlier sketch:
 - Web action tests:
   - New Capture/New Recording form metadata reaches filename rendering,
     frontmatter, and persisted output state;
-  - explicit pre-edit values override extracted personas.
+  - explicit pre-edit values override extracted personas;
+  - `/settings` can add, update, and remove user-level persona names.
 - Workspace registry tests:
   - persona definitions parse, normalize, dedupe, and reject invalid schema
     shapes.
@@ -305,7 +306,8 @@ Superseded decisions from the earlier sketch:
 
 - [ ] Add workspace-config persona definitions.
 - [ ] Add user-config persona definitions and migration behavior.
-- [ ] Add CLI/user-settings management for personal persona definitions.
+- [ ] Extend `/settings` with user-level persona name/library management.
+- [ ] Add CLI management for personal persona definitions.
 - [ ] Add shared workspace persona management through the workspace config edit
       surface once [[task.2026.2026-06-11-workspace-config-editing]] exists.
 - [ ] Add a small output metadata resolver module for persona-prefix
