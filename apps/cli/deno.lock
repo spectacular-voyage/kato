@@ -5,7 +5,8 @@
     "jsr:@std/cli@1": "1.0.20",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/path@1": "1.1.0",
-    "jsr:@std/yaml@^1.1.1": "1.1.1"
+    "jsr:@std/yaml@^1.1.1": "1.1.1",
+    "npm:loglayer@9.1.0": "9.1.0"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -25,6 +26,45 @@
     },
     "@std/yaml@1.1.1": {
       "integrity": "a57665ecf3d17b926380593a56625d8a10cc7281802f1e993b5ebc94a48e71f8"
+    }
+  },
+  "npm": {
+    "@loglayer/context-manager@2.0.2": {
+      "integrity": "sha512-IVt/iqACGw2GnucKOpyJ69MbGQSRzsArOwsTNMuOAfzm36zTphGIH4K7g7lhRvcd2jY0dZzvWA6tCqannpgXXg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/log-level-manager@2.0.2": {
+      "integrity": "sha512-hq6hjkXzrYyz0DwYUqizP0hS3jhPl5S/7U33Cd0EPbfLmDjYWzzcM0mQKUdtBi6qNX4DAPpag3oBGytB2zmghg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/plugin@3.0.2": {
+      "integrity": "sha512-ghIYpuPw/Q0jdlr7ErkaySfsSCsIigwIb1lvR5qhZrz3oEqGotDFZzhgU1YeO7BacA042ygv/xww3Ip3ROokeg==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "@loglayer/shared@4.1.0": {
+      "integrity": "sha512-hGSWhLhMF9L7sB0rXippvKhku9D9dT8imZ5OFpa4VHAVnclY0DQ+3wIPE37rzu0QAiBbyR3/HH03Q1Cgik8zYA=="
+    },
+    "@loglayer/transport@3.0.2": {
+      "integrity": "sha512-5t0lj/ibQQxGPpghNta8u10zl8owU0my/i2fHF/LdcCAtpw/IHblmpKSgOzdH9XE19Ub/i0VYj0JrFrFv8/NXw==",
+      "dependencies": [
+        "@loglayer/shared"
+      ]
+    },
+    "loglayer@9.1.0": {
+      "integrity": "sha512-KFCtoydUtfshszDMIEMa180MMT4jDgBz7FkkO0r3mLDzOkfqGUCbtH9DRszK/pEPrG7999FXfBsyv4DNhvmrag==",
+      "dependencies": [
+        "@loglayer/context-manager",
+        "@loglayer/log-level-manager",
+        "@loglayer/plugin",
+        "@loglayer/shared",
+        "@loglayer/transport"
+      ]
     }
   },
   "workspace": {
