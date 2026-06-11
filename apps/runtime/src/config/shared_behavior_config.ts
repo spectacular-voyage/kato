@@ -1,6 +1,8 @@
 import type {
   ExportFeatureFlags,
   MarkdownFrontmatterConfig,
+  SecretsPolicyConfig,
+  SecretsPolicyMode,
   SharedBehaviorConfig,
 } from "@kato/shared";
 import { isAbsolute, join, relative } from "@std/path";
@@ -23,7 +25,14 @@ const SHARED_CONFIG_KEYS: Array<keyof SharedBehaviorConfig> = [
   "exportTimezone",
   "exportMarkdownFrontmatter",
   "exportFeatureFlags",
+  "secretsPolicy",
 ];
+const SECRETS_POLICY_KEYS: Array<keyof SecretsPolicyConfig> = [
+  "mode",
+  "disabledRules",
+  "allowlist",
+];
+const SECRETS_POLICY_MODES: SecretsPolicyMode[] = ["off", "detect", "redact"];
 const EXPORT_FEATURE_FLAG_KEYS: Array<keyof ExportFeatureFlags> = [
   "writerIncludeCommentary",
   "writerIncludeThinking",
@@ -119,6 +128,16 @@ export function createDefaultRuntimeMarkdownFrontmatterConfig(
       defaults.includeRecordingIds,
     includeConversationEventKinds: overrides.includeConversationEventKinds ??
       defaults.includeConversationEventKinds,
+  };
+}
+
+export function createDefaultSecretsPolicyConfig(
+  overrides?: Partial<SecretsPolicyConfig>,
+): SecretsPolicyConfig {
+  return {
+    mode: overrides?.mode ?? "redact",
+    disabledRules: [...(overrides?.disabledRules ?? [])],
+    allowlist: [...(overrides?.allowlist ?? [])],
   };
 }
 
@@ -241,6 +260,68 @@ function parseMarkdownFrontmatter(
   return resolved;
 }
 
+function parseStringArray(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(value) ||
+    value.some((entry) => typeof entry !== "string" || entry.length === 0)
+  ) {
+    return undefined;
+  }
+  return [...value] as string[];
+}
+
+function isCompilableAllowlistEntry(entry: string): boolean {
+  if (!(entry.length > 2 && entry.startsWith("/") && entry.endsWith("/"))) {
+    return true;
+  }
+  try {
+    new RegExp(entry.slice(1, -1));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseSecretsPolicy(value: unknown): SecretsPolicyConfig | undefined {
+  if (value === undefined) {
+    return createDefaultSecretsPolicyConfig();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  for (const key of Object.keys(value)) {
+    if (!SECRETS_POLICY_KEYS.includes(key as keyof SecretsPolicyConfig)) {
+      return undefined;
+    }
+  }
+
+  const rawMode = value["mode"];
+  if (rawMode === null) {
+    return undefined;
+  }
+  const mode = rawMode === undefined ? "redact" : rawMode;
+  if (!SECRETS_POLICY_MODES.includes(mode as SecretsPolicyMode)) {
+    return undefined;
+  }
+  const disabledRules = parseStringArray(value["disabledRules"]);
+  if (!disabledRules) {
+    return undefined;
+  }
+  const allowlist = parseStringArray(value["allowlist"]);
+  if (!allowlist || !allowlist.every(isCompilableAllowlistEntry)) {
+    return undefined;
+  }
+
+  return {
+    mode: mode as SecretsPolicyMode,
+    disabledRules,
+    allowlist,
+  };
+}
+
 function parseSharedBehaviorConfig(
   value: unknown,
 ): SharedBehaviorConfig | undefined {
@@ -281,6 +362,10 @@ function parseSharedBehaviorConfig(
   if (!exportFeatureFlags) {
     return undefined;
   }
+  const secretsPolicy = parseSecretsPolicy(value["secretsPolicy"]);
+  if (!secretsPolicy) {
+    return undefined;
+  }
 
   return {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
@@ -290,6 +375,7 @@ function parseSharedBehaviorConfig(
     exportTimezone,
     exportMarkdownFrontmatter,
     exportFeatureFlags,
+    secretsPolicy,
   };
 }
 
@@ -317,6 +403,7 @@ function cloneConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
       ...config.exportMarkdownFrontmatter,
     },
     exportFeatureFlags: { ...config.exportFeatureFlags },
+    secretsPolicy: createDefaultSecretsPolicyConfig(config.secretsPolicy),
   };
 }
 
@@ -331,6 +418,7 @@ export function createDefaultSharedBehaviorConfig(options: {
   exportTimezone?: string;
   exportMarkdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   exportFeatureFlags?: Partial<ExportFeatureFlags>;
+  secretsPolicy?: Partial<SecretsPolicyConfig>;
   useHomeShorthand?: boolean;
 }): SharedBehaviorConfig {
   const serializePath = options.useHomeShorthand ? collapseHome : (
@@ -355,6 +443,7 @@ export function createDefaultSharedBehaviorConfig(options: {
     exportFeatureFlags: createDefaultExportFeatureFlags(
       options.exportFeatureFlags,
     ),
+    secretsPolicy: createDefaultSecretsPolicyConfig(options.secretsPolicy),
   };
 }
 

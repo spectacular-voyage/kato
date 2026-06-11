@@ -107,6 +107,23 @@ Enterprise upgrade path:
 7. If web bootstrap provisions credentials, only password hashes/verifiers
    `MUST` be persisted; plaintext passwords `MUST NOT` be stored.
 
+## Secrets Redaction Policy
+
+1. Canonical conversation events `MUST` pass the secrets policy at the
+   parse boundary (live ingestion and provider-source replay) before any
+   snapshot projection, twin append, snippet extraction, or export render.
+2. The default policy when `secretsPolicy` is absent or unreadable `MUST` be
+   `redact` (fail closed); `detect` and `off` are explicit opt-outs.
+3. Redaction `MUST` be deterministic (`[REDACTED:<rule-id>]` placeholders) so
+   twin dedupe fingerprints remain stable.
+4. If the redaction transform fails on an event, that event `MUST` be dropped
+   rather than persisted or served unredacted.
+5. Every redaction/detection batch `MUST` emit a security-audit event with
+   rule ids and counts; audit and operational logs `MUST NOT` contain the
+   matched secret text.
+6. Detection runs in-process; secrets scanning `MUST NOT` shell out to
+   external scanners or require network access.
+
 ## Build and Supply Chain Controls
 
 1. Lockfile `MUST` be committed and enforced as frozen in CI.
@@ -123,6 +140,9 @@ Enterprise upgrade path:
 5. Permission boundary tests per process/worker role.
 6. Daemon lifecycle race tests.
 7. Audit completeness tests for policy decisions.
+8. Secrets redaction tests: per-rule detection fixtures, fail-closed default
+   coverage across snapshot/twin/snippet/replay surfaces, and audit events
+   free of secret content.
 
 ## Platform Baseline
 

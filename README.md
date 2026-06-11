@@ -84,6 +84,27 @@ You can also trigger recording from the "Sessions" page in the web UI.
 - `::stop`: stop all active recordings
 - `::stop-<alias>`: stop one workspace output
 
+## Secrets Redaction
+
+By default, Kato scans every captured conversation for things that look like
+credentials — vendor API keys (AWS, GitHub, Slack, OpenAI, Anthropic, …), PEM
+private keys, JWTs, and `password=`/`api_key=`-style assignments — and
+replaces them with `[REDACTED:<rule-id>]` placeholders before anything is
+written to twins, recordings, exports, or shown in the web UI. Each redaction
+is recorded in the security audit log (rule and count only, never the secret).
+
+Note: the AI tool's own transcript files still contain the original text;
+Kato only controls what lands in Kato-created files.
+
+Configure via `secretsPolicy` in `~/.kato/shared/kato-shared-config.yaml`:
+
+```yaml
+secretsPolicy:
+  mode: redact            # redact (default) | detect (log only) | off
+  disabledRules: []       # rule ids to skip, e.g. [jwt]
+  allowlist: []           # literal substrings or /regex/ to never redact
+```
+
 ## Local Web
 
 From the web UI, you can start and stop recordings, and manage your Kato data and configuration. 

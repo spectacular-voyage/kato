@@ -257,6 +257,7 @@ graph TD
 | Session persistence | Authoritative provider-session metadata/twin writes and rebuildable daemon index cache                 | `apps/runtime/src/orchestrator/session_state_store.ts` |
 | Writer pipeline     | Render markdown/jsonl with policy gate enforcement                                                     | `apps/daemon/src/writer/*`                             |
 | Workspace layer     | Registry + workspace profile/template resolution                                                       | `apps/runtime/src/workspace/*`                         |
+| Secrets redaction   | Default-on secrets detection/redaction applied to parsed events at ingestion and source replay         | `apps/runtime/src/policy/secrets_*.ts`                 |
 | Observability       | Structured operational/audit events for CLI, daemon, and web                                           | `apps/runtime/src/observability/*`                     |
 
 ## Daemon Subsystems
@@ -309,6 +310,20 @@ Ingestion runners:
   for the provider or the user explicitly requests `create twin` / `update twin`
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
+
+Session snippets (the operator-facing session labels) always reflect the
+conversation's first user message: when a snapshot is created from a mid-file
+resume without twin hydration, the runner does a one-time bounded read of the
+source-file head (cached per run, secrets policy applied) instead of letting
+the label drift to the first post-restart message.
+
+Freshly parsed events pass the shared secrets policy
+(`apps/runtime/src/policy/secrets_redaction.ts`) before snapshot projection,
+twin append, or snippet extraction — and the same transform guards
+provider-source replay — so every derived artifact (twins, recordings,
+snippets, `status.json`) only ever sees redacted content. The policy comes
+from `secretsPolicy` in the shared behavior config and defaults to `redact`
+(fail closed) when absent; see [[dev.security-baseline]].
 
 When a session has no usable twin history after restart, full-history
 `capture` / `export` replay comes from the provider source file on demand

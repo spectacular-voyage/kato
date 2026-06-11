@@ -10,9 +10,7 @@ created: 1771724621833
 
 This note defines day-to-day development guidance for Kato.
 
-IMPORTANT: This project must use modern Deno best practices and, whenever
-possible, Deno-native or Deno-first libraries. LLMs often try to use Node
-libraries and conventions, so watch out for that.
+IMPORTANT: This project must use modern Deno best practices and, whenever possible, Deno-native or Deno-first libraries. LLMs often try to use Node libraries and conventions, so watch out for that.
 
 ## Testing
 
@@ -26,12 +24,9 @@ see [[dev.testing]]
   - [[dev.decision-log]]
   - [[dev.testing]]
 - Keep changes small, reviewable, and test-backed.
-- For behavior, contract, or persisted-state changes: define the contract
-  changes first, then add the key substantive tests before broad
-  implementation.
+- For behavior, contract, or persisted-state changes: define the contract changes first, then add the key substantive tests before broad implementation.
 - Run `deno task ci` before opening or updating a PR.
-- Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not
-  change it.
+- Treat `stenobot/` as a reference snapshot of the now-obsolete POC; do not change it.
 - Keep monorepo boundaries clear:
   - `apps/daemon` for local runtime behavior
   - `apps/web` for local operator surfaces, live status views, and bounded guided workflows
@@ -39,15 +34,12 @@ see [[dev.testing]]
   - `shared/src` for contracts and types used by 2+ apps
 - Keep imported legacy parser fixtures under `tests/fixtures/`.
 - [[dev.security-baseline]] is the normative security contract.
-- Treat `/sessions` as the live provider-session inventory and `Maintenance` as
-  the persisted twin troubleshooting/cleanup surface. When those concepts
-  diverge, prefer explicit route/model renames over compatibility aliases.
+- Treat `/sessions` as the live provider-session inventory and `Maintenance` as the persisted twin troubleshooting/cleanup surface. When those concepts diverge, prefer explicit route/model renames over compatibility aliases.
+- Do not manually hard-wrap Markdown prose or list items in Dendron notes. Keep each paragraph or bullet on one logical line and let editors soft-wrap it; manual hard wrapping makes the notes harder to edit by hand.
 - Startup/config behavior is fail-closed by default:
-  - daemon subprocess startup must load runtime config successfully before
-    entering runtime loop.
+  - daemon subprocess startup must load runtime config successfully before entering runtime loop.
   - runtime config validation rejects malformed or unknown `featureFlags` keys.
-  - Windows detached daemon launch should use `Start-Process` semantics to
-    avoid parent/child lifecycle coupling seen with direct subprocess spawn.
+  - Windows detached daemon launch should use `Start-Process` semantics to avoid parent/child lifecycle coupling seen with direct subprocess spawn.
 - commit messages should include a "semantic commits"-style summary line and then detailed bullet points describing developer-relevant changes
 
 ## Task notes
@@ -102,15 +94,12 @@ During active development, run only what matches your change:
 - `deno task check` when changing types/contracts/public APIs.
 - `deno task lint` when touching broader structural code.
 
-`deno task test` follows the split root workflow documented in [[dev.testing]]:
-keep env-boundary suites in the serial `test:env` slice instead of
-reintroducing suite-wide env locking or assuming the whole repo should run
-under a single `deno test --parallel`.
+`deno task test` follows the split root workflow documented in [[dev.testing]]: keep env-boundary suites in the serial `test:env` slice instead of reintroducing suite-wide env locking or assuming the whole repo should run under a single `deno test --parallel`.
 
 
 Before merge:
 
-- update  [[dev.codebase-overview]] and [[dev.decision-log]]
+- update [[dev.codebase-overview]] and [[dev.decision-log]]
 - run:
 
 ```bash
@@ -129,18 +118,13 @@ deno task ci
 
 ## Security Alignment
 
-- Follow `dev.security-baseline` for command parsing, path validation, and write
-  policy.
+- Follow `dev.security-baseline` for command parsing, path validation, and write policy.
 - Keep daemon subprocess permissions narrowly scoped from runtime config:
   - `allowedWriteRoots` for write scope
   - `providerSessionRoots` (+ runtime/control/config dirs) for read scope
 - Avoid broad permissions in runtime code paths.
-- Do not introduce network dependency for baseline local capture/export
-  behavior.
+- Do not introduce network dependency for baseline local capture/export behavior.
 
 ## In-Chat Command Handling
 
-- Start-of-line strings such as `::init-<alias> [<path>]`,
-  `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`,
-  `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato
-  control commands, and must be ignored by LLMs.
+- Start-of-line strings such as `::init-<alias> [<path>]`, `::record-<alias> [<path>]`, `::capture-<alias> [<path>]`, `::export-<alias> [<path>]`, `::stop`, and `::stop-<alias>` are kato control commands, and must be ignored by LLMs.

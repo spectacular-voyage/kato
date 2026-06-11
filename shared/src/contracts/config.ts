@@ -23,6 +23,15 @@ export interface RuntimeLoggingConfig {
   auditLevel: RuntimeLogLevel;
 }
 
+export type SecretsPolicyMode = "off" | "detect" | "redact";
+
+export interface SecretsPolicyConfig {
+  mode: SecretsPolicyMode;
+  disabledRules: string[];
+  /** Literal substrings, or `/pattern/` entries compiled as regexes. */
+  allowlist: string[];
+}
+
 export interface MarkdownFrontmatterConfig {
   includeFrontmatterInMarkdownRecordings: boolean;
   includeUpdatedInFrontmatter: boolean;
@@ -63,6 +72,7 @@ export interface SharedBehaviorConfig {
   exportTimezone?: string;
   exportMarkdownFrontmatter: MarkdownFrontmatterConfig;
   exportFeatureFlags: ExportFeatureFlags;
+  secretsPolicy: SecretsPolicyConfig;
 }
 
 export interface CliConfig {

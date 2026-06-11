@@ -19,7 +19,7 @@ const GLOBAL_USAGE_BODY = [
   "Commands:",
   "  init                  Create default global config files if missing",
   "  start                 Start daemon in detached background mode",
-  "  restart               Stop then start daemon (start only if not running)",
+  "  restart               Stop then start daemon and configured web app",
   "  stop                  Queue daemon stop request (or reset stale status)",
   "  status [--json] [--all] [--live]",
   "                        Show daemon status",
@@ -55,6 +55,7 @@ const COMMAND_USAGE_BODY: Record<DaemonCliCommandName, string> = {
     "Usage: kato restart",
     "",
     "Stops daemon and starts it again. If daemon is not running, starts it.",
+    "Also restarts Kato Web when web config exists; unconfigured web is skipped.",
     "Uses global ~/.kato by default; set KATO_RUNTIME_DIR to an absolute path (or ~/...) to use another runtime root.",
   ].join("\n"),
   stop: [

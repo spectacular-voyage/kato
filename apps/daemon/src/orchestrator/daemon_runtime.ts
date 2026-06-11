@@ -2,6 +2,7 @@ import type {
   ConversationEvent,
   DaemonFeatureFlags,
   MarkdownFrontmatterConfig,
+  SecretsPolicyConfig,
   SessionMetadataV1,
   UserConfig,
 } from "@kato/shared";
@@ -141,6 +142,11 @@ export interface DaemonRuntimeLoopOptions {
   workspaceProfileResolver?: WorkspaceProfileResolverLike;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
+  /**
+   * Applied to provider-source replay (capture/export fallback when no twin
+   * history exists). Defaults to fail-closed `redact` mode when omitted.
+   */
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
@@ -247,6 +253,7 @@ interface ProcessPersistentRecordingUpdatesOptions {
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
   userConfig: UserConfig;
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -334,6 +341,7 @@ interface PersistentRecordingCommandContext {
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
   userConfig: UserConfig;
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 async function assertCaptureDestinationDoesNotExist(
@@ -635,13 +643,37 @@ async function resolveBoundaryEventsFromSessionStart(
   commandEvent: ConversationEvent & { kind: "message.user" },
   boundaryLine: number,
   sessionStateStore: PersistentSessionStateStore,
+  replayContext?: {
+    secretsPolicy?: SecretsPolicyConfig;
+    auditLogger?: AuditLogger;
+  },
 ): Promise<ConversationEvent[]> {
   let historyEvents: ConversationEvent[];
   try {
     const history = await loadPersistedSessionHistoryEvents(
       metadata,
       sessionStateStore,
+      { secretsPolicy: replayContext?.secretsPolicy },
     );
+    if (history.redaction && replayContext?.auditLogger) {
+      await replayContext.auditLogger.record(
+        history.redaction.mode === "redact"
+          ? "secrets.redacted"
+          : "secrets.detected",
+        "Secrets policy applied during provider source replay",
+        {
+          provider: metadata.provider,
+          sessionId: metadata.providerSessionId,
+          mode: history.redaction.mode,
+          eventsAffected: history.redaction.eventsAffected,
+          countsByRule: Object.fromEntries(
+            history.redaction.matches.map((
+              match,
+            ) => [match.ruleId, match.count]),
+          ),
+        },
+      );
+    }
     historyEvents = history.events;
   } catch {
     return fallbackBoundaryEvents;
@@ -987,6 +1019,7 @@ async function applyPersistentControlCommandsForEvent(
             event,
             command.line,
             sessionStateStore,
+            { secretsPolicy: ctx.secretsPolicy, auditLogger },
           );
           const captureTitle = resolveConversationTitle(
             captureEvents,
@@ -1124,6 +1157,7 @@ async function applyPersistentControlCommandsForEvent(
             event,
             command.line,
             sessionStateStore,
+            { secretsPolicy: ctx.secretsPolicy, auditLogger },
           );
           const snapshotTitle = resolveConversationTitle(
             exportEvents,
@@ -1818,6 +1852,7 @@ async function processPersistentRecordingUpdates(
     workspaceCatalog,
     workspaceProfileResolver,
     userConfig,
+    secretsPolicy,
   } = options;
 
   const snapshots = sessionSnapshotStore.listMetadataOnly
@@ -1951,6 +1986,7 @@ async function processPersistentRecordingUpdates(
         workspaceCatalog,
         workspaceProfileResolver,
         userConfig,
+        secretsPolicy,
       });
       metadataChanged = metadataChanged || changed;
     }
@@ -2433,6 +2469,7 @@ export async function runDaemonRuntimeLoop(
             const history = await loadPersistedSessionHistoryEvents(
               metadata,
               sessionStateStore,
+              { secretsPolicy: options.secretsPolicy },
             );
             if (history.source === "twin" && liveSnapshot) {
               return {
@@ -2642,6 +2679,7 @@ export async function runDaemonRuntimeLoop(
               workspaceCatalog,
               workspaceProfileResolver,
               userConfig,
+              secretsPolicy: options.secretsPolicy,
             });
           sessionMetadataMayHaveChanged = sessionMetadataMayHaveChanged ||
             persistentUpdatesChanged;

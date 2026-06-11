@@ -1,5 +1,5 @@
 {
-  "version": "0.2.12",
+  "version": "0.2.13",
   "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts routes/**/*.tsx src/**/*.ts",
@@ -23,9 +23,9 @@
     "proseWrap": "preserve"
   },
   "imports": {
-    "@std/http/cookie": "jsr:@std/http@^1.1.0/cookie",
+    "@std/http/cookie": "jsr:@std/http@^1.1.1/cookie",
     "@std/path": "jsr:@std/path@^1.1.4",
-    "@std/yaml": "jsr:@std/yaml@^1.1.0",
+    "@std/yaml": "jsr:@std/yaml@^1.1.1",
     "@kato/shared": "../../shared/src/mod.ts",
     "@kato/runtime": "../../apps/runtime/src/mod.ts",
     "@/": "./",

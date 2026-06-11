@@ -15,6 +15,7 @@
     "fmt:check": "deno fmt --check deno.json apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "lint": "deno lint apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "check": "deno check apps/cli/**/*.ts apps/cloud/**/*.ts apps/daemon/**/*.ts apps/runtime/**/*.ts scripts/**/*.ts apps/web/src/**/*.ts shared/**/*.ts tests/**/*.ts && deno task --cwd apps/web check",
+    "bench": "deno bench --allow-read --allow-write --allow-env tests/secrets-redaction_bench.ts",
     "test": "deno run -A scripts/run-root-test-slices.ts standard",
     "test:parallel-safe": "deno run -A scripts/run-root-test-slices.ts parallel-safe",
     "test:env": "deno run -A scripts/run-root-test-slices.ts env",
@@ -28,9 +29,9 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
     "@std/cli": "jsr:@std/cli@1",
-    "@std/http/cookie": "jsr:@std/http@1/cookie",
+    "@std/http/cookie": "jsr:@std/http@^1.1.1/cookie",
     "@std/path": "jsr:@std/path@1",
-    "@std/yaml": "jsr:@std/yaml@1",
+    "@std/yaml": "jsr:@std/yaml@^1.1.1",
     "loglayer": "npm:loglayer@9.1.0",
     "@kato/shared": "./shared/src/mod.ts",
     "@kato/runtime": "./apps/runtime/src/mod.ts"

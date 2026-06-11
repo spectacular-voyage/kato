@@ -8,6 +8,8 @@ import { PersistentSessionStateStore } from "../apps/runtime/src/mod.ts";
 import { resolveSessionSnippet } from "../apps/web/src/session_snippets.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
+const PLANTED_AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE";
+
 function makeStatusStore(
   sessions: DaemonSessionStatus[],
 ): {
@@ -150,6 +152,38 @@ Deno.test("resolveSessionSnippet returns a twin snippet when source replay is di
       source: "twin",
     });
   });
+});
+
+Deno.test("resolveSessionSnippet redacts legacy twin snippets when source replay is disabled", async () => {
+  await withTestTempDir(
+    "web-session-snippets-twin-redact-",
+    async (rootDir) => {
+      const katoDir = `${rootDir}/.kato`;
+      const { metadata, store } = await createSnippetSessionFixture({
+        katoDir,
+        sessionId: "sess-twin-redact",
+        providerSessionId: "provider-twin-redact",
+        sourceName: "twin-redact",
+      });
+      await store.appendTwinEvents(metadata, [
+        makeTwinEvent(metadata.sessionId, 0, `legacy key ${PLANTED_AWS_KEY}`),
+      ]);
+
+      const result = await resolveSessionSnippet({
+        sessionId: metadata.sessionId,
+        katoDir,
+        allowSourceReplay: false,
+        statusStore: makeStatusStore([]),
+      });
+
+      assertEquals(result, {
+        sessionId: metadata.sessionId,
+        status: "ready",
+        snippet: "legacy key [REDACTED:aws-access-key-id]",
+        source: "twin",
+      });
+    },
+  );
 });
 
 Deno.test("resolveSessionSnippet uses twin history before source replay when both are allowed", async () => {

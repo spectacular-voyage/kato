@@ -77,7 +77,7 @@ Deno.test("watchFsDebounced exits promptly when aborted without filesystem event
     const abortTimer = setTimeout(() => {
       abortController.abort();
     }, 25);
-    let timeoutTimer: number | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
     const completed = await Promise.race([
       watchTask.then(() => true),

@@ -132,6 +132,11 @@ function makeDefaultSharedConfig(): SharedBehaviorConfig {
       writerIncludeDecisionSelection: true,
       writerItalicizeUserMessages: false,
     },
+    secretsPolicy: {
+      mode: "redact",
+      disabledRules: [],
+      allowlist: [],
+    },
   };
 }
 

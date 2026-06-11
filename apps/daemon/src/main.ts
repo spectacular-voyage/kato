@@ -39,6 +39,7 @@ import {
   resolveDefaultStatusPath,
   runDaemonRuntimeLoop,
 } from "./orchestrator/mod.ts";
+import { loadPersistedSessionHistoryEvents } from "./orchestrator/provider_source_replay.ts";
 import {
   AuditLogger,
   JsonLineFileSink,
@@ -383,6 +384,7 @@ export async function runDaemonSubprocess(
     now,
     operationalLogger,
     auditLogger,
+    secretsPolicy: sharedConfig.secretsPolicy,
   });
   const workspaceFrontmatterDefaults =
     createDefaultWorkspaceMarkdownFrontmatterConfig();
@@ -444,16 +446,46 @@ export async function runDaemonSubprocess(
       ingestionRunners,
       sessionSnapshotStore,
       sessionStateStore,
-      loadSessionSnapshot(sessionId: string) {
+      async loadSessionSnapshot(sessionId: string) {
         const snapshot = sessionSnapshotStore.get(sessionId);
-        if (!snapshot) {
-          return Promise.resolve(undefined);
+        if (snapshot && snapshot.events.length > 0) {
+          return {
+            provider: snapshot.provider,
+            events: snapshot.events,
+          };
         }
 
-        return Promise.resolve({
-          provider: snapshot.provider,
-          events: snapshot.events,
-        });
+        const metadata = (await sessionStateStore.listSessionMetadata()).find((
+          entry,
+        ) =>
+          entry.providerSessionId === sessionId || entry.sessionId === sessionId
+        );
+        if (metadata) {
+          try {
+            const history = await loadPersistedSessionHistoryEvents(
+              metadata,
+              sessionStateStore,
+              { secretsPolicy: sharedConfig.secretsPolicy },
+            );
+            if (history.events.length > 0) {
+              return {
+                provider: metadata.provider,
+                events: history.events,
+              };
+            }
+          } catch {
+            // Fall back to any in-memory snapshot below.
+          }
+        }
+
+        if (snapshot) {
+          return {
+            provider: snapshot.provider,
+            events: snapshot.events,
+          };
+        }
+
+        return undefined;
       },
       exportEnabled: featureSettings.exportEnabled,
       exportsLogPath: resolveExportsLogPath(runtimeConfig.runtimeDir),
@@ -476,6 +508,7 @@ export async function runDaemonSubprocess(
       operationalLogger,
       auditLogger,
       daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
+      secretsPolicy: sharedConfig.secretsPolicy,
       now,
     });
     return 0;

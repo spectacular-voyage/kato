@@ -96,12 +96,22 @@ export type {
   InChatControlCommandError,
   InChatControlCommandName,
   InChatControlDetectionResult,
+  ProcessEventsResult,
+  ProcessTextResult,
+  RedactedEventOutcome,
+  SecretsRule,
+  SecretsRuleMatchSummary,
   WritePathPolicyDecision,
   WritePathPolicyGateLike,
 } from "./policy/mod.ts";
 export {
+  createSecretsRedactor,
   detectInChatControlCommands,
+  redactConversationEvents,
   resolveDefaultAllowedWriteRoots,
+  SECRETS_RULES,
+  SecretsRedactor,
+  shannonEntropyBitsPerChar,
   WritePathPolicyGate,
 } from "./policy/mod.ts";
 

@@ -1,13 +1,41 @@
-import { extractSnippet, type SessionMetadataV1 } from "@kato/shared";
 import {
+  extractSnippet,
+  type SecretsPolicyConfig,
+  type SessionMetadataV1,
+} from "@kato/shared";
+import {
+  createSecretsRedactor,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   loadPersistedSessionHistoryEvents,
   mapTwinEventsToConversation,
   PersistentSessionStateStore,
+  redactConversationEvents,
   resolveDefaultKatoDir,
+  resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
+  SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
+
+const FAIL_CLOSED_SECRETS_POLICY: SecretsPolicyConfig = {
+  mode: "redact",
+  disabledRules: [],
+  allowlist: [],
+};
+
+async function loadSecretsPolicyBestEffort(
+  katoDir: string,
+): Promise<SecretsPolicyConfig | undefined> {
+  try {
+    const config = await new SharedBehaviorConfigFileStore(
+      resolveDefaultSharedConfigPath(katoDir),
+    ).load();
+    return config.secretsPolicy;
+  } catch {
+    // Fail closed: replay redaction defaults to redact when policy is absent.
+    return undefined;
+  }
+}
 
 export interface ResolveSessionSnippetOptions {
   sessionId: string;
@@ -39,14 +67,22 @@ function findMetadataBySessionId(
 async function loadTwinSnippet(
   metadata: SessionMetadataV1,
   sessionStore: PersistentSessionStateStore,
+  secretsPolicy: SecretsPolicyConfig | undefined,
 ): Promise<string | undefined> {
   try {
     const twinEvents = await sessionStore.readTwinEvents(metadata, 1);
     if (twinEvents.length === 0) {
       return undefined;
     }
+    const redactor = createSecretsRedactor(
+      secretsPolicy ?? FAIL_CLOSED_SECRETS_POLICY,
+    );
+    const { events } = redactConversationEvents(
+      mapTwinEventsToConversation(twinEvents),
+      redactor,
+    );
     return normalizeSnippet(
-      extractSnippet(mapTwinEventsToConversation(twinEvents)),
+      extractSnippet(events),
     );
   } catch {
     return undefined;
@@ -88,9 +124,14 @@ export async function resolveSessionSnippet(
       status: "unavailable",
     };
   }
+  const secretsPolicy = await loadSecretsPolicyBestEffort(katoDir);
 
   if (options.allowSourceReplay === false) {
-    const twinSnippet = await loadTwinSnippet(metadata, sessionStore);
+    const twinSnippet = await loadTwinSnippet(
+      metadata,
+      sessionStore,
+      secretsPolicy,
+    );
     return twinSnippet
       ? {
         sessionId: options.sessionId,
@@ -109,6 +150,7 @@ export async function resolveSessionSnippet(
     history = await loadPersistedSessionHistoryEvents(
       metadata,
       sessionStore,
+      { secretsPolicy },
     );
   } catch {
     return {
