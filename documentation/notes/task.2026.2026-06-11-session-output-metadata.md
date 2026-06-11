@@ -38,6 +38,9 @@ created: 1781191063000
   output, not a separate durable Recording object. In the first slice,
   "per-recording" means metadata attached to the workspace output that the
   recording writes to.
+- Product-facing UI can increasingly call these rows "recordings" or
+  "recording outputs". The internal contract can still use
+  `workspaceOutputs[]` until a rename is worth the migration cost.
 
 ## Discussion
 
@@ -58,6 +61,10 @@ created: 1781191063000
   the persisted write should target the workspace output. The current
   `recordingCycles[]` array is lifecycle history, not the product entity that
   should own tags or persona metadata.
+- A user-facing recording title/name fits this same layer. If the user edits a
+  recording name, treat it as output metadata and optionally sync it to
+  markdown frontmatter `title`. Do not silently rename/move the file path as
+  part of that edit unless a separate retarget/rename action says so.
 - Metadata edits should be possible for active and stopped outputs. For active
   outputs, future appends use the new metadata. For stopped outputs, re-arm or
   restart should preserve and reuse the metadata.
@@ -84,6 +91,12 @@ created: 1781191063000
   no for this precursor task; keep the first slice aligned with the existing
   output-centric contract and revisit only if output rows cannot express the
   UX cleanly.
+- Should Kato rename output rows to recordings in the UI? Recommendation: yes,
+  where the workflow is recording-centric. Prefer "recording output" in
+  developer-facing docs when destination/artifact semantics matter.
+- Should a recording title update markdown frontmatter `title`? Recommendation:
+  yes, when the output is markdown and frontmatter is available. Treat filename
+  changes as a separate explicit action.
 - Should output metadata edits update existing markdown frontmatter
   synchronously or enqueue a repair task? Recommendation: synchronous
   best-effort for markdown frontmatter fields that already have writer helpers.
@@ -100,6 +113,10 @@ created: 1781191063000
   recording state, and writer snapshots.
 - Do not introduce a separate persisted Recording entity for the first tagging
   or persona slices.
+- Use "recording" as the product-facing noun where it helps users, while
+  keeping the first implementation output-centric in the persisted contract.
+- A user-edited recording title is output metadata and may update markdown
+  frontmatter `title`; it should not implicitly rename files.
 - Metadata edits do not rewrite historical body content.
 - Metadata edits should work for active and stopped outputs.
 
@@ -117,6 +134,7 @@ created: 1781191063000
 
 ```ts
 export interface SessionOutputMetadataV1 {
+  displayTitle?: string;
   tags?: string[];
   personaName?: string;
   participantUsername?: string;
@@ -135,6 +153,11 @@ export interface SessionOutputMetadataV1 {
   - save metadata and update `updatedAt`;
   - optionally call a writer helper to update markdown frontmatter without
     appending conversation events.
+- Markdown title behavior
+  - when `displayTitle` changes and the output is markdown, update
+    frontmatter `title` best-effort;
+  - do not rename `currentResolvedPath` or mutate destination bindings from a
+    title edit.
 - Web loaders
   - expose effective metadata for session rows and output/recording rows;
   - expose whether values are inherited from session defaults or set directly
@@ -147,6 +170,7 @@ export interface SessionOutputMetadataV1 {
 | User adds a tag to a session before any workspace output exists | Yes | Not applicable | Yes | Future outputs inherit the session tag and write it as an effective output tag. |
 | User adds a tag to a session with active outputs | Yes | Not applicable | Yes | Future appends use inherited effective tags; markdown frontmatter is updated best-effort. |
 | User adds a tag to one output | Yes | Not applicable | Yes | Only that workspace output gets the direct output tag. |
+| User renames a recording row | Yes | Not applicable | Yes | Persist `displayTitle` on the workspace output and update markdown frontmatter `title` best-effort. |
 | User removes an output-specific tag that is still inherited from the session | Yes | Not applicable | Mostly | First slice should not implement negative/suppression semantics; inherited tags still apply. |
 | Output is stopped and later restarted | Yes | Not applicable | Yes | Output metadata remains on the workspace output and applies after restart. |
 | Workspace profile refreshes aliases or writer defaults | Yes | Not applicable | Yes | Profile snapshot refresh must preserve output metadata. |

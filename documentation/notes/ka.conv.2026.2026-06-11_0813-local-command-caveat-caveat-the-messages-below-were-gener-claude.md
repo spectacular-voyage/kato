@@ -2,13 +2,22 @@
 id: local-command-caveatcave-633577f7
 title: '<local-command-caveat>Caveat: The messages below were gener…'
 desc: ''
-created: 1781190815304
 updated: 1781190815304
-participants: [claude.claude-fable-5, djradon]
-kato-sessionIds: [6231667f-d2cb-426b-b128-e8baaa5e7345]
-kato-workspaceIds: [cd940f00-5558-40dc-bead-46f904ab937b]
-kato-recordingIds: [633577f7-45b8-431d-8148-badd02bb657f]
-conversationEventKinds: [decision, message.assistant, message.user, tool.call, tool.result]
+created: 1781190815304
+participants:
+  - claude.claude-fable-5
+kato-sessionIds:
+  - 6231667f-d2cb-426b-b128-e8baaa5e7345
+kato-workspaceIds:
+  - cd940f00-5558-40dc-bead-46f904ab937b
+kato-recordingIds:
+  - 633577f7-45b8-431d-8148-badd02bb657f
+conversationEventKinds:
+  - decision
+  - message.assistant
+  - message.user
+  - tool.call
+  - tool.result
 ---
 
 # djradon_2026-06-11_0658_05
@@ -115,7 +124,7 @@ Generic rules (password-keyword proximity, high-entropy strings) cause more fals
 
 Redact by default (Recommended)
 
-The plan is written into [[task.2026.2026-05-26-secrets-suppression]]. Here's the shape of it:
+The plan is written into [[ka.completed.2026.2026-05-26-secrets-suppression]]. Here's the shape of it:
 
 **Approach chosen** (per your confirmations):
 
