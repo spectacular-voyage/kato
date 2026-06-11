@@ -670,6 +670,7 @@ export async function runSessionRecordingRestartAction(
       const history = await loadPersistedSessionHistoryEvents(
         metadata,
         sessionStore,
+        { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
       const output = findStoppedWorkspaceOutputForRestart(metadata, {
@@ -853,6 +854,7 @@ export async function runSessionRecordingAction(
       const history = await loadPersistedSessionHistoryEvents(
         metadata,
         sessionStore,
+        { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
       const title = resolveConversationTitle(

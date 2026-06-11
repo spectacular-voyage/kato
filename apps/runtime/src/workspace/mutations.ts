@@ -43,6 +43,11 @@ function cloneSharedConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
     exportTimezone: config.exportTimezone,
     exportMarkdownFrontmatter: { ...config.exportMarkdownFrontmatter },
     exportFeatureFlags: { ...config.exportFeatureFlags },
+    secretsPolicy: {
+      mode: config.secretsPolicy.mode,
+      disabledRules: [...config.secretsPolicy.disabledRules],
+      allowlist: [...config.secretsPolicy.allowlist],
+    },
   };
 }
 

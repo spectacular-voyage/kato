@@ -6,6 +6,7 @@ export {
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultSecretsPolicyConfig,
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
   type EnsureCliConfigResult,

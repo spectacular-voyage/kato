@@ -28,6 +28,8 @@ export type {
   RuntimeConfigMetadata,
   RuntimeLoggingConfig,
   RuntimeLogLevel,
+  SecretsPolicyConfig,
+  SecretsPolicyMode,
   SharedBehaviorConfig,
   UserConfig,
   UserParticipantsConfig,

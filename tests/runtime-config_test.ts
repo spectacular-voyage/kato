@@ -815,3 +815,111 @@ Deno.test("resolveDefaultSharedConfigPath keeps shared config under ~/.kato/shar
   const resolved = resolveDefaultSharedConfigPath(".kato");
   assertEquals(resolved, join(".kato", "shared", "kato-shared-config.yaml"));
 });
+
+Deno.test("SharedBehaviorConfigFileStore defaults absent secretsPolicy to redact", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "shared", "kato-shared-config.yaml");
+  const store = new SharedBehaviorConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(join(root, "shared"), { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        allowedWriteRoots: [root],
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.secretsPolicy, {
+      mode: "redact",
+      disabledRules: [],
+      allowlist: [],
+    });
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("SharedBehaviorConfigFileStore loads explicit secretsPolicy settings", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "shared", "kato-shared-config.yaml");
+  const store = new SharedBehaviorConfigFileStore(configPath);
+
+  try {
+    await Deno.mkdir(join(root, "shared"), { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        allowedWriteRoots: [root],
+        secretsPolicy: {
+          mode: "detect",
+          disabledRules: ["jwt"],
+          allowlist: ["AKIAIOSFODNN7EXAMPLE", "/EXAMPLE$/"],
+        },
+      }),
+    );
+
+    const loaded = await store.load();
+    assertEquals(loaded.secretsPolicy.mode, "detect");
+    assertEquals(loaded.secretsPolicy.disabledRules, ["jwt"]);
+    assertEquals(loaded.secretsPolicy.allowlist, [
+      "AKIAIOSFODNN7EXAMPLE",
+      "/EXAMPLE$/",
+    ]);
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("SharedBehaviorConfigFileStore rejects invalid secretsPolicy values", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "shared", "kato-shared-config.yaml");
+  const store = new SharedBehaviorConfigFileStore(configPath);
+
+  const invalidCases: Array<Record<string, unknown>> = [
+    { mode: "audit" },
+    { mode: 1 },
+    { unknownKey: true },
+    { disabledRules: "jwt" },
+    { disabledRules: [1] },
+    { allowlist: [""] },
+    { allowlist: ["/[unclosed/"] },
+  ];
+
+  try {
+    await Deno.mkdir(join(root, "shared"), { recursive: true });
+    for (const secretsPolicy of invalidCases) {
+      await Deno.writeTextFile(
+        configPath,
+        stringify({
+          schemaVersion: 1,
+          allowedWriteRoots: [root],
+          secretsPolicy,
+        }),
+      );
+      await assertRejects(
+        () => store.load(),
+        Error,
+        "unsupported schema",
+        `expected rejection for ${JSON.stringify(secretsPolicy)}`,
+      );
+    }
+  } finally {
+    await removePathIfPresent(root);
+  }
+});
+
+Deno.test("createDefaultSharedBehaviorConfig carries secretsPolicy overrides", () => {
+  const config = createDefaultSharedBehaviorConfig({
+    allowedWriteRoots: [INVALID_ALLOWED_WRITE_ROOT],
+    secretsPolicy: { mode: "detect", disabledRules: ["jwt"] },
+  });
+  assertEquals(config.secretsPolicy, {
+    mode: "detect",
+    disabledRules: ["jwt"],
+    allowlist: [],
+  });
+});

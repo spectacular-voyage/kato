@@ -69,6 +69,7 @@ export {
   createDefaultRuntimeConfig,
   createDefaultRuntimeLoggingConfig,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultSecretsPolicyConfig,
   createDefaultUserConfig,
   resolveDefaultConfigPath,
   resolveDefaultProviderSessionRoots,

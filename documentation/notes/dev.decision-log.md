@@ -17,6 +17,45 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Secrets Redaction Is Default-On at the Parse Boundary
+
+- Decision:
+  - Scan and redact secrets from canonical `ConversationEvent`s at the two
+    parse boundaries (live ingestion in `provider_ingestion.ts`, full-history
+    replay in `provider_source_replay.ts`) so twins, recordings, snapshots,
+    snippets, and `status.json` are all covered by one choke point.
+  - Detection is a built-in Deno-native ruleset (vendor patterns adapted from
+    gitleaks' MIT ruleset, PEM/JWT structural rules, keyword-proximity rules
+    with entropy/placeholder/digit guards) in `apps/runtime/src/policy/`.
+  - `secretsPolicy` lives in `~/.kato/shared/kato-shared-config.yaml` with
+    modes `off | detect | redact`; absent config means `redact` (fail
+    closed); unknown keys/invalid values are rejected at load.
+  - Matched spans become deterministic `[REDACTED:<rule-id>]` placeholders;
+    transform failures drop the event rather than passing it through; every
+    batch emits a `secrets.redacted`/`secrets.detected` security-audit event
+    carrying rule ids and counts only.
+- Owner: Kato engineering
+- Date: 2026-06-11
+- Why:
+  - Recordings/exports are workspace files that get committed and shared;
+    leaked credentials there are unrecoverable, while over-redaction is
+    always recoverable from the provider's own transcript file.
+  - A single upstream transform cannot drift out of sync the way per-sink
+    enforcement (twin append + writer + snippets) would.
+  - External scanners (gitleaks/trufflehog) would add subprocess permissions
+    forbidden by the security baseline plus cross-platform packaging burden.
+- Tradeoffs:
+  - Twins store redacted content; the provider source file is the only raw
+    record. Rule updates change redacted output, which can re-append a few
+    events as new on anchor replay (bounded by existing dedupe).
+  - Generic rules accept some false-positive risk by design; the escape
+    hatches are `disabledRules`, `allowlist`, and `mode: detect`.
+  - Measured overhead ~3-4 µs/KB (see the 2026-05-26 secrets-suppression task
+    note for the recorded `deno task bench` baseline).
+- Follow-up tasks:
+  - Periodically re-sync ported rules against upstream gitleaks releases.
+
+
 ### Kato Web Startup Selects an Available Local Port
 
 - Decision:

@@ -2,10 +2,16 @@ import type {
   ConversationEvent,
   ProviderAutoGenerateTwins,
   ProviderCursor,
+  SecretsPolicyConfig,
   SessionIngestAnchorV1,
   SessionMetadataV1,
 } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
+import {
+  createSecretsRedactor,
+  redactConversationEvents,
+  type SecretsRedactor,
+} from "../policy/mod.ts";
 import { basename, join, relative } from "@std/path";
 import {
   type DebouncedWatchBatch,
@@ -95,6 +101,8 @@ export interface FileProviderIngestionRunnerOptions {
   ) => Promise<void>;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
+  /** Defaults to fail-closed `redact` mode when omitted. */
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 export interface ProviderIngestionFactoryOptions {
@@ -115,6 +123,8 @@ export interface ProviderIngestionFactoryOptions {
   ) => Promise<void>;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
+  /** Defaults to fail-closed `redact` mode when omitted. */
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 export interface CreateProviderIngestionRunnerOptions {
@@ -132,6 +142,8 @@ export interface CreateProviderIngestionRunnerOptions {
   ) => Promise<void>;
   operationalLogger?: StructuredLogger;
   auditLogger?: AuditLogger;
+  /** Defaults to fail-closed `redact` mode when omitted. */
+  secretsPolicy?: SecretsPolicyConfig;
 }
 
 interface IngestSessionResult {
@@ -685,6 +697,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
   private readonly failedClosedSessions = new Set<string>();
+  private readonly secretsRedactor: SecretsRedactor;
 
   constructor(options: FileProviderIngestionRunnerOptions) {
     this.provider = options.provider;
@@ -702,6 +715,71 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.operationalLogger = options.operationalLogger ??
       makeNoopOperationalLogger(this.now);
     this.auditLogger = options.auditLogger ?? makeNoopAuditLogger(this.now);
+    // Fail-closed: absent policy means redact, never pass-through.
+    this.secretsRedactor = createSecretsRedactor(
+      options.secretsPolicy ??
+        { mode: "redact", disabledRules: [], allowlist: [] },
+    );
+  }
+
+  /**
+   * Applies the secrets policy to freshly parsed events before any
+   * snapshot/twin/snippet consumption. Events the transform fails on are
+   * dropped (fail-closed) and surfaced via audit logging.
+   */
+  private async applySecretsPolicy(
+    events: ConversationEvent[],
+    sessionId: string,
+  ): Promise<ConversationEvent[]> {
+    if (this.secretsRedactor.mode === "off" || events.length === 0) {
+      return events;
+    }
+    const result = redactConversationEvents(events, this.secretsRedactor);
+    if (result.redactedEvents.length > 0) {
+      const countsByRule: Record<string, number> = {};
+      for (const outcome of result.redactedEvents) {
+        for (const match of outcome.matches) {
+          countsByRule[match.ruleId] = (countsByRule[match.ruleId] ?? 0) +
+            match.count;
+        }
+      }
+      await this.auditLogger.record(
+        this.secretsRedactor.mode === "redact"
+          ? "secrets.redacted"
+          : "secrets.detected",
+        this.secretsRedactor.mode === "redact"
+          ? "Secrets redacted from ingested conversation events"
+          : "Secrets detected in ingested conversation events",
+        {
+          provider: this.provider,
+          sessionId,
+          mode: this.secretsRedactor.mode,
+          eventsAffected: result.redactedEvents.length,
+          countsByRule,
+        },
+      );
+    }
+    if (result.droppedEventIds.length > 0) {
+      await this.auditLogger.record(
+        "secrets.events_dropped",
+        "Events dropped because secrets redaction failed",
+        {
+          provider: this.provider,
+          sessionId,
+          droppedEventIds: result.droppedEventIds,
+        },
+      );
+      await this.operationalLogger.error(
+        "provider.ingestion.secrets_redaction_failed",
+        "Secrets redaction failed for events; events dropped fail-closed",
+        {
+          provider: this.provider,
+          sessionId,
+          droppedEvents: result.droppedEventIds.length,
+        },
+      );
+    }
+    return result.events;
   }
 
   async start(): Promise<void> {
@@ -1313,13 +1391,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           throw error;
         }
 
+        const redactedBootstrapEvents = await this.applySecretsPolicy(
+          bootstrapEvents,
+          sessionId,
+        );
+
         let bootstrappedTwinCount = 0;
-        if (bootstrapEvents.length > 0) {
+        if (redactedBootstrapEvents.length > 0) {
           const twinDrafts = mapConversationEventsToTwin({
             provider: this.provider,
             providerSessionId: sessionId,
             sessionId: stateMetadata.sessionId,
-            events: bootstrapEvents,
+            events: redactedBootstrapEvents,
             mode: "backfill",
             // Codex backfill cannot infer reliable event time from source.
             // Leave capturedAt unset so it surfaces as unknown downstream.
@@ -1371,7 +1454,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       twinAvailableForHydration = twinExists;
     }
 
-    const incomingEvents: ConversationEvent[] = [];
+    let incomingEvents: ConversationEvent[] = [];
     let latestCursor: ProviderCursor = existingCursor?.kind === "item-index"
       ? makeItemIndexCursor(fromOffset)
       : makeByteOffsetCursor(fromOffset);
@@ -1411,6 +1494,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       );
       return { updated: false, eventsObserved: 0 };
     }
+
+    incomingEvents = await this.applySecretsPolicy(incomingEvents, sessionId);
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
@@ -1701,6 +1786,7 @@ export function createClaudeIngestionRunner(
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
     auditLogger: options.auditLogger,
+    secretsPolicy: options.secretsPolicy,
   });
 }
 
@@ -1723,6 +1809,7 @@ export function createCodexIngestionRunner(
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
     auditLogger: options.auditLogger,
+    secretsPolicy: options.secretsPolicy,
   });
 }
 
@@ -1745,6 +1832,7 @@ export function createGeminiIngestionRunner(
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
     auditLogger: options.auditLogger,
+    secretsPolicy: options.secretsPolicy,
   });
 }
 
@@ -1770,6 +1858,7 @@ export function createDefaultProviderIngestionRunners(
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,
+      secretsPolicy: options.secretsPolicy,
     }),
     createCodexIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
@@ -1782,6 +1871,7 @@ export function createDefaultProviderIngestionRunners(
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,
+      secretsPolicy: options.secretsPolicy,
     }),
     createGeminiIngestionRunner({
       sessionSnapshotStore: options.sessionSnapshotStore,
@@ -1794,6 +1884,7 @@ export function createDefaultProviderIngestionRunners(
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,
+      secretsPolicy: options.secretsPolicy,
     }),
   ];
 }

@@ -383,6 +383,7 @@ export async function runDaemonSubprocess(
     now,
     operationalLogger,
     auditLogger,
+    secretsPolicy: sharedConfig.secretsPolicy,
   });
   const workspaceFrontmatterDefaults =
     createDefaultWorkspaceMarkdownFrontmatterConfig();
@@ -476,6 +477,7 @@ export async function runDaemonSubprocess(
       operationalLogger,
       auditLogger,
       daemonMaxMemoryMb: runtimeConfig.daemonMaxMemoryMb,
+      secretsPolicy: sharedConfig.secretsPolicy,
       now,
     });
     return 0;

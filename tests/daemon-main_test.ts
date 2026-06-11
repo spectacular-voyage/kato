@@ -7,6 +7,7 @@ import type {
 import {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultSecretsPolicyConfig,
   createDefaultUserConfig,
   DEFAULT_WORKSPACE_REGISTRY_FILENAME,
   runDaemonSubprocess,
@@ -58,6 +59,11 @@ function cloneSharedConfig(config: SharedBehaviorConfig): SharedBehaviorConfig {
     exportTimezone: config.exportTimezone,
     exportMarkdownFrontmatter: { ...config.exportMarkdownFrontmatter },
     exportFeatureFlags: { ...config.exportFeatureFlags },
+    secretsPolicy: {
+      ...config.secretsPolicy,
+      disabledRules: [...config.secretsPolicy.disabledRules],
+      allowlist: [...config.secretsPolicy.allowlist],
+    },
   };
 }
 
@@ -76,6 +82,7 @@ function makeSharedConfig(
       ...createDefaultExportFeatureFlags({ writerItalicizeUserMessages: true }),
       ...(overrides.exportFeatureFlags ?? {}),
     },
+    secretsPolicy: createDefaultSecretsPolicyConfig(overrides.secretsPolicy),
   };
 }
 

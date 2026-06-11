@@ -15,6 +15,7 @@
     "fmt:check": "deno fmt --check deno.json apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/deno.json apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "lint": "deno lint apps/cli apps/cloud apps/daemon apps/runtime scripts shared tests apps/web/main.ts apps/web/client.ts apps/web/utils.ts apps/web/vite.config.ts apps/web/routes apps/web/src",
     "check": "deno check apps/cli/**/*.ts apps/cloud/**/*.ts apps/daemon/**/*.ts apps/runtime/**/*.ts scripts/**/*.ts apps/web/src/**/*.ts shared/**/*.ts tests/**/*.ts && deno task --cwd apps/web check",
+    "bench": "deno bench --allow-read --allow-write --allow-env tests/secrets-redaction_bench.ts",
     "test": "deno run -A scripts/run-root-test-slices.ts standard",
     "test:parallel-safe": "deno run -A scripts/run-root-test-slices.ts parallel-safe",
     "test:env": "deno run -A scripts/run-root-test-slices.ts env",

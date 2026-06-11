@@ -25,6 +25,7 @@ export type {
 export {
   createDefaultExportFeatureFlags,
   createDefaultRuntimeMarkdownFrontmatterConfig,
+  createDefaultSecretsPolicyConfig,
   createDefaultSharedBehaviorConfig,
   resolveDefaultSharedConfigPath,
   SharedBehaviorConfigFileStore,

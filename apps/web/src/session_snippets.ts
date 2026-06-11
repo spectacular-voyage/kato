@@ -1,4 +1,8 @@
-import { extractSnippet, type SessionMetadataV1 } from "@kato/shared";
+import {
+  extractSnippet,
+  type SecretsPolicyConfig,
+  type SessionMetadataV1,
+} from "@kato/shared";
 import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
@@ -6,8 +10,24 @@ import {
   mapTwinEventsToConversation,
   PersistentSessionStateStore,
   resolveDefaultKatoDir,
+  resolveDefaultSharedConfigPath,
   resolveDefaultStatusPath,
+  SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
+
+async function loadSecretsPolicyBestEffort(
+  katoDir: string,
+): Promise<SecretsPolicyConfig | undefined> {
+  try {
+    const config = await new SharedBehaviorConfigFileStore(
+      resolveDefaultSharedConfigPath(katoDir),
+    ).load();
+    return config.secretsPolicy;
+  } catch {
+    // Fail closed: replay redaction defaults to redact when policy is absent.
+    return undefined;
+  }
+}
 
 export interface ResolveSessionSnippetOptions {
   sessionId: string;
@@ -109,6 +129,7 @@ export async function resolveSessionSnippet(
     history = await loadPersistedSessionHistoryEvents(
       metadata,
       sessionStore,
+      { secretsPolicy: await loadSecretsPolicyBestEffort(katoDir) },
     );
   } catch {
     return {
