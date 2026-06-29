@@ -245,7 +245,7 @@ Superseded decisions from the earlier sketch:
     `/workspaces`.
 - Web session actions
   - accept optional output metadata from New Capture/New Recording pre-edit;
-  - coordinate title, filename slug, and any optional filename/path override with [[task.2026.2026-06-28-output-filename-title-overrides]] rather than defining those controls inside persona support.
+  - coordinate title, filename slug, and any optional filename/path override with [[ka.completed.2026.2026-06-28-output-filename-title-overrides]] rather than defining those controls inside persona support.
 - Filename rendering
   - resolve `{username}` from output persona metadata first, then existing
     workspace/default username behavior, then `unknown-user`.
@@ -338,7 +338,7 @@ Superseded decisions from the earlier sketch:
 - [ ] Wire persona extraction into persistent in-chat record/capture flows.
 - [ ] Wire persona extraction into live/session-state in-chat record/capture
       flows.
-- [ ] Add web New Capture/New Recording pre-edit fields for persona/participant, coordinating title and filename controls with [[task.2026.2026-06-28-output-filename-title-overrides]].
+- [ ] Add web New Capture/New Recording pre-edit fields for persona/participant, coordinating title and filename controls with [[ka.completed.2026.2026-06-28-output-filename-title-overrides]].
 - [ ] Update Sessions/Recordings UI view models as needed to show persisted
       output metadata without crowding the rows.
 - [ ] Update developer docs and release notes once behavior is implemented.

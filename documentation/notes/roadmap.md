@@ -21,7 +21,7 @@ The next product arc is making Kato's saved outputs easier to configure, describ
 - [ ] Add web-based shared workspace config editing in [[task.2026.2026-06-11-workspace-config-editing]].
 - [ ] Add output tagging in [[task.2026.2026-06-11-output-tagging]].
 - [ ] Add persona support in [[task.2026.2026-05-28-persona-support]].
-- [ ] Add creation-time output title and filename slug overrides in [[task.2026.2026-06-28-output-filename-title-overrides]].
+- [ ] Add creation-time output title and filename slug overrides in [[ka.completed.2026.2026-06-28-output-filename-title-overrides]].
 
 ## Product Roadmap
 

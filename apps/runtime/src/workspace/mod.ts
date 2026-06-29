@@ -1,8 +1,10 @@
 export type {
   EnsureDefaultWorkspaceConfigResult,
   RegisteredWorkspace,
+  ResolvedWorkspaceConfigValues,
   ResolvedWorkspaceProfile,
   WorkspaceCatalogLike,
+  WorkspaceConfigFileValues,
   WorkspaceConfigOverrides,
   WorkspaceProfileResolverLike,
   WorkspaceRegistryStoreLike,
@@ -24,10 +26,13 @@ export {
   isPathWithinRoots,
   loadDefaultWorkspaceConfigOverrides,
   loadWorkspaceConfigOverrides,
+  normalizeWorkspaceConfigFileValues,
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveWorkspaceConfigPath,
+  resolveWorkspaceConfigValues,
+  serializeWorkspaceConfigFileValues,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
@@ -44,9 +49,13 @@ export type {
   SetWorkspaceDisplayNameResult,
   UnregisterWorkspaceMutationOptions,
   UnregisterWorkspaceMutationResult,
+  UpdateWorkspaceConfigOptions,
+  UpdateWorkspaceConfigResult,
+  WorkspaceConfigEditInput,
 } from "./mutations.ts";
 export {
   registerWorkspace,
   setWorkspaceDisplayName,
   unregisterWorkspace,
+  updateWorkspaceConfig,
 } from "./mutations.ts";

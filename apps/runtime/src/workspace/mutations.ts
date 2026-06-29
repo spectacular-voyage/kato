@@ -1,5 +1,7 @@
 import {
+  type MarkdownFrontmatterConfig,
   normalizeWorkspaceDisplayName,
+  type SessionWorkspaceAttachmentWriterFeatureFlagsV1,
   type SharedBehaviorConfig,
 } from "@kato/shared";
 import { basename, join, resolve } from "@std/path";
@@ -16,13 +18,19 @@ import {
   ensureWorkspaceConfigWorkspaceId,
   findNearestWorkspaceConfig,
   isPathWithinRoots,
+  loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
   type RegisteredWorkspace,
   resolveDefaultWorkspaceRegistryPath,
+  type ResolvedWorkspaceConfigValues,
   resolveWorkspaceConfigPath,
+  resolveWorkspaceConfigValues,
+  serializeWorkspaceConfigFileValues,
+  type WorkspaceConfigOverrides,
   WorkspaceRegistryFileStore,
   type WorkspaceRegistryStoreLike,
 } from "./registry.ts";
+import { writeTextAtomically } from "../config/file_store_utils.ts";
 
 function cloneEntry(entry: RegisteredWorkspace): RegisteredWorkspace {
   return {
@@ -433,6 +441,149 @@ export async function unregisterWorkspace(
   );
 
   return { entry: cloneEntry(match) };
+}
+
+export interface WorkspaceConfigEditInput {
+  defaultOutputDir?: string;
+  filenameTemplate?: string;
+  workspaceTimezone?: string;
+  markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
+  writerFeatureFlags?: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
+}
+
+export interface UpdateWorkspaceConfigOptions {
+  selector: string;
+  edits: WorkspaceConfigEditInput;
+  katoDir?: string;
+  registryStore?: WorkspaceRegistryStoreLike;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface UpdateWorkspaceConfigResult {
+  entry: RegisteredWorkspace;
+  changed: boolean;
+  overrides: WorkspaceConfigOverrides;
+  resolved: ResolvedWorkspaceConfigValues;
+}
+
+function hasKeys(value: object | undefined): boolean {
+  return value !== undefined && Object.keys(value).length > 0;
+}
+
+function mergeWorkspaceConfigEdits(
+  workspaceId: string,
+  current: WorkspaceConfigOverrides,
+  edits: WorkspaceConfigEditInput,
+) {
+  const markdownFrontmatter = edits.markdownFrontmatter === undefined
+    ? current.markdownFrontmatter
+    : {
+      ...(current.markdownFrontmatter ?? {}),
+      ...edits.markdownFrontmatter,
+    };
+  const writerFeatureFlags = edits.writerFeatureFlags === undefined
+    ? current.writerFeatureFlags
+    : {
+      ...current.writerFeatureFlags,
+      ...edits.writerFeatureFlags,
+    };
+
+  return {
+    workspaceId,
+    ...(edits.defaultOutputDir !== undefined
+      ? { defaultOutputDir: edits.defaultOutputDir }
+      : current.defaultOutputDir !== undefined
+      ? { defaultOutputDir: current.defaultOutputDir }
+      : {}),
+    ...(edits.filenameTemplate !== undefined
+      ? { filenameTemplate: edits.filenameTemplate }
+      : current.filenameTemplate !== undefined
+      ? { filenameTemplate: current.filenameTemplate }
+      : {}),
+    ...(edits.workspaceTimezone !== undefined
+      ? { workspaceTimezone: edits.workspaceTimezone }
+      : current.workspaceTimezone !== undefined
+      ? { workspaceTimezone: current.workspaceTimezone }
+      : {}),
+    ...(hasKeys(markdownFrontmatter) ? { markdownFrontmatter } : {}),
+    ...(hasKeys(writerFeatureFlags) ? { writerFeatureFlags } : {}),
+  };
+}
+
+export async function updateWorkspaceConfig(
+  options: UpdateWorkspaceConfigOptions,
+): Promise<UpdateWorkspaceConfigResult> {
+  const trimmedSelector = resolveWorkspaceSelector(options.selector);
+  const katoDir = options.katoDir ?? resolveDefaultKatoDir();
+  const registryStore = options.registryStore ??
+    new WorkspaceRegistryFileStore(
+      resolveDefaultWorkspaceRegistryPath(katoDir),
+    );
+  const entries = await registryStore.load();
+  const existing = findWorkspaceBySelector(entries, trimmedSelector);
+  if (!existing) {
+    throw new Error(`Workspace not found: ${trimmedSelector}`);
+  }
+
+  const current = await loadWorkspaceConfigOverrides(existing.configPath);
+  const configuredWorkspaceId = await readWorkspaceConfigWorkspaceId(
+    existing.configPath,
+    { allowMissing: true },
+  );
+  if (configuredWorkspaceId && configuredWorkspaceId !== existing.workspaceId) {
+    throw new Error(
+      `workspaceId mismatch (registry=${existing.workspaceId}, config=${configuredWorkspaceId})`,
+    );
+  }
+
+  const nextValues = mergeWorkspaceConfigEdits(
+    configuredWorkspaceId ?? existing.workspaceId,
+    current,
+    options.edits,
+  );
+  const serialized = serializeWorkspaceConfigFileValues(
+    nextValues,
+    existing.configPath,
+  );
+  const priorRaw = await Deno.readTextFile(existing.configPath);
+  const changed = priorRaw !== serialized;
+  if (changed) {
+    await writeTextAtomically(existing.configPath, serialized);
+  }
+
+  const overrides = await loadWorkspaceConfigOverrides(existing.configPath);
+  const resolved = resolveWorkspaceConfigValues(overrides);
+
+  await options.operationalLogger?.info(
+    changed ? "workspace.config.updated" : "workspace.config.unchanged",
+    changed
+      ? "Updated workspace config"
+      : "Workspace config already matched requested values",
+    {
+      workspaceId: existing.workspaceId,
+      alias: existing.alias,
+      configPath: existing.configPath,
+      changed,
+    },
+  );
+  await options.auditLogger?.record(
+    "workspace.config.update",
+    "Workspace config mutation invoked",
+    {
+      workspaceId: existing.workspaceId,
+      alias: existing.alias,
+      configPath: existing.configPath,
+      changed,
+    },
+  );
+
+  return {
+    entry: cloneEntry(existing),
+    changed,
+    overrides,
+    resolved,
+  };
 }
 
 export interface SetWorkspaceDisplayNameOptions {

@@ -17,6 +17,23 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Workspace Config Web Editing Uses Canonical Schema Rewrites
+
+- Decision:
+  - Kato Web edits shared `.kato-workspace-config.yaml` values through `updateWorkspaceConfig()` in `apps/runtime/src/workspace/mutations.ts`.
+  - The mutation helper loads the current registered workspace config, rejects invalid or unknown-free-schema violations through the existing workspace config parser, preserves omitted fields for partial programmatic edits, and atomically writes supported keys in Kato's canonical YAML order.
+  - The first web slice edits only existing fields: `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, markdown frontmatter toggles, and `workspaceFeatureFlags` writer flags including relative local links and Dendron wikilinks.
+- Owner: Kato engineering
+- Date: 2026-06-29
+- Why:
+  - The existing loader already normalizes validated overrides rather than preserving comments/formatting, so schema-owned canonical writes avoid a second lossy patcher with weaker validation.
+  - Kato Web is a guided workflow surface; rejecting invalid config and writing only supported keys keeps shared workspace files fail-closed.
+- Tradeoffs:
+  - Saving from the web editor can remove hand-written comments or formatting from `.kato-workspace-config.yaml`.
+  - The editor intentionally does not include shared tag libraries or persona libraries yet; those sections should be added after their config contracts land.
+- Follow-up tasks:
+  - Revisit comment-preserving patch writes only if real shared workspace files need that ergonomics enough to justify parser complexity.
+
 ### Secrets Redaction Is Default-On at the Parse Boundary
 
 - Decision:

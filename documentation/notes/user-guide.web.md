@@ -59,8 +59,7 @@ kato web status --json
 - Sessions: discovered provider sessions, snippets, and capture/record
   controls.
 - Recordings: per-file output state, stop controls, and re-arm controls.
-- Workspaces: registration, display labels, username overrides, and workspace
-  diagnostics.
+- Workspaces: registration, display labels, shared workspace config editing, username overrides, and workspace diagnostics.
 - Logs: operational and security-audit records.
 - Settings: user-default and workspace username mapping workflows.
 - Maintenance: cleanup flows and persisted twin troubleshooting.
