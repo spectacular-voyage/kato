@@ -161,6 +161,7 @@ created: 1781187417804
   - deduped in stable order.
 - Recording/web action inputs
   - accept optional per-output tags when creating a new capture or recording;
+  - share the New Capture/New Recording pre-edit surface with title and filename slug controls from [[task.2026.2026-06-28-output-filename-title-overrides]];
   - pass effective tags to markdown writer options.
 - Markdown writer/pipeline
   - keep existing `frontmatterTags?: string[]` render behavior;
@@ -261,7 +262,7 @@ created: 1781187417804
 - [ ] Add a writer/pipeline helper for tag-only markdown frontmatter mutation.
 - [ ] Add web mutation handling for active and stopped output tag edits.
 - [ ] Project tag fields into Sessions and Recordings row data.
-- [ ] Add compact tag editing UI with workspace suggestions.
+- [ ] Add compact tag editing UI with workspace suggestions, sharing the creation popover shape with [[task.2026.2026-06-28-output-filename-title-overrides]].
 - [ ] Decide whether to include an in-chat tag mutation command; implement it
       if included.
 - [ ] Add focused registry, contract, writer, runtime, loader, and web tests.

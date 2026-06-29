@@ -21,12 +21,14 @@ The next product arc is making Kato's saved outputs easier to configure, describ
 - [ ] Add web-based shared workspace config editing in [[task.2026.2026-06-11-workspace-config-editing]].
 - [ ] Add output tagging in [[task.2026.2026-06-11-output-tagging]].
 - [ ] Add persona support in [[task.2026.2026-05-28-persona-support]].
+- [ ] Add creation-time output title and filename slug overrides in [[task.2026.2026-06-28-output-filename-title-overrides]].
 
 ## Product Roadmap
 
 ### Output Control And Review
 
 - [ ] Let users edit recording/output title, tags, persona, and selected writer settings after an output has started.
+- [ ] Let users customize web-created capture/recording titles and filename slugs before Kato creates the output file.
 - [ ] Add a full markdown/twin review surface for captured conversations and generated files.
 - [ ] Add metadata-only frontmatter updates for supported markdown outputs.
 - [ ] Support JSONL recording once the active writer pipeline has a configured JSONL writer.
