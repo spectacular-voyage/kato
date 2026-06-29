@@ -74,6 +74,8 @@ function makeEditForm(options: {
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string;
+  tagSuggestions?: string;
   checkboxValues?: Record<string, boolean>;
 } = {}): FormData {
   const form = new FormData();
@@ -84,6 +86,8 @@ function makeEditForm(options: {
     options.filenameTemplate ?? "{provider}-{sessionShortId}.md",
   );
   form.set("workspaceTimezone", options.workspaceTimezone ?? "UTC");
+  form.set("defaultTags", options.defaultTags ?? "");
+  form.set("tagSuggestions", options.tagSuggestions ?? "");
   setCheckboxes(form, options.checkboxValues ?? {});
   return form;
 }
@@ -97,6 +101,12 @@ Deno.test("loadWorkspaceConfigEditPageData exposes raw, effective, and wikilink 
         "defaultOutputDir: notes",
         'filenameTemplate: "{provider}.md"',
         'workspaceTimezone: "UTC"',
+        "defaultTags:",
+        "  - workspace",
+        "  - research",
+        "tagSuggestions:",
+        "  - research",
+        "  - journal",
         "markdownFrontmatter:",
         "  includeSessionIds: true",
         "workspaceFeatureFlags:",
@@ -119,12 +129,16 @@ Deno.test("loadWorkspaceConfigEditPageData exposes raw, effective, and wikilink 
       assertEquals(data.workspace.workspaceId, "ws-alpha");
       assertEquals(data.raw?.defaultOutputDir, "notes");
       assertEquals(data.raw?.workspaceTimezone, "UTC");
+      assertEquals(data.raw?.defaultTags, ["workspace", "research"]);
+      assertEquals(data.raw?.tagSuggestions, ["research", "journal"]);
       assertEquals(data.raw?.markdownFrontmatter?.includeSessionIds, true);
       assertEquals(
         data.raw?.writerFeatureFlags.writerRelativizeLocalLinks,
         false,
       );
       assertEquals(data.effective?.filenameTemplate, "{provider}.md");
+      assertEquals(data.effective?.defaultTags, ["workspace", "research"]);
+      assertEquals(data.effective?.tagSuggestions, ["research", "journal"]);
       assertEquals(
         data.effective?.markdownFrontmatter
           .includeFrontmatterInMarkdownRecordings,
@@ -189,6 +203,8 @@ Deno.test("handleWorkspaceConfigEditPost saves workspace config edits and redire
       defaultOutputDir: "notes/{provider}",
       filenameTemplate: "{YYYY}-{MM}-{DD}-{provider}.md",
       workspaceTimezone: "America/Los_Angeles",
+      defaultTags: " workspace, research\nresearch ",
+      tagSuggestions: "research\njournal",
       checkboxValues: {
         "markdownFrontmatter.includeFrontmatterInMarkdownRecordings": true,
         "markdownFrontmatter.includeWorkspaceIds": true,
@@ -221,6 +237,8 @@ Deno.test("handleWorkspaceConfigEditPost saves workspace config edits and redire
     assertEquals(loaded.defaultOutputDir, "notes/{provider}");
     assertEquals(loaded.filenameTemplate, "{YYYY}-{MM}-{DD}-{provider}.md");
     assertEquals(loaded.workspaceTimezone, "America/Los_Angeles");
+    assertEquals(loaded.defaultTags, ["workspace", "research"]);
+    assertEquals(loaded.tagSuggestions, ["research", "journal"]);
     assertEquals(loaded.markdownFrontmatter?.includeWorkspaceIds, true);
     assertEquals(loaded.markdownFrontmatter?.includeSessionIds, false);
     assertEquals(

@@ -33,6 +33,7 @@ export type {
   SharedBehaviorConfig,
   UserConfig,
   UserParticipantsConfig,
+  UserTagLibrariesConfig,
   WebAuthConfig,
   WebConfig,
 } from "./contracts/config.ts";
@@ -99,6 +100,11 @@ export {
   resolveEffectiveOutputMetadata,
   resolveEffectiveWriterFeatureFlags,
 } from "./output_metadata.ts";
+export {
+  normalizeOutputTags,
+  resolveOutputTagSuggestions,
+  validateAndNormalizeOutputTag,
+} from "./tags.ts";
 export {
   formatWorkspaceLabel,
   normalizeWorkspaceDisplayName,

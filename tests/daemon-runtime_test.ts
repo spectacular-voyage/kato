@@ -267,6 +267,8 @@ function cloneWorkspaceProfile(
     defaultOutputDirTemplate: profile.defaultOutputDirTemplate,
     filenameTemplate: profile.filenameTemplate,
     workspaceTimezone: profile.workspaceTimezone,
+    defaultTags: [...profile.defaultTags],
+    tagSuggestions: [...profile.tagSuggestions],
     markdownFrontmatter: { ...profile.markdownFrontmatter },
     writerFeatureFlags: { ...profile.writerFeatureFlags },
   };
@@ -377,6 +379,8 @@ async function createTestWorkspaceFixture(
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "{provider}-{sessionShortId}.md",
     workspaceTimezone: "local",
+    defaultTags: [],
+    tagSuggestions: [],
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: {
       writerIncludeCommentary: true,

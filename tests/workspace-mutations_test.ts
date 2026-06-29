@@ -256,6 +256,8 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
         defaultOutputDir: "notes/{provider}",
         filenameTemplate: "{YYYY}-{MM}-{DD}-{provider}.md",
         workspaceTimezone: "UTC",
+        defaultTags: [" workspace ", "research"],
+        tagSuggestions: ["research", "journal"],
         markdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: false,
           includeUpdatedInFrontmatter: true,
@@ -288,6 +290,8 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
       "{YYYY}-{MM}-{DD}-{provider}.md",
     );
     assertEquals(result.resolved.workspaceTimezone, "UTC");
+    assertEquals(result.resolved.defaultTags, ["workspace", "research"]);
+    assertEquals(result.resolved.tagSuggestions, ["research", "journal"]);
     assertEquals(
       result.resolved.markdownFrontmatter
         .includeFrontmatterInMarkdownRecordings,
@@ -310,6 +314,8 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
     assertEquals(loaded.defaultOutputDir, "notes/{provider}");
     assertEquals(loaded.filenameTemplate, "{YYYY}-{MM}-{DD}-{provider}.md");
     assertEquals(loaded.workspaceTimezone, "UTC");
+    assertEquals(loaded.defaultTags, ["workspace", "research"]);
+    assertEquals(loaded.tagSuggestions, ["research", "journal"]);
     assertEquals(loaded.markdownFrontmatter?.includeWorkspaceIds, true);
     assertEquals(loaded.writerFeatureFlags.writerIncludeToolCalls, true);
     assertEquals(

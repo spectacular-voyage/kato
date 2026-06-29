@@ -222,6 +222,26 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         defaultValue={effective.workspaceTimezone}
                         required
                       />
+                      <label class="form-label" for="defaultTags">
+                        Default Tags
+                      </label>
+                      <textarea
+                        class="form-input mono workspace-config-tag-field"
+                        id="defaultTags"
+                        name="defaultTags"
+                        rows={4}
+                        defaultValue={effective.defaultTags.join("\n")}
+                      />
+                      <label class="form-label" for="tagSuggestions">
+                        Tag Suggestions
+                      </label>
+                      <textarea
+                        class="form-input mono workspace-config-tag-field"
+                        id="tagSuggestions"
+                        name="tagSuggestions"
+                        rows={4}
+                        defaultValue={effective.tagSuggestions.join("\n")}
+                      />
                     </div>
 
                     <fieldset class="workspace-config-fieldset">

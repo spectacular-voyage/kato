@@ -7,6 +7,8 @@ import {
   loadUserSettings,
   setDefaultUsername,
   setExcludeMeFromParticipantList,
+  setGlobalTagSuggestions,
+  setWorkspaceTagSuggestions,
   setWorkspaceUsernameMapping,
   UserConfigFileStore,
 } from "../apps/runtime/src/mod.ts";
@@ -111,6 +113,61 @@ Deno.test("setExcludeMeFromParticipantList updates the boolean flag", async () =
 
     const saved = await userConfigStore.load();
     assertEquals(saved.participants.excludeMeFromParticipantList, false);
+  });
+});
+
+Deno.test("setGlobalTagSuggestions and setWorkspaceTagSuggestions update personal tag libraries", async () => {
+  await withTestTempDir("user-settings-tags-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const sharedDir = join(katoDir, "shared");
+    await Deno.mkdir(sharedDir, { recursive: true });
+    await Deno.writeTextFile(
+      join(sharedDir, "workspace-registry.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-03-07T20:00:00.000Z",
+        workspaces: [{
+          workspaceId: "ws-tags",
+          alias: "tags",
+          displayName: "Tags Workspace",
+          workspaceRoot: join(homeDir, "tags-workspace"),
+          configPath: join(
+            homeDir,
+            "tags-workspace",
+            ".kato-workspace-config.yaml",
+          ),
+          registeredAt: "2026-03-07T20:00:00.000Z",
+        }],
+      }),
+    );
+
+    const globalResult = await setGlobalTagSuggestions({
+      userConfigStore: new UserConfigFileStore(
+        join(katoDir, "kato-user-config.yaml"),
+      ),
+      tags: [" alpha ", "beta", "alpha"],
+    });
+    assertEquals(globalResult.tags, ["alpha", "beta"]);
+
+    const workspaceResult = await setWorkspaceTagSuggestions({
+      katoDir,
+      selector: "tags",
+      tags: ["local", " local "],
+    });
+    assertEquals(workspaceResult.workspaceId, "ws-tags");
+    assertEquals(workspaceResult.tags, ["local"]);
+
+    const loaded = await loadUserSettings({ katoDir });
+    assertEquals(loaded.config.tagLibraries?.globalSuggestions, [
+      "alpha",
+      "beta",
+    ]);
+    assertEquals(loaded.tagLibraryMappings, [{
+      workspaceId: "ws-tags",
+      workspaceAlias: "tags",
+      workspaceDisplayName: "Tags Workspace",
+      tags: ["local"],
+    }]);
   });
 });
 

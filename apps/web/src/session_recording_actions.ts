@@ -2,6 +2,8 @@ import {
   type ConversationEvent,
   extractSnippet,
   type MarkdownFrontmatterConfig,
+  normalizeOutputTags,
+  resolveEffectiveOutputMetadata,
   type SecretsPolicyConfig,
   type SessionMetadataV1,
   type SessionOutputMetadataV1,
@@ -69,7 +71,7 @@ export interface RunSessionRecordingActionOptions {
   workspaceSelector: string;
   creationMetadata?: Pick<
     SessionOutputMetadataV1,
-    "displayTitle" | "filenameSlug"
+    "displayTitle" | "filenameSlug" | "tags"
   >;
   katoDir?: string;
   now?: () => Date;
@@ -168,12 +170,21 @@ function normalizeMetadataString(
 
 function normalizeCreationMetadata(
   metadata: RunSessionRecordingActionOptions["creationMetadata"],
-): Pick<SessionOutputMetadataV1, "displayTitle" | "filenameSlug"> | undefined {
+):
+  | Pick<
+    SessionOutputMetadataV1,
+    "displayTitle" | "filenameSlug" | "tags"
+  >
+  | undefined {
   const displayTitle = normalizeMetadataString(metadata?.displayTitle);
   const filenameSlug = normalizeMetadataString(metadata?.filenameSlug);
+  const tags = metadata?.tags
+    ? normalizeOutputTags(metadata.tags, "creationMetadata.tags")
+    : [];
   const normalized = {
     ...(displayTitle ? { displayTitle } : {}),
     ...(filenameSlug ? { filenameSlug } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
   };
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
@@ -268,6 +279,7 @@ function createOutputOverrides(options: {
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: ResolvedWorkspaceProfile["writerFeatureFlags"];
   workspaceTimezone: string;
+  frontmatterTags?: string[];
   preferredUsername?: string;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
@@ -281,6 +293,9 @@ function createOutputOverrides(options: {
     includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
+    ...(options.frontmatterTags && options.frontmatterTags.length > 0
+      ? { frontmatterTags: options.frontmatterTags }
+      : {}),
     participantUsername: resolveFrontmatterParticipantUsername({
       markdownFrontmatter: options.markdownFrontmatter,
       userConfig: options.userConfig,
@@ -321,6 +336,7 @@ function createOutputOverrides(options: {
 function createOutputOverridesFromWorkspaceProfile(
   profile: ResolvedWorkspaceProfile,
   userConfig: UserConfig,
+  frontmatterTags?: string[],
 ): RecordingOutputOverrides {
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig,
@@ -331,6 +347,7 @@ function createOutputOverridesFromWorkspaceProfile(
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
     workspaceTimezone: profile.workspaceTimezone,
+    frontmatterTags,
     preferredUsername,
     userConfig,
   });
@@ -871,10 +888,6 @@ export async function runSessionRecordingAction(
         : {}),
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
     });
-    const outputOverrides = createOutputOverridesFromWorkspaceProfile(
-      profile,
-      userConfig,
-    );
     const outputUsername = resolvePreferredParticipantUsername({
       userConfig,
       workspaceId: workspace.workspaceId,
@@ -888,6 +901,16 @@ export async function runSessionRecordingAction(
       const metadata = await resolveSessionMetadata(
         sessionStore,
         options.sessionId,
+      );
+      const effectiveCreationMetadata = resolveEffectiveOutputMetadata(
+        metadata.outputMetadataDefaults,
+        creationMetadata,
+        profile.defaultTags,
+      );
+      const outputOverrides = createOutputOverridesFromWorkspaceProfile(
+        profile,
+        userConfig,
+        effectiveCreationMetadata.tags,
       );
       const history = await loadPersistedSessionHistoryEvents(
         metadata,

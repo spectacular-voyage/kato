@@ -398,6 +398,85 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA workspaceTimezone
   );
 });
 
+Deno.test("loadWorkspaceConfigOverrides normalizes workspace default tags and tag suggestions", async () => {
+  await withTestTempDir("workspace-profile-tags-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Tags.Proj");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "defaultTags:",
+        '  - " alpha "',
+        "  - beta",
+        "  - alpha",
+        "tagSuggestions:",
+        "  - topic",
+        '  - " topic "',
+      ].join("\n") + "\n",
+    );
+
+    const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.defaultTags, ["alpha", "beta"]);
+    assertEquals(loaded.tagSuggestions, ["topic"]);
+
+    const workspace = makeWorkspace({
+      workspaceId: "ws-tags",
+      alias: "Tags.Proj",
+      workspaceRoot,
+      configPath,
+    });
+    const profile = await new WorkspaceProfileResolver().resolveForCommand(
+      workspace,
+    );
+    assertEquals(profile.defaultTags, ["alpha", "beta"]);
+    assertEquals(profile.tagSuggestions, ["topic"]);
+  });
+});
+
+Deno.test("loadWorkspaceConfigOverrides rejects malformed workspace tag fields", async () => {
+  await withTestTempDir("workspace-profile-tags-invalid-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Tags.Invalid");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "defaultTags:",
+        '  - ""',
+      ].join("\n") + "\n",
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "defaultTags[0] must be a non-empty string",
+    );
+
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "tagSuggestions:",
+        "  - 42",
+      ].join("\n") + "\n",
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "tagSuggestions must contain only strings",
+    );
+  });
+});
+
 Deno.test("loadWorkspaceConfigOverrides rejects invalid workspaceTimezone", async () => {
   await withTestTempDir(
     "workspace-profile-timezone-invalid-",

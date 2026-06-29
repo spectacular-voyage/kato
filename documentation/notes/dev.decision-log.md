@@ -22,7 +22,7 @@ created: 1771779490894
 - Decision:
   - Kato Web edits shared `.kato-workspace-config.yaml` values through `updateWorkspaceConfig()` in `apps/runtime/src/workspace/mutations.ts`.
   - The mutation helper loads the current registered workspace config, rejects invalid or unknown-free-schema violations through the existing workspace config parser, preserves omitted fields for partial programmatic edits, and atomically writes supported keys in Kato's canonical YAML order.
-  - The first web slice edits only existing fields: `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, markdown frontmatter toggles, and `workspaceFeatureFlags` writer flags including relative local links and Dendron wikilinks.
+  - The first web slice edits output/config fields: `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and `workspaceFeatureFlags` writer flags including relative local links and Dendron wikilinks.
 - Owner: Kato engineering
 - Date: 2026-06-29
 - Why:
@@ -30,9 +30,32 @@ created: 1771779490894
   - Kato Web is a guided workflow surface; rejecting invalid config and writing only supported keys keeps shared workspace files fail-closed.
 - Tradeoffs:
   - Saving from the web editor can remove hand-written comments or formatting from `.kato-workspace-config.yaml`.
-  - The editor intentionally does not include shared tag libraries or persona libraries yet; those sections should be added after their config contracts land.
+  - The editor intentionally does not include persona libraries yet; those sections should be added after their config contracts land.
 - Follow-up tasks:
   - Revisit comment-preserving patch writes only if real shared workspace files need that ergonomics enough to justify parser complexity.
+
+### Output Tagging Uses Metadata As Source Of Truth
+
+- Decision:
+  - Add shared output tag validation helpers in `shared/src/tags.ts`: trim strings, reject empty/control-character tags, dedupe in stable case-sensitive order, and preserve user spelling.
+  - Extend workspace config with `defaultTags` and `tagSuggestions`; workspace defaults are automatic effective tags for workspace outputs, while workspace suggestions are UI-only until selected.
+  - Extend user config with optional `tagLibraries.globalSuggestions` and `tagLibraries.workspaceSuggestions`; old user configs without `tagLibraries` load with empty libraries, and personal suggestions never write automatically.
+  - Resolve effective output tags in order: session defaults (`outputMetadataDefaults.tags`), current workspace defaults when resolvable, then direct per-output metadata tags.
+  - Keep persisted session/output metadata authoritative. Markdown frontmatter is descriptive: creation/appends receive effective tags through writer options, and web tag edits replace the effective `tags` frontmatter list best-effort without rewriting markdown body content.
+  - Kato Web exposes selected tags in the Sessions creation popover, shared workspace tag fields in the workspace config editor, personal tag suggestions in Settings, and direct per-output tag edits on Recordings rows.
+- Owner: Kato engineering
+- Date: 2026-06-29
+- Why:
+  - Tags are descriptive output metadata that may evolve after output creation, so storing them only in frontmatter would make stopped outputs, disabled-frontmatter outputs, and unavailable files unreliable.
+  - Workspace defaults need to be shared team/workspace policy; personal libraries need to remain private suggestions unless the user explicitly selects a tag for an output.
+  - Reusing the session output metadata layer avoids another mutation path and keeps future persona/tag/writer controls aligned.
+- Tradeoffs:
+  - Workspace default tags are additive and cannot be suppressed for a single output in this slice.
+  - Web tag edits replace the frontmatter tag list, while writer appends still merge tags accretively so existing markdown gets missing effective tags without losing manually present tags during append.
+  - CLI tag-library management and in-chat tag mutation commands are deferred; Kato Web is the first management surface for this slice.
+- Follow-up tasks:
+  - Add CLI management for shared/personal tag libraries if command-line parity becomes important.
+  - Decide whether an in-chat tag mutation command is worth the additional command-surface complexity.
 
 ### Secrets Redaction Is Default-On at the Parse Boundary
 

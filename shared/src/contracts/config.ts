@@ -49,9 +49,15 @@ export interface UserParticipantsConfig {
   excludeMeFromParticipantList: boolean;
 }
 
+export interface UserTagLibrariesConfig {
+  globalSuggestions: string[];
+  workspaceSuggestions: Record<string, string[]>;
+}
+
 export interface UserConfig {
   schemaVersion: 1;
   participants: UserParticipantsConfig;
+  tagLibraries?: UserTagLibrariesConfig;
 }
 
 export interface ProviderSessionRoots {

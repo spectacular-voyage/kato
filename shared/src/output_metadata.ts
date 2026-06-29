@@ -3,28 +3,15 @@ import type {
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
   SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
 } from "./contracts/session_state.ts";
-
-function normalizeTags(values: ReadonlyArray<string> | undefined): string[] {
-  if (!values || values.length === 0) {
-    return [];
-  }
-  const deduped = new Set<string>();
-  for (const value of values) {
-    const normalized = value.trim();
-    if (normalized.length === 0) {
-      continue;
-    }
-    deduped.add(normalized);
-  }
-  return Array.from(deduped);
-}
+import { normalizeOutputTags } from "./tags.ts";
 
 // Merges session-level defaults with per-output metadata. Scalar fields on the
 // output win over session defaults; tags are additive and stable-deduped with
-// session tags first.
+// session tags first, then workspace defaults, then direct output tags.
 export function resolveEffectiveOutputMetadata(
   sessionDefaults: SessionOutputMetadataV1 | undefined,
   outputMetadata: SessionOutputMetadataV1 | undefined,
+  workspaceDefaultTags: ReadonlyArray<string> | undefined = undefined,
 ): SessionOutputMetadataV1 {
   const displayTitle = outputMetadata?.displayTitle ??
     sessionDefaults?.displayTitle;
@@ -34,10 +21,11 @@ export function resolveEffectiveOutputMetadata(
     sessionDefaults?.personaName;
   const participantUsername = outputMetadata?.participantUsername ??
     sessionDefaults?.participantUsername;
-  const tags = normalizeTags([
+  const tags = normalizeOutputTags([
     ...(sessionDefaults?.tags ?? []),
+    ...(workspaceDefaultTags ?? []),
     ...(outputMetadata?.tags ?? []),
-  ]);
+  ], "outputMetadata.tags");
   return {
     ...(displayTitle !== undefined ? { displayTitle } : {}),
     ...(filenameSlug !== undefined ? { filenameSlug } : {}),

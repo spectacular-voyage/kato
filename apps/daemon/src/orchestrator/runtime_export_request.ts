@@ -83,6 +83,12 @@ function cloneOutputOverrides(
     ...(value.participantUsername
       ? { participantUsername: value.participantUsername }
       : {}),
+    ...(value.frontmatterTags
+      ? { frontmatterTags: [...value.frontmatterTags] }
+      : {}),
+    ...(value.frontmatterWriterPolicy
+      ? { frontmatterWriterPolicy: { ...value.frontmatterWriterPolicy } }
+      : {}),
     ...(value.renderOptions
       ? { renderOptions: { ...value.renderOptions } }
       : {}),

@@ -101,6 +101,25 @@ Deno.test("updateFrontmatterMetadataFields reports unchanged content and missing
   assertEquals(noFrontmatter.hadFrontmatter, false);
 });
 
+Deno.test("updateFrontmatterMetadataFields replaces tags when requested", () => {
+  const replaced = updateFrontmatterMetadataFields(SAMPLE_CONTENT, {
+    replaceTags: ["new"],
+  });
+  assertEquals(replaced.changed, true);
+  assertStringIncludes(replaced.content, "tags: [new]");
+  assertEquals(replaced.content.includes("tags: [existing]"), false);
+
+  const removed = updateFrontmatterMetadataFields(SAMPLE_CONTENT, {
+    replaceTags: [],
+  });
+  assertEquals(removed.changed, true);
+  assertEquals(removed.content.includes("tags:"), false);
+  assertStringIncludes(
+    removed.content,
+    "Original body content stays untouched.",
+  );
+});
+
 Deno.test("mergeFrontmatterWriterPolicySnapshot replaces the snapshot only when it differs", () => {
   const frontmatter = [
     "---",

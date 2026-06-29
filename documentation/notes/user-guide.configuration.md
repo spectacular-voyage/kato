@@ -63,6 +63,12 @@ kato user exclude-me <true|false>
 Workspace username mappings are personal settings. They do not change the
 shared workspace file.
 
+## Output Tags
+
+Shared workspace tags live in `<workspace>/.kato-workspace-config.yaml`. `defaultTags` are automatically included in effective markdown frontmatter tags for workspace outputs, while `tagSuggestions` only feed Kato Web tag inputs.
+
+Personal tag suggestions live in `~/.kato/kato-user-config.yaml` under `tagLibraries`. Kato Web Settings can edit global personal suggestions and per-workspace personal suggestions. Personal suggestions are not automatic defaults; they are written only when selected or typed for an output.
+
 ## Writer Settings
 
 Shared defaults live in `~/.kato/shared/kato-shared-config.yaml`. Workspace
@@ -72,7 +78,7 @@ Writer flags can control whether markdown output includes commentary,
 thinking, tool calls/results, decision prompts/options/selections, italicized
 user messages, relative local links, and Dendron wikilinks.
 
-Kato Web can edit registered workspace overrides from the Workspaces page. The editor is for shared `.kato-workspace-config.yaml` values; personal username mappings still live in user config.
+Kato Web can edit registered workspace overrides from the Workspaces page, including output directory, filename template, workspace timezone, shared default tags, shared tag suggestions, markdown frontmatter toggles, and writer flags. The editor is for shared `.kato-workspace-config.yaml` values; personal username mappings and personal tag suggestions still live in user config.
 
 Workspace settings win for workspace-scoped recordings. Existing output files
 are not renamed when config changes; future writes use the current effective

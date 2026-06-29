@@ -34,6 +34,14 @@ function recordingState(
   }
 }
 
+function formatTags(tags: string[] | undefined): string {
+  return tags && tags.length > 0 ? tags.join(", ") : "";
+}
+
+function buildTagSuggestionListId(rowKey: string): string {
+  return `recording-tag-suggestions-${rowKey.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
 export default function RecordingsLive(
   props: {
     initialData: RecordingsPageData;
@@ -199,6 +207,7 @@ export default function RecordingsLive(
                 )
                 : row.workspaceId ?? "workspace";
               const stopActionLabel = recordingsPageStopActionLabel(row.state);
+              const tagSuggestionListId = buildTagSuggestionListId(row.key);
               return (
                 <li
                   key={row.key}
@@ -318,6 +327,55 @@ export default function RecordingsLive(
                           </div>
                         )
                         : null}
+                      <div class="recording-detail-line recording-tag-line">
+                        <span class="mono recording-detail-label">
+                          Tags:
+                        </span>{" "}
+                        {row.effectiveMetadata?.tags &&
+                            row.effectiveMetadata.tags.length > 0
+                          ? (
+                            <span class="recording-tag-list">
+                              {row.effectiveMetadata.tags.map((tag) => (
+                                <span class="recording-tag" key={tag}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </span>
+                          )
+                          : <span class="muted">none</span>}
+                        <form method="post" class="recording-tag-form">
+                          <RecordingsPageActionFields
+                            sessionId={row.sessionId}
+                            recordingCycleId={row.recordingCycleId}
+                            rowKey={row.key}
+                            workspaceId={row.workspaceId}
+                            outputPath={row.outputPath}
+                          />
+                          <input
+                            type="hidden"
+                            name="action"
+                            value="update-recording-metadata"
+                          />
+                          <input
+                            class="form-input recording-tag-input"
+                            name="tags"
+                            type="text"
+                            list={tagSuggestionListId}
+                            defaultValue={formatTags(row.directMetadata?.tags)}
+                          />
+                          <datalist id={tagSuggestionListId}>
+                            {(row.tagSuggestions ?? []).map((tag) => (
+                              <option key={tag} value={tag} />
+                            ))}
+                          </datalist>
+                          <button
+                            class="session-inline-action mono"
+                            type="submit"
+                          >
+                            [save tags]
+                          </button>
+                        </form>
+                      </div>
                     </div>
                     <div class="session-activity-meta recording-row-meta">
                       <div

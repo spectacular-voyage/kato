@@ -50,7 +50,9 @@ discovered session. The Recordings page shows recording-output state per file,
 including active outputs and stopped outputs that can be re-armed when the
 saved file still exists and passes policy.
 
-When starting from Kato Web, the workspace chooser also lets you set the output title and filename snippet before the file is created. The title is written as markdown frontmatter when frontmatter is enabled. The filename snippet feeds `{snippetSlug}` in the selected workspace filename template; if the template does not use `{snippetSlug}`, the filename snippet does not affect the generated path.
+When starting from Kato Web, the workspace chooser also lets you set the output title, filename snippet, and direct output tags before the file is created. The title and effective tags are written as markdown frontmatter when frontmatter is enabled. The filename snippet feeds `{snippetSlug}` in the selected workspace filename template; if the template does not use `{snippetSlug}`, the filename snippet does not affect the generated path.
+
+Output tags can be edited later from the Recordings page. Workspace default tags remain additive; editing a recording row changes the direct per-output tags stored in session metadata, then Kato updates markdown frontmatter best-effort without rewriting the body.
 
 ## Stopping
 
@@ -65,9 +67,7 @@ twin.
 
 Markdown is the normal recording format. One-off exports can also use JSONL.
 
-Markdown output can include frontmatter, participant information, Kato ids,
-conversation event kinds, commentary, thinking, tool calls/results, and
-decision metadata depending on shared and workspace writer settings.
+Markdown output can include frontmatter, tags, participant information, Kato ids, conversation event kinds, commentary, thinking, tool calls/results, and decision metadata depending on shared and workspace writer settings.
 
 ## Secrets Redaction
 

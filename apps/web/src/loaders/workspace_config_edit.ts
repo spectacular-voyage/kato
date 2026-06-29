@@ -24,6 +24,8 @@ export interface WorkspaceConfigEditRawValues {
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -197,6 +199,12 @@ export async function loadWorkspaceConfigEditPageData(
           : {}),
         ...(overrides.workspaceTimezone !== undefined
           ? { workspaceTimezone: overrides.workspaceTimezone }
+          : {}),
+        ...(overrides.defaultTags !== undefined
+          ? { defaultTags: [...overrides.defaultTags] }
+          : {}),
+        ...(overrides.tagSuggestions !== undefined
+          ? { tagSuggestions: [...overrides.tagSuggestions] }
           : {}),
         ...(overrides.markdownFrontmatter
           ? { markdownFrontmatter: { ...overrides.markdownFrontmatter } }

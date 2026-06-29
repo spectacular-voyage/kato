@@ -101,6 +101,10 @@ export const handler = define.handlers({
         }
         const displayTitle = String(form.get("displayTitle") ?? "").trim();
         const filenameSlug = String(form.get("filenameSlug") ?? "").trim();
+        const tags = String(form.get("tags") ?? "")
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0);
         const result = await runSessionRecordingAction({
           action,
           sessionId,
@@ -108,6 +112,7 @@ export const handler = define.handlers({
           creationMetadata: {
             ...(displayTitle.length > 0 ? { displayTitle } : {}),
             ...(filenameSlug.length > 0 ? { filenameSlug } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
           },
           operationalLogger,
           auditLogger,

@@ -173,6 +173,7 @@ function SessionRecordingActions(
   const [filenameSlug, setFilenameSlug] = useState(
     () => deriveFilenameSlugFromTitle(props.sessionSnippet),
   );
+  const [tagsInput, setTagsInput] = useState("");
   const [filenameSlugCustomized, setFilenameSlugCustomized] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -180,6 +181,7 @@ function SessionRecordingActions(
     const nextTitle = props.sessionSnippet ?? "";
     setDisplayTitle(nextTitle);
     setFilenameSlug(deriveFilenameSlugFromTitle(nextTitle));
+    setTagsInput("");
     setFilenameSlugCustomized(false);
   };
 
@@ -268,6 +270,8 @@ function SessionRecordingActions(
     option.workspaceId === selectedWorkspace
   );
   const selectedTemplate = selectedWorkspaceOption?.filenameTemplate;
+  const selectedDefaultTags = selectedWorkspaceOption?.defaultTags ?? [];
+  const selectedTagSuggestions = selectedWorkspaceOption?.tagSuggestions ?? [];
   const selectedTemplateUsesSnippet =
     selectedWorkspaceOption?.filenameTemplateIncludesSnippet ?? true;
   const filenamePreview = selectedTemplate
@@ -349,10 +353,11 @@ function SessionRecordingActions(
                 name="workspaceSelector"
                 aria-labelledby={buildWorkspaceSelectorIds(openAction).titleId}
                 value={selectedWorkspace}
-                onInput={(event) =>
+                onInput={(event) => {
                   setSelectedWorkspace(
                     (event.currentTarget as HTMLSelectElement).value,
-                  )}
+                  );
+                }}
               >
                 {props.workspaceOptions.map((option) => (
                   <option key={option.workspaceId} value={option.workspaceId}>
@@ -360,6 +365,13 @@ function SessionRecordingActions(
                   </option>
                 ))}
               </select>
+              {selectedDefaultTags.length > 0
+                ? (
+                  <div class="session-recording-default-tags muted mono">
+                    Default tags: {selectedDefaultTags.join(", ")}
+                  </div>
+                )
+                : null}
               <label class="form-label" for={`display-title-${openAction}`}>
                 Title
               </label>
@@ -382,6 +394,26 @@ function SessionRecordingActions(
                   );
                 }}
               />
+              <label class="form-label" for={`tags-${openAction}`}>
+                Tags
+              </label>
+              <input
+                id={`tags-${openAction}`}
+                class="form-input"
+                name="tags"
+                type="text"
+                list={`tag-suggestions-${openAction}`}
+                value={tagsInput}
+                onInput={(event) =>
+                  setTagsInput(
+                    (event.currentTarget as HTMLInputElement).value,
+                  )}
+              />
+              <datalist id={`tag-suggestions-${openAction}`}>
+                {selectedTagSuggestions.map((tag) => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
               {selectedTemplateUsesSnippet
                 ? (
                   <>

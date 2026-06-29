@@ -60,6 +60,8 @@ function makeProfile(workspaceRoot: string): ResolvedWorkspaceProfile {
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "{provider}.md",
     workspaceTimezone: "local",
+    defaultTags: [],
+    tagSuggestions: [],
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags({
       writerIncludeCommentary: true,
@@ -150,6 +152,25 @@ Deno.test("resolvePersistedWorkspaceOutputOverrides applies overrides over the p
 
   assertEquals(overrides.renderOptions?.includeCommentary, false);
   assertEquals(overrides.renderOptions?.includeThinking, true);
+});
+
+Deno.test("resolvePersistedWorkspaceOutputOverrides includes persisted default tags when workspace config is unavailable", async () => {
+  const workspaceRoot = resolve(".test-tmp", "writer-overrides-workspace");
+  const output = makeOutput({
+    defaultTags: ["workspace"],
+    outputMetadata: { tags: ["direct"] },
+  });
+  delete output.sourceConfigPath;
+
+  const overrides = await resolvePersistedWorkspaceOutputOverrides({
+    output,
+    sessionDefaults: { tags: ["session"] },
+    captureIncludeSystemEvents: false,
+    userConfig: createDefaultUserConfig(),
+    ...makeStubWorkspaceLookups(workspaceRoot, false),
+  });
+
+  assertEquals(overrides.frontmatterTags, ["session", "workspace", "direct"]);
 });
 
 Deno.test("resolvePersistedWorkspaceOutputOverrides omits the frontmatter policy when no overrides exist", async () => {

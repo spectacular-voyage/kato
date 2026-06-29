@@ -56,12 +56,11 @@ kato web status --json
 ## Pages
 
 - Summary: high-level daemon, session, recording, and workspace status.
-- Sessions: discovered provider sessions, snippets, and capture/record
-  controls.
-- Recordings: per-file output state, stop controls, and re-arm controls.
-- Workspaces: registration, display labels, shared workspace config editing, username overrides, and workspace diagnostics.
+- Sessions: discovered provider sessions, snippets, and capture/record controls with creation-time title, filename snippet, and tag fields.
+- Recordings: per-file output state, output tag editing, stop controls, and re-arm controls.
+- Workspaces: registration, display labels, shared workspace config editing, shared tag fields, username overrides, and workspace diagnostics.
 - Logs: operational and security-audit records.
-- Settings: user-default and workspace username mapping workflows.
+- Settings: user-default, workspace username mapping, and personal tag suggestion workflows.
 - Maintenance: cleanup flows and persisted twin troubleshooting.
 
 ## Auth Expiry

@@ -500,6 +500,7 @@ export function mergeFrontmatterWriterPolicySnapshot(options: {
 export interface FrontmatterMetadataUpdate {
   title?: string;
   tags?: ReadonlyArray<string>;
+  replaceTags?: ReadonlyArray<string>;
   writerPolicy?: FrontmatterWriterPolicy;
 }
 
@@ -510,9 +511,9 @@ export interface FrontmatterMetadataUpdateResult {
 }
 
 // Metadata-only frontmatter update on full markdown file content: replaces
-// `title` and the writer-policy snapshot, merges `tags` accretively, and
-// preserves the body bytes untouched. Content without parseable frontmatter is
-// returned unchanged.
+// `title` and the writer-policy snapshot, merges `tags` accretively unless
+// `replaceTags` is present, and preserves the body bytes untouched. Content
+// without parseable frontmatter is returned unchanged.
 export function updateFrontmatterMetadataFields(
   content: string,
   update: FrontmatterMetadataUpdate,
@@ -552,6 +553,18 @@ export function updateFrontmatterMetadataFields(
     const mergedTags = mergeStringLists(existingTags, incomingTags);
     if (!arraysEqual(existingTags, mergedTags)) {
       nextRecord["tags"] = mergedTags;
+      changed = true;
+    }
+  }
+  if (update.replaceTags !== undefined) {
+    const existingTags = readStringList(parsed["tags"]);
+    const replacementTags = dedupeStrings(update.replaceTags);
+    if (!arraysEqual(existingTags, replacementTags)) {
+      if (replacementTags.length > 0) {
+        nextRecord["tags"] = replacementTags;
+      } else {
+        delete nextRecord["tags"];
+      }
       changed = true;
     }
   }

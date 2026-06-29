@@ -6,6 +6,7 @@ import type {
 } from "@kato/shared";
 import {
   hasWriterFeatureFlagOverrides,
+  normalizeOutputTags,
   resolveEffectiveOutputMetadata,
   resolveEffectiveWriterFeatureFlags,
 } from "@kato/shared";
@@ -168,14 +169,7 @@ function normalizeTagsEdit(values: string[] | undefined): string[] | undefined {
   if (values === undefined) {
     return undefined;
   }
-  const deduped = new Set<string>();
-  for (const value of values) {
-    const normalized = value.trim();
-    if (normalized.length > 0) {
-      deduped.add(normalized);
-    }
-  }
-  return Array.from(deduped);
+  return normalizeOutputTags(values, "outputMetadata.tags");
 }
 
 function applyMetadataEdits(
@@ -240,6 +234,29 @@ async function resolveWorkspaceDefaultWriterFlags(
   return { ...output.writerFeatureFlags };
 }
 
+async function resolveWorkspaceDefaultTags(
+  katoDir: string,
+  output: WorkspaceOutputState,
+): Promise<string[]> {
+  try {
+    const catalog = new WorkspaceCatalog(
+      new WorkspaceRegistryFileStore(
+        resolveDefaultWorkspaceRegistryPath(katoDir),
+      ),
+    );
+    const registered = await catalog.getByWorkspaceId(output.workspaceId);
+    if (registered) {
+      const profile = await new WorkspaceProfileResolver().resolveForCommand(
+        registered,
+      );
+      return [...profile.defaultTags];
+    }
+  } catch {
+    // Fall back to no workspace defaults when config cannot be resolved.
+  }
+  return [...(output.defaultTags ?? [])];
+}
+
 function isMarkdownOutputPath(outputPath: string): boolean {
   return /\.md$/i.test(outputPath);
 }
@@ -249,6 +266,7 @@ async function bestEffortFrontmatterMetadataUpdate(
   update: {
     title?: string;
     tags?: string[];
+    replaceTags?: string[];
     writerPolicy?: FrontmatterWriterPolicy;
   },
 ): Promise<MarkdownFrontmatterMetadataUpdateStatus> {
@@ -294,18 +312,20 @@ export async function runSessionOutputMetadataUpdateAction(
           if (!isMarkdownOutputPath(output.currentResolvedPath)) {
             continue;
           }
+          const workspaceDefaultTags = await resolveWorkspaceDefaultTags(
+            katoDir,
+            output,
+          );
           const effective = resolveEffectiveOutputMetadata(
             metadata.outputMetadataDefaults,
             output.outputMetadata,
+            workspaceDefaultTags,
           );
-          if (!effective.tags || effective.tags.length === 0) {
-            continue;
-          }
           frontmatterStatuses.push({
             outputPath: output.currentResolvedPath,
             status: await bestEffortFrontmatterMetadataUpdate(
               output.currentResolvedPath,
-              { tags: effective.tags },
+              { replaceTags: effective.tags ?? [] },
             ),
           });
         }
@@ -343,6 +363,7 @@ export async function runSessionOutputMetadataUpdateAction(
     const effectiveMetadata = resolveEffectiveOutputMetadata(
       metadata.outputMetadataDefaults,
       output.outputMetadata,
+      await resolveWorkspaceDefaultTags(katoDir, output),
     );
     if (
       isMarkdownOutputPath(output.currentResolvedPath) &&
@@ -359,7 +380,9 @@ export async function runSessionOutputMetadataUpdateAction(
               ? { title: effectiveMetadata.displayTitle }
               : {}),
             ...(options.edits.tags !== undefined && effectiveMetadata.tags
-              ? { tags: effectiveMetadata.tags }
+              ? { replaceTags: effectiveMetadata.tags }
+              : options.edits.tags !== undefined
+              ? { replaceTags: [] }
               : {}),
           },
         ),

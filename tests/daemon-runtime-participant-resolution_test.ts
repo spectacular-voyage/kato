@@ -294,6 +294,8 @@ async function runWorkspaceResolutionScenario(
         defaultOutputDirTemplate: "{workspace_dir}/notes",
         filenameTemplate: "{provider}.md",
         workspaceTimezone: "local",
+        defaultTags: [],
+        tagSuggestions: [],
         markdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: false,

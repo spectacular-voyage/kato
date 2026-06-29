@@ -3,6 +3,7 @@ import {
   hasWriterFeatureFlagOverrides,
   resolveEffectiveOutputMetadata,
   resolveEffectiveWriterFeatureFlags,
+  resolveOutputTagSuggestions,
   type SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
 
@@ -49,10 +50,23 @@ Deno.test(
   () => {
     const effective = resolveEffectiveOutputMetadata(
       { tags: ["alpha", "beta", "  gamma "] },
-      { tags: ["beta", "delta", "", "gamma"] },
+      { tags: ["beta", "delta", "gamma"] },
     );
 
     assertEquals(effective.tags, ["alpha", "beta", "gamma", "delta"]);
+  },
+);
+
+Deno.test(
+  "resolveEffectiveOutputMetadata merges workspace default tags between session and output tags",
+  () => {
+    const effective = resolveEffectiveOutputMetadata(
+      { tags: ["session"] },
+      { tags: ["output", "workspace"] },
+      ["workspace", "shared"],
+    );
+
+    assertEquals(effective.tags, ["session", "workspace", "shared", "output"]);
   },
 );
 
@@ -72,6 +86,18 @@ Deno.test(
     );
   },
 );
+
+Deno.test("resolveOutputTagSuggestions merges libraries and existing tags without implying defaults", () => {
+  assertEquals(
+    resolveOutputTagSuggestions({
+      workspaceTagSuggestions: ["workspace", "shared"],
+      userGlobalTagSuggestions: ["personal", "shared"],
+      userWorkspaceTagSuggestions: ["local"],
+      existingTags: ["existing", "workspace"],
+    }),
+    ["workspace", "shared", "personal", "local", "existing"],
+  );
+});
 
 Deno.test(
   "resolveEffectiveWriterFeatureFlags applies overrides over base flags",

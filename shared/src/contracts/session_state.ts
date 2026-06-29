@@ -1,4 +1,5 @@
 import type { ProviderCursor } from "./ipc.ts";
+import { normalizeOutputTags } from "../tags.ts";
 
 export const DAEMON_CONTROL_SCHEMA_VERSION = 1 as const;
 export const SESSION_METADATA_SCHEMA_VERSION = 1 as const;
@@ -58,6 +59,9 @@ export interface SessionWorkspaceOutputStateV1 {
   workspaceRootSnapshot: string;
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
+  // Snapshot of workspace-level default tags used when the workspace config is
+  // no longer resolvable for future appends or metadata syncs.
+  defaultTags?: string[];
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
   writerFeatureFlagOverrides?:
     SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
@@ -238,6 +242,13 @@ export function isSessionOutputMetadataV1(
   ) {
     return false;
   }
+  if (Array.isArray(value["tags"])) {
+    try {
+      normalizeOutputTags(value["tags"], "outputMetadata.tags");
+    } catch {
+      return false;
+    }
+  }
   if (
     value["personaName"] !== undefined &&
     !isNonEmptyString(value["personaName"])
@@ -340,6 +351,20 @@ function isWorkspaceOutputState(
     value["createdAt"] !== undefined && typeof value["createdAt"] !== "string"
   ) {
     return false;
+  }
+  if (
+    value["defaultTags"] !== undefined &&
+    (!Array.isArray(value["defaultTags"]) ||
+      value["defaultTags"].some((tag) => typeof tag !== "string"))
+  ) {
+    return false;
+  }
+  if (Array.isArray(value["defaultTags"])) {
+    try {
+      normalizeOutputTags(value["defaultTags"], "workspaceOutput.defaultTags");
+    } catch {
+      return false;
+    }
   }
   if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
     return false;

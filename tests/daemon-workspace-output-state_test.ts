@@ -43,6 +43,8 @@ function makeProfile(
     filenameTemplate: overrides.filenameTemplate ??
       "{provider}-{sessionShortId}.md",
     workspaceTimezone: overrides.workspaceTimezone ?? "local",
+    defaultTags: overrides.defaultTags ?? [],
+    tagSuggestions: overrides.tagSuggestions ?? [],
     markdownFrontmatter: overrides.markdownFrontmatter ??
       createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: overrides.writerFeatureFlags ??
@@ -246,7 +248,10 @@ Deno.test(
 Deno.test(
   "createWorkspaceOutputState and applyWorkspaceProfileSnapshot capture workspace metadata",
   () => {
-    const initialProfile = makeProfile({ alias: "alpha" });
+    const initialProfile = makeProfile({
+      alias: "alpha",
+      defaultTags: ["initial"],
+    });
     const output = createWorkspaceOutputState({
       profile: initialProfile,
       binding: {
@@ -261,6 +266,7 @@ Deno.test(
     });
 
     assertEquals(output.workspaceAliasSnapshot, "alpha");
+    assertEquals(output.defaultTags, ["initial"]);
     assertEquals(output.recordingCycles, []);
     assertEquals(output.writeCursor, 4);
 
@@ -280,6 +286,7 @@ Deno.test(
         "workspace.yaml",
       ),
       filenameTemplate: "{timestampHumane}-{provider}.md",
+      defaultTags: ["updated", "shared"],
       writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags({
         writerIncludeCommentary: false,
       }),
@@ -312,6 +319,7 @@ Deno.test(
       updatedProfile.resolvedDefaultOutputDir,
     );
     assertEquals(output.filenameTemplate, "{timestampHumane}-{provider}.md");
+    assertEquals(output.defaultTags, ["updated", "shared"]);
     assertEquals(output.writerFeatureFlags.writerIncludeCommentary, false);
     assertEquals(output.recordingCycles.length, 1);
     assertEquals(output.outputMetadata, {

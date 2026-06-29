@@ -104,6 +104,8 @@ async function setupWorkspaceFixture(
     writerRelativizeLocalLinks?: boolean;
     createDendronConfig?: boolean;
     filenameTemplate?: string;
+    defaultTags?: string[];
+    tagSuggestions?: string[];
   } = {},
 ): Promise<{
   katoDir: string;
@@ -124,6 +126,18 @@ async function setupWorkspaceFixture(
       `filenameTemplate: "${
         options.filenameTemplate ?? "{provider}-{sessionShortId}.md"
       }"`,
+      ...(options.defaultTags
+        ? [
+          "defaultTags:",
+          ...options.defaultTags.map((tag) => `  - ${tag}`),
+        ]
+        : []),
+      ...(options.tagSuggestions
+        ? [
+          "tagSuggestions:",
+          ...options.tagSuggestions.map((tag) => `  - ${tag}`),
+        ]
+        : []),
       ...(options.writerUseDendronStyleWikilinks === undefined &&
           options.writerRelativizeLocalLinks === undefined
         ? []
@@ -186,6 +200,7 @@ async function createSessionFixture(options: {
   providerSessionId: string;
   sourceFilePath: string;
   workspaceOutputs?: NonNullable<SessionMetadataV1["workspaceOutputs"]>;
+  outputMetadataDefaults?: SessionMetadataV1["outputMetadataDefaults"];
 }) {
   const store = new PersistentSessionStateStore({
     katoDir: options.katoDir,
@@ -199,6 +214,9 @@ async function createSessionFixture(options: {
     initialCursor: { kind: "byte-offset", value: 0 },
   });
   metadata.workspaceOutputs = options.workspaceOutputs;
+  if (options.outputMetadataDefaults) {
+    metadata.outputMetadataDefaults = options.outputMetadataDefaults;
+  }
   await store.saveSessionMetadata(metadata);
 }
 
@@ -315,6 +333,53 @@ Deno.test("runSessionRecordingAction recording uses creation title and filename 
 
       const written = await Deno.readTextFile(result.targetPath);
       assertStringIncludes(written, "title: 'Useful Recording Title'");
+    },
+  );
+});
+
+Deno.test("runSessionRecordingAction recording writes effective workspace, session, and selected tags", async () => {
+  await withTestTempDir(
+    "web-session-record-action-tags-",
+    async (homeDir) => {
+      const { katoDir } = await setupWorkspaceFixture(homeDir, {
+        defaultTags: ["workspace-default", "shared"],
+      });
+      const sessionFilePath = join(homeDir, "provider-session.jsonl");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-tags",
+        providerSessionId: "provider-session-tags",
+        sourceFilePath: sessionFilePath,
+        outputMetadataDefaults: {
+          tags: ["session-default", "shared"],
+        },
+      });
+
+      const result = await runSessionRecordingAction({
+        action: "new-recording",
+        sessionId: "sess-web-tags",
+        workspaceSelector: "alpha",
+        creationMetadata: {
+          tags: ["selected", "shared"],
+        },
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+
+      const sessionStore = new PersistentSessionStateStore({ katoDir });
+      const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadataAfter);
+      assertEquals(metadataAfter.workspaceOutputs?.[0]?.outputMetadata, {
+        tags: ["selected", "shared"],
+      });
+
+      const written = await Deno.readTextFile(result.targetPath);
+      assertStringIncludes(
+        written,
+        "tags: [session-default, shared, workspace-default, selected]",
+      );
     },
   );
 });

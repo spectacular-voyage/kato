@@ -2,6 +2,7 @@ import type {
   MarkdownFrontmatterConfig,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
+import { normalizeOutputTags } from "@kato/shared";
 import type { AuditLogger, StructuredLogger } from "@kato/runtime";
 import { updateWorkspaceConfig } from "@kato/runtime";
 import { createWebLoggers } from "./logging.ts";
@@ -40,6 +41,21 @@ function readCheckboxField(form: FormData, name: string): boolean {
   throw new Error(`${name} must be a checkbox value`);
 }
 
+function readTagListField(form: FormData, name: string): string[] {
+  const value = form.get(name);
+  if (value === null) {
+    return [];
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be text`);
+  }
+  const rawTags = value
+    .split(/[,\n]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+  return normalizeOutputTags(rawTags, name);
+}
+
 function buildRedirectUrl(
   reqUrl: string,
   selector: string,
@@ -72,6 +88,8 @@ function buildEditInput(form: FormData) {
     defaultOutputDir: readRequiredTextField(form, "defaultOutputDir"),
     filenameTemplate: readRequiredTextField(form, "filenameTemplate"),
     workspaceTimezone: readRequiredTextField(form, "workspaceTimezone"),
+    defaultTags: readTagListField(form, "defaultTags"),
+    tagSuggestions: readTagListField(form, "tagSuggestions"),
     markdownFrontmatter,
     writerFeatureFlags,
   };

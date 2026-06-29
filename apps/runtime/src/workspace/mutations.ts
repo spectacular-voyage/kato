@@ -447,6 +447,8 @@ export interface WorkspaceConfigEditInput {
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags?: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -505,6 +507,16 @@ function mergeWorkspaceConfigEdits(
       ? { workspaceTimezone: edits.workspaceTimezone }
       : current.workspaceTimezone !== undefined
       ? { workspaceTimezone: current.workspaceTimezone }
+      : {}),
+    ...(edits.defaultTags !== undefined
+      ? { defaultTags: edits.defaultTags }
+      : current.defaultTags !== undefined
+      ? { defaultTags: current.defaultTags }
+      : {}),
+    ...(edits.tagSuggestions !== undefined
+      ? { tagSuggestions: edits.tagSuggestions }
+      : current.tagSuggestions !== undefined
+      ? { tagSuggestions: current.tagSuggestions }
       : {}),
     ...(hasKeys(markdownFrontmatter) ? { markdownFrontmatter } : {}),
     ...(hasKeys(writerFeatureFlags) ? { writerFeatureFlags } : {}),

@@ -55,9 +55,14 @@ export type {
   SetDefaultUsernameResult,
   SetExcludeMeOptions,
   SetExcludeMeResult,
+  SetGlobalTagSuggestionsOptions,
+  SetGlobalTagSuggestionsResult,
+  SetWorkspaceTagSuggestionsOptions,
+  SetWorkspaceTagSuggestionsResult,
   SetWorkspaceUsernameMappingOptions,
   SetWorkspaceUsernameMappingResult,
   UserWorkspaceMappingListEntry,
+  UserWorkspaceTagLibraryListEntry,
 } from "./user_settings.ts";
 export {
   clearDefaultUsername,
@@ -65,6 +70,8 @@ export {
   loadUserSettings,
   setDefaultUsername,
   setExcludeMeFromParticipantList,
+  setGlobalTagSuggestions,
+  setWorkspaceTagSuggestions,
   setWorkspaceUsernameMapping,
 } from "./user_settings.ts";
 export type {

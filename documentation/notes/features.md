@@ -63,6 +63,7 @@ Workspace features include:
 - workspace-local output defaults;
 - output filename templates;
 - workspace timezone settings;
+- shared default tags and tag suggestions;
 - markdown frontmatter settings;
 - writer feature flags for commentary, thinking, tool calls/results, decision
   prompts/options/selections, user-message italics, relative link sanitization,
@@ -92,9 +93,7 @@ In-chat control commands:
 ::stop-<alias>
 ```
 
-Web-created captures and recordings are available from the Sessions page.
-Active and stopped recording outputs can be managed from Sessions and
-Recordings.
+Web-created captures and recordings are available from the Sessions page. The creation popover can set an output title, filename snippet, and per-output tags before the file is created. Active and stopped recording outputs can be managed from Sessions and Recordings, and output tags can be edited from Recordings after creation.
 
 Markdown is the normal recording format. One-off exports can also use JSONL.
 
@@ -112,11 +111,11 @@ The Maintenance page exposes twin troubleshooting and cleanup workflows.
 Kato Web is a local authenticated operator console. Current pages include:
 
 - Summary dashboard;
-- Sessions inventory with capture/record controls and snippet reveal;
-- Recordings status and stop/re-arm controls;
-- Workspaces registration, labels, username overrides, and diagnostics;
+- Sessions inventory with capture/record controls, creation-time metadata fields, and snippet reveal;
+- Recordings status, output tag editing, stop controls, and re-arm controls;
+- Workspaces registration, labels, username overrides, shared tag/default config editing, and diagnostics;
 - Logs for operational and security-audit records;
-- Settings for user-default and workspace username mapping workflows;
+- Settings for user-default, workspace username mapping, and personal tag suggestion workflows;
 - Maintenance for logs and old derived session artifacts.
 
 Kato Web uses the configured host/port as a preference. If the preferred port
@@ -144,9 +143,7 @@ still contain the original text.
 
 ## Markdown Output
 
-Markdown recordings can include frontmatter, participant metadata, Kato ids,
-conversation event kinds, commentary, thinking, tool calls/results, and
-decision metadata according to shared and workspace-level writer settings.
+Markdown recordings can include frontmatter, output tags, participant metadata, Kato ids, conversation event kinds, commentary, thinking, tool calls/results, and decision metadata according to shared and workspace-level writer settings.
 
 Workspace markdown output sanitizes absolute local markdown links/images to
 relative paths by default. Workspaces can also opt into Dendron-style

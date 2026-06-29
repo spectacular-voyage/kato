@@ -4,20 +4,25 @@ import type {
   SessionMetadataV1,
   SessionOutputMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
+  UserConfig,
 } from "@kato/shared";
 import {
   DEFAULT_STATUS_STALE_AFTER_MS,
   isSessionStale,
   resolveEffectiveOutputMetadata,
+  resolveOutputTagSuggestions,
 } from "@kato/shared";
 import {
+  createDefaultUserConfig,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   PersistentSessionStateStore,
   type RegisteredWorkspace,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
+  resolveDefaultUserConfigPath,
   resolveDefaultWorkspaceRegistryPath,
+  UserConfigFileStore,
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
 } from "@kato/runtime";
@@ -50,6 +55,7 @@ export interface SessionRecordingActivityRow {
   recordingCycleId?: string;
   effectiveMetadata?: SessionOutputMetadataV1;
   directMetadata?: SessionOutputMetadataV1;
+  tagSuggestions?: string[];
   writerPolicy?: OutputWriterPolicyProjection;
 }
 
@@ -123,6 +129,8 @@ export interface WorkspaceOption {
   displayName?: string;
   filenameTemplate?: string;
   filenameTemplateIncludesSnippet?: boolean;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
 }
 
 function resolveActivityTimestamp(
@@ -231,22 +239,36 @@ async function loadRegisteredWorkspaces(
   }
 }
 
-async function resolveWorkspaceDefaultWriterFlagsById(
+interface WorkspaceOutputProfileProjection {
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  defaultTags: string[];
+  tagSuggestions: string[];
+}
+
+async function loadUserConfigOrDefault(katoDir: string): Promise<UserConfig> {
+  try {
+    const store = new UserConfigFileStore(
+      resolveDefaultUserConfigPath(katoDir),
+    );
+    return (await store.ensureInitialized(createDefaultUserConfig())).config;
+  } catch {
+    return createDefaultUserConfig();
+  }
+}
+
+async function resolveWorkspaceOutputProfilesById(
   workspaceEntries: RegisteredWorkspace[],
   metadataList: SessionMetadataV1[],
-): Promise<Map<string, SessionWorkspaceAttachmentWriterFeatureFlagsV1>> {
+): Promise<Map<string, WorkspaceOutputProfileProjection>> {
   const usedWorkspaceIds = new Set<string>();
   for (const metadata of metadataList) {
     for (const output of metadata.workspaceOutputs ?? []) {
       usedWorkspaceIds.add(output.workspaceId);
     }
   }
-  const flagsById = new Map<
-    string,
-    SessionWorkspaceAttachmentWriterFeatureFlagsV1
-  >();
+  const profilesById = new Map<string, WorkspaceOutputProfileProjection>();
   if (usedWorkspaceIds.size === 0) {
-    return flagsById;
+    return profilesById;
   }
   const resolver = new WorkspaceProfileResolver();
   for (const entry of workspaceEntries) {
@@ -255,16 +277,21 @@ async function resolveWorkspaceDefaultWriterFlagsById(
     }
     try {
       const profile = await resolver.resolveForCommand(entry);
-      flagsById.set(entry.workspaceId, { ...profile.writerFeatureFlags });
+      profilesById.set(entry.workspaceId, {
+        writerFeatureFlags: { ...profile.writerFeatureFlags },
+        defaultTags: [...profile.defaultTags],
+        tagSuggestions: [...profile.tagSuggestions],
+      });
     } catch {
       // Unresolvable workspaces fall back to per-output snapshots.
     }
   }
-  return flagsById;
+  return profilesById;
 }
 
 async function resolveWorkspaceOptions(
   workspaceEntries: RegisteredWorkspace[],
+  userConfig: UserConfig,
 ): Promise<WorkspaceOption[]> {
   const resolver = new WorkspaceProfileResolver();
   const options = await Promise.all(
@@ -279,6 +306,17 @@ async function resolveWorkspaceOptions(
           filenameTemplateIncludesSnippet: profile.filenameTemplate.includes(
             "{snippetSlug}",
           ),
+          defaultTags: [...profile.defaultTags],
+          tagSuggestions: resolveOutputTagSuggestions({
+            workspaceTagSuggestions: [
+              ...profile.defaultTags,
+              ...profile.tagSuggestions,
+            ],
+            userGlobalTagSuggestions: userConfig.tagLibraries
+              ?.globalSuggestions,
+            userWorkspaceTagSuggestions: userConfig.tagLibraries
+              ?.workspaceSuggestions[entry.workspaceId],
+          }),
         };
       } catch {
         return {
@@ -438,10 +476,11 @@ function findLatestStoppedCycle(
 
 interface OutputRowProjectionContext {
   outputMetadataDefaults?: SessionOutputMetadataV1;
-  workspaceDefaultWriterFlagsById: ReadonlyMap<
+  workspaceOutputProfilesById: ReadonlyMap<
     string,
-    SessionWorkspaceAttachmentWriterFeatureFlagsV1
+    WorkspaceOutputProfileProjection
   >;
+  userConfig: UserConfig;
 }
 
 function buildOutputRowProjection(
@@ -449,20 +488,37 @@ function buildOutputRowProjection(
   context: OutputRowProjectionContext,
 ): Pick<
   SessionRecordingActivityRow,
-  "effectiveMetadata" | "directMetadata" | "writerPolicy"
+  "effectiveMetadata" | "directMetadata" | "tagSuggestions" | "writerPolicy"
 > {
+  const workspaceProfile = context.workspaceOutputProfilesById.get(
+    output.workspaceId,
+  );
   const effectiveMetadata = resolveEffectiveOutputMetadata(
     context.outputMetadataDefaults,
     output.outputMetadata,
+    workspaceProfile?.defaultTags ?? output.defaultTags,
   );
-  const workspaceDefaultFlags = context.workspaceDefaultWriterFlagsById.get(
-    output.workspaceId,
-  ) ?? output.writerFeatureFlags;
+  const workspaceDefaultFlags = workspaceProfile?.writerFeatureFlags ??
+    output.writerFeatureFlags;
+  const tagSuggestions = resolveOutputTagSuggestions({
+    workspaceTagSuggestions: workspaceProfile
+      ? [
+        ...workspaceProfile.defaultTags,
+        ...workspaceProfile.tagSuggestions,
+      ]
+      : output.defaultTags ?? [],
+    userGlobalTagSuggestions: context.userConfig.tagLibraries
+      ?.globalSuggestions,
+    userWorkspaceTagSuggestions: context.userConfig.tagLibraries
+      ?.workspaceSuggestions[output.workspaceId],
+    existingTags: effectiveMetadata.tags,
+  });
   return {
     ...(Object.keys(effectiveMetadata).length > 0 ? { effectiveMetadata } : {}),
     ...(output.outputMetadata
       ? { directMetadata: structuredClone(output.outputMetadata) }
       : {}),
+    ...(tagSuggestions.length > 0 ? { tagSuggestions } : {}),
     writerPolicy: projectOutputWriterPolicy(
       workspaceDefaultFlags,
       output.writerFeatureFlagOverrides,
@@ -661,9 +717,10 @@ function buildRecordingRows(
   live: DaemonSessionStatus | undefined,
   recordingsMode: "latest" | "all" = "latest",
   now: Date,
-  workspaceDefaultWriterFlagsById: OutputRowProjectionContext[
-    "workspaceDefaultWriterFlagsById"
+  workspaceOutputProfilesById: OutputRowProjectionContext[
+    "workspaceOutputProfilesById"
   ] = new Map(),
+  userConfig: UserConfig = createDefaultUserConfig(),
 ): SessionRecordingActivityRow[] {
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
@@ -671,7 +728,8 @@ function buildRecordingRows(
   const sessionStale = live?.stale ?? true;
   const projectionContext: OutputRowProjectionContext = {
     outputMetadataDefaults: session.outputMetadataDefaults,
-    workspaceDefaultWriterFlagsById,
+    workspaceOutputProfilesById,
+    userConfig,
   };
 
   for (const output of session.workspaceOutputs ?? []) {
@@ -805,23 +863,23 @@ export async function loadSessionActivityRows(
   const workspaceEntriesPromise = options.workspaceEntries
     ? Promise.resolve(options.workspaceEntries)
     : loadRegisteredWorkspaces(katoDir);
-  const [snapshot, metadataList, runtimeConfig, workspaceEntries] =
+  const [snapshot, metadataList, runtimeConfig, workspaceEntries, userConfig] =
     await Promise.all([
       statusStore.load(),
       sessionStore.listSessionMetadata(),
       loadRuntimeConfigOrDefault({ katoDir }),
       workspaceEntriesPromise,
+      loadUserConfigOrDefault(katoDir),
     ]);
   const normalizedMetadataList = await Promise.all(
     metadataList.map((metadata) =>
       normalizePersistedTwinMetadata(sessionStore, metadata)
     ),
   );
-  const workspaceDefaultWriterFlagsById =
-    await resolveWorkspaceDefaultWriterFlagsById(
-      workspaceEntries,
-      normalizedMetadataList,
-    );
+  const workspaceOutputProfilesById = await resolveWorkspaceOutputProfilesById(
+    workspaceEntries,
+    normalizedMetadataList,
+  );
 
   const liveBySessionId = new Map(
     (snapshot.sessions ?? []).map((session) => [session.sessionId, session]),
@@ -853,7 +911,8 @@ export async function loadSessionActivityRows(
       live,
       recordingsMode,
       statusClock,
-      workspaceDefaultWriterFlagsById,
+      workspaceOutputProfilesById,
+      userConfig,
     );
     const filteredRecordings = resolvedWorkspaceFilter
       ? recordings.filter((row) =>
@@ -950,6 +1009,7 @@ export async function loadSessionsPageData(
   const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const workspaceEntries = options.workspaceEntries ??
     await loadRegisteredWorkspaces(katoDir);
+  const userConfig = await loadUserConfigOrDefault(katoDir);
   const [rows, resolvedWorkspaceFilter] = await Promise.all([
     loadSessionActivityRows({
       ...options,
@@ -964,7 +1024,10 @@ export async function loadSessionsPageData(
       workspaceEntries,
     ),
   ]);
-  const workspaceOptions = await resolveWorkspaceOptions(workspaceEntries);
+  const workspaceOptions = await resolveWorkspaceOptions(
+    workspaceEntries,
+    userConfig,
+  );
 
   return {
     includeStale,

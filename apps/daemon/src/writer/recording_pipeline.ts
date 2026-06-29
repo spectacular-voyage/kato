@@ -43,6 +43,7 @@ export interface RecordingOutputOverrides {
   includeRecordingIds?: boolean;
   includeConversationEventKinds?: boolean;
   participantUsername?: string;
+  frontmatterTags?: string[];
   // Descriptive effective render-policy snapshot for frontmatter; persisted
   // session metadata remains the source of truth for render behavior.
   frontmatterWriterPolicy?: FrontmatterWriterPolicy;
@@ -734,6 +735,10 @@ export class RecordingPipeline implements RecordingPipelineLike {
         ? { frontmatterConversationEventKinds }
         : {}),
       ...(frontmatterParticipants ? { frontmatterParticipants } : {}),
+      ...(options.outputOverrides?.frontmatterTags &&
+          options.outputOverrides.frontmatterTags.length > 0
+        ? { frontmatterTags: options.outputOverrides.frontmatterTags }
+        : {}),
     };
   }
 

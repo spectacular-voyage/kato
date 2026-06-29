@@ -2,6 +2,7 @@ import type {
   MarkdownFrontmatterConfig,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
+import { normalizeOutputTags } from "@kato/shared";
 import {
   basename,
   dirname,
@@ -71,6 +72,8 @@ const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
+  "defaultTags",
+  "tagSuggestions",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
@@ -78,6 +81,8 @@ const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
+  "defaultTags",
+  "tagSuggestions",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
@@ -125,6 +130,8 @@ export interface WorkspaceConfigOverrides {
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -134,6 +141,8 @@ export interface WorkspaceConfigFileValues {
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags?: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
 }
@@ -142,6 +151,8 @@ export interface ResolvedWorkspaceConfigValues {
   defaultOutputDir: string;
   filenameTemplate: string;
   workspaceTimezone: string;
+  defaultTags: string[];
+  tagSuggestions: string[];
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
@@ -155,6 +166,8 @@ export interface ResolvedWorkspaceProfile {
   defaultOutputDirTemplate: string;
   filenameTemplate: string;
   workspaceTimezone: string;
+  defaultTags: string[];
+  tagSuggestions: string[];
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
@@ -463,6 +476,23 @@ function parseWorkspaceTimezone(
   return trimmed;
 }
 
+function parseWorkspaceTagList(
+  value: unknown,
+  configPath: string,
+  field: "defaultTags" | "tagSuggestions",
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be a string array: ${configPath}`);
+  }
+  if (value.some((tag) => typeof tag !== "string")) {
+    throw new Error(`${field} must contain only strings: ${configPath}`);
+  }
+  return normalizeOutputTags(value, field);
+}
+
 export function createDefaultWorkspaceWriterFeatureFlags(
   overrides: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1> = {},
 ): SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
@@ -668,6 +698,16 @@ function parseWorkspaceConfigLikeDocument(
     parsed["workspaceTimezone"],
     configPath,
   );
+  const defaultTags = parseWorkspaceTagList(
+    parsed["defaultTags"],
+    configPath,
+    "defaultTags",
+  );
+  const tagSuggestions = parseWorkspaceTagList(
+    parsed["tagSuggestions"],
+    configPath,
+    "tagSuggestions",
+  );
 
   const markdownFrontmatter = parseWorkspaceMarkdownFrontmatter(
     parsed["markdownFrontmatter"],
@@ -682,6 +722,8 @@ function parseWorkspaceConfigLikeDocument(
     ...(defaultOutputDir ? { defaultOutputDir } : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
     ...(workspaceTimezone ? { workspaceTimezone } : {}),
+    ...(defaultTags !== undefined ? { defaultTags } : {}),
+    ...(tagSuggestions !== undefined ? { tagSuggestions } : {}),
     ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
     writerFeatureFlags,
   };
@@ -702,6 +744,12 @@ function workspaceConfigFileValuesToDocument(
   }
   if (values.workspaceTimezone !== undefined) {
     document.workspaceTimezone = values.workspaceTimezone;
+  }
+  if (values.defaultTags !== undefined) {
+    document.defaultTags = values.defaultTags;
+  }
+  if (values.tagSuggestions !== undefined) {
+    document.tagSuggestions = values.tagSuggestions;
   }
 
   const markdownFrontmatter: Record<string, unknown> = {};
@@ -761,6 +809,8 @@ export function resolveWorkspaceConfigValues(
       DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
     workspaceTimezone: overrides.workspaceTimezone ??
       DEFAULT_WORKSPACE_TIMEZONE,
+    defaultTags: [...(overrides.defaultTags ?? [])],
+    tagSuggestions: [...(overrides.tagSuggestions ?? [])],
     markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
     writerFeatureFlags: resolveWriterFeatureFlags(overrides),
   };
@@ -886,6 +936,8 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
       workspaceTimezone: overrides.workspaceTimezone ??
         DEFAULT_WORKSPACE_TIMEZONE,
+      defaultTags: [...(overrides.defaultTags ?? [])],
+      tagSuggestions: [...(overrides.tagSuggestions ?? [])],
       markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
       writerFeatureFlags: resolveWriterFeatureFlags(overrides),
     };
@@ -931,6 +983,8 @@ export class DefaultWorkspaceConfigFileStore {
       loaded.defaultOutputDir === undefined &&
       loaded.filenameTemplate === undefined &&
       loaded.workspaceTimezone === undefined &&
+      loaded.defaultTags === undefined &&
+      loaded.tagSuggestions === undefined &&
       loaded.markdownFrontmatter === undefined &&
       Object.keys(loaded.writerFeatureFlags).length === 0
     ) {
@@ -1008,6 +1062,8 @@ export function createWorkspaceConfigScaffold(): string {
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
     `workspaceTimezone: "${DEFAULT_WORKSPACE_TIMEZONE}"`,
+    "defaultTags: []",
+    "tagSuggestions: []",
     "markdownFrontmatter:",
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",

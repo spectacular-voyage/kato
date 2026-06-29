@@ -28,6 +28,9 @@ Deno.test("UserConfigFileStore ensureInitialized creates scaffold and reloads", 
     assertStringIncludes(raw, "defaultUsername: ''");
     assertStringIncludes(raw, "workspaceUsernames: {}");
     assertStringIncludes(raw, "excludeMeFromParticipantList: true");
+    assertStringIncludes(raw, "tagLibraries:");
+    assertStringIncludes(raw, "globalSuggestions: []");
+    assertStringIncludes(raw, "workspaceSuggestions: {}");
 
     const loaded = await store.load();
     assertEquals(loaded, createDefaultUserConfig());
@@ -54,6 +57,15 @@ Deno.test("UserConfigFileStore parses valid config and normalizes usernames", as
         "  workspaceUsernames:",
         '    workspace-1: "  Case.User  "',
         "  excludeMeFromParticipantList: false",
+        "tagLibraries:",
+        "  globalSuggestions:",
+        '    - "  alpha  "',
+        "    - beta",
+        "    - alpha",
+        "  workspaceSuggestions:",
+        "    workspace-1:",
+        "      - gamma",
+        '      - " gamma "',
         "",
       ].join("\n"),
     );
@@ -65,6 +77,10 @@ Deno.test("UserConfigFileStore parses valid config and normalizes usernames", as
       { "workspace-1": "Case.User" },
     );
     assertEquals(loaded.participants.excludeMeFromParticipantList, false);
+    assertEquals(loaded.tagLibraries, {
+      globalSuggestions: ["alpha", "beta"],
+      workspaceSuggestions: { "workspace-1": ["gamma"] },
+    });
   } finally {
     await removePathIfPresent(tempDir);
   }
@@ -116,6 +132,29 @@ Deno.test("UserConfigFileStore rejects unknown keys and invalid types", async ()
         '  defaultUsername: ""',
         "  workspaceUsernames: {}",
         "  excludeMeFromParticipantList: maybe",
+        "",
+      ].join("\n"),
+      [
+        "schemaVersion: 1",
+        "participants:",
+        '  defaultUsername: ""',
+        "  workspaceUsernames: {}",
+        "  excludeMeFromParticipantList: true",
+        "tagLibraries:",
+        "  globalSuggestions:",
+        '    - ""',
+        "",
+      ].join("\n"),
+      [
+        "schemaVersion: 1",
+        "participants:",
+        '  defaultUsername: ""',
+        "  workspaceUsernames: {}",
+        "  excludeMeFromParticipantList: true",
+        "tagLibraries:",
+        "  workspaceSuggestions:",
+        "    workspace-1:",
+        "      - 42",
         "",
       ].join("\n"),
     ];

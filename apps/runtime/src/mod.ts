@@ -30,6 +30,8 @@ export {
   type RuntimeConfigStoreLike,
   setDefaultUsername,
   setExcludeMeFromParticipantList,
+  setGlobalTagSuggestions,
+  setWorkspaceTagSuggestions,
   setWorkspaceUsernameMapping,
   SharedBehaviorConfigFileStore,
   type SharedBehaviorConfigStoreLike,
@@ -50,9 +52,14 @@ export type {
   SetDefaultUsernameResult,
   SetExcludeMeOptions,
   SetExcludeMeResult,
+  SetGlobalTagSuggestionsOptions,
+  SetGlobalTagSuggestionsResult,
+  SetWorkspaceTagSuggestionsOptions,
+  SetWorkspaceTagSuggestionsResult,
   SetWorkspaceUsernameMappingOptions,
   SetWorkspaceUsernameMappingResult,
   UserWorkspaceMappingListEntry,
+  UserWorkspaceTagLibraryListEntry,
 } from "./config/mod.ts";
 
 export type {

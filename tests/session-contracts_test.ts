@@ -197,6 +197,7 @@ Deno.test(
       participantUsername: "dave",
     };
     const output = makeWorkspaceOutput();
+    output.defaultTags = ["workspace", "research"];
     output.outputMetadata = {
       displayTitle: "Output Title",
       filenameSlug: "output-title",
@@ -247,6 +248,12 @@ Deno.test(
     };
     badOverrides.workspaceOutputs = [overrideOutput];
     assertEquals(isSessionMetadataV1(badOverrides), false);
+
+    const badWorkspaceDefaultTags = makeSessionMetadata();
+    const badWorkspaceDefaultTagOutput = makeWorkspaceOutput();
+    badWorkspaceDefaultTagOutput.defaultTags = ["valid", ""];
+    badWorkspaceDefaultTags.workspaceOutputs = [badWorkspaceDefaultTagOutput];
+    assertEquals(isSessionMetadataV1(badWorkspaceDefaultTags), false);
 
     const nonRecordMetadata = makeSessionMetadata();
     nonRecordMetadata.outputMetadataDefaults =

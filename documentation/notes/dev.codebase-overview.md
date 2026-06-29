@@ -60,8 +60,7 @@ Related notes:
   resolvers/control-plane/policy/workspace/observability).
 - `shared/src`: contracts and projection utilities (`config`, `status`,
   `session_state`, `events`, `messages`, `ipc`, etc.), including
-  `output_metadata.ts` resolvers for effective output metadata and effective
-  writer feature flags (session defaults + per-output overrides).
+  `output_metadata.ts` resolvers for effective output metadata/effective tags/effective writer feature flags and `tags.ts` validation/suggestion helpers.
 - `apps/web`: local Fresh-based operator console (routes, loaders, API
   handlers, islands, auth/session handling, and small guided workflows).
 - `apps/cloud/src`: placeholder.
@@ -73,17 +72,13 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/sessions`: primary discovered chat-session inventory, backed by
-  `loadSessionsPageData()` and `/api/sessions`, with live activity,
-  recording state, and on-demand snippet reveal.
-- `/recordings`: latest recording-output state across sessions and workspaces
-  (one row per output file, with stop / same-path `Re-start` for persisted
-  rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
+- `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, creation-time output title/filename/tag controls, and on-demand snippet reveal.
+- `/recordings`: latest recording-output state across sessions and workspaces (one row per output file, with output tag editing plus stop / same-path `Re-start` for persisted rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label editing, registration-time display-label entry, per-workspace preferred-username overrides, shared workspace config edit links, plus workspace-level recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
-- `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for existing first-slice workspace fields (`defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
+- `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for workspace fields (`defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
 - `/logs`: combined daemon + web operational/security log view with shared
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
-- `/settings`: guided user-default and workspace-username mapping workflows.
+- `/settings`: guided user-default, workspace-username mapping, and personal tag suggestion workflows.
 - `/maintenance`: guided cleanup workflows for logs and old derived session
   artifacts, plus the persisted twin troubleshooting/cleanup surface backed by
   `loadMaintenanceTwinsData()` and `/api/maintenance-twins`.
@@ -93,12 +88,9 @@ Supporting web files worth knowing:
 
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
-- `apps/web/src/session_recording_actions.ts`: shared web mutation flows for
-  Sessions and Recordings recording/capture start-stop-`Re-start` actions,
-  including creation-time output metadata (`displayTitle`/`filenameSlug`) and
-  same-file exclusivity guards.
+- `apps/web/src/session_recording_actions.ts`: shared web mutation flows for Sessions and Recordings recording/capture start-stop-`Re-start` actions, including creation-time output metadata (`displayTitle`/`filenameSlug`/`tags`) and same-file exclusivity guards.
 - `apps/web/src/workspace_config_edit_actions.ts` and `apps/web/src/loaders/workspace_config_edit.ts`: shared web mutation and read-model plumbing for the workspace config editor.
-- `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`filenameSlug`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync.
+- `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`filenameSlug`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync. Tag edits replace the effective frontmatter tag list while writer appends remain accretive.
 - `apps/web/src/output_writer_policy.ts` + `apps/web/src/writer_policy_controls.tsx`: default/override/effective writer-policy projection and the compact tri-state (default/include/exclude) controls rendered on Recordings rows.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/maintenance`, `/sessions`, and session anchor links.
@@ -161,9 +153,7 @@ flag is enabled. Twins and persisted source/history snapshots stay
 authoritative. The Workspaces page exposes the matched
 `dendron.yml` path plus the derived roots as read-only diagnostics for the
 workspace default output location.
-Operator-facing workspace `displayName` labels live in the shared workspace
-registry, while preferred per-workspace participant usernames remain in
-`kato-user-config.yaml`.
+Operator-facing workspace `displayName` labels live in the shared workspace registry, while preferred per-workspace participant usernames and personal tag suggestions remain in `kato-user-config.yaml`.
 Kato Web edits shared workspace config through the runtime `updateWorkspaceConfig()` helper, which validates via the workspace config schema, writes atomically, preserves omitted fields for partial programmatic updates, and serializes supported keys back to canonical YAML when a web edit saves.
 
 ## Topology

@@ -7,7 +7,10 @@ import {
   runSessionRecordingRestartAction,
   runSessionRecordingStopAction,
 } from "./session_recording_actions.ts";
-import { runSessionWriterOverridesAction } from "./session_metadata_actions.ts";
+import {
+  runSessionOutputMetadataUpdateAction,
+  runSessionWriterOverridesAction,
+} from "./session_metadata_actions.ts";
 import { parseWriterFlagChoice } from "./output_writer_policy.ts";
 import { buildRecordingsRecordingHref } from "./session_routes.ts";
 
@@ -97,6 +100,9 @@ function buildRecordingsMutationErrorToken(
   }
   if (action === "set-writer-overrides") {
     return "writer_overrides_failed";
+  }
+  if (action === "update-recording-metadata") {
+    return "metadata_update_failed";
   }
   return "internal_error";
 }
@@ -223,6 +229,36 @@ export async function handleRecordingsPagePost(
           recordingCycleId,
           rowKey,
           notice: buildWriterOverridesNotice(result),
+        }),
+        303,
+      );
+    }
+
+    if (action === "update-recording-metadata") {
+      const workspaceId = String(form.get("workspaceId") ?? "").trim() ||
+        undefined;
+      const outputPath = String(form.get("outputPath") ?? "").trim() ||
+        undefined;
+      const tags = String(form.get("tags") ?? "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+      const result = await runSessionOutputMetadataUpdateAction({
+        scope: "output",
+        sessionId,
+        selector: { workspaceId, outputPath, recordingCycleId },
+        edits: { tags },
+        katoDir: options.katoDir,
+        operationalLogger,
+        auditLogger,
+      });
+      return Response.redirect(
+        buildRedirectUrl(req.url, {
+          stateFilter,
+          workspaceFilter,
+          recordingCycleId,
+          rowKey,
+          notice: `recording tags updated (${result.sessionShortId})`,
         }),
         303,
       );

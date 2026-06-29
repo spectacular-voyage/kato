@@ -107,7 +107,7 @@ secretsPolicy:
 
 ## Local Web
 
-From the web UI, you can start and stop recordings, and manage your Kato data and configuration. 
+From the web UI, you can start and stop recordings, edit output tags, and manage your Kato data and configuration.
 
 ```bash
 kato web init --username <username>

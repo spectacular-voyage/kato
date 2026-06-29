@@ -558,6 +558,15 @@ a {
   font-size: 0.86rem;
 }
 
+.settings-tag-field {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.settings-tag-list {
+  margin-top: 14px;
+}
+
 .workspace-config-meta,
 .workspace-config-diagnostics,
 .workspace-config-section,
@@ -587,6 +596,11 @@ a {
 
 .workspace-config-section h2 {
   margin-bottom: 0;
+}
+
+.workspace-config-tag-field {
+  min-height: 6rem;
+  resize: vertical;
 }
 
 .workspace-config-fieldset {
@@ -1006,6 +1020,12 @@ a {
   overflow-wrap: anywhere;
 }
 
+.session-recording-default-tags {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .session-recording-popover-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1184,6 +1204,46 @@ a {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.recording-tag-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.recording-tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recording-tag {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.recording-tag-form {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: min(22rem, 100%);
+}
+
+.recording-tag-input {
+  width: min(18rem, 100%);
+  padding: 4px 8px;
+  font-size: 0.76rem;
 }
 
 .writer-policy-form {

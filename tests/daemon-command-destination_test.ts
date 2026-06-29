@@ -33,6 +33,8 @@ function makeProfile(workspaceRoot: string): ResolvedWorkspaceProfile {
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "capture.md",
     workspaceTimezone: "UTC",
+    defaultTags: [],
+    tagSuggestions: [],
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(),
   };

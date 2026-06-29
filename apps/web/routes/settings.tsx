@@ -4,6 +4,8 @@ import {
   deleteWorkspaceUsernameMapping,
   setDefaultUsername,
   setExcludeMeFromParticipantList,
+  setGlobalTagSuggestions,
+  setWorkspaceTagSuggestions,
   setWorkspaceUsernameMapping,
 } from "@kato/runtime";
 import { Head } from "fresh/runtime";
@@ -22,6 +24,13 @@ function decodeMessage(value: string | null): string | undefined {
   } catch {
     return value;
   }
+}
+
+function readTagsField(form: FormData, name: string): string[] {
+  return String(form.get(name) ?? "")
+    .split(/[,\n]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
 }
 
 export const handler = define.handlers({
@@ -120,6 +129,46 @@ export const handler = define.handlers({
                 result.deleted
                   ? `user mapping deleted: ${result.workspaceAlias}`
                   : `user mapping already absent: ${result.workspaceAlias}`,
+              )
+            }`,
+            ctx.req.url,
+          ),
+          303,
+        );
+      }
+
+      if (action === "set-global-tag-suggestions") {
+        const result = await setGlobalTagSuggestions({
+          tags: readTagsField(form, "tags"),
+          operationalLogger,
+          auditLogger,
+        });
+        return Response.redirect(
+          new URL(
+            `/settings?notice=${
+              encodeURIComponent(
+                `global tag suggestions saved (${result.tags.length})`,
+              )
+            }`,
+            ctx.req.url,
+          ),
+          303,
+        );
+      }
+
+      if (action === "set-workspace-tag-suggestions") {
+        const selector = String(form.get("selector") ?? "");
+        const result = await setWorkspaceTagSuggestions({
+          selector,
+          tags: readTagsField(form, "tags"),
+          operationalLogger,
+          auditLogger,
+        });
+        return Response.redirect(
+          new URL(
+            `/settings?notice=${
+              encodeURIComponent(
+                `workspace tag suggestions saved: ${result.workspaceAlias} (${result.tags.length})`,
               )
             }`,
             ctx.req.url,
@@ -330,6 +379,105 @@ export default define.page(async function SettingsPage(ctx) {
                           Delete Mapping
                         </button>
                       </form>
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          </article>
+
+          <article class="card span-5">
+            <h2>Global Tag Suggestions</h2>
+            <form method="post" class="login-form">
+              <input
+                type="hidden"
+                name="action"
+                value="set-global-tag-suggestions"
+              />
+              <input
+                type="hidden"
+                name="csrfToken"
+                value={ctx.state.csrfToken ?? ""}
+              />
+              <label class="form-label" for="globalTagSuggestions">
+                Tags
+              </label>
+              <textarea
+                class="form-input mono settings-tag-field"
+                id="globalTagSuggestions"
+                name="tags"
+                rows={6}
+                defaultValue={(pageData.config.tagLibraries
+                  ?.globalSuggestions ?? []).join("\n")}
+              />
+              <button class="form-button" type="submit">
+                Save Tags
+              </button>
+            </form>
+          </article>
+
+          <article class="card span-7">
+            <h2>Workspace Tag Suggestions</h2>
+            <form method="post" class="login-form">
+              <input
+                type="hidden"
+                name="action"
+                value="set-workspace-tag-suggestions"
+              />
+              <input
+                type="hidden"
+                name="csrfToken"
+                value={ctx.state.csrfToken ?? ""}
+              />
+              <label class="form-label" for="tagWorkspaceSelector">
+                Workspace
+              </label>
+              <select
+                class="form-input"
+                id="tagWorkspaceSelector"
+                name="selector"
+                required
+              >
+                <option value="">Select a workspace</option>
+                {pageData.workspaces.map((workspace) => (
+                  <option
+                    key={workspace.workspaceId}
+                    value={workspace.workspaceId}
+                  >
+                    {formatWorkspaceLabel(
+                      workspace.alias,
+                      workspace.displayName,
+                    )} ({workspace.workspaceId})
+                  </option>
+                ))}
+              </select>
+              <label class="form-label" for="workspaceTagSuggestions">
+                Tags
+              </label>
+              <textarea
+                class="form-input mono settings-tag-field"
+                id="workspaceTagSuggestions"
+                name="tags"
+                rows={6}
+              />
+              <button class="form-button" type="submit">
+                Save Workspace Tags
+              </button>
+            </form>
+            <ul class="workspace-list settings-tag-list">
+              {pageData.tagLibraryMappings.length === 0
+                ? <li class="muted">No workspace tag suggestions.</li>
+                : pageData.tagLibraryMappings.map((mapping) => (
+                  <li key={mapping.workspaceId} class="workspace-row">
+                    <div class="workspace-row-main">
+                      <div class="mono workspace-row-title">
+                        {mapping.workspaceAlias
+                          ? formatWorkspaceLabel(
+                            mapping.workspaceAlias,
+                            mapping.workspaceDisplayName,
+                          )
+                          : "<unregistered>"} ({mapping.workspaceId})
+                      </div>
+                      <div class="muted">{mapping.tags.join(", ")}</div>
                     </div>
                   </li>
                 ))}

@@ -142,6 +142,7 @@ export function applyWorkspaceProfileSnapshot(
   output.workspaceRootSnapshot = profile.workspaceRoot;
   output.resolvedDefaultOutputDir = resolvedDefaultOutputDir;
   output.filenameTemplate = profile.filenameTemplate;
+  output.defaultTags = [...profile.defaultTags];
   output.writerFeatureFlags = { ...profile.writerFeatureFlags };
 }
 
@@ -164,6 +165,7 @@ export function createWorkspaceOutputState(options: {
     workspaceRootSnapshot: options.profile.workspaceRoot,
     resolvedDefaultOutputDir: options.resolvedDefaultOutputDir,
     filenameTemplate: options.profile.filenameTemplate,
+    defaultTags: [...options.profile.defaultTags],
     writerFeatureFlags: { ...options.profile.writerFeatureFlags },
     writeCursor: options.writeCursor,
     createdAt: options.nowIso,

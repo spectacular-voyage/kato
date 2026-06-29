@@ -4,6 +4,7 @@ import type {
   MarkdownFrontmatterConfig,
   SecretsPolicyConfig,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
   SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
   UserConfig,
@@ -11,6 +12,7 @@ import type {
 import {
   extractSnippet,
   hasWriterFeatureFlagOverrides,
+  resolveEffectiveOutputMetadata,
   resolveEffectiveWriterFeatureFlags,
 } from "@kato/shared";
 import {
@@ -465,6 +467,7 @@ function createOutputOverridesFromWorkspaceProfile(
     writerFeatureFlags: profile.writerFeatureFlags,
     writerFeatureFlagOverrides,
     workspaceTimezone: profile.workspaceTimezone,
+    frontmatterTags: profile.defaultTags,
     preferredUsername,
     captureIncludeSystemEvents,
     userConfig,
@@ -478,6 +481,7 @@ function createOutputOverrides(options: {
   writerFeatureFlagOverrides?:
     SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
   workspaceTimezone: string;
+  frontmatterTags?: string[];
   preferredUsername?: string;
   captureIncludeSystemEvents: boolean;
   userConfig: UserConfig;
@@ -496,6 +500,9 @@ function createOutputOverrides(options: {
     includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
+    ...(options.frontmatterTags && options.frontmatterTags.length > 0
+      ? { frontmatterTags: options.frontmatterTags }
+      : {}),
     participantUsername: resolveFrontmatterParticipantUsername(
       {
         markdownFrontmatter: options.markdownFrontmatter,
@@ -546,6 +553,7 @@ function createOutputOverrides(options: {
 // otherwise the persisted snapshot, plus per-output writer flag overrides.
 export async function resolvePersistedWorkspaceOutputOverrides(options: {
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number];
+  sessionDefaults?: SessionOutputMetadataV1;
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
@@ -556,6 +564,7 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
     workspaceId: options.output.workspaceId,
   });
   const writerFeatureFlagOverrides = options.output.writerFeatureFlagOverrides;
+  let workspaceDefaultTags: string[] = [];
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
   );
@@ -563,12 +572,22 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
     const profile = await options.workspaceProfileResolver.resolveForCommand(
       registered,
     );
-    return createOutputOverridesFromWorkspaceProfile(
+    workspaceDefaultTags = profile.defaultTags;
+    const effectiveMetadata = resolveEffectiveOutputMetadata(
+      options.sessionDefaults,
+      options.output.outputMetadata,
+      workspaceDefaultTags,
+    );
+    const outputOverrides = createOutputOverridesFromWorkspaceProfile(
       profile,
       options.captureIncludeSystemEvents,
       options.userConfig,
       writerFeatureFlagOverrides,
     );
+    if (effectiveMetadata.tags && effectiveMetadata.tags.length > 0) {
+      outputOverrides.frontmatterTags = effectiveMetadata.tags;
+    }
+    return outputOverrides;
   }
 
   if (options.output.sourceConfigPath) {
@@ -577,6 +596,13 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
       if (stat.isFile) {
         const overrides = await loadWorkspaceConfigOverrides(
           options.output.sourceConfigPath,
+        );
+        workspaceDefaultTags = overrides.defaultTags ??
+          options.output.defaultTags ?? [];
+        const effectiveMetadata = resolveEffectiveOutputMetadata(
+          options.sessionDefaults,
+          options.output.outputMetadata,
+          workspaceDefaultTags,
         );
         return createOutputOverrides({
           workspaceId: options.output.workspaceId,
@@ -589,6 +615,7 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
           writerFeatureFlagOverrides,
           workspaceTimezone: overrides.workspaceTimezone ??
             DEFAULT_WORKSPACE_TIMEZONE,
+          frontmatterTags: effectiveMetadata.tags,
           preferredUsername,
           captureIncludeSystemEvents: options.captureIncludeSystemEvents,
           userConfig: options.userConfig,
@@ -601,6 +628,11 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
     }
   }
 
+  const effectiveMetadata = resolveEffectiveOutputMetadata(
+    options.sessionDefaults,
+    options.output.outputMetadata,
+    options.output.defaultTags,
+  );
   return createOutputOverrides({
     workspaceId: options.output.workspaceId,
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
@@ -609,6 +641,7 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
     ),
     writerFeatureFlagOverrides,
     workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
+    frontmatterTags: effectiveMetadata.tags,
     preferredUsername,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
     userConfig: options.userConfig,
@@ -2069,6 +2102,7 @@ async function processPersistentRecordingUpdates(
         }
         const outputOverrides = await resolvePersistedWorkspaceOutputOverrides({
           output,
+          sessionDefaults: metadata.outputMetadataDefaults,
           captureIncludeSystemEvents,
           workspaceCatalog,
           workspaceProfileResolver,
