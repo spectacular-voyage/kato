@@ -49,4 +49,5 @@ created: 1781195549137
 - Credential-shaped test fixtures are built from split literals so repository push protection does not see contiguous fake secrets.
 - CodeRabbit path instructions now tell automated review to respect Dendron `updated` frontmatter in `documentation/notes/**`.
 - npm package assembly now uses the public Kato homepage consistently and improves generated top-package README content.
+- Kato Web now pins Vite to a patched 7.3.x release so `deno task audit` passes the high-severity gate.
 - Session output metadata now includes `filenameSlug`, and generated workspace paths can use it as an explicit `{snippetSlug}` source before falling back to the extracted session snippet.

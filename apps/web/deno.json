@@ -33,7 +33,7 @@
     "preact": "npm:preact@^10.29.2",
     "@preact/signals": "npm:@preact/signals@^2.9.0",
     "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@^1.1.2",
-    "vite": "npm:vite@^7.3.3"
+    "vite": "npm:vite@^7.3.5"
   },
   "compilerOptions": {
     "lib": [

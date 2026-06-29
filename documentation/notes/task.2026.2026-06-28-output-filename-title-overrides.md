@@ -148,4 +148,4 @@ created: 1782688387000
 - [x] Decide whether to add an explicit existing-output rename/retarget task after the creation-time slug path lands.
 - [x] Update developer and user documentation after behavior is implemented.
 - [x] Run focused tests, `deno task check`, and the non-audit CI gates.
-- [ ] Re-run full `deno task ci` after the current Vite audit advisory is resolved.
+- [x] Re-run full `deno task ci` after the current Vite audit advisory is resolved.
