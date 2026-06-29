@@ -925,6 +925,24 @@ a {
   width: 100%;
 }
 
+.session-recording-slug-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-recording-reset-button {
+  margin-top: 0;
+  padding: 12px 10px;
+}
+
+.session-recording-preview {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .session-recording-popover-actions {
   display: flex;
   flex-wrap: wrap;

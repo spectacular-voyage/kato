@@ -4,6 +4,7 @@ import {
   type MarkdownFrontmatterConfig,
   type SecretsPolicyConfig,
   type SessionMetadataV1,
+  type SessionOutputMetadataV1,
   type UserConfig,
 } from "@kato/shared";
 import {
@@ -66,6 +67,10 @@ export interface RunSessionRecordingActionOptions {
   action: SessionRecordingWebAction;
   sessionId: string;
   workspaceSelector: string;
+  creationMetadata?: Pick<
+    SessionOutputMetadataV1,
+    "displayTitle" | "filenameSlug"
+  >;
   katoDir?: string;
   now?: () => Date;
   operationalLogger?: StructuredLogger;
@@ -152,6 +157,25 @@ function resolveConversationTitle(
     return snippet;
   }
   return fallback;
+}
+
+function normalizeMetadataString(
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeCreationMetadata(
+  metadata: RunSessionRecordingActionOptions["creationMetadata"],
+): Pick<SessionOutputMetadataV1, "displayTitle" | "filenameSlug"> | undefined {
+  const displayTitle = normalizeMetadataString(metadata?.displayTitle);
+  const filenameSlug = normalizeMetadataString(metadata?.filenameSlug);
+  const normalized = {
+    ...(displayTitle ? { displayTitle } : {}),
+    ...(filenameSlug ? { filenameSlug } : {}),
+  };
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -856,6 +880,9 @@ export async function runSessionRecordingAction(
       workspaceId: workspace.workspaceId,
     }) ?? UNKNOWN_OUTPUT_USERNAME;
     return await withSessionMutationLock(options.sessionId, async () => {
+      const creationMetadata = normalizeCreationMetadata(
+        options.creationMetadata,
+      );
       const actionNow = now();
       const nowIso = actionNow.toISOString();
       const metadata = await resolveSessionMetadata(
@@ -868,10 +895,11 @@ export async function runSessionRecordingAction(
         { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
-      const title = resolveConversationTitle(
-        history.events,
-        metadata.providerSessionId,
-      );
+      const title = creationMetadata?.displayTitle ??
+        resolveConversationTitle(
+          history.events,
+          metadata.providerSessionId,
+        );
       const outputs = readWorkspaceOutputs(metadata);
       const matchingOutputs = outputs.filter((entry) =>
         entry.workspaceId === workspace.workspaceId
@@ -885,6 +913,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
+          filenameSlug: creationMetadata?.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,
@@ -931,6 +960,9 @@ export async function runSessionRecordingAction(
           profile,
           resolved.resolvedDefaultOutputDir,
         );
+        if (creationMetadata) {
+          output.outputMetadata = { ...creationMetadata };
+        }
         const recordingCycleId = openWorkspaceOutputCycle(
           output,
           writeCursor,
@@ -968,6 +1000,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
+          filenameSlug: creationMetadata?.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,
@@ -1013,6 +1046,9 @@ export async function runSessionRecordingAction(
           profile,
           resolved.resolvedDefaultOutputDir,
         );
+        if (creationMetadata) {
+          output.outputMetadata = { ...creationMetadata };
+        }
         openWorkspaceOutputCycle(
           output,
           writeCursor,

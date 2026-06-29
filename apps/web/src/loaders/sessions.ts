@@ -121,6 +121,8 @@ export interface WorkspaceOption {
   workspaceId: string;
   alias: string;
   displayName?: string;
+  filenameTemplate?: string;
+  filenameTemplateIncludesSnippet?: boolean;
 }
 
 function resolveActivityTimestamp(
@@ -259,6 +261,38 @@ async function resolveWorkspaceDefaultWriterFlagsById(
     }
   }
   return flagsById;
+}
+
+async function resolveWorkspaceOptions(
+  workspaceEntries: RegisteredWorkspace[],
+): Promise<WorkspaceOption[]> {
+  const resolver = new WorkspaceProfileResolver();
+  const options = await Promise.all(
+    workspaceEntries.map(async (entry): Promise<WorkspaceOption> => {
+      try {
+        const profile = await resolver.resolveForCommand(entry);
+        return {
+          workspaceId: entry.workspaceId,
+          alias: entry.alias,
+          displayName: entry.displayName,
+          filenameTemplate: profile.filenameTemplate,
+          filenameTemplateIncludesSnippet: profile.filenameTemplate.includes(
+            "{snippetSlug}",
+          ),
+        };
+      } catch {
+        return {
+          workspaceId: entry.workspaceId,
+          alias: entry.alias,
+          displayName: entry.displayName,
+        };
+      }
+    }),
+  );
+  return options.sort((a, b) =>
+    a.alias.localeCompare(b.alias) ||
+    a.workspaceId.localeCompare(b.workspaceId)
+  );
 }
 
 function sortRecordings(
@@ -930,16 +964,7 @@ export async function loadSessionsPageData(
       workspaceEntries,
     ),
   ]);
-  const workspaceOptions = workspaceEntries
-    .map((entry) => ({
-      workspaceId: entry.workspaceId,
-      alias: entry.alias,
-      displayName: entry.displayName,
-    }))
-    .sort((a, b) =>
-      a.alias.localeCompare(b.alias) ||
-      a.workspaceId.localeCompare(b.workspaceId)
-    );
+  const workspaceOptions = await resolveWorkspaceOptions(workspaceEntries);
 
   return {
     includeStale,

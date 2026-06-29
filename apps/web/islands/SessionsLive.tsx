@@ -12,9 +12,11 @@ import {
 import {
   buildWorkspaceSelectorIds,
   canStopSessionRecording,
+  deriveFilenameSlugFromTitle,
   readRememberedSessionsWorkspace,
   rememberSessionsWorkspace,
   resolveDefaultWorkspaceSelectorValue,
+  resolveTitleDerivedFilenameSlug,
   type SessionRecordingAction,
 } from "../src/session_recording_view_model.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
@@ -146,6 +148,7 @@ function SessionRecordingActions(
     includeStale: boolean;
     workspaceFilter?: string;
     workspaceFilterId?: string;
+    sessionSnippet?: string;
     csrfToken?: string;
     workspaceOptions: SessionsPageData["workspaceOptions"];
   },
@@ -164,7 +167,21 @@ function SessionRecordingActions(
       rememberedWorkspaceId: readRememberedSessionsWorkspace(),
     }) ?? ""
   );
+  const [displayTitle, setDisplayTitle] = useState(
+    () => props.sessionSnippet ?? "",
+  );
+  const [filenameSlug, setFilenameSlug] = useState(
+    () => deriveFilenameSlugFromTitle(props.sessionSnippet),
+  );
+  const [filenameSlugCustomized, setFilenameSlugCustomized] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const resetCreationFields = () => {
+    const nextTitle = props.sessionSnippet ?? "";
+    setDisplayTitle(nextTitle);
+    setFilenameSlug(deriveFilenameSlugFromTitle(nextTitle));
+    setFilenameSlugCustomized(false);
+  };
 
   useEffect(() => {
     const resolvedWorkspace = resolveDefaultWorkspaceSelectorValue({
@@ -191,6 +208,15 @@ function SessionRecordingActions(
     props.workspaceOptions,
     selectedWorkspace,
   ]);
+
+  useEffect(() => {
+    if (filenameSlugCustomized) {
+      return;
+    }
+    const nextTitle = props.sessionSnippet ?? "";
+    setDisplayTitle(nextTitle);
+    setFilenameSlug(deriveFilenameSlugFromTitle(nextTitle));
+  }, [filenameSlugCustomized, props.sessionSnippet]);
 
   useEffect(() => {
     if (!openAction || pendingCreateAction !== null) {
@@ -229,8 +255,27 @@ function SessionRecordingActions(
     if (pendingCreateAction !== null) {
       return;
     }
-    setOpenAction((current) => current === action ? null : action);
+    setOpenAction((current) => {
+      if (current === action) {
+        return null;
+      }
+      resetCreationFields();
+      return action;
+    });
   };
+
+  const selectedWorkspaceOption = props.workspaceOptions.find((option) =>
+    option.workspaceId === selectedWorkspace
+  );
+  const selectedTemplate = selectedWorkspaceOption?.filenameTemplate;
+  const selectedTemplateUsesSnippet =
+    selectedWorkspaceOption?.filenameTemplateIncludesSnippet ?? true;
+  const filenamePreview = selectedTemplate
+    ? selectedTemplate.replaceAll(
+      "{snippetSlug}",
+      filenameSlug || "conversation",
+    )
+    : filenameSlug || "conversation";
 
   const handleCreateSubmit =
     (action: SessionRecordingAction) => (event: Event) => {
@@ -315,6 +360,72 @@ function SessionRecordingActions(
                   </option>
                 ))}
               </select>
+              <label class="form-label" for={`display-title-${openAction}`}>
+                Title
+              </label>
+              <input
+                id={`display-title-${openAction}`}
+                class="form-input"
+                name="displayTitle"
+                type="text"
+                value={displayTitle}
+                onInput={(event) => {
+                  const nextTitle = (event.currentTarget as HTMLInputElement)
+                    .value;
+                  setDisplayTitle(nextTitle);
+                  setFilenameSlug((current) =>
+                    resolveTitleDerivedFilenameSlug({
+                      title: nextTitle,
+                      currentFilenameSlug: current,
+                      filenameSlugCustomized,
+                    })
+                  );
+                }}
+              />
+              {selectedTemplateUsesSnippet
+                ? (
+                  <>
+                    <label
+                      class="form-label"
+                      for={`filename-slug-${openAction}`}
+                    >
+                      Filename snippet
+                    </label>
+                    <div class="session-recording-slug-row">
+                      <input
+                        id={`filename-slug-${openAction}`}
+                        class="form-input"
+                        name="filenameSlug"
+                        type="text"
+                        value={filenameSlug}
+                        onInput={(event) => {
+                          setFilenameSlug(
+                            (event.currentTarget as HTMLInputElement).value,
+                          );
+                          setFilenameSlugCustomized(true);
+                        }}
+                      />
+                      <button
+                        class="secondary-button session-recording-reset-button"
+                        type="button"
+                        disabled={!filenameSlugCustomized ||
+                          pendingCreateAction !== null}
+                        onClick={() => {
+                          setFilenameSlug(
+                            deriveFilenameSlugFromTitle(displayTitle),
+                          );
+                          setFilenameSlugCustomized(false);
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </>
+                )
+                : null}
+              <div class="session-recording-preview muted mono">
+                Filename: {filenamePreview}
+              </div>
               <div class="session-recording-popover-actions">
                 <button
                   class="secondary-button"
@@ -492,6 +603,7 @@ export default function SessionsLive(
                       includeStale={pageData.includeStale}
                       workspaceFilter={pageData.workspaceFilter}
                       workspaceFilterId={pageData.workspaceFilterId}
+                      sessionSnippet={row.snippet}
                       csrfToken={props.csrfToken}
                       workspaceOptions={pageData.workspaceOptions}
                     />

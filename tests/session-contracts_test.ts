@@ -191,6 +191,7 @@ Deno.test(
 
     metadata.outputMetadataDefaults = {
       displayTitle: "Session Title",
+      filenameSlug: "session-title",
       tags: ["alpha", "beta"],
       personaName: "Investigator",
       participantUsername: "dave",
@@ -198,6 +199,7 @@ Deno.test(
     const output = makeWorkspaceOutput();
     output.outputMetadata = {
       displayTitle: "Output Title",
+      filenameSlug: "output-title",
       tags: ["gamma"],
     };
     output.writerFeatureFlagOverrides = {
@@ -223,6 +225,12 @@ Deno.test(
       tags: ["fine", 42 as unknown as string],
     };
     assertEquals(isSessionMetadataV1(nonStringTags), false);
+
+    const blankFilenameSlug = makeSessionMetadata();
+    blankFilenameSlug.outputMetadataDefaults = {
+      filenameSlug: "   ",
+    };
+    assertEquals(isSessionMetadataV1(blankFilenameSlug), false);
 
     const badOutputMetadata = makeSessionMetadata();
     const output = makeWorkspaceOutput();

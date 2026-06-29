@@ -97,8 +97,9 @@ Supporting web files worth knowing:
   handlers.
 - `apps/web/src/session_recording_actions.ts`: shared web mutation flows for
   Sessions and Recordings recording/capture start-stop-`Re-start` actions,
-  including same-file exclusivity guards.
-- `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync.
+  including creation-time output metadata (`displayTitle`/`filenameSlug`) and
+  same-file exclusivity guards.
+- `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`filenameSlug`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync.
 - `apps/web/src/output_writer_policy.ts` + `apps/web/src/writer_policy_controls.tsx`: default/override/effective writer-policy projection and the compact tri-state (default/include/exclude) controls rendered on Recordings rows.
 - `apps/web/src/session_routes.ts`: canonical href builders for
   `/maintenance`, `/sessions`, and session anchor links.

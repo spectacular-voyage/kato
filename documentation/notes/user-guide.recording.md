@@ -50,6 +50,8 @@ discovered session. The Recordings page shows recording-output state per file,
 including active outputs and stopped outputs that can be re-armed when the
 saved file still exists and passes policy.
 
+When starting from Kato Web, the workspace chooser also lets you set the output title and filename snippet before the file is created. The title is written as markdown frontmatter when frontmatter is enabled. The filename snippet feeds `{snippetSlug}` in the selected workspace filename template; if the template does not use `{snippetSlug}`, the filename snippet does not affect the generated path.
+
 ## Stopping
 
 Use `::stop` to stop all active recordings from the chat, or

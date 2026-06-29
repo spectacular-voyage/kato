@@ -27,6 +27,7 @@ created: 1781195549137
 - `mode: detect` logs detections without changing output, while `mode: off` disables Kato's redaction pass. Missing config defaults to `redact`.
 - Kato Web and daemon export paths now re-sanitize legacy twin-backed history during replay, reducing the chance that older unredacted twins resurface in snippets or exports after upgrade.
 - Session snippets are pinned to the source-head first user message during ingestion so restart/replay bookkeeping is less likely to change the displayed session label.
+- Kato Web `New capture` and `New recording` popovers can set an output title and filename snippet before the output file is created. Title changes derive the filename snippet until the snippet is manually customized.
 - `kato restart` now also restarts Kato Web when web config exists, so daemon and web processes are less likely to drift across local upgrades.
 - The user guide has been expanded into focused pages for installation, quickstart, recording, web, workspaces, configuration, and troubleshooting.
 - README coverage now includes install/upgrade guidance, supported platforms, secrets redaction behavior, and local web startup basics.
@@ -48,3 +49,4 @@ created: 1781195549137
 - Credential-shaped test fixtures are built from split literals so repository push protection does not see contiguous fake secrets.
 - CodeRabbit path instructions now tell automated review to respect Dendron `updated` frontmatter in `documentation/notes/**`.
 - npm package assembly now uses the public Kato homepage consistently and improves generated top-package README content.
+- Session output metadata now includes `filenameSlug`, and generated workspace paths can use it as an explicit `{snippetSlug}` source before falling back to the extracted session snippet.

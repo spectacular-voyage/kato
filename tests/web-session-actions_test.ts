@@ -4,7 +4,7 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
-import { dirname, fromFileUrl, join } from "@std/path";
+import { basename, dirname, fromFileUrl, join } from "@std/path";
 import type { ConversationEvent, SessionMetadataV1 } from "@kato/shared";
 import { mapConversationEventsToTwin } from "../apps/daemon/src/mod.ts";
 import {
@@ -103,6 +103,7 @@ async function setupWorkspaceFixture(
     writerUseDendronStyleWikilinks?: boolean;
     writerRelativizeLocalLinks?: boolean;
     createDendronConfig?: boolean;
+    filenameTemplate?: string;
   } = {},
 ): Promise<{
   katoDir: string;
@@ -120,7 +121,9 @@ async function setupWorkspaceFixture(
     [
       "workspaceId: ws-alpha",
       "defaultOutputDir: notes",
-      'filenameTemplate: "{provider}-{sessionShortId}.md"',
+      `filenameTemplate: "${
+        options.filenameTemplate ?? "{provider}-{sessionShortId}.md"
+      }"`,
       ...(options.writerUseDendronStyleWikilinks === undefined &&
           options.writerRelativizeLocalLinks === undefined
         ? []
@@ -261,6 +264,59 @@ Deno.test("runSessionRecordingAction creates a new recording file with frontmatt
       "title: 'I want to add authentication to my app. Can you help?'",
     );
   });
+});
+
+Deno.test("runSessionRecordingAction recording uses creation title and filename slug metadata", async () => {
+  await withTestTempDir(
+    "web-session-record-action-custom-title-",
+    async (homeDir) => {
+      const { katoDir, alphaRoot } = await setupWorkspaceFixture(homeDir, {
+        filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md",
+      });
+      const sessionFilePath = join(homeDir, "provider-session.jsonl");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-custom-title",
+        providerSessionId: "provider-session-custom-title",
+        sourceFilePath: sessionFilePath,
+      });
+
+      const result = await runSessionRecordingAction({
+        action: "new-recording",
+        sessionId: "sess-web-custom-title",
+        workspaceSelector: "alpha",
+        creationMetadata: {
+          displayTitle: "Useful Recording Title",
+          filenameSlug: "better filename seed",
+        },
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+
+      assertEquals(result.mode, "record");
+      assertEquals(
+        result.targetPath.startsWith(join(alphaRoot, "notes")),
+        true,
+      );
+      assertStringIncludes(
+        basename(result.targetPath),
+        "better-filename-seed",
+      );
+
+      const sessionStore = new PersistentSessionStateStore({ katoDir });
+      const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadataAfter);
+      assertEquals(metadataAfter.workspaceOutputs?.[0]?.outputMetadata, {
+        displayTitle: "Useful Recording Title",
+        filenameSlug: "better filename seed",
+      });
+
+      const written = await Deno.readTextFile(result.targetPath);
+      assertStringIncludes(written, "title: 'Useful Recording Title'");
+    },
+  );
 });
 
 Deno.test("runSessionRecordingAction creates a fresh recording destination and stops the prior engaged output", async () => {
@@ -442,6 +498,59 @@ Deno.test("runSessionRecordingAction capture creates a fresh destination and pre
       nextOutput.recordingCycles[0]?.recordingCycleId,
     );
   });
+});
+
+Deno.test("runSessionRecordingAction capture uses creation title and filename slug metadata", async () => {
+  await withTestTempDir(
+    "web-session-capture-action-custom-title-",
+    async (homeDir) => {
+      const { katoDir, alphaRoot } = await setupWorkspaceFixture(homeDir, {
+        filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md",
+      });
+      const sessionFilePath = join(homeDir, "provider-session.jsonl");
+      await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+
+      await createSessionFixture({
+        katoDir,
+        sessionId: "sess-web-capture-custom-title",
+        providerSessionId: "provider-session-capture-custom-title",
+        sourceFilePath: sessionFilePath,
+      });
+
+      const result = await runSessionRecordingAction({
+        action: "new-capture",
+        sessionId: "sess-web-capture-custom-title",
+        workspaceSelector: "alpha",
+        creationMetadata: {
+          displayTitle: "Useful Capture Title",
+          filenameSlug: "capture filename seed",
+        },
+        katoDir,
+        now: () => new Date("2026-03-17T17:05:00.000Z"),
+      });
+
+      assertEquals(result.mode, "capture");
+      assertEquals(
+        result.targetPath.startsWith(join(alphaRoot, "notes")),
+        true,
+      );
+      assertStringIncludes(
+        basename(result.targetPath),
+        "capture-filename-seed",
+      );
+
+      const sessionStore = new PersistentSessionStateStore({ katoDir });
+      const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+      assertExists(metadataAfter);
+      assertEquals(metadataAfter.workspaceOutputs?.[0]?.outputMetadata, {
+        displayTitle: "Useful Capture Title",
+        filenameSlug: "capture filename seed",
+      });
+
+      const written = await Deno.readTextFile(result.targetPath);
+      assertStringIncludes(written, "title: 'Useful Capture Title'");
+    },
+  );
 });
 
 Deno.test("runSessionRecordingAction capture writes relative local links from twin-backed history by default", async () => {

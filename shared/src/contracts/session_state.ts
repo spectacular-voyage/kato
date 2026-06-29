@@ -34,6 +34,7 @@ export interface SessionWorkspaceOutputDestinationV1 {
 // frontmatter derived from it stays descriptive.
 export interface SessionOutputMetadataV1 {
   displayTitle?: string;
+  filenameSlug?: string;
   tags?: string[];
   personaName?: string;
   participantUsername?: string;
@@ -221,6 +222,12 @@ export function isSessionOutputMetadataV1(
   if (
     value["displayTitle"] !== undefined &&
     !isNonEmptyString(value["displayTitle"])
+  ) {
+    return false;
+  }
+  if (
+    value["filenameSlug"] !== undefined &&
+    !isNonEmptyString(value["filenameSlug"])
   ) {
     return false;
   }

@@ -99,6 +99,42 @@ Deno.test(
 );
 
 Deno.test(
+  "renderWorkspaceFilename uses custom filename slug before extracted snippet",
+  () => {
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile(),
+        provider: "codex",
+        sessionId: "session-filename-custom-slug",
+        now: new Date("2026-02-22T10:00:00.000Z"),
+        outputUsername: "Jane User",
+        filenameSlug: "Better Conversation Name",
+        boundarySnapshot: makeBoundarySnapshot("bad first line"),
+      }),
+      "2026-02-22_0200-better-conversation-name-codex.md",
+    );
+  },
+);
+
+Deno.test(
+  "renderWorkspaceFilename falls back to extracted snippet when custom filename slug is unsafe",
+  () => {
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile(),
+        provider: "codex",
+        sessionId: "session-filename-custom-slug-unsafe",
+        now: new Date("2026-02-22T10:00:00.000Z"),
+        outputUsername: "Jane User",
+        filenameSlug: "!!! ???",
+        boundarySnapshot: makeBoundarySnapshot("Helpful fallback"),
+      }),
+      "2026-02-22_0200-helpful-fallback-codex.md",
+    );
+  },
+);
+
+Deno.test(
   "renderWorkspaceFilename falls back when normalization collapses to dot segments",
   () => {
     assertEquals(

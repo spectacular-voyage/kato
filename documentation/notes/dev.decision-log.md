@@ -939,3 +939,24 @@ created: 1771779490894
   - Build tag library/output tagging UI on this layer ([[task.2026.2026-06-11-output-tagging]]).
   - Build persona selection/detection on `personaName`/`participantUsername` ([[task.2026.2026-05-28-persona-support]]).
   - Decide whether Sessions rows should also expose the tri-state controls once the Recordings-page UI has soaked.
+
+### Creation-Time Output Title And Filename Snippet Overrides
+
+- Decision:
+  - Add `filenameSlug?: string` to `SessionOutputMetadataV1` alongside `displayTitle`, `tags`, and persona fields.
+  - Keep this feature creation-scoped: the Sessions-page `New capture` and `New recording` popovers can set `displayTitle` and `filenameSlug`; post-start title editing and existing-file rename/retarget remain separate workflows.
+  - Treat `displayTitle` as the human-facing/frontmatter title and `filenameSlug` as the `{snippetSlug}` template input. Title changes in the popover update the filename snippet until the user manually customizes the snippet, with a reset affordance to derive from title again.
+  - Resolve `{snippetSlug}` from `filenameSlug` first when present and safely slugifiable, then fall back to the extracted session snippet. If a custom snippet normalizes to nothing, use the normal conversation-derived fallback rather than creating an unsafe path.
+  - Persist the concrete creation metadata onto the new `workspaceOutputs[]` entry and pass `displayTitle` to markdown frontmatter rendering for the initial capture/recording output.
+- Owner: Kato engineering
+- Date: 2026-06-28
+- Why:
+  - Users often know the useful output name before starting a capture/recording, while the first meaningful provider message may be a poor filename seed.
+  - Creation-time filename customization solves the common case without the file-moving and append-retarget risks of post-start rename.
+- Tradeoffs:
+  - Workspaces whose `filenameTemplate` omits `{snippetSlug}` ignore the snippet control for path generation; the popover uses the selected workspace template to decide whether to show the control.
+  - In-chat command flags such as `--title` or `--slug` are deferred until command option parsing is explicitly designed; explicit path arguments remain the expert escape hatch.
+- Follow-up tasks:
+  - Add output tagging controls to the same creation popover ([[task.2026.2026-06-11-output-tagging]]).
+  - Add persona/participant controls to the same creation popover ([[task.2026.2026-05-28-persona-support]]).
+  - Design explicit existing-output rename/retarget separately if creation-time naming does not cover enough workflows.

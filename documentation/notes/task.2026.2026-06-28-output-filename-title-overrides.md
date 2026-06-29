@@ -131,20 +131,21 @@ created: 1782688387000
 
 ## Implementation Plan
 
-- [ ] Confirm field naming and first-slice scope: `displayTitle` plus `filenameSlug`, with full path override deferred unless needed.
-- [ ] Extend `SessionOutputMetadataV1` and validation for optional `filenameSlug`.
-- [ ] Add focused contract tests for `filenameSlug`.
-- [ ] Extend workspace filename rendering to accept a metadata/custom slug source.
-- [ ] Add workspace path tests for custom slug rendering and unsafe slug fallback.
-- [ ] Extend web capture/recording actions to accept creation metadata.
-- [ ] Persist creation metadata onto new workspace outputs.
-- [ ] Ensure markdown frontmatter title uses `displayTitle` for new outputs.
-- [ ] Project filename-template/slug-preview data into Sessions view models.
-- [ ] Extend the existing Sessions New Capture/New Recording workspace chooser popovers with title and filename snippet controls.
-- [ ] Add popover dirty-state behavior so title changes update the snippet until the snippet is manually customized.
-- [ ] Add a reset affordance for returning the snippet to title-derived behavior.
-- [ ] Keep tag/persona controls coordinated with [[task.2026.2026-06-11-output-tagging]] and [[task.2026.2026-05-28-persona-support]].
-- [ ] Add web action and UI tests for custom title/slug creation.
-- [ ] Decide whether to add an explicit existing-output rename/retarget task after the creation-time slug path lands.
-- [ ] Update developer and user documentation after behavior is implemented.
-- [ ] Run focused tests, then `deno task check`, then `deno task ci`.
+- [x] Confirm field naming and first-slice scope: `displayTitle` plus `filenameSlug`, with full path override deferred unless needed.
+- [x] Extend `SessionOutputMetadataV1` and validation for optional `filenameSlug`.
+- [x] Add focused contract tests for `filenameSlug`.
+- [x] Extend workspace filename rendering to accept a metadata/custom slug source.
+- [x] Add workspace path tests for custom slug rendering and unsafe slug fallback.
+- [x] Extend web capture/recording actions to accept creation metadata.
+- [x] Persist creation metadata onto new workspace outputs.
+- [x] Ensure markdown frontmatter title uses `displayTitle` for new outputs.
+- [x] Project filename-template/slug-preview data into Sessions view models.
+- [x] Extend the existing Sessions New Capture/New Recording workspace chooser popovers with title and filename snippet controls.
+- [x] Add popover dirty-state behavior so title changes update the snippet until the snippet is manually customized.
+- [x] Add a reset affordance for returning the snippet to title-derived behavior.
+- [x] Keep tag/persona controls coordinated with [[task.2026.2026-06-11-output-tagging]] and [[task.2026.2026-05-28-persona-support]].
+- [x] Add web action and UI tests for custom title/slug creation.
+- [x] Decide whether to add an explicit existing-output rename/retarget task after the creation-time slug path lands.
+- [x] Update developer and user documentation after behavior is implemented.
+- [x] Run focused tests, `deno task check`, and the non-audit CI gates.
+- [ ] Re-run full `deno task ci` after the current Vite audit advisory is resolved.

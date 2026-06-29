@@ -24,17 +24,20 @@ Deno.test(
     const effective = resolveEffectiveOutputMetadata(
       {
         displayTitle: "Session Title",
+        filenameSlug: "session-title",
         personaName: "Session Persona",
         participantUsername: "session-user",
       },
       {
         displayTitle: "Output Title",
+        filenameSlug: "output-title",
         participantUsername: "output-user",
       },
     );
 
     assertEquals(effective, {
       displayTitle: "Output Title",
+      filenameSlug: "output-title",
       personaName: "Session Persona",
       participantUsername: "output-user",
     });

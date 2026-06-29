@@ -2,12 +2,14 @@ import { assertEquals } from "@std/assert";
 import {
   buildWorkspaceSelectorIds,
   canStopSessionRecording,
+  deriveFilenameSlugFromTitle,
   readRememberedSessionsWorkspace,
   recordingsPageStaleFilterLabel,
   recordingsPageStateLabel,
   recordingsPageStopActionLabel,
   rememberSessionsWorkspace,
   resolveDefaultWorkspaceSelectorValue,
+  resolveTitleDerivedFilenameSlug,
   SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
 } from "../apps/web/src/session_recording_view_model.ts";
 import type {
@@ -84,6 +86,33 @@ Deno.test("buildWorkspaceSelectorIds returns stable popover ids", () => {
     titleId: "session-recording-popover-title-new-recording",
     selectId: "session-recording-popover-select-new-recording",
   });
+});
+
+Deno.test("deriveFilenameSlugFromTitle normalizes titles for filename snippets", () => {
+  assertEquals(
+    deriveFilenameSlugFromTitle("  Better Conversation: Name!  "),
+    "better-conversation-name",
+  );
+  assertEquals(deriveFilenameSlugFromTitle("!!!"), "");
+});
+
+Deno.test("resolveTitleDerivedFilenameSlug preserves manually customized snippets", () => {
+  assertEquals(
+    resolveTitleDerivedFilenameSlug({
+      title: "Fresh Title",
+      currentFilenameSlug: "old-value",
+      filenameSlugCustomized: false,
+    }),
+    "fresh-title",
+  );
+  assertEquals(
+    resolveTitleDerivedFilenameSlug({
+      title: "Fresh Title",
+      currentFilenameSlug: "hand-picked",
+      filenameSlugCustomized: true,
+    }),
+    "hand-picked",
+  );
 });
 
 Deno.test("recordings page labels use armed/disarm wording for idle engaged rows", () => {

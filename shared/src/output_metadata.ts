@@ -28,6 +28,8 @@ export function resolveEffectiveOutputMetadata(
 ): SessionOutputMetadataV1 {
   const displayTitle = outputMetadata?.displayTitle ??
     sessionDefaults?.displayTitle;
+  const filenameSlug = outputMetadata?.filenameSlug ??
+    sessionDefaults?.filenameSlug;
   const personaName = outputMetadata?.personaName ??
     sessionDefaults?.personaName;
   const participantUsername = outputMetadata?.participantUsername ??
@@ -38,6 +40,7 @@ export function resolveEffectiveOutputMetadata(
   ]);
   return {
     ...(displayTitle !== undefined ? { displayTitle } : {}),
+    ...(filenameSlug !== undefined ? { filenameSlug } : {}),
     ...(tags.length > 0 ? { tags } : {}),
     ...(personaName !== undefined ? { personaName } : {}),
     ...(participantUsername !== undefined ? { participantUsername } : {}),

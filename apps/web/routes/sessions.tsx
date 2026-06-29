@@ -99,10 +99,16 @@ export const handler = define.handlers({
         if (workspaceSelector.length === 0) {
           throw new Error("Workspace selector is required");
         }
+        const displayTitle = String(form.get("displayTitle") ?? "").trim();
+        const filenameSlug = String(form.get("filenameSlug") ?? "").trim();
         const result = await runSessionRecordingAction({
           action,
           sessionId,
           workspaceSelector,
+          creationMetadata: {
+            ...(displayTitle.length > 0 ? { displayTitle } : {}),
+            ...(filenameSlug.length > 0 ? { filenameSlug } : {}),
+          },
           operationalLogger,
           auditLogger,
         });
