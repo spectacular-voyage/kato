@@ -328,21 +328,23 @@ export default function RecordingsLive(
                         )
                         : null}
                       <div class="recording-detail-line recording-tag-line">
-                        <span class="mono recording-detail-label">
-                          Tags:
-                        </span>{" "}
-                        {row.effectiveMetadata?.tags &&
-                            row.effectiveMetadata.tags.length > 0
-                          ? (
-                            <span class="recording-tag-list">
-                              {row.effectiveMetadata.tags.map((tag) => (
-                                <span class="recording-tag" key={tag}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </span>
-                          )
-                          : <span class="muted">none</span>}
+                        <div class="recording-tag-summary">
+                          <span class="mono recording-detail-label">
+                            Tags:
+                          </span>{" "}
+                          {row.effectiveMetadata?.tags &&
+                              row.effectiveMetadata.tags.length > 0
+                            ? (
+                              <span class="recording-tag-list">
+                                {row.effectiveMetadata.tags.map((tag) => (
+                                  <span class="recording-tag" key={tag}>
+                                    {tag}
+                                  </span>
+                                ))}
+                              </span>
+                            )
+                            : <span class="muted">none</span>}
+                        </div>
                         <form method="post" class="recording-tag-form">
                           <RecordingsPageActionFields
                             sessionId={row.sessionId}
@@ -369,10 +371,11 @@ export default function RecordingsLive(
                             ))}
                           </datalist>
                           <button
-                            class="session-inline-action mono"
+                            class="recording-tag-save"
                             type="submit"
+                            title="Save direct tags"
                           >
-                            [save tags]
+                            Save
                           </button>
                         </form>
                       </div>

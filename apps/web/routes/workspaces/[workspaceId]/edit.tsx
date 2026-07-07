@@ -197,7 +197,7 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         id="defaultOutputDir"
                         name="defaultOutputDir"
                         type="text"
-                        defaultValue={effective.defaultOutputDir}
+                        value={effective.defaultOutputDir}
                         required
                       />
                       <label class="form-label" for="filenameTemplate">
@@ -208,7 +208,7 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         id="filenameTemplate"
                         name="filenameTemplate"
                         type="text"
-                        defaultValue={effective.filenameTemplate}
+                        value={effective.filenameTemplate}
                         required
                       />
                       <label class="form-label" for="workspaceTimezone">
@@ -219,7 +219,7 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         id="workspaceTimezone"
                         name="workspaceTimezone"
                         type="text"
-                        defaultValue={effective.workspaceTimezone}
+                        value={effective.workspaceTimezone}
                         required
                       />
                       <label class="form-label" for="defaultTags">
@@ -230,8 +230,9 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         id="defaultTags"
                         name="defaultTags"
                         rows={4}
-                        defaultValue={effective.defaultTags.join("\n")}
-                      />
+                      >
+                        {effective.defaultTags.join("\n")}
+                      </textarea>
                       <label class="form-label" for="tagSuggestions">
                         Tag Suggestions
                       </label>
@@ -240,8 +241,9 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         id="tagSuggestions"
                         name="tagSuggestions"
                         rows={4}
-                        defaultValue={effective.tagSuggestions.join("\n")}
-                      />
+                      >
+                        {effective.tagSuggestions.join("\n")}
+                      </textarea>
                     </div>
 
                     <fieldset class="workspace-config-fieldset">

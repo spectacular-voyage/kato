@@ -421,7 +421,7 @@ export default define.page(async function MaintenancePage(ctx) {
                 type="number"
                 min="0"
                 step="1"
-                defaultValue={twinsDays}
+                value={twinsDays}
                 required
               />
               <button

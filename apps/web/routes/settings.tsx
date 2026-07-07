@@ -247,7 +247,7 @@ export default define.page(async function SettingsPage(ctx) {
                 id="defaultUsername"
                 name="username"
                 type="text"
-                defaultValue={pageData.config.participants.defaultUsername}
+                value={pageData.config.participants.defaultUsername}
                 required
               />
               <button class="form-button" type="submit">Save Default</button>
@@ -406,9 +406,11 @@ export default define.page(async function SettingsPage(ctx) {
                 id="globalTagSuggestions"
                 name="tags"
                 rows={6}
-                defaultValue={(pageData.config.tagLibraries
-                  ?.globalSuggestions ?? []).join("\n")}
-              />
+              >
+                {(pageData.config.tagLibraries?.globalSuggestions ?? []).join(
+                  "\n",
+                )}
+              </textarea>
               <button class="form-button" type="submit">
                 Save Tags
               </button>

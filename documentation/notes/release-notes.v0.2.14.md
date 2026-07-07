@@ -19,8 +19,10 @@ This release also wires tags into the output metadata model: workspace defaults,
 - Markdown frontmatter settings can now be toggled from Kato Web, including frontmatter inclusion, `updated`, participant username fields/headings, session ids, workspace ids, recording ids, and event kinds.
 - Workspace writer flags can now be toggled from Kato Web, including commentary, thinking, tool calls/results, decision prompt/options/selection, italicized user messages, relative local links, and Dendron wikilinks.
 - The editor shows the workspace root, config path, and read-only Dendron/wikilink diagnostics for the effective default output location.
+- Server-rendered web forms now emit editable field values in browser-native markup, so workspace config, Settings, and Maintenance fields are populated before any client-side code runs.
 - Invalid workspace configs are shown as errors instead of crashing the page.
 - The Sessions page `New capture` and `New recording` popovers now accept direct output tags alongside title and filename snippet overrides.
+- The Sessions page `New capture` and `New recording` popovers now stay within the viewport when opened near the bottom of the page.
 - The Recordings page now shows effective output tags and can edit direct per-output tags for active or stopped outputs; markdown frontmatter is updated best-effort without rewriting the body.
 - The Settings page can edit personal global tag suggestions and per-workspace personal tag suggestions. Personal suggestions do not write into output files unless selected or typed for an output.
 - User documentation now explains which settings are shared workspace config versus personal user config.

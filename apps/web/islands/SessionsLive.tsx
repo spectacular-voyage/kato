@@ -142,6 +142,39 @@ function buildStopRecordingActionKey(
   return `stop:${sessionId}:${recordingKey}`;
 }
 
+function positionRecordingPopover(
+  root: HTMLDivElement,
+  popover: HTMLDivElement,
+) {
+  const viewportPadding = 16;
+  const anchorGap = 8;
+  const rootRect = root.getBoundingClientRect();
+  const viewportHeight = globalThis.innerHeight ||
+    document.documentElement.clientHeight;
+  const maxVisibleHeight = Math.max(0, viewportHeight - viewportPadding * 2);
+  const popoverHeight = Math.min(popover.scrollHeight, maxVisibleHeight);
+  const belowTop = rootRect.bottom + anchorGap;
+  const belowFits = belowTop + popoverHeight <=
+    viewportHeight - viewportPadding;
+  const aboveTop = rootRect.top - anchorGap - popoverHeight;
+  const preferredTop = belowFits || aboveTop < viewportPadding
+    ? belowTop
+    : aboveTop;
+  const clampedTop = Math.min(
+    Math.max(preferredTop, viewportPadding),
+    Math.max(viewportPadding, viewportHeight - viewportPadding - popoverHeight),
+  );
+
+  popover.style.setProperty(
+    "--session-recording-popover-top",
+    `${Math.round(clampedTop - rootRect.top)}px`,
+  );
+  popover.style.setProperty(
+    "--session-recording-popover-max-height",
+    `${Math.round(maxVisibleHeight)}px`,
+  );
+}
+
 function SessionRecordingActions(
   props: {
     sessionId: string;
@@ -176,6 +209,7 @@ function SessionRecordingActions(
   const [tagsInput, setTagsInput] = useState("");
   const [filenameSlugCustomized, setFilenameSlugCustomized] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   const resetCreationFields = () => {
     const nextTitle = props.sessionSnippet ?? "";
@@ -244,6 +278,49 @@ function SessionRecordingActions(
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [openAction, pendingCreateAction]);
+
+  useEffect(() => {
+    if (!openAction) {
+      return;
+    }
+
+    let frameId: number | undefined;
+    const schedulePopoverPosition = () => {
+      if (frameId !== undefined && "cancelAnimationFrame" in globalThis) {
+        globalThis.cancelAnimationFrame(frameId);
+      }
+      if ("requestAnimationFrame" in globalThis) {
+        frameId = globalThis.requestAnimationFrame(() => {
+          frameId = undefined;
+          if (rootRef.current && popoverRef.current) {
+            positionRecordingPopover(rootRef.current, popoverRef.current);
+          }
+        });
+        return;
+      }
+      if (rootRef.current && popoverRef.current) {
+        positionRecordingPopover(rootRef.current, popoverRef.current);
+      }
+    };
+
+    schedulePopoverPosition();
+    globalThis.addEventListener("resize", schedulePopoverPosition);
+    globalThis.addEventListener("scroll", schedulePopoverPosition, true);
+    return () => {
+      if (frameId !== undefined && "cancelAnimationFrame" in globalThis) {
+        globalThis.cancelAnimationFrame(frameId);
+      }
+      globalThis.removeEventListener("resize", schedulePopoverPosition);
+      globalThis.removeEventListener("scroll", schedulePopoverPosition, true);
+    };
+  }, [
+    displayTitle,
+    filenameSlug,
+    openAction,
+    props.workspaceOptions,
+    selectedWorkspace,
+    tagsInput,
+  ]);
 
   if (props.workspaceOptions.length === 0) {
     return (
@@ -327,7 +404,7 @@ function SessionRecordingActions(
       </button>
       {openAction
         ? (
-          <div class="session-recording-popover">
+          <div ref={popoverRef} class="session-recording-popover">
             <form
               method="post"
               class="session-recording-popover-form"

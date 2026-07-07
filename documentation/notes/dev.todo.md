@@ -6,7 +6,28 @@ updated: 1781196292514
 created: 1771812869620
 ---
 
-## Runtime And Ingestion Nits
+This note is the working board for developer-facing project state. Keep product direction in [[roadmap]], shipped behavior in [[features]], and detailed implementation plans in dated `task.*` notes.
+
+## In Flight
+
+- [x] Land the shared session/output metadata foundation in [[task.2026.2026-06-11-session-output-metadata]].
+- [x] Validate the first editable-recording path with per-output writer controls in [[task.2026.2026-05-11-per-output-writer-controls]].
+- [x] Add creation-time output title and filename slug overrides through the web capture/recording flow in [[ka.completed.2026.2026-06-28-output-filename-title-overrides]].
+- [x] Add web-based shared workspace config editing in [[task.2026.2026-06-11-workspace-config-editing]].
+- [x] Add the web-first output tagging slice in [[task.2026.2026-06-11-output-tagging]].
+- [x] Fix the Sessions `New capture`/`New recording` popover so the submit actions remain reachable when the trigger is low in the viewport.
+- [x] Verify the current v0.2.14 dirty tree with focused formatting/type checks.
+- [x] Final review [[release-notes.v0.2.14]] against the dirty tree before release.
+
+## Next Up
+
+- [ ] Update dependent task notes after the tagging implementation choices settle, especially [[task.2026.2026-06-11-session-output-metadata]].
+- [ ] Decide whether CLI management for personal tag libraries belongs in the v0.2.14 release or should stay deferred in [[task.2026.2026-06-11-output-tagging]].
+- [ ] Start persona support from [[task.2026.2026-05-28-persona-support]] after the output metadata/tagging release is closed.
+- [ ] Add workspace pre-persist verification and runtime re-verification status (`valid`, `invalid`, `unverified`) with explicit reasons.
+- [ ] Add `kato config validate` for preflight runtime and shared config checks.
+
+## Runtime And Ingestion Backlog
 
 - [ ] Add schema fail-closed checks when persisted snapshot files are added, with a `kato clean --all` remediation hint for v1 data.
 - [ ] Extend `SessionSnapshotStore` with `delete`/`clear` and wire it into `clean` behavior.
