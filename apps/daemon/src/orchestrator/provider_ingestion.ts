@@ -23,7 +23,10 @@ import {
   NoopSink,
   StructuredLogger,
 } from "../observability/mod.ts";
-import { parseClaudeEvents } from "../providers/claude/mod.ts";
+import {
+  isClaudeSubagentSourcePath,
+  parseClaudeEvents,
+} from "../providers/claude/mod.ts";
 import { parseCodexEvents } from "../providers/codex/mod.ts";
 import { parseGeminiEvents } from "../providers/gemini/mod.ts";
 import type {
@@ -1856,7 +1859,10 @@ export function createClaudeIngestionRunner(
     watchRoots: roots,
     discoverSessions: () => discoverClaudeSessions(roots),
     parseEvents: (filePath, fromOffset, ctx) =>
-      parseClaudeEvents(filePath, fromOffset, ctx),
+      parseClaudeEvents(filePath, fromOffset, {
+        ...ctx,
+        includeSidechainEvents: isClaudeSubagentSourcePath(filePath),
+      }),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,
     autoGenerateTwins: options.autoGenerateTwins,

@@ -63,6 +63,65 @@ Deno.test("claude parser skips sidechains", async () => {
   }
 });
 
+Deno.test("claude parser can include sidechains for subagent source files", async () => {
+  const tempPath = makeTestTempPath("claude-subagent-sidechain-") + ".jsonl";
+  await Deno.writeTextFile(
+    tempPath,
+    [
+      JSON.stringify({
+        type: "user",
+        uuid: "subagent-u1",
+        isSidechain: true,
+        sessionId: "parent-session",
+        timestamp: "2026-07-09T18:00:00.000Z",
+        message: {
+          role: "user",
+          content: "investigate the rendering issue",
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        uuid: "subagent-a1",
+        parentUuid: "subagent-u1",
+        isSidechain: true,
+        sessionId: "parent-session",
+        timestamp: "2026-07-09T18:00:05.000Z",
+        message: {
+          role: "assistant",
+          model: "claude-sonnet-4-6",
+          content: [{ type: "text", text: "I found the issue." }],
+        },
+      }),
+    ].join("\n") + "\n",
+  );
+  try {
+    const defaultResults = await collectEvents(tempPath);
+    assertEquals(defaultResults, []);
+
+    const includedResults: ParseItem[] = [];
+    for await (
+      const item of parseClaudeEvents(tempPath, 0, {
+        ...TEST_CTX,
+        includeSidechainEvents: true,
+      })
+    ) {
+      includedResults.push(item as ParseItem);
+    }
+
+    assertEquals(
+      includedResults.map((item) => item.event.kind),
+      ["message.user", "message.assistant"],
+    );
+    const first = includedResults[0]?.event;
+    assertEquals(first?.sessionId, TEST_CTX.sessionId);
+    if (first?.kind === "message.user") {
+      assertEquals(first.content, "investigate the rendering issue");
+    }
+  } finally {
+    await removePathIfPresent(tempPath);
+  }
+});
+
 Deno.test("claude parser emits user message correctly", async () => {
   const results = await collectEvents(FIXTURE);
   const userEvent = results[0]!.event;

@@ -59,11 +59,6 @@ function* parseLines(
       currentOffset = endOffset;
       continue;
     }
-    if (entry.isSidechain) {
-      currentOffset = endOffset;
-      continue;
-    }
-
     yield { entry, endOffset };
     currentOffset = endOffset;
   }
@@ -205,6 +200,11 @@ function makeEventId(
 export interface ClaudeParseContext {
   provider: string;
   sessionId: string;
+  includeSidechainEvents?: boolean;
+}
+
+export function isClaudeSubagentSourcePath(filePath: string): boolean {
+  return filePath.split(/[\\/]+/).includes("subagents");
 }
 
 export async function* parseClaudeEvents(
@@ -216,6 +216,10 @@ export async function* parseClaudeEvents(
   const { provider, sessionId } = ctx;
 
   for (const { entry, endOffset } of parseLines(content, fromOffset)) {
+    if (entry.isSidechain && !ctx.includeSidechainEvents) {
+      continue;
+    }
+
     const turnId = entry.uuid;
     const timestamp = entry.timestamp;
     const cursor = makeByteOffsetCursor(endOffset);

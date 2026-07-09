@@ -9,7 +9,10 @@ import {
   redactConversationEvents,
   type SecretsRuleMatchSummary,
 } from "../policy/mod.ts";
-import { parseClaudeEvents } from "../providers/claude/mod.ts";
+import {
+  isClaudeSubagentSourcePath,
+  parseClaudeEvents,
+} from "../providers/claude/mod.ts";
 import { parseCodexEvents } from "../providers/codex/mod.ts";
 import { parseGeminiEvents } from "../providers/gemini/mod.ts";
 import type { PersistentSessionStateStore } from "./session_state_store.ts";
@@ -36,7 +39,11 @@ export interface ProviderSourceReplayOptions {
 type ProviderReplayParser = (
   filePath: string,
   fromOffset: number,
-  ctx: { provider: string; sessionId: string },
+  ctx: {
+    provider: string;
+    sessionId: string;
+    includeSidechainEvents?: boolean;
+  },
 ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
 
 function resolveProviderReplayParser(provider: string): ProviderReplayParser {
@@ -122,6 +129,10 @@ export async function replayProviderSourceEvents(
       {
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
+        ...(metadata.provider === "claude" &&
+            isClaudeSubagentSourcePath(metadata.sourceFilePath)
+          ? { includeSidechainEvents: true }
+          : {}),
       },
     )
   ) {

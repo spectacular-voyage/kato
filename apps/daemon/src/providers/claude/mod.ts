@@ -1,1 +1,5 @@
-export { type ClaudeParseContext, parseClaudeEvents } from "./parser.ts";
+export {
+  type ClaudeParseContext,
+  isClaudeSubagentSourcePath,
+  parseClaudeEvents,
+} from "./parser.ts";

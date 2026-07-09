@@ -1415,6 +1415,68 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
   });
 });
 
+Deno.test("createClaudeIngestionRunner ingests sidechain-marked Claude subagent sessions", async () => {
+  await withTempDir("provider-ingestion-claude-subagent-", async (dir) => {
+    const parentDir = join(dir, "project-1", "parent-session");
+    const subagentDir = join(parentDir, "subagents");
+    await Deno.mkdir(subagentDir, { recursive: true });
+    const sessionPath = join(subagentDir, "agent-a1b2c3.jsonl");
+    await Deno.writeTextFile(
+      sessionPath,
+      [
+        JSON.stringify({
+          type: "user",
+          uuid: "subagent-u1",
+          isSidechain: true,
+          sessionId: "parent-session",
+          timestamp: "2026-07-09T18:00:00.000Z",
+          message: {
+            role: "user",
+            content: "summarize the failing workflow",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "subagent-a1",
+          parentUuid: "subagent-u1",
+          isSidechain: true,
+          sessionId: "parent-session",
+          timestamp: "2026-07-09T18:00:05.000Z",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-6",
+            content: [{ type: "text", text: "Summary complete." }],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const runner = createClaudeIngestionRunner({
+      sessionSnapshotStore: store,
+      sessionRoots: [dir],
+      now: () => new Date("2026-07-09T18:00:10.000Z"),
+      watchFs: harness.watchFn,
+    });
+
+    await runner.start();
+    const result = await runner.poll();
+    await runner.stop();
+
+    assertEquals(result.provider, "claude");
+    assertEquals(result.sessionsUpdated, 1);
+    assertEquals(result.eventsObserved, 2);
+    const snapshot = store.get("agent-a1b2c3");
+    assertExists(snapshot);
+    assertEquals(snapshot.metadata.snippet, "summarize the failing workflow");
+    assertEquals(
+      snapshot.events.map((event) => event.kind),
+      ["message.user", "message.assistant"],
+    );
+  });
+});
+
 Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async () => {
   await withTempDir("provider-ingestion-codex-", async (dir) => {
     const dayDir = join(dir, "2026", "02", "22");
