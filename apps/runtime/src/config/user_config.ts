@@ -1,4 +1,9 @@
-import type { UserConfig, UserParticipantsConfig } from "@kato/shared";
+import {
+  normalizeOutputTags,
+  type UserConfig,
+  type UserParticipantsConfig,
+  type UserTagLibrariesConfig,
+} from "@kato/shared";
 import { join } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveHomeDir } from "../utils/env.ts";
@@ -10,16 +15,25 @@ import {
 
 const USER_CONFIG_SCHEMA_VERSION = 1;
 const USER_CONFIG_FILENAME = "kato-user-config.yaml";
-const USER_CONFIG_KEYS = ["schemaVersion", "participants"] as const;
+const USER_CONFIG_KEYS = [
+  "schemaVersion",
+  "participants",
+  "tagLibraries",
+] as const;
 const USER_PARTICIPANTS_KEYS = [
   "defaultUsername",
   "workspaceUsernames",
   "excludeMeFromParticipantList",
 ] as const;
+const USER_TAG_LIBRARIES_KEYS = [
+  "globalSuggestions",
+  "workspaceSuggestions",
+] as const;
 const MAX_USERNAME_CODE_POINTS = 128;
 
 type UserConfigKey = typeof USER_CONFIG_KEYS[number];
 type UserParticipantsKey = typeof USER_PARTICIPANTS_KEYS[number];
+type UserTagLibrariesKey = typeof USER_TAG_LIBRARIES_KEYS[number];
 
 export interface EnsureUserConfigResult {
   created: boolean;
@@ -44,6 +58,7 @@ function createUserConfigSchemaError(
       "Expected UserConfig with schemaVersion: 1 and participants: UserParticipantsConfig. " +
       "UserParticipantsConfig requires defaultUsername (string), workspaceUsernames (Record<string, string>), " +
       "and excludeMeFromParticipantList (boolean). " +
+      "Optional tagLibraries requires globalSuggestions (string[]) and workspaceSuggestions (Record<string, string[]>). " +
       "Migration guidance: unknown keys or a missing schemaVersion require migrating to this shape " +
       "(or reinitialize with `kato user init`).",
   );
@@ -163,6 +178,82 @@ function parseParticipants(value: unknown): UserParticipantsConfig {
   };
 }
 
+function parseTagList(value: unknown, context: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${context} must be a string array`);
+  }
+  if (value.some((tag) => typeof tag !== "string")) {
+    throw new Error(`${context} must contain only strings`);
+  }
+  return normalizeOutputTags(value, context);
+}
+
+function createDefaultTagLibrariesConfig(): UserTagLibrariesConfig {
+  return {
+    globalSuggestions: [],
+    workspaceSuggestions: {},
+  };
+}
+
+function parseTagLibraries(value: unknown): UserTagLibrariesConfig {
+  if (value === undefined) {
+    return createDefaultTagLibrariesConfig();
+  }
+  if (!isRecord(value)) {
+    throw new Error(
+      "UserConfig.tagLibraries must be an object matching UserTagLibrariesConfig",
+    );
+  }
+
+  const unknownTagLibraryKeys = Object.keys(value).filter((key) =>
+    !USER_TAG_LIBRARIES_KEYS.includes(key as UserTagLibrariesKey)
+  );
+  if (unknownTagLibraryKeys.length > 0) {
+    throw new Error(
+      `Unknown UserTagLibrariesConfig keys: ${
+        unknownTagLibraryKeys.join(", ")
+      }`,
+    );
+  }
+
+  const globalSuggestions = value["globalSuggestions"] === undefined
+    ? []
+    : parseTagList(
+      value["globalSuggestions"],
+      "tagLibraries.globalSuggestions",
+    );
+  const workspaceSuggestionsRaw = value["workspaceSuggestions"] ?? {};
+  if (!isRecord(workspaceSuggestionsRaw)) {
+    throw new Error(
+      "tagLibraries.workspaceSuggestions must be an object map",
+    );
+  }
+
+  const workspaceSuggestions: Record<string, string[]> = {};
+  for (
+    const [workspaceIdRaw, tagsRaw] of Object.entries(workspaceSuggestionsRaw)
+  ) {
+    const workspaceId = workspaceIdRaw.trim();
+    if (workspaceId.length === 0) {
+      throw new Error(
+        "tagLibraries.workspaceSuggestions keys must be non-empty strings",
+      );
+    }
+    const tags = parseTagList(
+      tagsRaw,
+      `tagLibraries.workspaceSuggestions[${workspaceId}]`,
+    );
+    if (tags.length > 0) {
+      workspaceSuggestions[workspaceId] = tags;
+    }
+  }
+
+  return {
+    globalSuggestions,
+    workspaceSuggestions,
+  };
+}
+
 function parseUserConfig(
   value: unknown,
   subject: "User config file" | "User config" = "User config file",
@@ -192,9 +283,11 @@ function parseUserConfig(
     }
 
     const participants = parseParticipants(value["participants"]);
+    const tagLibraries = parseTagLibraries(value["tagLibraries"]);
     return {
       schemaVersion: USER_CONFIG_SCHEMA_VERSION,
       participants,
+      tagLibraries,
     };
   } catch (error) {
     const detail = error instanceof Error
@@ -213,11 +306,20 @@ function cloneUserConfig(config: UserConfig): UserConfig {
       excludeMeFromParticipantList:
         config.participants.excludeMeFromParticipantList,
     },
+    tagLibraries: {
+      globalSuggestions: [...(config.tagLibraries?.globalSuggestions ?? [])],
+      workspaceSuggestions: Object.fromEntries(
+        Object.entries(config.tagLibraries?.workspaceSuggestions ?? {}).map((
+          [workspaceId, tags],
+        ) => [workspaceId, [...tags]]),
+      ),
+    },
   };
 }
 
 export function createDefaultUserConfig(
   participants?: Partial<UserParticipantsConfig>,
+  tagLibraries?: Partial<UserTagLibrariesConfig>,
 ): UserConfig {
   return {
     schemaVersion: USER_CONFIG_SCHEMA_VERSION,
@@ -226,6 +328,14 @@ export function createDefaultUserConfig(
       workspaceUsernames: { ...(participants?.workspaceUsernames ?? {}) },
       excludeMeFromParticipantList:
         participants?.excludeMeFromParticipantList ?? true,
+    },
+    tagLibraries: {
+      globalSuggestions: [...(tagLibraries?.globalSuggestions ?? [])],
+      workspaceSuggestions: Object.fromEntries(
+        Object.entries(tagLibraries?.workspaceSuggestions ?? {}).map((
+          [workspaceId, tags],
+        ) => [workspaceId, [...tags]]),
+      ),
     },
   };
 }

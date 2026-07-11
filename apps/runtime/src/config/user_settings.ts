@@ -1,4 +1,4 @@
-import type { UserConfig } from "@kato/shared";
+import { normalizeOutputTags, type UserConfig } from "@kato/shared";
 import type { AuditLogger } from "../observability/audit_logger.ts";
 import type { StructuredLogger } from "../observability/logger.ts";
 import {
@@ -23,6 +23,14 @@ function cloneUserConfig(config: UserConfig): UserConfig {
       workspaceUsernames: { ...config.participants.workspaceUsernames },
       excludeMeFromParticipantList:
         config.participants.excludeMeFromParticipantList,
+    },
+    tagLibraries: {
+      globalSuggestions: [...(config.tagLibraries?.globalSuggestions ?? [])],
+      workspaceSuggestions: Object.fromEntries(
+        Object.entries(config.tagLibraries?.workspaceSuggestions ?? {}).map((
+          [workspaceId, tags],
+        ) => [workspaceId, [...tags]]),
+      ),
     },
   };
 }
@@ -50,9 +58,27 @@ export interface UserWorkspaceMappingListEntry {
   username: string;
 }
 
+export interface UserWorkspaceTagLibraryListEntry {
+  workspaceId: string;
+  workspaceAlias: string;
+  workspaceDisplayName?: string;
+  tags: string[];
+}
+
 function compareUserMapEntries(
   a: UserWorkspaceMappingListEntry,
   b: UserWorkspaceMappingListEntry,
+): number {
+  const aliasCompare = a.workspaceAlias.localeCompare(b.workspaceAlias);
+  if (aliasCompare !== 0) {
+    return aliasCompare;
+  }
+  return a.workspaceId.localeCompare(b.workspaceId);
+}
+
+function compareUserTagLibraryEntries(
+  a: UserWorkspaceTagLibraryListEntry,
+  b: UserWorkspaceTagLibraryListEntry,
 ): number {
   const aliasCompare = a.workspaceAlias.localeCompare(b.workspaceAlias);
   if (aliasCompare !== 0) {
@@ -73,6 +99,20 @@ function buildUserMapListEntries(
       username,
     }))
     .sort(compareUserMapEntries);
+}
+
+function buildUserTagLibraryListEntries(
+  config: UserConfig,
+  workspacesById: Map<string, RegisteredWorkspace>,
+): UserWorkspaceTagLibraryListEntry[] {
+  return Object.entries(config.tagLibraries?.workspaceSuggestions ?? {})
+    .map(([workspaceId, tags]) => ({
+      workspaceId,
+      workspaceAlias: workspacesById.get(workspaceId)?.alias ?? "",
+      workspaceDisplayName: workspacesById.get(workspaceId)?.displayName,
+      tags: [...tags],
+    }))
+    .sort(compareUserTagLibraryEntries);
 }
 
 async function loadInitializedUserConfig(
@@ -144,6 +184,7 @@ export interface LoadUserSettingsResult {
   config: UserConfig;
   path: string;
   mappings: UserWorkspaceMappingListEntry[];
+  tagLibraryMappings: UserWorkspaceTagLibraryListEntry[];
   workspaces: RegisteredWorkspace[];
 }
 
@@ -171,6 +212,10 @@ export async function loadUserSettings(
     config: initialized.config,
     path: initialized.path,
     mappings: buildUserMapListEntries(initialized.config, workspacesById),
+    tagLibraryMappings: buildUserTagLibraryListEntries(
+      initialized.config,
+      workspacesById,
+    ),
     workspaces,
   };
 }
@@ -436,4 +481,126 @@ export async function setExcludeMeFromParticipantList(
   );
 
   return { value: options.value, config: nextConfig };
+}
+
+export interface SetGlobalTagSuggestionsOptions {
+  tags: string[];
+  userConfigStore?: UserConfigStoreLike;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface SetGlobalTagSuggestionsResult {
+  tags: string[];
+  config: UserConfig;
+}
+
+export async function setGlobalTagSuggestions(
+  options: SetGlobalTagSuggestionsOptions,
+): Promise<SetGlobalTagSuggestionsResult> {
+  const tags = normalizeOutputTags(
+    options.tags,
+    "tagLibraries.globalSuggestions",
+  );
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    undefined,
+  );
+  const { config } = await loadInitializedUserConfig(userConfigStore);
+  const nextConfig = cloneUserConfig(config);
+  nextConfig.tagLibraries = nextConfig.tagLibraries ?? {
+    globalSuggestions: [],
+    workspaceSuggestions: {},
+  };
+  nextConfig.tagLibraries.globalSuggestions = tags;
+  await userConfigStore.save(nextConfig);
+
+  await options.operationalLogger?.info(
+    "user.tags.global.set",
+    "Updated global user tag suggestions",
+    { tagCount: tags.length },
+  );
+  await options.auditLogger?.record(
+    "user.tags.global.set",
+    "Updated global user tag suggestions",
+    { tagCount: tags.length },
+  );
+
+  return { tags, config: nextConfig };
+}
+
+export interface SetWorkspaceTagSuggestionsOptions {
+  selector: string;
+  tags: string[];
+  userConfigStore?: UserConfigStoreLike;
+  workspaceRegistryStore?: WorkspaceRegistryStoreLike;
+  katoDir?: string;
+  operationalLogger?: StructuredLogger;
+  auditLogger?: AuditLogger;
+}
+
+export interface SetWorkspaceTagSuggestionsResult {
+  workspaceId: string;
+  workspaceAlias: string;
+  tags: string[];
+  config: UserConfig;
+}
+
+export async function setWorkspaceTagSuggestions(
+  options: SetWorkspaceTagSuggestionsOptions,
+): Promise<SetWorkspaceTagSuggestionsResult> {
+  const workspaceRegistryStore = resolveWorkspaceRegistryStore(
+    options.workspaceRegistryStore,
+    options.katoDir,
+  );
+  const workspace = await resolveWorkspaceBySelector(
+    workspaceRegistryStore,
+    options.selector,
+  );
+  const tags = normalizeOutputTags(
+    options.tags,
+    `tagLibraries.workspaceSuggestions[${workspace.workspaceId}]`,
+  );
+  const userConfigStore = resolveUserConfigStore(
+    options.userConfigStore,
+    options.katoDir,
+  );
+  const { config } = await loadInitializedUserConfig(userConfigStore);
+  const nextConfig = cloneUserConfig(config);
+  nextConfig.tagLibraries = nextConfig.tagLibraries ?? {
+    globalSuggestions: [],
+    workspaceSuggestions: {},
+  };
+  if (tags.length > 0) {
+    nextConfig.tagLibraries.workspaceSuggestions[workspace.workspaceId] = tags;
+  } else {
+    delete nextConfig.tagLibraries.workspaceSuggestions[workspace.workspaceId];
+  }
+  await userConfigStore.save(nextConfig);
+
+  await options.operationalLogger?.info(
+    "user.tags.workspace.set",
+    "Updated workspace user tag suggestions",
+    {
+      workspaceId: workspace.workspaceId,
+      workspaceAlias: workspace.alias,
+      tagCount: tags.length,
+    },
+  );
+  await options.auditLogger?.record(
+    "user.tags.workspace.set",
+    "Updated workspace user tag suggestions",
+    {
+      workspaceId: workspace.workspaceId,
+      workspaceAlias: workspace.alias,
+      tagCount: tags.length,
+    },
+  );
+
+  return {
+    workspaceId: workspace.workspaceId,
+    workspaceAlias: workspace.alias,
+    tags,
+    config: nextConfig,
+  };
 }

@@ -56,14 +56,32 @@ kato web status --json
 ## Pages
 
 - Summary: high-level daemon, session, recording, and workspace status.
-- Sessions: discovered provider sessions, snippets, and capture/record
-  controls.
-- Recordings: per-file output state, stop controls, and re-arm controls.
-- Workspaces: registration, display labels, username overrides, and workspace
-  diagnostics.
+- Sessions: discovered provider sessions grouped into default-closed parent/sub-conversation trees, snippets, persisted-twin size indicators, activity and sub-conversation filters, and capture/record controls with creation-time title, filename snippet, and tag fields.
+- Recordings: per-file output state, output tag editing, stop controls, and re-arm controls.
+- Workspaces: registration, display labels, shared workspace config editing, shared tag fields, username overrides, and workspace diagnostics.
 - Logs: operational and security-audit records.
-- Settings: user-default and workspace username mapping workflows.
+- Settings: user-default, workspace username mapping, and personal tag suggestion workflows.
 - Maintenance: cleanup flows and persisted twin troubleshooting.
+
+## Session Inventory Trees And Filters
+
+The Sessions toolbar has separate controls for activity (`All Sessions` or `Active Only`) and sub-conversations (`Grouped` or `Hidden`). `Grouped` is the default: Kato keeps recognized sub-conversations available beneath their provider parent, but every parent starts collapsed so routine workflows occupy one row.
+
+The parent disclosure summarizes descendant count, active/recording state, and available child Twin bytes. Expanding it renders the normal child rows with their own activity, actions, recordings, and individual `Twin` values. Open branches remain open while the page refreshes live. A link to a child session automatically expands its ancestor chain, and Sessions actions return to that child.
+
+Choose `Hidden` to exclude recognized sub-conversations from rows and totals. This preserves the bookmarkable `subagents=hide` URL and remains selected when combined with activity/workspace filters or after Sessions actions. Collapsing does not alter totals; Hidden does.
+
+Kato recognizes Claude children from the provider's exact `subagents` source layout. Codex children use the explicit immediate `parent_thread_id` recorded in Codex `session_meta`, so nested Codex agents can form real recursive trees. Kato does not infer children from repeated titles, timing, `agent-*` ids, or similar filenames. Recognized children whose parent is unavailable remain accessible under `Unlinked sub-conversations` in Grouped mode.
+
+When an activity or workspace filter matches a child but not its parent, Kato retains the parent as a visibly marked context row so the child remains reachable. Context-only parents do not increase the matching totals.
+
+## Session Twin Size
+
+Each Sessions row shows `Twin <size>` when Kato has recognized persisted twin history, or `Twin absent` when no usable twin size is available. Sizes use 1024-based units (`B`, `KB`, `MB`, `GB`, and `TB`) and update with the live Sessions view.
+
+Twin size measures Kato's normalized JSONL history, not the provider transcript, a recording output, elapsed time, turns, or tokens. Treat it as a rough length cue: JSONL and tool-event overhead affect the value, and the twin can represent only partial conversation history when persistence began after the provider conversation started.
+
+The Sessions page keeps this indicator read-only and does not expose the twin path. Use Maintenance for twin paths, current/behind state, troubleshooting, and cleanup actions.
 
 ## Auth Expiry
 

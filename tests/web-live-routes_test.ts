@@ -77,11 +77,14 @@ function makeWorkspaceOutput(options: {
 async function createSessionFixture(options: {
   katoDir: string;
   sessionId: string;
+  provider?: string;
   providerSessionId: string;
   snippet: string;
   updatedAt: string;
   sourceFilePath: string;
   workspaceOutputs?: ReturnType<typeof makeWorkspaceOutput>[];
+  nextTwinSeq?: number;
+  parentProviderSessionId?: string;
 }) {
   const store = new PersistentSessionStateStore({
     katoDir: options.katoDir,
@@ -89,14 +92,19 @@ async function createSessionFixture(options: {
     makeSessionId: () => options.sessionId,
   });
   const metadata = await store.getOrCreateSessionMetadata({
-    provider: "codex",
+    provider: options.provider ?? "codex",
     providerSessionId: options.providerSessionId,
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
   metadata.updatedAt = options.updatedAt;
+  metadata.parentProviderSessionId = options.parentProviderSessionId;
   metadata.workspaceOutputs = options.workspaceOutputs;
+  if (options.nextTwinSeq !== undefined) {
+    metadata.nextTwinSeq = options.nextTwinSeq;
+  }
   await store.saveSessionMetadata(metadata);
+  return metadata;
 }
 
 function assertNoStore(response: Response): void {
@@ -366,6 +374,38 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
   await withTestTempDir("web-live-route-filters-", async (homeDir) => {
     const katoDir = join(homeDir, ".kato");
     await setupLiveRouteFixture(homeDir);
+    const subagentMetadata = await createSessionFixture({
+      katoDir,
+      sessionId: "sess-subagent",
+      provider: "claude",
+      providerSessionId: "agent-live-route",
+      snippet: "sub-agent session",
+      updatedAt: "2026-03-07T13:00:00.000Z",
+      sourceFilePath: join(
+        homeDir,
+        ".claude",
+        "projects",
+        "example",
+        "subagents",
+        "agent-live-route.jsonl",
+      ),
+      nextTwinSeq: 2,
+    });
+    const subagentTwinContents = '{"seq":1,"kind":"message.user"}\n';
+    await Deno.writeTextFile(
+      subagentMetadata.twinPath,
+      subagentTwinContents,
+    );
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-codex-subconversation",
+      provider: "codex",
+      providerSessionId: "provider-codex-subconversation",
+      parentProviderSessionId: "provider-active",
+      snippet: "Codex child session",
+      updatedAt: "2026-03-07T12:30:00.000Z",
+      sourceFilePath: join(homeDir, "codex-child-source.jsonl"),
+    });
 
     const sessionsAllResponse = await getSessionsResponse(
       new URL("http://kato.local/api/sessions"),
@@ -381,8 +421,16 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
     );
     const sessionsCombinedResponse = await getSessionsResponse(
       new URL(
-        "http://kato.local/api/sessions?view=active&workspace=ws-alpha",
+        "http://kato.local/api/sessions?view=active&workspace=ws-alpha&subagents=hide",
       ),
+      { katoDir },
+    );
+    const sessionsTopLevelResponse = await getSessionsResponse(
+      new URL("http://kato.local/api/sessions?subagents=hide"),
+      { katoDir },
+    );
+    const sessionsUnknownSubagentFilterResponse = await getSessionsResponse(
+      new URL("http://kato.local/api/sessions?subagents=unknown"),
       { katoDir },
     );
     const twinsActiveResponse = await getMaintenanceTwinsResponse(
@@ -402,6 +450,8 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
         sessionsActiveResponse,
         sessionsWorkspaceResponse,
         sessionsCombinedResponse,
+        sessionsTopLevelResponse,
+        sessionsUnknownSubagentFilterResponse,
         twinsActiveResponse,
         recordingsFilteredResponse,
       ]
@@ -411,7 +461,11 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
 
     const sessionsAllData = await sessionsAllResponse.json() as {
       includeStale: boolean;
-      rows: Array<{ sessionId: string }>;
+      rows: Array<{
+        sessionId: string;
+        twinSizeBytes?: number;
+        relationship?: { kind: string; parentSessionId?: string };
+      }>;
     };
     const sessionsActiveData = await sessionsActiveResponse.json() as {
       includeStale: boolean;
@@ -424,9 +478,20 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
       };
     const sessionsCombinedData = await sessionsCombinedResponse.json() as {
       includeStale: boolean;
+      includeSubagents: boolean;
       workspaceFilterId?: string;
       rows: Array<{ sessionId: string }>;
     };
+    const sessionsTopLevelData = await sessionsTopLevelResponse.json() as {
+      includeSubagents: boolean;
+      sessionCount: number;
+      rows: Array<{ sessionId: string }>;
+    };
+    const sessionsUnknownSubagentFilterData =
+      await sessionsUnknownSubagentFilterResponse.json() as {
+        includeSubagents: boolean;
+        sessionCount: number;
+      };
     const twinsActiveData = await twinsActiveResponse.json() as {
       includeStale: boolean;
       rows: Array<{ sessionId: string }>;
@@ -442,7 +507,37 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
     assertEquals(sessionsAllData.rows.map((row) => row.sessionId), [
       "sess-active",
       "sess-stale",
+      "sess-subagent",
+      "sess-codex-subconversation",
     ]);
+    assertEquals(
+      sessionsAllData.rows.find((row) =>
+        row.sessionId === "sess-codex-subconversation"
+      )?.relationship,
+      {
+        kind: "subconversation",
+        parentSessionId: "sess-active",
+      },
+    );
+    assertEquals(
+      sessionsAllData.rows.find((row) => row.sessionId === "sess-subagent")
+        ?.twinSizeBytes,
+      new TextEncoder().encode(subagentTwinContents).byteLength,
+    );
+    assertEquals(
+      "twinPath" in
+        (sessionsAllData.rows.find((row) =>
+          row.sessionId === "sess-subagent"
+        ) ?? {}),
+      false,
+    );
+    assertEquals(
+      "sourceFilePath" in
+        (sessionsAllData.rows.find((row) =>
+          row.sessionId === "sess-codex-subconversation"
+        ) ?? {}),
+      false,
+    );
     assertEquals(sessionsActiveData.includeStale, false);
     assertEquals(sessionsActiveData.rows.map((row) => row.sessionId), [
       "sess-active",
@@ -452,10 +547,19 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
       "sess-stale",
     ]);
     assertEquals(sessionsCombinedData.includeStale, false);
+    assertEquals(sessionsCombinedData.includeSubagents, false);
     assertEquals(sessionsCombinedData.workspaceFilterId, "ws-alpha");
     assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
       "sess-active",
     ]);
+    assertEquals(sessionsTopLevelData.includeSubagents, false);
+    assertEquals(sessionsTopLevelData.sessionCount, 2);
+    assertEquals(sessionsTopLevelData.rows.map((row) => row.sessionId), [
+      "sess-active",
+      "sess-stale",
+    ]);
+    assertEquals(sessionsUnknownSubagentFilterData.includeSubagents, true);
+    assertEquals(sessionsUnknownSubagentFilterData.sessionCount, 4);
     assertEquals(twinsActiveData.includeStale, false);
     assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
       "sess-active",

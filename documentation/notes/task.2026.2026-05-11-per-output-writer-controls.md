@@ -30,6 +30,8 @@ should update those overrides on a specific workspace output. Runtime rendering
 should resolve effective writer flags from current workspace defaults plus the
 per-output overrides.
 
+This task should build on [[task.2026.2026-06-11-session-output-metadata]] for shared mutation, loader, and metadata-only frontmatter update patterns. The writer override field can remain separate from `outputMetadata`, because it is render policy rather than descriptive output metadata.
+
 Frontmatter should optionally record the effective writer policy for portability
 and auditability, but frontmatter must not be the source of truth. Outputs may
 have frontmatter disabled, may be JSONL, or may not be writable when the user
@@ -129,16 +131,20 @@ needed to regenerate historical output under a new policy.
 
 - Decide whether the initial UI belongs on both Sessions and Recordings pages,
   or whether Sessions is enough for the first implementation.
+  - Resolved 2026-06-11: the first tri-state controls live on Recordings page rows; Sessions rows carry the same loader projection so controls can be added there later without new plumbing.
 - Decide the exact frontmatter key name. `kato-writerFeatureFlags` is explicit
   and aligns with existing writer flag names, but it is more developer-facing
   than a friendlier `kato-renderPolicy`.
+  - Resolved 2026-06-11: `kato-writerFeatureFlags`, written only for outputs that carry overrides so unoverridden files stay byte-stable.
 - Decide whether stopped outputs should allow policy edits immediately. The
   likely answer is yes, because the override affects future re-arm/restart.
+  - Resolved 2026-06-11: yes; the selector matches stopped outputs (including by historical recording cycle id) and overrides apply on re-arm/restart.
 
 ## Decisions
 
 - Store per-output writer choices in persisted session metadata under each
   `workspaceOutputs[]` entry.
+- Reuse the shared session/output metadata foundation for mutation locking, loader projection, and metadata-only frontmatter update patterns.
 - Use override semantics rather than copying full effective flags into the
   override field.
 - Keep `workspaceOutputs[].writerFeatureFlags` as the workspace-default
@@ -220,14 +226,15 @@ export interface SessionWorkspaceOutputStateV1 {
 
 ## Implementation Plan
 
-- [ ] Add persisted contract type and validation for output writer flag overrides.
-- [ ] Add helpers to resolve effective output writer flags from defaults plus overrides.
-- [ ] Preserve overrides when applying workspace profile snapshots.
-- [ ] Apply effective output flags in daemon persisted append/capture/restart flows.
-- [ ] Apply effective output flags in web recording mutation flows.
-- [ ] Add web mutation endpoint/action for per-output commentary/thinking overrides.
-- [ ] Project output policy fields into Sessions and Recordings row data.
-- [ ] Add compact tri-state controls to web output rows.
-- [ ] Record effective writer policy in markdown frontmatter when frontmatter is enabled.
-- [ ] Add focused contract, runtime, writer, loader, and web action tests.
-- [ ] Update developer/user documentation after behavior is implemented.
+- [x] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its shared mutation/loader/frontmatter-update helpers to avoid duplicate plumbing.
+- [x] Add persisted contract type and validation for output writer flag overrides.
+- [x] Add helpers to resolve effective output writer flags from defaults plus overrides.
+- [x] Preserve overrides when applying workspace profile snapshots.
+- [x] Apply effective output flags in daemon persisted append/capture/restart flows.
+- [x] Apply effective output flags in web recording mutation flows.
+- [x] Add web mutation endpoint/action for per-output commentary/thinking overrides.
+- [x] Project output policy fields into Sessions and Recordings row data.
+- [x] Add compact tri-state controls to web output rows (Recordings page rows; Sessions rows carry the projection data).
+- [x] Record effective writer policy in markdown frontmatter when frontmatter is enabled (written for outputs that carry overrides).
+- [x] Add focused contract, runtime, writer, loader, and web action tests.
+- [x] Update developer/user documentation after behavior is implemented (see [[dev.decision-log]]).

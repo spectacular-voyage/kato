@@ -1,6 +1,7 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
+  createWorkspaceConfigScaffold,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   DefaultWorkspaceConfigFileStore,
   loadWorkspaceConfigOverrides,
@@ -43,6 +44,44 @@ function makeWorkspace(
     ...(overrides.updatedAt ? { updatedAt: overrides.updatedAt } : {}),
   };
 }
+
+Deno.test("loadWorkspaceConfigOverrides supports auto-recording settings", async () => {
+  await withTestTempDir("workspace-profile-auto-record-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "AutoRecord.Proj");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "autoRecordConversations: true",
+        "defaultOutputDir: notes",
+        'filenameTemplate: "{provider}.md"',
+      ].join("\n") + "\n",
+    );
+
+    const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.autoRecordConversations, true);
+
+    const profile = await new WorkspaceProfileResolver().resolveForCommand(
+      makeWorkspace({
+        workspaceId: "ws-auto-record",
+        alias: "auto",
+        workspaceRoot,
+        configPath,
+      }),
+    );
+    assertEquals(profile.autoRecordConversations, true);
+    assertEquals(
+      createWorkspaceConfigScaffold().includes(
+        "autoRecordConversations: false",
+      ),
+      true,
+    );
+  });
+});
 
 function makeInMemoryWorkspaceRegistryStore(
   initial: RegisteredWorkspace[] = [],
@@ -396,6 +435,85 @@ Deno.test("loadWorkspaceConfigOverrides accepts local and IANA workspaceTimezone
       );
     },
   );
+});
+
+Deno.test("loadWorkspaceConfigOverrides normalizes workspace default tags and tag suggestions", async () => {
+  await withTestTempDir("workspace-profile-tags-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Tags.Proj");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "defaultTags:",
+        '  - " alpha "',
+        "  - beta",
+        "  - alpha",
+        "tagSuggestions:",
+        "  - topic",
+        '  - " topic "',
+      ].join("\n") + "\n",
+    );
+
+    const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.defaultTags, ["alpha", "beta"]);
+    assertEquals(loaded.tagSuggestions, ["topic"]);
+
+    const workspace = makeWorkspace({
+      workspaceId: "ws-tags",
+      alias: "Tags.Proj",
+      workspaceRoot,
+      configPath,
+    });
+    const profile = await new WorkspaceProfileResolver().resolveForCommand(
+      workspace,
+    );
+    assertEquals(profile.defaultTags, ["alpha", "beta"]);
+    assertEquals(profile.tagSuggestions, ["topic"]);
+  });
+});
+
+Deno.test("loadWorkspaceConfigOverrides rejects malformed workspace tag fields", async () => {
+  await withTestTempDir("workspace-profile-tags-invalid-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Tags.Invalid");
+    const configPath = join(
+      workspaceRoot,
+      DEFAULT_WORKSPACE_CONFIG_FILENAME,
+    );
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "defaultTags:",
+        '  - ""',
+      ].join("\n") + "\n",
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "defaultTags[0] must be a non-empty string",
+    );
+
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultOutputDir: notes",
+        "tagSuggestions:",
+        "  - 42",
+      ].join("\n") + "\n",
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "tagSuggestions must contain only strings",
+    );
+  });
 });
 
 Deno.test("loadWorkspaceConfigOverrides rejects invalid workspaceTimezone", async () => {

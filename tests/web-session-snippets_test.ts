@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import type {
   DaemonSessionStatus,
   DaemonStatusSnapshot,
@@ -213,6 +214,77 @@ Deno.test("resolveSessionSnippet uses twin history before source replay when bot
       source: "twin",
     });
   });
+});
+
+Deno.test("resolveSessionSnippet replays Claude subagent sidechain source for snippets", async () => {
+  await withTestTempDir(
+    "web-session-snippets-claude-subagent-",
+    async (rootDir) => {
+      const katoDir = join(rootDir, ".kato");
+      const sourceDir = join(
+        rootDir,
+        "claude",
+        "parent-session",
+        "subagents",
+      );
+      await Deno.mkdir(sourceDir, { recursive: true });
+      const sourceFilePath = join(sourceDir, "agent-a1b2c3.jsonl");
+      await Deno.writeTextFile(
+        sourceFilePath,
+        [
+          JSON.stringify({
+            type: "user",
+            uuid: "subagent-u1",
+            isSidechain: true,
+            sessionId: "parent-session",
+            timestamp: "2026-07-09T18:00:00.000Z",
+            message: {
+              role: "user",
+              content: "inspect the workflow output",
+            },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: "subagent-a1",
+            parentUuid: "subagent-u1",
+            isSidechain: true,
+            sessionId: "parent-session",
+            timestamp: "2026-07-09T18:00:05.000Z",
+            message: {
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              content: [{ type: "text", text: "Inspection complete." }],
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+
+      const store = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-07-09T18:01:00.000Z"),
+        makeSessionId: () => "sess-claude-subagent",
+      });
+      await store.getOrCreateSessionMetadata({
+        provider: "claude",
+        providerSessionId: "agent-a1b2c3",
+        sourceFilePath,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+
+      const result = await resolveSessionSnippet({
+        sessionId: "sess-claude-subagent",
+        katoDir,
+        statusStore: makeStatusStore([]),
+      });
+
+      assertEquals(result, {
+        sessionId: "sess-claude-subagent",
+        status: "ready",
+        snippet: "inspect the workflow output",
+        source: "source",
+      });
+    },
+  );
 });
 
 Deno.test("resolveSessionSnippet returns unavailable when the session metadata is missing", async () => {

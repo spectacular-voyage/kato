@@ -4,9 +4,18 @@ import type {
   MarkdownFrontmatterConfig,
   SecretsPolicyConfig,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
+  SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
   UserConfig,
 } from "@kato/shared";
-import { extractSnippet } from "@kato/shared";
+import {
+  extractSnippet,
+  hasWriterFeatureFlagOverrides,
+  resolveEffectiveOutputMetadata,
+  resolveEffectiveWriterFeatureFlags,
+} from "@kato/shared";
+import { isAbsolute, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -344,6 +353,21 @@ interface PersistentRecordingCommandContext {
   secretsPolicy?: SecretsPolicyConfig;
 }
 
+interface ApplyWorkspaceAutoRecordingOptions {
+  provider: string;
+  providerSessionId: string;
+  snapshotSnippet?: string;
+  events: ConversationEvent[];
+  metadata: SessionMetadataV1;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+  now: () => Date;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
+}
+
 async function assertCaptureDestinationDoesNotExist(
   targetPath: string,
 ): Promise<void> {
@@ -377,6 +401,13 @@ function isAlreadyExistsError(error: unknown): boolean {
   }
   return typeof candidate.message === "string" &&
     /^Capture destination already exists:/.test(candidate.message);
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const resolvedCandidate = resolve(candidatePath);
+  const resolvedRoot = resolve(rootPath);
+  const rel = relative(resolvedRoot, resolvedCandidate);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 async function captureSnapshotWithRetries(options: {
@@ -446,6 +477,8 @@ function createOutputOverridesFromWorkspaceProfile(
   profile: ResolvedWorkspaceProfile,
   captureIncludeSystemEvents: boolean,
   userConfig: UserConfig,
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
 ): RecordingOutputOverrides {
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig,
@@ -455,7 +488,9 @@ function createOutputOverridesFromWorkspaceProfile(
     workspaceId: profile.workspaceId,
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
+    writerFeatureFlagOverrides,
     workspaceTimezone: profile.workspaceTimezone,
+    frontmatterTags: profile.defaultTags,
     preferredUsername,
     captureIncludeSystemEvents,
     userConfig,
@@ -465,23 +500,19 @@ function createOutputOverridesFromWorkspaceProfile(
 function createOutputOverrides(options: {
   workspaceId?: string;
   markdownFrontmatter: MarkdownFrontmatterConfig;
-  writerFeatureFlags: {
-    writerIncludeCommentary: boolean;
-    writerIncludeThinking: boolean;
-    writerIncludeToolCalls: boolean;
-    writerIncludeToolResults?: boolean;
-    writerIncludeDecisionPrompt?: boolean;
-    writerIncludeDecisionOptions?: boolean;
-    writerIncludeDecisionSelection?: boolean;
-    writerItalicizeUserMessages: boolean;
-    writerRelativizeLocalLinks?: boolean;
-    writerUseDendronStyleWikilinks?: boolean;
-  };
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
   workspaceTimezone: string;
+  frontmatterTags?: string[];
   preferredUsername?: string;
   captureIncludeSystemEvents: boolean;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
+  const writerFeatureFlags = resolveEffectiveWriterFeatureFlags(
+    options.writerFeatureFlags,
+    options.writerFeatureFlagOverrides,
+  );
   return {
     includeFrontmatter:
       options.markdownFrontmatter.includeFrontmatterInMarkdownRecordings,
@@ -492,6 +523,9 @@ function createOutputOverrides(options: {
     includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
+    ...(options.frontmatterTags && options.frontmatterTags.length > 0
+      ? { frontmatterTags: options.frontmatterTags }
+      : {}),
     participantUsername: resolveFrontmatterParticipantUsername(
       {
         markdownFrontmatter: options.markdownFrontmatter,
@@ -499,26 +533,32 @@ function createOutputOverrides(options: {
         workspaceId: options.workspaceId,
       },
     ),
+    ...(hasWriterFeatureFlagOverrides(options.writerFeatureFlagOverrides)
+      ? {
+        frontmatterWriterPolicy: {
+          writerIncludeCommentary: writerFeatureFlags.writerIncludeCommentary,
+          writerIncludeThinking: writerFeatureFlags.writerIncludeThinking,
+        },
+      }
+      : {}),
     renderOptions: {
-      includeCommentary: options.writerFeatureFlags.writerIncludeCommentary,
-      includeThinking: options.writerFeatureFlags.writerIncludeThinking,
-      includeToolCalls: options.writerFeatureFlags.writerIncludeToolCalls,
-      includeToolResults: options.writerFeatureFlags.writerIncludeToolResults ??
+      includeCommentary: writerFeatureFlags.writerIncludeCommentary,
+      includeThinking: writerFeatureFlags.writerIncludeThinking,
+      includeToolCalls: writerFeatureFlags.writerIncludeToolCalls,
+      includeToolResults: writerFeatureFlags.writerIncludeToolResults ??
         false,
-      includeDecisionPrompt:
-        options.writerFeatureFlags.writerIncludeDecisionPrompt ?? true,
-      includeDecisionOptions:
-        options.writerFeatureFlags.writerIncludeDecisionOptions ?? true,
+      includeDecisionPrompt: writerFeatureFlags.writerIncludeDecisionPrompt ??
+        true,
+      includeDecisionOptions: writerFeatureFlags.writerIncludeDecisionOptions ??
+        true,
       includeDecisionSelection:
-        options.writerFeatureFlags.writerIncludeDecisionSelection ?? true,
-      italicizeUserMessages:
-        options.writerFeatureFlags.writerItalicizeUserMessages,
-      relativizeLocalLinks:
-        options.writerFeatureFlags.writerRelativizeLocalLinks ?? true,
-      markdownLinkStyle:
-        options.writerFeatureFlags.writerUseDendronStyleWikilinks
-          ? "dendron-wikilink"
-          : "standard",
+        writerFeatureFlags.writerIncludeDecisionSelection ?? true,
+      italicizeUserMessages: writerFeatureFlags.writerItalicizeUserMessages,
+      relativizeLocalLinks: writerFeatureFlags.writerRelativizeLocalLinks ??
+        true,
+      markdownLinkStyle: writerFeatureFlags.writerUseDendronStyleWikilinks
+        ? "dendron-wikilink"
+        : "standard",
       includeSystemEvents: options.captureIncludeSystemEvents,
       headingTimestampTimezone: options.workspaceTimezone,
       ...(options.markdownFrontmatter.addParticipantUsernameToHeadings &&
@@ -531,8 +571,12 @@ function createOutputOverrides(options: {
   };
 }
 
-async function resolvePersistedWorkspaceOutputOverrides(options: {
+// Resolves effective writer behavior for a persisted workspace output: current
+// registered workspace profile flags when the workspace still exists,
+// otherwise the persisted snapshot, plus per-output writer flag overrides.
+export async function resolvePersistedWorkspaceOutputOverrides(options: {
   output: NonNullable<SessionMetadataV1["workspaceOutputs"]>[number];
+  sessionDefaults?: SessionOutputMetadataV1;
   captureIncludeSystemEvents: boolean;
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
@@ -542,6 +586,8 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     userConfig: options.userConfig,
     workspaceId: options.output.workspaceId,
   });
+  const writerFeatureFlagOverrides = options.output.writerFeatureFlagOverrides;
+  let workspaceDefaultTags: string[] = [];
   const registered = await options.workspaceCatalog.getByWorkspaceId(
     options.output.workspaceId,
   );
@@ -549,11 +595,22 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     const profile = await options.workspaceProfileResolver.resolveForCommand(
       registered,
     );
-    return createOutputOverridesFromWorkspaceProfile(
+    workspaceDefaultTags = profile.defaultTags;
+    const effectiveMetadata = resolveEffectiveOutputMetadata(
+      options.sessionDefaults,
+      options.output.outputMetadata,
+      workspaceDefaultTags,
+    );
+    const outputOverrides = createOutputOverridesFromWorkspaceProfile(
       profile,
       options.captureIncludeSystemEvents,
       options.userConfig,
+      writerFeatureFlagOverrides,
     );
+    if (effectiveMetadata.tags && effectiveMetadata.tags.length > 0) {
+      outputOverrides.frontmatterTags = effectiveMetadata.tags;
+    }
+    return outputOverrides;
   }
 
   if (options.output.sourceConfigPath) {
@@ -563,6 +620,13 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
         const overrides = await loadWorkspaceConfigOverrides(
           options.output.sourceConfigPath,
         );
+        workspaceDefaultTags = overrides.defaultTags ??
+          options.output.defaultTags ?? [];
+        const effectiveMetadata = resolveEffectiveOutputMetadata(
+          options.sessionDefaults,
+          options.output.outputMetadata,
+          workspaceDefaultTags,
+        );
         return createOutputOverrides({
           workspaceId: options.output.workspaceId,
           markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(
@@ -571,8 +635,10 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
           writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
             overrides.writerFeatureFlags,
           ),
+          writerFeatureFlagOverrides,
           workspaceTimezone: overrides.workspaceTimezone ??
             DEFAULT_WORKSPACE_TIMEZONE,
+          frontmatterTags: effectiveMetadata.tags,
           preferredUsername,
           captureIncludeSystemEvents: options.captureIncludeSystemEvents,
           userConfig: options.userConfig,
@@ -585,17 +651,148 @@ async function resolvePersistedWorkspaceOutputOverrides(options: {
     }
   }
 
+  const effectiveMetadata = resolveEffectiveOutputMetadata(
+    options.sessionDefaults,
+    options.output.outputMetadata,
+    options.output.defaultTags,
+  );
   return createOutputOverrides({
     workspaceId: options.output.workspaceId,
     markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(
       options.output.writerFeatureFlags,
     ),
+    writerFeatureFlagOverrides,
     workspaceTimezone: DEFAULT_WORKSPACE_TIMEZONE,
+    frontmatterTags: effectiveMetadata.tags,
     preferredUsername,
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
     userConfig: options.userConfig,
   });
+}
+
+async function applyWorkspaceAutoRecording(
+  options: ApplyWorkspaceAutoRecordingOptions,
+): Promise<boolean> {
+  if (options.provider !== "claude") {
+    return false;
+  }
+  const workingDirectory = options.metadata.workingDirectory?.trim();
+  if (!workingDirectory || options.events.length === 0) {
+    return false;
+  }
+
+  const workspaces = await options.workspaceCatalog.list();
+  let metadataChanged = false;
+  for (const workspace of workspaces) {
+    try {
+      const profile = await options.workspaceProfileResolver.resolveForCommand(
+        workspace,
+      );
+      if (!profile.autoRecordConversations) {
+        continue;
+      }
+      if (!isPathWithinRoot(workingDirectory, profile.workspaceRoot)) {
+        continue;
+      }
+      if (findWorkspaceOutput(options.metadata, workspace.workspaceId)) {
+        continue;
+      }
+
+      const outputUsername = resolvePreferredParticipantUsername({
+        userConfig: options.userConfig,
+        workspaceId: workspace.workspaceId,
+      }) ?? UNKNOWN_OUTPUT_USERNAME;
+      const autoRecordNow = options.now();
+      const resolved = await resolveWorkspaceCommandDestination({
+        profile,
+        provider: options.provider,
+        sessionId: options.providerSessionId,
+        outputUsername,
+        snapshotSnippet: options.snapshotSnippet,
+        boundarySnapshot: options.events,
+        now: autoRecordNow,
+      });
+      const resolvedDestination = await validateDestinationPathForCommand(
+        options.recordingPipeline,
+        options.provider,
+        options.providerSessionId,
+        resolved.resolvedPath,
+        "record",
+      );
+      const targetBinding = resolveBindingForRetargetedWorkspacePath({
+        profile,
+        currentBinding: resolved.binding,
+        resolvedPath: resolvedDestination,
+      });
+      const nowIso = options.now().toISOString();
+      const output = createWorkspaceOutputState({
+        profile,
+        binding: targetBinding,
+        resolvedPath: resolvedDestination,
+        resolvedDefaultOutputDir: resolved.resolvedDefaultOutputDir,
+        desiredState: "off",
+        writeCursor: 0,
+        nowIso,
+      });
+      const recordingCycleId = openWorkspaceOutputCycle(output, 0, nowIso);
+      readWorkspaceOutputs(options.metadata).push(output);
+      metadataChanged = true;
+
+      await options.operationalLogger.info(
+        "recording.auto_record.activated",
+        "Workspace auto-recording activated for provider session",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: profile.alias,
+          workingDirectory,
+          targetPath: resolvedDestination,
+          recordingCycleId,
+        },
+      );
+      await options.auditLogger.record(
+        "recording.auto_record.activated",
+        "Workspace auto-recording activated for provider session",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: profile.alias,
+          workingDirectory,
+          targetPath: resolvedDestination,
+          recordingCycleId,
+        },
+      );
+    } catch (error) {
+      await options.operationalLogger.error(
+        "recording.auto_record.failed",
+        "Failed to activate workspace auto-recording",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          workingDirectory,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      await options.auditLogger.record(
+        "recording.auto_record.failed",
+        "Failed to activate workspace auto-recording",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          workingDirectory,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+  return metadataChanged;
 }
 
 function matchesCaptureBoundaryEvent(
@@ -972,6 +1169,16 @@ async function applyPersistentControlCommandsForEvent(
                   "Recording pipeline does not support appendToDestination",
                 );
               }
+              const seedOutputOverrides = hasWriterFeatureFlagOverrides(
+                  output.writerFeatureFlagOverrides,
+                )
+                ? createOutputOverridesFromWorkspaceProfile(
+                  profile,
+                  captureIncludeSystemEvents,
+                  userConfig,
+                  output.writerFeatureFlagOverrides,
+                )
+                : outputOverrides;
               const writeResult = await recordingPipeline.appendToDestination({
                 provider,
                 sessionId: providerSessionId,
@@ -981,7 +1188,7 @@ async function applyPersistentControlCommandsForEvent(
                 recordingId: cycleId,
                 recordingCycleIds: [cycleId],
                 workspaceIds: [workspace.workspaceId],
-                outputOverrides,
+                outputOverrides: seedOutputOverrides,
               });
               if (writeResult.wrote) {
                 updateWorkspaceOutputCycleLastWrite(
@@ -1026,6 +1233,15 @@ async function applyPersistentControlCommandsForEvent(
             providerSessionId,
             { snapshotSnippet },
           );
+          const captureOutputOverrides = output &&
+              hasWriterFeatureFlagOverrides(output.writerFeatureFlagOverrides)
+            ? createOutputOverridesFromWorkspaceProfile(
+              profile,
+              captureIncludeSystemEvents,
+              userConfig,
+              output.writerFeatureFlagOverrides,
+            )
+            : outputOverrides;
           const captureResult = await captureSnapshotWithRetries({
             recordingPipeline,
             provider,
@@ -1034,7 +1250,7 @@ async function applyPersistentControlCommandsForEvent(
             events: captureEvents,
             title: captureTitle,
             workspaceId: workspace.workspaceId,
-            outputOverrides,
+            outputOverrides: captureOutputOverrides,
             allowGeneratedDestinationRetries: resolved.usesGeneratedFilename,
             resolveCycleIdForAttempt: (targetPathForAttempt) => {
               const destinationChangedForAttempt = !output ||
@@ -1119,7 +1335,7 @@ async function applyPersistentControlCommandsForEvent(
               ...(activeCycleId ? { recordingId: activeCycleId } : {}),
               recordingCycleIds: activeCycleId ? [activeCycleId] : undefined,
               workspaceIds: [workspace.workspaceId],
-              outputOverrides,
+              outputOverrides: captureOutputOverrides,
             });
             if (writeResult.wrote && activeCycleId) {
               updateWorkspaceOutputCycleLastWrite(
@@ -2004,6 +2220,22 @@ async function processPersistentRecordingUpdates(
       metadataChanged = true;
     }
 
+    const autoRecordingChanged = await applyWorkspaceAutoRecording({
+      provider,
+      providerSessionId,
+      snapshotSnippet: snapshot.metadata.snippet,
+      events: snapshot.events,
+      metadata,
+      recordingPipeline,
+      operationalLogger,
+      auditLogger,
+      now,
+      workspaceCatalog,
+      workspaceProfileResolver,
+      userConfig,
+    });
+    metadataChanged = metadataChanged || autoRecordingChanged;
+
     const recordingTitle = resolveConversationTitle(
       snapshot.events,
       providerSessionId,
@@ -2033,6 +2265,7 @@ async function processPersistentRecordingUpdates(
         }
         const outputOverrides = await resolvePersistedWorkspaceOutputOverrides({
           output,
+          sessionDefaults: metadata.outputMetadataDefaults,
           captureIncludeSystemEvents,
           workspaceCatalog,
           workspaceProfileResolver,
@@ -2260,6 +2493,16 @@ function mergeMatchingWorkspaceOutputPreferringLatest(
   if (!merged.createdAt && current.createdAt) {
     merged.createdAt = current.createdAt;
   }
+  if (
+    !merged.writerFeatureFlagOverrides && current.writerFeatureFlagOverrides
+  ) {
+    merged.writerFeatureFlagOverrides = structuredClone(
+      current.writerFeatureFlagOverrides,
+    );
+  }
+  if (!merged.outputMetadata && current.outputMetadata) {
+    merged.outputMetadata = structuredClone(current.outputMetadata);
+  }
 
   merged.writeCursor = Math.max(merged.writeCursor, current.writeCursor);
   merged.recordingCycles = mergeWorkspaceRecordingCyclesPreferringLatest(
@@ -2344,6 +2587,11 @@ async function mergeLatestSessionMetadataBeforeSave(
     merged.ingestionActivatedAt = metadata.ingestionActivatedAt;
   } else {
     delete merged.ingestionActivatedAt;
+  }
+  if (metadata.workingDirectory !== undefined) {
+    merged.workingDirectory = metadata.workingDirectory;
+  } else {
+    delete merged.workingDirectory;
   }
   if (metadata.commandCursor !== undefined) {
     merged.commandCursor = metadata.commandCursor;

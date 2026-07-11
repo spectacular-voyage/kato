@@ -94,6 +94,7 @@ export async function resolveWorkspaceCommandDestination(options: {
   provider: string;
   sessionId: string;
   outputUsername: string;
+  filenameSlug?: string;
   snapshotSnippet?: string;
   boundarySnapshot?: ConversationEvent[];
   rawArgument?: string;
@@ -111,6 +112,7 @@ export async function resolveWorkspaceCommandDestination(options: {
     sessionId: options.sessionId,
     now: options.now,
     outputUsername: options.outputUsername,
+    filenameSlug: options.filenameSlug,
     snapshotSnippet: options.snapshotSnippet,
     boundarySnapshot: options.boundarySnapshot,
   });
@@ -124,6 +126,7 @@ export async function resolveWorkspaceCommandDestination(options: {
         sessionId: options.sessionId,
         now: options.now,
         outputUsername: options.outputUsername,
+        filenameSlug: options.filenameSlug,
         snapshotSnippet: options.snapshotSnippet,
         boundarySnapshot: options.boundarySnapshot,
       }),
@@ -158,6 +161,7 @@ export async function resolveWorkspaceCommandDestination(options: {
         sessionId: options.sessionId,
         now: options.now,
         outputUsername: options.outputUsername,
+        filenameSlug: options.filenameSlug,
         snapshotSnippet: options.snapshotSnippet,
         boundarySnapshot: options.boundarySnapshot,
       }),

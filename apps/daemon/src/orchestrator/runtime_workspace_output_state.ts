@@ -69,7 +69,11 @@ export function closeWorkspaceOutputCycle(
     }
     cycle.stoppedCursor = stopCursor;
     cycle.stoppedAt = nowIso;
-    cycle.stoppedBySeq = stopCursor;
+    if (stopCursor > 0) {
+      cycle.stoppedBySeq = stopCursor;
+    } else {
+      delete cycle.stoppedBySeq;
+    }
     break;
   }
   delete output.activeRecordingCycleId;
@@ -102,7 +106,7 @@ export function openWorkspaceOutputCycle(
     startedCursor: startCursor,
     startedAt: nowIso,
     lastWriteAt: nowIso,
-    startedBySeq: startCursor,
+    ...(startCursor > 0 ? { startedBySeq: startCursor } : {}),
   });
   output.activeRecordingCycleId = recordingCycleId;
   output.desiredState = "on";
@@ -142,6 +146,7 @@ export function applyWorkspaceProfileSnapshot(
   output.workspaceRootSnapshot = profile.workspaceRoot;
   output.resolvedDefaultOutputDir = resolvedDefaultOutputDir;
   output.filenameTemplate = profile.filenameTemplate;
+  output.defaultTags = [...profile.defaultTags];
   output.writerFeatureFlags = { ...profile.writerFeatureFlags };
 }
 
@@ -164,6 +169,7 @@ export function createWorkspaceOutputState(options: {
     workspaceRootSnapshot: options.profile.workspaceRoot,
     resolvedDefaultOutputDir: options.resolvedDefaultOutputDir,
     filenameTemplate: options.profile.filenameTemplate,
+    defaultTags: [...options.profile.defaultTags],
     writerFeatureFlags: { ...options.profile.writerFeatureFlags },
     writeCursor: options.writeCursor,
     createdAt: options.nowIso,

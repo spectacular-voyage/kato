@@ -161,6 +161,7 @@ created: 1781187417804
   - deduped in stable order.
 - Recording/web action inputs
   - accept optional per-output tags when creating a new capture or recording;
+  - share the New Capture/New Recording pre-edit surface with title and filename slug controls from [[ka.completed.2026.2026-06-28-output-filename-title-overrides]];
   - pass effective tags to markdown writer options.
 - Markdown writer/pipeline
   - keep existing `frontmatterTags?: string[]` render behavior;
@@ -241,28 +242,28 @@ created: 1781187417804
 
 ## Implementation Plan
 
-- [ ] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its
+- [x] Land [[task.2026.2026-06-11-session-output-metadata]] or enough of its
       shared contract/mutation layer to avoid adding tag-specific metadata
       plumbing.
-- [ ] Add workspace config fields for `defaultTags` and `tagSuggestions`.
-- [ ] Add user config fields for personal tag libraries and migration behavior.
-- [ ] Extend `/settings` with user-level tag library management.
+- [x] Add workspace config fields for `defaultTags` and `tagSuggestions`.
+- [x] Add user config fields for personal tag libraries and migration behavior.
+- [x] Extend `/settings` with user-level tag library management.
 - [ ] Add CLI management for personal tag libraries.
-- [ ] Add shared workspace tag library management through the workspace config
+- [x] Add shared workspace tag library management through the workspace config
       edit surface once [[task.2026.2026-06-11-workspace-config-editing]]
       exists.
-- [ ] Add shared tag validation/normalization helpers.
-- [ ] Add persisted per-output tag metadata to session contracts and
+- [x] Add shared tag validation/normalization helpers.
+- [x] Add persisted per-output tag metadata to session contracts and
       validation.
-- [ ] Add an effective tag resolver for workspace defaults plus output tags.
-- [ ] Add a tag suggestion resolver for workspace and user-level libraries.
-- [ ] Wire effective tags into web-created capture/recording actions.
-- [ ] Wire effective tags into daemon in-chat capture/record flows.
-- [ ] Add a writer/pipeline helper for tag-only markdown frontmatter mutation.
-- [ ] Add web mutation handling for active and stopped output tag edits.
-- [ ] Project tag fields into Sessions and Recordings row data.
-- [ ] Add compact tag editing UI with workspace suggestions.
-- [ ] Decide whether to include an in-chat tag mutation command; implement it
-      if included.
-- [ ] Add focused registry, contract, writer, runtime, loader, and web tests.
-- [ ] Update developer/user documentation after behavior is implemented.
+- [x] Add an effective tag resolver for workspace defaults plus output tags.
+- [x] Add a tag suggestion resolver for workspace and user-level libraries.
+- [x] Wire effective tags into web-created capture/recording actions.
+- [x] Wire effective tags into daemon in-chat capture/record flows.
+- [x] Add a writer/pipeline helper for tag-only markdown frontmatter mutation.
+- [x] Add web mutation handling for active and stopped output tag edits.
+- [x] Project tag fields into Sessions and Recordings row data.
+- [x] Add compact tag editing UI with workspace suggestions, sharing the creation popover shape with [[ka.completed.2026.2026-06-28-output-filename-title-overrides]].
+- [x] Decide whether to include an in-chat tag mutation command; implement it
+      if included. Deferred for the web-first slice.
+- [x] Add focused registry, contract, writer, runtime, loader, and web tests.
+- [x] Update developer/user documentation after behavior is implemented.

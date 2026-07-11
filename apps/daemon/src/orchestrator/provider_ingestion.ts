@@ -23,8 +23,14 @@ import {
   NoopSink,
   StructuredLogger,
 } from "../observability/mod.ts";
-import { parseClaudeEvents } from "../providers/claude/mod.ts";
-import { parseCodexEvents } from "../providers/codex/mod.ts";
+import {
+  isClaudeSubagentSourcePath,
+  parseClaudeEvents,
+} from "../providers/claude/mod.ts";
+import {
+  parseCodexEvents,
+  readCodexSessionMeta,
+} from "../providers/codex/mod.ts";
 import { parseGeminiEvents } from "../providers/gemini/mod.ts";
 import type {
   ProviderIngestionPollResult,
@@ -66,6 +72,7 @@ import {
 
 export interface ProviderSessionFile {
   sessionId: string;
+  parentProviderSessionId?: string;
   filePath: string;
   modifiedAtMs: number;
   /**
@@ -151,11 +158,6 @@ interface IngestSessionResult {
   eventsObserved: number;
 }
 
-interface CodexSessionMeta {
-  id: string;
-  source: string;
-}
-
 interface GeminiSessionDiscovery {
   sessionId: string;
   contentUpdatedAtMs?: number;
@@ -209,6 +211,33 @@ function makeNoopAuditLogger(now: () => Date): AuditLogger {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function resolveEventWorkingDirectory(
+  event: ConversationEvent,
+): string | undefined {
+  const value = event.source.workingDirectory;
+  if (!isNonEmptyString(value)) {
+    return undefined;
+  }
+  return value.trim();
+}
+
+function inferSessionWorkingDirectory(
+  provider: string,
+  events: ConversationEvent[],
+  current?: string,
+): string | undefined {
+  if (provider !== "claude") {
+    return current;
+  }
+  for (const event of events) {
+    const workingDirectory = resolveEventWorkingDirectory(event);
+    if (workingDirectory) {
+      return workingDirectory;
+    }
+  }
+  return current;
 }
 
 function normalizeRoots(paths: string[]): string[] {
@@ -370,58 +399,6 @@ async function discoverClaudeSessions(
   return sessions;
 }
 
-async function readFirstLineChunk(
-  filePath: string,
-): Promise<string | undefined> {
-  let file: Deno.FsFile;
-  try {
-    file = await Deno.open(filePath, { read: true });
-  } catch (error) {
-    if (error instanceof Deno.errors.PermissionDenied) {
-      throw new ProviderIngestionReadDeniedError("open", filePath, error);
-    }
-    throw error;
-  }
-  try {
-    const buffer = new Uint8Array(32 * 1024);
-    const read = await file.read(buffer);
-    if (read === null || read === 0) return undefined;
-    const chunk = new TextDecoder().decode(buffer.subarray(0, read));
-    const lines = chunk.split("\n");
-    for (const line of lines) {
-      if (line.trim().length > 0) return line;
-    }
-    return undefined;
-  } finally {
-    file.close();
-  }
-}
-
-async function readCodexSessionMeta(
-  filePath: string,
-): Promise<CodexSessionMeta | undefined> {
-  const firstLine = await readFirstLineChunk(filePath);
-  if (!firstLine) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(firstLine);
-  } catch {
-    return undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return undefined;
-  }
-  const entry = parsed as { type?: unknown; payload?: Record<string, unknown> };
-  if (entry.type !== "session_meta" || !entry.payload) return undefined;
-  const id = entry.payload["id"];
-  const source = entry.payload["source"];
-  if (!isNonEmptyString(id)) return undefined;
-  return {
-    id: id.trim(),
-    source: isNonEmptyString(source) ? source.trim() : "",
-  };
-}
-
 async function readLatestCodexCompactionAnchor(
   filePath: string,
 ): Promise<ProviderIngestionCodexCompactionAnchor | undefined> {
@@ -523,10 +500,21 @@ async function discoverCodexSessions(
   for (const root of roots) {
     if (!(await pathExists(root))) continue;
     for await (const filePath of walkJsonlFiles(root)) {
-      const meta = await readCodexSessionMeta(filePath);
+      let meta;
+      try {
+        meta = await readCodexSessionMeta(filePath);
+      } catch (error) {
+        if (error instanceof Deno.errors.PermissionDenied) {
+          throw new ProviderIngestionReadDeniedError("open", filePath, error);
+        }
+        throw error;
+      }
       if (!meta || meta.source === "exec") continue;
       sessions.push({
         sessionId: meta.id,
+        ...(meta.parentProviderSessionId
+          ? { parentProviderSessionId: meta.parentProviderSessionId }
+          : {}),
         filePath,
         modifiedAtMs: await statModifiedAtMs(filePath),
       });
@@ -1050,7 +1038,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       const modifiedAtChanged = current
         ? current.modifiedAtMs !== session.modifiedAtMs
         : false;
-      if (isNewSession || filePathChanged || modifiedAtChanged) {
+      const parentChanged = current
+        ? current.parentProviderSessionId !== session.parentProviderSessionId
+        : session.parentProviderSessionId !== undefined;
+      if (
+        isNewSession || filePathChanged || modifiedAtChanged || parentChanged
+      ) {
+        if (
+          (isNewSession || parentChanged) && session.parentProviderSessionId
+        ) {
+          await this.reconcileDiscoveredSessionParent(session);
+        }
         this.sessions.set(session.sessionId, session);
         this.sessionByFilePath.set(session.filePath, session.sessionId);
         if (current && current.filePath !== session.filePath) {
@@ -1079,6 +1077,49 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     this.needsDiscovery = false;
     this.nextDiscoveryAtMs = this.now().getTime() + this.discoveryIntervalMs;
+  }
+
+  private async reconcileDiscoveredSessionParent(
+    session: ProviderSessionFile,
+  ): Promise<void> {
+    if (!this.sessionStateStore || !session.parentProviderSessionId) {
+      return;
+    }
+    try {
+      const result = await this.sessionStateStore
+        .reconcileSessionParentProviderSessionId({
+          provider: this.provider,
+          providerSessionId: session.sessionId,
+          sourceFilePath: session.filePath,
+          parentProviderSessionId: session.parentProviderSessionId,
+        });
+      if (result === "updated") {
+        await this.operationalLogger.debug(
+          "session.state.parent_backfilled",
+          "Backfilled provider parent relationship without replaying the session",
+          {
+            provider: this.provider,
+            sessionId: session.sessionId,
+            parentProviderSessionId: session.parentProviderSessionId,
+          },
+        );
+      }
+    } catch (error) {
+      if (error instanceof SessionStateLoadError) {
+        await this.operationalLogger.debug(
+          "session.state.parent_backfill_skipped",
+          "Skipped provider parent backfill for invalid session metadata",
+          {
+            provider: this.provider,
+            sessionId: session.sessionId,
+            metadataPath: error.metadataPath,
+            reason: error.reason,
+          },
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   private shouldProactivelyIngestDiscoveredSession(
@@ -1148,6 +1189,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           {
             provider: this.provider,
             providerSessionId: sessionId,
+            ...(session.parentProviderSessionId
+              ? {
+                parentProviderSessionId: session.parentProviderSessionId,
+              }
+              : {}),
             sourceFilePath: session.filePath,
             // Always initialize new metadata from the start of the source.
             // This keeps snippet/history anchored to the first user message in
@@ -1672,6 +1718,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         stateMetadata.ingestCursor,
         latestCursor,
       );
+      const nextWorkingDirectory = inferSessionWorkingDirectory(
+        this.provider,
+        incomingEvents,
+        stateMetadata.workingDirectory,
+      );
+      const workingDirectoryChanged =
+        stateMetadata.workingDirectory !== nextWorkingDirectory;
       const fileMtimeChanged =
         stateMetadata.lastObservedMtimeMs !== fileModifiedAtMs;
       const sourceFileChanged =
@@ -1680,9 +1733,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
+        workingDirectoryChanged ||
         anchorChanged
       ) {
         stateMetadata.ingestCursor = latestCursor;
+        if (nextWorkingDirectory) {
+          stateMetadata.workingDirectory = nextWorkingDirectory;
+        } else {
+          delete stateMetadata.workingDirectory;
+        }
         stateMetadata.lastObservedMtimeMs = fileModifiedAtMs;
         stateMetadata.sourceFilePath = session.filePath;
         await this.sessionStateStore.saveSessionMetadata(stateMetadata);
@@ -1856,7 +1915,10 @@ export function createClaudeIngestionRunner(
     watchRoots: roots,
     discoverSessions: () => discoverClaudeSessions(roots),
     parseEvents: (filePath, fromOffset, ctx) =>
-      parseClaudeEvents(filePath, fromOffset, ctx),
+      parseClaudeEvents(filePath, fromOffset, {
+        ...ctx,
+        includeSidechainEvents: isClaudeSubagentSourcePath(filePath),
+      }),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,
     autoGenerateTwins: options.autoGenerateTwins,

@@ -25,6 +25,7 @@ export interface SessionTwinEventTime {
 export interface SessionTwinEventSource {
   providerEventType: string;
   providerEventId?: string;
+  workingDirectory?: string;
   cursor: SessionTwinSourceCursor;
   emitIndex: number;
 }
@@ -132,6 +133,12 @@ export function isSessionTwinEventV1(
   if (
     source["providerEventId"] !== undefined &&
     !isNonEmptyString(source["providerEventId"])
+  ) {
+    return false;
+  }
+  if (
+    source["workingDirectory"] !== undefined &&
+    !isNonEmptyString(source["workingDirectory"])
   ) {
     return false;
   }

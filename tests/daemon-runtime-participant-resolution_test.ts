@@ -290,10 +290,13 @@ async function runWorkspaceResolutionScenario(
         alias: "My.Proj",
         workspaceRoot: PARTICIPANT_RUNTIME_WORKSPACE_ROOT,
         configPath: PARTICIPANT_RUNTIME_WORKSPACE_CONFIG_PATH,
+        autoRecordConversations: false,
         resolvedDefaultOutputDir: PARTICIPANT_RUNTIME_DEFAULT_OUTPUT_DIR,
         defaultOutputDirTemplate: "{workspace_dir}/notes",
         filenameTemplate: "{provider}.md",
         workspaceTimezone: "local",
+        defaultTags: [],
+        tagSuggestions: [],
         markdownFrontmatter: {
           includeFrontmatterInMarkdownRecordings: true,
           includeUpdatedInFrontmatter: false,

@@ -70,6 +70,9 @@ function makeBaseDraft(
       ...(event.source.providerEventId
         ? { providerEventId: event.source.providerEventId }
         : {}),
+      ...(event.source.workingDirectory
+        ? { workingDirectory: event.source.workingDirectory }
+        : {}),
       cursor: event.source.rawCursor ?? {
         kind: "opaque",
         value: event.eventId,
@@ -329,6 +332,9 @@ export function mapTwinEventsToConversation(
         providerEventType: event.source.providerEventType,
         ...(event.source.providerEventId
           ? { providerEventId: event.source.providerEventId }
+          : {}),
+        ...(event.source.workingDirectory
+          ? { workingDirectory: event.source.workingDirectory }
           : {}),
         rawCursor: event.source.cursor,
       },

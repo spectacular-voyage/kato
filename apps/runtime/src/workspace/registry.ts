@@ -2,6 +2,7 @@ import type {
   MarkdownFrontmatterConfig,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
 } from "@kato/shared";
+import { normalizeOutputTags } from "@kato/shared";
 import {
   basename,
   dirname,
@@ -10,7 +11,7 @@ import {
   relative,
   resolve,
 } from "@std/path";
-import { parse as parseYaml } from "@std/yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
 
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
@@ -68,16 +69,22 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
 ] as const;
 const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceId",
+  "autoRecordConversations",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
+  "defaultTags",
+  "tagSuggestions",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
 const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
+  "autoRecordConversations",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
+  "defaultTags",
+  "tagSuggestions",
   "markdownFrontmatter",
   "workspaceFeatureFlags",
 ] as const;
@@ -122,11 +129,37 @@ export interface WorkspaceCatalogLike {
 }
 
 export interface WorkspaceConfigOverrides {
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
   markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
   writerFeatureFlags: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
+}
+
+export interface WorkspaceConfigFileValues {
+  workspaceId?: string;
+  autoRecordConversations?: boolean;
+  defaultOutputDir?: string;
+  filenameTemplate?: string;
+  workspaceTimezone?: string;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
+  markdownFrontmatter?: Partial<MarkdownFrontmatterConfig>;
+  writerFeatureFlags?: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1>;
+}
+
+export interface ResolvedWorkspaceConfigValues {
+  autoRecordConversations: boolean;
+  defaultOutputDir: string;
+  filenameTemplate: string;
+  workspaceTimezone: string;
+  defaultTags: string[];
+  tagSuggestions: string[];
+  markdownFrontmatter: MarkdownFrontmatterConfig;
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
 
 export interface ResolvedWorkspaceProfile {
@@ -134,10 +167,13 @@ export interface ResolvedWorkspaceProfile {
   alias: string;
   workspaceRoot: string;
   configPath: string;
+  autoRecordConversations: boolean;
   resolvedDefaultOutputDir: string;
   defaultOutputDirTemplate: string;
   filenameTemplate: string;
   workspaceTimezone: string;
+  defaultTags: string[];
+  tagSuggestions: string[];
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
 }
@@ -446,6 +482,23 @@ function parseWorkspaceTimezone(
   return trimmed;
 }
 
+function parseWorkspaceTagList(
+  value: unknown,
+  configPath: string,
+  field: "defaultTags" | "tagSuggestions",
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be a string array: ${configPath}`);
+  }
+  if (value.some((tag) => typeof tag !== "string")) {
+    throw new Error(`${field} must contain only strings: ${configPath}`);
+  }
+  return normalizeOutputTags(value, field);
+}
+
 export function createDefaultWorkspaceWriterFeatureFlags(
   overrides: Partial<SessionWorkspaceAttachmentWriterFeatureFlagsV1> = {},
 ): SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
@@ -586,6 +639,14 @@ async function loadWorkspaceConfigLikeOverrides(
     return { writerFeatureFlags: {} };
   }
 
+  return parseWorkspaceConfigLikeDocument(parsed, configPath, options);
+}
+
+function parseWorkspaceConfigLikeDocument(
+  parsed: Record<string, unknown>,
+  configPath: string,
+  options: { allowWorkspaceId: boolean },
+): WorkspaceConfigOverrides {
   for (const key of Object.keys(parsed)) {
     const isAllowed = options.allowWorkspaceId
       ? WORKSPACE_CONFIG_TOP_LEVEL_KEYS.includes(
@@ -615,6 +676,17 @@ async function loadWorkspaceConfigLikeOverrides(
   }
 
   const defaultOutputDirRaw = parsed["defaultOutputDir"];
+  const autoRecordConversationsRaw = parsed["autoRecordConversations"];
+  let autoRecordConversations: boolean | undefined;
+  if (autoRecordConversationsRaw !== undefined) {
+    if (typeof autoRecordConversationsRaw !== "boolean") {
+      throw new Error(
+        `autoRecordConversations must be a boolean: ${configPath}`,
+      );
+    }
+    autoRecordConversations = autoRecordConversationsRaw;
+  }
+
   const defaultOutputDir = trimOptionalString(defaultOutputDirRaw);
   if (
     defaultOutputDirRaw !== undefined &&
@@ -643,6 +715,16 @@ async function loadWorkspaceConfigLikeOverrides(
     parsed["workspaceTimezone"],
     configPath,
   );
+  const defaultTags = parseWorkspaceTagList(
+    parsed["defaultTags"],
+    configPath,
+    "defaultTags",
+  );
+  const tagSuggestions = parseWorkspaceTagList(
+    parsed["tagSuggestions"],
+    configPath,
+    "tagSuggestions",
+  );
 
   const markdownFrontmatter = parseWorkspaceMarkdownFrontmatter(
     parsed["markdownFrontmatter"],
@@ -654,11 +736,107 @@ async function loadWorkspaceConfigLikeOverrides(
   );
 
   return {
+    ...(autoRecordConversations !== undefined
+      ? { autoRecordConversations }
+      : {}),
     ...(defaultOutputDir ? { defaultOutputDir } : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
     ...(workspaceTimezone ? { workspaceTimezone } : {}),
+    ...(defaultTags !== undefined ? { defaultTags } : {}),
+    ...(tagSuggestions !== undefined ? { tagSuggestions } : {}),
     ...(markdownFrontmatter ? { markdownFrontmatter } : {}),
     writerFeatureFlags,
+  };
+}
+
+function workspaceConfigFileValuesToDocument(
+  values: WorkspaceConfigFileValues,
+): Record<string, unknown> {
+  const document: Record<string, unknown> = {};
+  if (values.workspaceId !== undefined) {
+    document.workspaceId = values.workspaceId;
+  }
+  if (values.autoRecordConversations !== undefined) {
+    document.autoRecordConversations = values.autoRecordConversations;
+  }
+  if (values.defaultOutputDir !== undefined) {
+    document.defaultOutputDir = values.defaultOutputDir;
+  }
+  if (values.filenameTemplate !== undefined) {
+    document.filenameTemplate = values.filenameTemplate;
+  }
+  if (values.workspaceTimezone !== undefined) {
+    document.workspaceTimezone = values.workspaceTimezone;
+  }
+  if (values.defaultTags !== undefined) {
+    document.defaultTags = values.defaultTags;
+  }
+  if (values.tagSuggestions !== undefined) {
+    document.tagSuggestions = values.tagSuggestions;
+  }
+
+  const markdownFrontmatter: Record<string, unknown> = {};
+  for (const key of WORKSPACE_MARKDOWN_FRONTMATTER_KEYS) {
+    const value = values.markdownFrontmatter?.[key];
+    if (value !== undefined) {
+      markdownFrontmatter[key] = value;
+    }
+  }
+  if (Object.keys(markdownFrontmatter).length > 0) {
+    document.markdownFrontmatter = markdownFrontmatter;
+  }
+
+  const writerFeatureFlags: Record<string, unknown> = {};
+  for (const key of WRITER_FEATURE_FLAG_KEYS) {
+    const value = values.writerFeatureFlags?.[key];
+    if (value !== undefined) {
+      writerFeatureFlags[key] = value;
+    }
+  }
+  if (Object.keys(writerFeatureFlags).length > 0) {
+    document.workspaceFeatureFlags = writerFeatureFlags;
+  }
+
+  return document;
+}
+
+export function normalizeWorkspaceConfigFileValues(
+  values: WorkspaceConfigFileValues,
+  configPath: string,
+): WorkspaceConfigOverrides {
+  return parseWorkspaceConfigLikeDocument(
+    workspaceConfigFileValuesToDocument(values),
+    configPath,
+    { allowWorkspaceId: true },
+  );
+}
+
+export function serializeWorkspaceConfigFileValues(
+  values: WorkspaceConfigFileValues,
+  configPath: string,
+): string {
+  const document = workspaceConfigFileValuesToDocument(values);
+  parseWorkspaceConfigLikeDocument(document, configPath, {
+    allowWorkspaceId: true,
+  });
+  return `${stringifyYaml(document).trimEnd()}\n`;
+}
+
+export function resolveWorkspaceConfigValues(
+  overrides: WorkspaceConfigOverrides,
+): ResolvedWorkspaceConfigValues {
+  return {
+    autoRecordConversations: overrides.autoRecordConversations ?? false,
+    defaultOutputDir: overrides.defaultOutputDir ??
+      DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
+    filenameTemplate: overrides.filenameTemplate ??
+      DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
+    workspaceTimezone: overrides.workspaceTimezone ??
+      DEFAULT_WORKSPACE_TIMEZONE,
+    defaultTags: [...(overrides.defaultTags ?? [])],
+    tagSuggestions: [...(overrides.tagSuggestions ?? [])],
+    markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
+    writerFeatureFlags: resolveWriterFeatureFlags(overrides),
   };
 }
 
@@ -776,12 +954,15 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       alias: workspace.alias,
       workspaceRoot: resolvedWorkspaceRoot,
       configPath: workspace.configPath,
+      autoRecordConversations: overrides.autoRecordConversations ?? false,
       resolvedDefaultOutputDir,
       defaultOutputDirTemplate,
       filenameTemplate: overrides.filenameTemplate ??
         DEFAULT_WORKSPACE_FILENAME_TEMPLATE,
       workspaceTimezone: overrides.workspaceTimezone ??
         DEFAULT_WORKSPACE_TIMEZONE,
+      defaultTags: [...(overrides.defaultTags ?? [])],
+      tagSuggestions: [...(overrides.tagSuggestions ?? [])],
       markdownFrontmatter: resolveWorkspaceMarkdownFrontmatter(overrides),
       writerFeatureFlags: resolveWriterFeatureFlags(overrides),
     };
@@ -825,8 +1006,11 @@ export class DefaultWorkspaceConfigFileStore {
     if (
       options.allowMissing &&
       loaded.defaultOutputDir === undefined &&
+      loaded.autoRecordConversations === undefined &&
       loaded.filenameTemplate === undefined &&
       loaded.workspaceTimezone === undefined &&
+      loaded.defaultTags === undefined &&
+      loaded.tagSuggestions === undefined &&
       loaded.markdownFrontmatter === undefined &&
       Object.keys(loaded.writerFeatureFlags).length === 0
     ) {
@@ -901,9 +1085,12 @@ export async function findNearestWorkspaceConfig(
 
 export function createWorkspaceConfigScaffold(): string {
   return [
+    "autoRecordConversations: false",
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
     `workspaceTimezone: "${DEFAULT_WORKSPACE_TIMEZONE}"`,
+    "defaultTags: []",
+    "tagSuggestions: []",
     "markdownFrontmatter:",
     "  includeFrontmatterInMarkdownRecordings: true",
     "  includeUpdatedInFrontmatter: false",

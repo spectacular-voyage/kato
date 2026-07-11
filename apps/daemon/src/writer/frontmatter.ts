@@ -6,6 +6,15 @@ const RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const KATO_SESSION_IDS_KEY = "kato-sessionIds";
 const KATO_WORKSPACE_IDS_KEY = "kato-workspaceIds";
 const KATO_RECORDING_IDS_KEY = "kato-recordingIds";
+export const KATO_WRITER_FEATURE_FLAGS_KEY = "kato-writerFeatureFlags";
+
+// Descriptive snapshot of the effective render policy for an output. Unlike
+// the accretive id/tag lists, it is replaced wholesale on update and never
+// drives live Kato behavior.
+export interface FrontmatterWriterPolicy {
+  writerIncludeCommentary: boolean;
+  writerIncludeThinking: boolean;
+}
 
 export function slugifyForFrontmatterId(
   value: string,
@@ -126,6 +135,7 @@ export function renderFrontmatter(options: {
   participants?: string[];
   tags?: string[];
   conversationEventKinds?: string[];
+  writerPolicy?: FrontmatterWriterPolicy;
   includeUpdated?: boolean;
 }): string {
   const now = options.now ?? new Date();
@@ -179,6 +189,13 @@ export function renderFrontmatter(options: {
         `conversationEventKinds: ${
           renderInlineYamlArray(conversationEventKinds)
         }`,
+      ]
+      : []),
+    ...(options.writerPolicy
+      ? [
+        `${KATO_WRITER_FEATURE_FLAGS_KEY}:`,
+        `  writerIncludeCommentary: ${options.writerPolicy.writerIncludeCommentary}`,
+        `  writerIncludeThinking: ${options.writerPolicy.writerIncludeThinking}`,
       ]
       : []),
     "---",
@@ -414,4 +431,163 @@ export function mergeAccretiveFrontmatterFields(options: {
     nextRecord["conversationEventKinds"] = mergedConversationEventKinds;
   }
   return renderFrontmatterRecord(nextRecord);
+}
+
+function readFrontmatterWriterPolicy(
+  value: unknown,
+): FrontmatterWriterPolicy | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const commentary = value["writerIncludeCommentary"];
+  const thinking = value["writerIncludeThinking"];
+  if (typeof commentary !== "boolean" || typeof thinking !== "boolean") {
+    return undefined;
+  }
+  return {
+    writerIncludeCommentary: commentary,
+    writerIncludeThinking: thinking,
+  };
+}
+
+function writerPolicyEquals(
+  a: FrontmatterWriterPolicy | undefined,
+  b: FrontmatterWriterPolicy,
+): boolean {
+  return a !== undefined &&
+    a.writerIncludeCommentary === b.writerIncludeCommentary &&
+    a.writerIncludeThinking === b.writerIncludeThinking;
+}
+
+// Replaces the effective writer-policy snapshot in an existing frontmatter
+// block. Returns the input unchanged when the snapshot already matches or the
+// frontmatter cannot be parsed.
+export function mergeFrontmatterWriterPolicySnapshot(options: {
+  frontmatter: string;
+  writerPolicy: FrontmatterWriterPolicy;
+}): string {
+  if (!options.frontmatter.startsWith("---\n")) {
+    return options.frontmatter;
+  }
+  const closingIndex = options.frontmatter.indexOf("\n---", 4);
+  if (closingIndex < 0) {
+    return options.frontmatter;
+  }
+  const payload = options.frontmatter.slice(4, closingIndex);
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(payload);
+  } catch {
+    return options.frontmatter;
+  }
+  if (!isRecord(parsed)) {
+    return options.frontmatter;
+  }
+  const existingPolicy = readFrontmatterWriterPolicy(
+    parsed[KATO_WRITER_FEATURE_FLAGS_KEY],
+  );
+  if (writerPolicyEquals(existingPolicy, options.writerPolicy)) {
+    return options.frontmatter;
+  }
+  const nextRecord: Record<string, unknown> = { ...parsed };
+  nextRecord[KATO_WRITER_FEATURE_FLAGS_KEY] = {
+    writerIncludeCommentary: options.writerPolicy.writerIncludeCommentary,
+    writerIncludeThinking: options.writerPolicy.writerIncludeThinking,
+  };
+  return renderFrontmatterRecord(nextRecord);
+}
+
+export interface FrontmatterMetadataUpdate {
+  title?: string;
+  tags?: ReadonlyArray<string>;
+  replaceTags?: ReadonlyArray<string>;
+  writerPolicy?: FrontmatterWriterPolicy;
+}
+
+export interface FrontmatterMetadataUpdateResult {
+  content: string;
+  changed: boolean;
+  hadFrontmatter: boolean;
+}
+
+// Metadata-only frontmatter update on full markdown file content: replaces
+// `title` and the writer-policy snapshot, merges `tags` accretively unless
+// `replaceTags` is present, and preserves the body bytes untouched. Content
+// without parseable frontmatter is returned unchanged.
+export function updateFrontmatterMetadataFields(
+  content: string,
+  update: FrontmatterMetadataUpdate,
+): FrontmatterMetadataUpdateResult {
+  if (!content.startsWith("---\n")) {
+    return { content, changed: false, hadFrontmatter: false };
+  }
+  const closingIndex = content.indexOf("\n---", 4);
+  if (closingIndex < 0) {
+    return { content, changed: false, hadFrontmatter: false };
+  }
+  const frontmatterEnd = closingIndex + 4;
+  const payload = content.slice(4, closingIndex);
+  const body = content.slice(frontmatterEnd);
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(payload);
+  } catch {
+    return { content, changed: false, hadFrontmatter: false };
+  }
+  if (!isRecord(parsed)) {
+    return { content, changed: false, hadFrontmatter: false };
+  }
+
+  const nextRecord: Record<string, unknown> = { ...parsed };
+  let changed = false;
+
+  const nextTitle = update.title?.trim();
+  if (nextTitle && parsed["title"] !== nextTitle) {
+    nextRecord["title"] = nextTitle;
+    changed = true;
+  }
+
+  const incomingTags = dedupeStrings(update.tags);
+  if (incomingTags.length > 0) {
+    const existingTags = readStringList(parsed["tags"]);
+    const mergedTags = mergeStringLists(existingTags, incomingTags);
+    if (!arraysEqual(existingTags, mergedTags)) {
+      nextRecord["tags"] = mergedTags;
+      changed = true;
+    }
+  }
+  if (update.replaceTags !== undefined) {
+    const existingTags = readStringList(parsed["tags"]);
+    const replacementTags = dedupeStrings(update.replaceTags);
+    if (!arraysEqual(existingTags, replacementTags)) {
+      if (replacementTags.length > 0) {
+        nextRecord["tags"] = replacementTags;
+      } else {
+        delete nextRecord["tags"];
+      }
+      changed = true;
+    }
+  }
+
+  if (update.writerPolicy) {
+    const existingPolicy = readFrontmatterWriterPolicy(
+      parsed[KATO_WRITER_FEATURE_FLAGS_KEY],
+    );
+    if (!writerPolicyEquals(existingPolicy, update.writerPolicy)) {
+      nextRecord[KATO_WRITER_FEATURE_FLAGS_KEY] = {
+        writerIncludeCommentary: update.writerPolicy.writerIncludeCommentary,
+        writerIncludeThinking: update.writerPolicy.writerIncludeThinking,
+      };
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return { content, changed: false, hadFrontmatter: true };
+  }
+  return {
+    content: `${renderFrontmatterRecord(nextRecord)}${body}`,
+    changed: true,
+    hadFrontmatter: true,
+  };
 }

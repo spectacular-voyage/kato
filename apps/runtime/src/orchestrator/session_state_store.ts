@@ -3,6 +3,7 @@ import type {
   DaemonControlSessionIndexEntryV1,
   ProviderCursor,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
   SessionTwinEventV1,
 } from "@kato/shared";
 import {
@@ -39,7 +40,19 @@ export interface SessionStateLocation {
 export interface GetOrCreateSessionMetadataInput extends SessionStateIdentity {
   sourceFilePath: string;
   initialCursor: ProviderCursor;
+  parentProviderSessionId?: string;
 }
+
+export interface ReconcileSessionParentProviderSessionIdInput
+  extends SessionStateIdentity {
+  sourceFilePath: string;
+  parentProviderSessionId: string;
+}
+
+export type ReconcileSessionParentProviderSessionIdResult =
+  | "updated"
+  | "unchanged"
+  | "missing";
 
 export interface PersistentSessionStateStoreOptions {
   katoDir?: string;
@@ -118,16 +131,31 @@ function cloneCursor(cursor: ProviderCursor): ProviderCursor {
   return { ...cursor };
 }
 
+function cloneOutputMetadata(
+  metadata: SessionOutputMetadataV1,
+): SessionOutputMetadataV1 {
+  return {
+    ...metadata,
+    ...(metadata.tags ? { tags: [...metadata.tags] } : {}),
+  };
+}
+
 function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
   return {
     schemaVersion: metadata.schemaVersion,
     sessionKey: metadata.sessionKey,
     provider: metadata.provider,
     providerSessionId: metadata.providerSessionId,
+    ...(metadata.parentProviderSessionId
+      ? { parentProviderSessionId: metadata.parentProviderSessionId }
+      : {}),
     sessionId: metadata.sessionId,
     createdAt: metadata.createdAt,
     updatedAt: metadata.updatedAt,
     sourceFilePath: metadata.sourceFilePath,
+    ...(metadata.workingDirectory
+      ? { workingDirectory: metadata.workingDirectory }
+      : {}),
     ...(metadata.lastObservedMtimeMs !== undefined
       ? { lastObservedMtimeMs: metadata.lastObservedMtimeMs }
       : {}),
@@ -146,6 +174,13 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
       : {}),
     ...(metadata.commandCursorAnchor
       ? { commandCursorAnchor: { ...metadata.commandCursorAnchor } }
+      : {}),
+    ...(metadata.outputMetadataDefaults
+      ? {
+        outputMetadataDefaults: cloneOutputMetadata(
+          metadata.outputMetadataDefaults,
+        ),
+      }
       : {}),
     ...(metadata.workspaceOutputs
       ? {
@@ -177,6 +212,16 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
           writerFeatureFlags: {
             ...entry.writerFeatureFlags,
           },
+          ...(entry.writerFeatureFlagOverrides
+            ? {
+              writerFeatureFlagOverrides: {
+                ...entry.writerFeatureFlagOverrides,
+              },
+            }
+            : {}),
+          ...(entry.outputMetadata
+            ? { outputMetadata: cloneOutputMetadata(entry.outputMetadata) }
+            : {}),
           ...(entry.activeRecordingCycleId
             ? { activeRecordingCycleId: entry.activeRecordingCycleId }
             : {}),
@@ -372,7 +417,8 @@ export class PersistentSessionStateStore {
     const sessionKey = toSessionKey(input);
     const cached = this.metadataCache.get(sessionKey);
     if (cached) {
-      return cloneSessionMetadata(cached);
+      const reconciled = await this.reconcileInputParent(cached, input);
+      return cloneSessionMetadata(reconciled);
     }
 
     const { metadataPath, twinPath } = toSessionFilePaths(
@@ -385,8 +431,9 @@ export class PersistentSessionStateStore {
       { metadataPath, twinPath },
     );
     if (existing) {
-      this.metadataCache.set(sessionKey, existing);
-      return cloneSessionMetadata(existing);
+      const reconciled = await this.reconcileInputParent(existing, input);
+      this.metadataCache.set(sessionKey, reconciled);
+      return cloneSessionMetadata(reconciled);
     }
 
     const nowIso = this.now().toISOString();
@@ -395,6 +442,9 @@ export class PersistentSessionStateStore {
       sessionKey,
       provider: input.provider,
       providerSessionId: input.providerSessionId,
+      ...(input.parentProviderSessionId
+        ? { parentProviderSessionId: input.parentProviderSessionId }
+        : {}),
       sessionId: this.makeSessionId(),
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -422,6 +472,29 @@ export class PersistentSessionStateStore {
     return cloneSessionMetadata(created);
   }
 
+  async reconcileSessionParentProviderSessionId(
+    input: ReconcileSessionParentProviderSessionIdInput,
+  ): Promise<ReconcileSessionParentProviderSessionIdResult> {
+    const sessionKey = toSessionKey(input);
+    const cached = this.metadataCache.get(sessionKey);
+    const canonicalPaths = toSessionFilePaths(this.sessionsDir, input);
+    const existing = cached ?? await this.loadExistingSessionMetadata(
+      sessionKey,
+      input,
+      canonicalPaths,
+    );
+    if (!existing) {
+      return "missing";
+    }
+    if (existing.parentProviderSessionId === input.parentProviderSessionId) {
+      this.metadataCache.set(sessionKey, existing);
+      return "unchanged";
+    }
+    const reconciled = await this.reconcileInputParent(existing, input);
+    this.metadataCache.set(sessionKey, reconciled);
+    return "updated";
+  }
+
   async saveSessionMetadata(
     metadata: SessionMetadataV1,
     options: SaveSessionMetadataOptions = {},
@@ -446,6 +519,35 @@ export class PersistentSessionStateStore {
       twinPath: cloned.twinPath,
       updatedAt: cloned.updatedAt,
     });
+  }
+
+  private async reconcileInputParent(
+    metadata: SessionMetadataV1,
+    input: { parentProviderSessionId?: string },
+  ): Promise<SessionMetadataV1> {
+    const parentProviderSessionId = input.parentProviderSessionId?.trim();
+    if (
+      !parentProviderSessionId ||
+      metadata.parentProviderSessionId === parentProviderSessionId
+    ) {
+      return metadata;
+    }
+    const next = cloneSessionMetadata(metadata);
+    next.parentProviderSessionId = parentProviderSessionId;
+    const location = this.resolveLocation(next);
+    await writeJsonAtomically(location.metadataPath, next);
+    this.metadataCache.set(next.sessionKey, next);
+    await this.ensureDaemonControlEntry({
+      sessionKey: next.sessionKey,
+      provider: next.provider,
+      providerSessionId: next.providerSessionId,
+      sessionId: next.sessionId,
+      sessionShortId: makeSessionShortId(next.sessionId),
+      metadataPath: location.metadataPath,
+      twinPath: next.twinPath,
+      updatedAt: next.updatedAt,
+    });
+    return next;
   }
 
   async listSessionMetadata(): Promise<SessionMetadataV1[]> {

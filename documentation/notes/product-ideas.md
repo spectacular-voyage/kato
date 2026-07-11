@@ -32,6 +32,7 @@ Use [[roadmap]] for prioritized work and [[features]] for shipped behavior.
 ## Metadata, Tags, And Personas
 
 - Add persisted session/output metadata for titles, tags, personas, and other output-scoped settings. See [[task.2026.2026-06-11-session-output-metadata]].
+- Add creation-time title and filename slug overrides for web captures and recordings. See [[ka.completed.2026.2026-06-28-output-filename-title-overrides]].
 - Add output tagging with shared workspace tag libraries and personal user-level tag suggestions. See [[task.2026.2026-06-11-output-tagging]].
 - Add persona support for configured prefixes, participant labels, and persona/model-aware headings. See [[task.2026.2026-05-28-persona-support]].
 - Let web-created captures and recordings accept metadata before creation.

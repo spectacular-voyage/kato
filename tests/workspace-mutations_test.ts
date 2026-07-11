@@ -2,12 +2,15 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   createDefaultSharedBehaviorConfig,
+  loadWorkspaceConfigOverrides,
   readWorkspaceConfigWorkspaceId,
   registerWorkspace,
   resolveDefaultSharedConfigPath,
   setWorkspaceDisplayName,
   SharedBehaviorConfigFileStore,
   unregisterWorkspace,
+  updateWorkspaceConfig,
+  type WorkspaceConfigEditInput,
   WorkspaceRegistryFileStore,
 } from "../apps/runtime/src/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
@@ -217,6 +220,218 @@ Deno.test("unregisterWorkspace removes an existing registry entry", async () => 
         join(sharedDir, "workspace-registry.json"),
       ).load();
       assertEquals(registry, []);
+    },
+  );
+});
+
+Deno.test("updateWorkspaceConfig writes editable workspace config fields", async () => {
+  await withTestTempDir("workspace-mutation-config-edit-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const workspaceRoot = join(homeDir, "demo-workspace");
+    const configPath = join(workspaceRoot, ".kato-workspace-config.yaml");
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "workspaceId: ws-1",
+        "defaultOutputDir: notes",
+        'filenameTemplate: "{provider}.md"',
+      ].join("\n") + "\n",
+    );
+    await new WorkspaceRegistryFileStore(
+      join(katoDir, "shared", "workspace-registry.json"),
+    ).save([{
+      workspaceId: "ws-1",
+      alias: "demo",
+      workspaceRoot,
+      configPath,
+      registeredAt: "2026-03-07T20:00:00.000Z",
+    }]);
+
+    const result = await updateWorkspaceConfig({
+      katoDir,
+      selector: "demo",
+      edits: {
+        autoRecordConversations: true,
+        defaultOutputDir: "notes/{provider}",
+        filenameTemplate: "{YYYY}-{MM}-{DD}-{provider}.md",
+        workspaceTimezone: "UTC",
+        defaultTags: [" workspace ", "research"],
+        tagSuggestions: ["research", "journal"],
+        markdownFrontmatter: {
+          includeFrontmatterInMarkdownRecordings: false,
+          includeUpdatedInFrontmatter: true,
+          addParticipantUsernameToFrontmatter: true,
+          addParticipantUsernameToHeadings: true,
+          includeSessionIds: true,
+          includeWorkspaceIds: true,
+          includeRecordingIds: true,
+          includeConversationEventKinds: true,
+        },
+        writerFeatureFlags: {
+          writerIncludeCommentary: false,
+          writerIncludeThinking: false,
+          writerIncludeToolCalls: true,
+          writerIncludeToolResults: true,
+          writerIncludeDecisionPrompt: false,
+          writerIncludeDecisionOptions: false,
+          writerIncludeDecisionSelection: false,
+          writerItalicizeUserMessages: true,
+          writerRelativizeLocalLinks: false,
+          writerUseDendronStyleWikilinks: true,
+        },
+      },
+    });
+
+    assertEquals(result.changed, true);
+    assertEquals(result.resolved.autoRecordConversations, true);
+    assertEquals(result.resolved.defaultOutputDir, "notes/{provider}");
+    assertEquals(
+      result.resolved.filenameTemplate,
+      "{YYYY}-{MM}-{DD}-{provider}.md",
+    );
+    assertEquals(result.resolved.workspaceTimezone, "UTC");
+    assertEquals(result.resolved.defaultTags, ["workspace", "research"]);
+    assertEquals(result.resolved.tagSuggestions, ["research", "journal"]);
+    assertEquals(
+      result.resolved.markdownFrontmatter
+        .includeFrontmatterInMarkdownRecordings,
+      false,
+    );
+    assertEquals(
+      result.resolved.markdownFrontmatter.includeUpdatedInFrontmatter,
+      true,
+    );
+    assertEquals(
+      result.resolved.writerFeatureFlags.writerRelativizeLocalLinks,
+      false,
+    );
+    assertEquals(
+      result.resolved.writerFeatureFlags.writerUseDendronStyleWikilinks,
+      true,
+    );
+
+    const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.autoRecordConversations, true);
+    assertEquals(loaded.defaultOutputDir, "notes/{provider}");
+    assertEquals(loaded.filenameTemplate, "{YYYY}-{MM}-{DD}-{provider}.md");
+    assertEquals(loaded.workspaceTimezone, "UTC");
+    assertEquals(loaded.defaultTags, ["workspace", "research"]);
+    assertEquals(loaded.tagSuggestions, ["research", "journal"]);
+    assertEquals(loaded.markdownFrontmatter?.includeWorkspaceIds, true);
+    assertEquals(loaded.writerFeatureFlags.writerIncludeToolCalls, true);
+    assertEquals(
+      loaded.writerFeatureFlags.writerUseDendronStyleWikilinks,
+      true,
+    );
+  });
+});
+
+Deno.test("updateWorkspaceConfig preserves omitted optional fields as inherited defaults", async () => {
+  await withTestTempDir(
+    "workspace-mutation-config-edit-partial-",
+    async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      const workspaceRoot = join(homeDir, "demo-workspace");
+      const configPath = join(workspaceRoot, ".kato-workspace-config.yaml");
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+      await Deno.writeTextFile(configPath, "workspaceId: ws-1\n");
+      await new WorkspaceRegistryFileStore(
+        join(katoDir, "shared", "workspace-registry.json"),
+      ).save([{
+        workspaceId: "ws-1",
+        alias: "demo",
+        workspaceRoot,
+        configPath,
+        registeredAt: "2026-03-07T20:00:00.000Z",
+      }]);
+
+      const result = await updateWorkspaceConfig({
+        katoDir,
+        selector: "ws-1",
+        edits: {
+          filenameTemplate: "{provider}-{sessionShortId}.md",
+        },
+      });
+
+      const loaded = await loadWorkspaceConfigOverrides(configPath);
+      assertEquals(result.resolved.defaultOutputDir, ".");
+      assertEquals(result.resolved.workspaceTimezone, "local");
+      assertEquals(loaded.defaultOutputDir, undefined);
+      assertEquals(loaded.workspaceTimezone, undefined);
+      assertEquals(loaded.filenameTemplate, "{provider}-{sessionShortId}.md");
+      assertEquals(Object.keys(loaded.writerFeatureFlags), []);
+    },
+  );
+});
+
+Deno.test("updateWorkspaceConfig rejects invalid edits and preserves config", async () => {
+  await withTestTempDir(
+    "workspace-mutation-config-edit-invalid-",
+    async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      const workspaceRoot = join(homeDir, "demo-workspace");
+      const configPath = join(workspaceRoot, ".kato-workspace-config.yaml");
+      await Deno.mkdir(workspaceRoot, { recursive: true });
+      await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        [
+          "workspaceId: ws-1",
+          "defaultOutputDir: notes",
+          'filenameTemplate: "{provider}.md"',
+        ].join("\n") + "\n",
+      );
+      await new WorkspaceRegistryFileStore(
+        join(katoDir, "shared", "workspace-registry.json"),
+      ).save([{
+        workspaceId: "ws-1",
+        alias: "demo",
+        workspaceRoot,
+        configPath,
+        registeredAt: "2026-03-07T20:00:00.000Z",
+      }]);
+
+      const assertPreserved = async (
+        edits: WorkspaceConfigEditInput,
+        expectedMessage: string,
+      ) => {
+        const before = await Deno.readTextFile(configPath);
+        await assertRejects(
+          () =>
+            updateWorkspaceConfig({
+              katoDir,
+              selector: "demo",
+              edits,
+            }),
+          Error,
+          expectedMessage,
+        );
+        assertEquals(await Deno.readTextFile(configPath), before);
+      };
+
+      await assertPreserved(
+        { filenameTemplate: "{timestampUtc}-{provider}.md" },
+        "filenameTemplate token '{timestampUtc}' is no longer supported",
+      );
+      await assertPreserved(
+        { defaultOutputDir: "notes/{unknownToken}" },
+        "defaultOutputDir token '{unknownToken}' is unsupported",
+      );
+      await assertPreserved(
+        { workspaceTimezone: "Mars/Olympus_Mons" },
+        "workspaceTimezone must be",
+      );
+      await assertPreserved(
+        {
+          writerFeatureFlags: {
+            writerRelativizeLocalLinks: "yes",
+          } as unknown as WorkspaceConfigEditInput["writerFeatureFlags"],
+        },
+        "workspaceFeatureFlags.writerRelativizeLocalLinks must be a boolean",
+      );
     },
   );
 });

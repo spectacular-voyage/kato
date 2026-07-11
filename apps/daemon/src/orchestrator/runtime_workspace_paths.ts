@@ -15,6 +15,7 @@ export interface WorkspacePathTemplateOptions {
   sessionId: string;
   now: Date;
   outputUsername: string;
+  filenameSlug?: string;
   snapshotSnippet?: string;
   boundarySnapshot?: ConversationEvent[];
 }
@@ -27,12 +28,12 @@ function sanitizeFilenamePart(value: string): string {
   return normalized.length > 0 ? normalized : "recording";
 }
 
-function slugifySnippetForFilename(value: string): string {
+function slugifySnippetForFilename(value: string): string | undefined {
   const normalized = value.toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return normalized.length > 0 ? normalized : "conversation";
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function firstNonEmptyLine(value: string | undefined): string | undefined {
@@ -45,9 +46,17 @@ function firstNonEmptyLine(value: string | undefined): string | undefined {
 }
 
 function resolveFilenameSnippet(options: {
+  filenameSlug?: string;
   snapshotSnippet?: string;
   boundarySnapshot?: ConversationEvent[];
 }): string {
+  const fromFilenameSlug = firstNonEmptyLine(options.filenameSlug);
+  if (fromFilenameSlug) {
+    const normalized = slugifySnippetForFilename(fromFilenameSlug);
+    if (normalized) {
+      return normalized;
+    }
+  }
   const fromSnapshot = firstNonEmptyLine(options.snapshotSnippet);
   if (fromSnapshot) {
     return fromSnapshot;
@@ -124,7 +133,8 @@ function buildWorkspaceTemplateTokens(
     HH: timestampTokens.HH,
     mm: timestampTokens.mm,
     timestampHumane: timestampTokens.timestampHumane,
-    snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)),
+    snippetSlug: slugifySnippetForFilename(resolveFilenameSnippet(options)) ??
+      "conversation",
     username: sanitizeFilenamePart(options.outputUsername),
   };
 }

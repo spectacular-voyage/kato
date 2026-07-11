@@ -10,6 +10,7 @@ interface RawEntry {
   type: string;
   uuid: string;
   timestamp: string;
+  cwd?: string;
   isSidechain?: boolean;
   toolUseResult?: unknown;
   message?: {
@@ -59,11 +60,6 @@ function* parseLines(
       currentOffset = endOffset;
       continue;
     }
-    if (entry.isSidechain) {
-      currentOffset = endOffset;
-      continue;
-    }
-
     yield { entry, endOffset };
     currentOffset = endOffset;
   }
@@ -85,6 +81,14 @@ function cleanText(text: string): string {
       "",
     )
     .trim();
+}
+
+function normalizeOptionalPath(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function asContentBlocks(content: unknown): RawContentBlock[] {
@@ -205,6 +209,27 @@ function makeEventId(
 export interface ClaudeParseContext {
   provider: string;
   sessionId: string;
+  includeSidechainEvents?: boolean;
+}
+
+export function resolveClaudeSubagentParentProviderSessionId(
+  filePath: string,
+): string | undefined {
+  const segments = filePath.split(/[\\/]+/).filter((segment) =>
+    segment.length > 0
+  );
+  const subagentsIndex = segments.lastIndexOf("subagents");
+  if (subagentsIndex <= 0) {
+    return undefined;
+  }
+  const parentProviderSessionId = segments[subagentsIndex - 1]?.trim();
+  return parentProviderSessionId && parentProviderSessionId.length > 0
+    ? parentProviderSessionId
+    : undefined;
+}
+
+export function isClaudeSubagentSourcePath(filePath: string): boolean {
+  return resolveClaudeSubagentParentProviderSessionId(filePath) !== undefined;
 }
 
 export async function* parseClaudeEvents(
@@ -216,9 +241,14 @@ export async function* parseClaudeEvents(
   const { provider, sessionId } = ctx;
 
   for (const { entry, endOffset } of parseLines(content, fromOffset)) {
+    if (entry.isSidechain && !ctx.includeSidechainEvents) {
+      continue;
+    }
+
     const turnId = entry.uuid;
     const timestamp = entry.timestamp;
     const cursor = makeByteOffsetCursor(endOffset);
+    const workingDirectory = normalizeOptionalPath(entry.cwd);
 
     const makeBase = (
       kind: ConversationEvent["kind"],
@@ -233,6 +263,7 @@ export async function* parseClaudeEvents(
       source: {
         providerEventType: entry.type,
         providerEventId: turnId,
+        ...(workingDirectory ? { workingDirectory } : {}),
         rawCursor: cursor,
       },
     });

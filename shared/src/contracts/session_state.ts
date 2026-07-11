@@ -1,4 +1,5 @@
 import type { ProviderCursor } from "./ipc.ts";
+import { normalizeOutputTags } from "../tags.ts";
 
 export const DAEMON_CONTROL_SCHEMA_VERSION = 1 as const;
 export const SESSION_METADATA_SCHEMA_VERSION = 1 as const;
@@ -28,6 +29,26 @@ export interface SessionWorkspaceOutputDestinationV1 {
   absolutePath?: string;
 }
 
+// User-editable descriptive metadata. Session-level values are inherited
+// defaults for outputs; per-output values win for scalar fields and tags are
+// additive. Persisted session metadata is the source of truth; markdown
+// frontmatter derived from it stays descriptive.
+export interface SessionOutputMetadataV1 {
+  displayTitle?: string;
+  filenameSlug?: string;
+  tags?: string[];
+  personaName?: string;
+  participantUsername?: string;
+}
+
+// Per-output render-policy overrides. Missing keys inherit the workspace
+// default; present booleans override it. Distinct from `writerFeatureFlags`,
+// which stays a refreshable snapshot of workspace defaults.
+export interface SessionWorkspaceOutputWriterFeatureFlagOverridesV1 {
+  writerIncludeCommentary?: boolean;
+  writerIncludeThinking?: boolean;
+}
+
 export interface SessionWorkspaceOutputStateV1 {
   workspaceId: string;
   workspaceAliasSnapshot?: string;
@@ -38,7 +59,13 @@ export interface SessionWorkspaceOutputStateV1 {
   workspaceRootSnapshot: string;
   resolvedDefaultOutputDir: string;
   filenameTemplate: string;
+  // Snapshot of workspace-level default tags used when the workspace config is
+  // no longer resolvable for future appends or metadata syncs.
+  defaultTags?: string[];
   writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  writerFeatureFlagOverrides?:
+    SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
+  outputMetadata?: SessionOutputMetadataV1;
   activeRecordingCycleId?: string;
   writeCursor: number;
   createdAt?: string;
@@ -75,10 +102,13 @@ export interface SessionMetadataV1 {
   sessionKey: string;
   provider: string;
   providerSessionId: string;
+  /** Provider-native immediate parent for a recognized sub-conversation. */
+  parentProviderSessionId?: string;
   sessionId: string;
   createdAt: string;
   updatedAt: string;
   sourceFilePath: string;
+  workingDirectory?: string;
   lastObservedMtimeMs?: number;
   ingestCursor: ProviderCursor;
   ingestAnchor?: SessionIngestAnchorV1;
@@ -88,6 +118,7 @@ export interface SessionMetadataV1 {
   ingestionActivatedAt?: string;
   commandCursor?: number;
   commandCursorAnchor?: SessionCommandCursorAnchorV1;
+  outputMetadataDefaults?: SessionOutputMetadataV1;
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
 }
 
@@ -189,6 +220,65 @@ function isWorkspaceRecordingCycle(
   return true;
 }
 
+export function isSessionOutputMetadataV1(
+  value: unknown,
+): value is SessionOutputMetadataV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    value["displayTitle"] !== undefined &&
+    !isNonEmptyString(value["displayTitle"])
+  ) {
+    return false;
+  }
+  if (
+    value["filenameSlug"] !== undefined &&
+    !isNonEmptyString(value["filenameSlug"])
+  ) {
+    return false;
+  }
+  if (
+    value["tags"] !== undefined &&
+    (!Array.isArray(value["tags"]) ||
+      value["tags"].some((tag) => typeof tag !== "string"))
+  ) {
+    return false;
+  }
+  if (Array.isArray(value["tags"])) {
+    try {
+      normalizeOutputTags(value["tags"], "outputMetadata.tags");
+    } catch {
+      return false;
+    }
+  }
+  if (
+    value["personaName"] !== undefined &&
+    !isNonEmptyString(value["personaName"])
+  ) {
+    return false;
+  }
+  if (
+    value["participantUsername"] !== undefined &&
+    !isNonEmptyString(value["participantUsername"])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isSessionWorkspaceOutputWriterFeatureFlagOverridesV1(
+  value: unknown,
+): value is SessionWorkspaceOutputWriterFeatureFlagOverridesV1 {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (value["writerIncludeCommentary"] === undefined ||
+    typeof value["writerIncludeCommentary"] === "boolean") &&
+    (value["writerIncludeThinking"] === undefined ||
+      typeof value["writerIncludeThinking"] === "boolean");
+}
+
 function isWorkspaceOutputDestination(
   value: unknown,
 ): value is SessionWorkspaceOutputDestinationV1 {
@@ -265,7 +355,35 @@ function isWorkspaceOutputState(
   ) {
     return false;
   }
+  if (
+    value["defaultTags"] !== undefined &&
+    (!Array.isArray(value["defaultTags"]) ||
+      value["defaultTags"].some((tag) => typeof tag !== "string"))
+  ) {
+    return false;
+  }
+  if (Array.isArray(value["defaultTags"])) {
+    try {
+      normalizeOutputTags(value["defaultTags"], "workspaceOutput.defaultTags");
+    } catch {
+      return false;
+    }
+  }
   if (!isWorkspaceAttachmentWriterFeatureFlags(value["writerFeatureFlags"])) {
+    return false;
+  }
+  if (
+    value["writerFeatureFlagOverrides"] !== undefined &&
+    !isSessionWorkspaceOutputWriterFeatureFlagOverridesV1(
+      value["writerFeatureFlagOverrides"],
+    )
+  ) {
+    return false;
+  }
+  if (
+    value["outputMetadata"] !== undefined &&
+    !isSessionOutputMetadataV1(value["outputMetadata"])
+  ) {
     return false;
   }
   if (
@@ -323,10 +441,22 @@ export function isSessionMetadataV1(
     return false;
   }
   if (
+    value["parentProviderSessionId"] !== undefined &&
+    !isNonEmptyString(value["parentProviderSessionId"])
+  ) {
+    return false;
+  }
+  if (
     value["lastObservedMtimeMs"] !== undefined &&
     (typeof value["lastObservedMtimeMs"] !== "number" ||
       !Number.isFinite(value["lastObservedMtimeMs"]) ||
       value["lastObservedMtimeMs"] < 0)
+  ) {
+    return false;
+  }
+  if (
+    value["workingDirectory"] !== undefined &&
+    !isNonEmptyString(value["workingDirectory"])
   ) {
     return false;
   }
@@ -405,6 +535,12 @@ export function isSessionMetadataV1(
     ) {
       return false;
     }
+  }
+  if (
+    value["outputMetadataDefaults"] !== undefined &&
+    !isSessionOutputMetadataV1(value["outputMetadataDefaults"])
+  ) {
+    return false;
   }
   if (
     value["workspaceOutputs"] !== undefined &&

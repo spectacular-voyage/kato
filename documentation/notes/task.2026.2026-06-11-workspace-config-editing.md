@@ -146,12 +146,12 @@ created: 1781187417804
 
 ## Implementation Plan
 
-- [ ] Add workspace config mutation helper(s) with focused tests.
-- [ ] Add loader support for editable workspace config values.
-- [ ] Add an `Edit` action from each Workspaces row.
-- [ ] Add a dedicated edit page or compact popover for first-slice fields.
-- [ ] Wire POST handling for workspace config edits.
-- [ ] Preserve existing register/display-name/username/unregister behavior.
-- [ ] Add validation and web action tests.
-- [ ] Update workspaces loader/view-model tests.
-- [ ] Update developer/user documentation after behavior is implemented.
+- [x] Add workspace config mutation helper(s) with focused tests.
+- [x] Add loader support for editable workspace config values.
+- [x] Add an `Edit` action from each Workspaces row.
+- [x] Add a dedicated edit page or compact popover for first-slice fields.
+- [x] Wire POST handling for workspace config edits.
+- [x] Preserve existing register/display-name/username/unregister behavior.
+- [x] Add validation and web action tests.
+- [x] Update workspaces loader/view-model tests.
+- [x] Update developer/user documentation after behavior is implemented.

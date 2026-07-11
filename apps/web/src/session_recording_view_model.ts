@@ -20,6 +20,26 @@ export interface ResolveDefaultWorkspaceSelectorValueOptions {
   rememberedWorkspaceId?: string;
 }
 
+export function deriveFilenameSlugFromTitle(
+  value: string | undefined,
+): string {
+  const normalized = value?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "") ?? "";
+  return normalized;
+}
+
+export function resolveTitleDerivedFilenameSlug(options: {
+  title: string;
+  currentFilenameSlug: string;
+  filenameSlugCustomized: boolean;
+}): string {
+  return options.filenameSlugCustomized
+    ? options.currentFilenameSlug
+    : deriveFilenameSlugFromTitle(options.title);
+}
+
 function normalizeWorkspacePreference(
   value: string | undefined,
 ): string | undefined {

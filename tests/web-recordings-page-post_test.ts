@@ -1,6 +1,6 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
-import type { WebConfig } from "@kato/shared";
+import type { SessionMetadataV1, WebConfig } from "@kato/shared";
 import {
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
@@ -35,6 +35,9 @@ function makeWorkspaceOutput(options: {
   resolvedPath: string;
   desiredState: "on" | "off";
   activeRecordingCycleId?: string;
+  outputMetadata?: NonNullable<
+    SessionMetadataV1["workspaceOutputs"]
+  >[number]["outputMetadata"];
   writeCursor?: number;
   recordingCycles: Array<{
     recordingCycleId: string;
@@ -64,6 +67,9 @@ function makeWorkspaceOutput(options: {
     writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(),
     ...(options.activeRecordingCycleId
       ? { activeRecordingCycleId: options.activeRecordingCycleId }
+      : {}),
+    ...(options.outputMetadata
+      ? { outputMetadata: options.outputMetadata }
       : {}),
     writeCursor: options.writeCursor ?? 0,
     createdAt: "2026-03-17T17:00:00.000Z",
@@ -507,4 +513,184 @@ Deno.test("handleRecordingsPagePost rejects unsupported actions with a 400 respo
       );
     },
   );
+});
+
+Deno.test("handleRecordingsPagePost sets per-output writer overrides and redirects with a notice", async () => {
+  await withTestTempDir("web-recordings-post-overrides-", async (homeDir) => {
+    const { katoDir, alphaRoot, alphaConfigPath } = await setupWorkspaceFixture(
+      homeDir,
+    );
+    const webConfig = await setupWebAuthFixture(katoDir);
+    const sessionPath = join(homeDir, "provider-session-overrides.jsonl");
+    const outputPath = join(alphaRoot, "notes", "overrides-target.md");
+    await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+    await Deno.writeTextFile(
+      outputPath,
+      [
+        "---",
+        "id: overrides-abc123",
+        "title: 'Overrides Target'",
+        "---",
+        "",
+        "Existing body.",
+        "",
+      ].join("\n"),
+    );
+
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-web-route-overrides",
+      providerSessionId: "provider-session-route-overrides",
+      sourceFilePath: sessionPath,
+      workspaceOutputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceAlias: "alpha",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          resolvedPath: outputPath,
+          desiredState: "on",
+          activeRecordingCycleId: "cycle-overrides-route",
+          writeCursor: 4,
+          recordingCycles: [{
+            recordingCycleId: "cycle-overrides-route",
+            startedCursor: 4,
+            startedAt: "2026-03-17T17:00:00.000Z",
+            startedBySeq: 4,
+          }],
+        }),
+      ],
+    });
+
+    const response = await handleRecordingsPagePost(
+      await buildAuthenticatedPostRequest("http://kato.local/recordings", {
+        action: "set-writer-overrides",
+        sessionId: "sess-web-route-overrides",
+        workspaceId: "ws-alpha",
+        recordingCycleId: "cycle-overrides-route",
+        outputPath,
+        commentary: "inherit",
+        thinking: "exclude",
+        stateFilter: "engaged-active",
+        workspaceFilter: "ws-alpha",
+        rowKey: "row-overrides-route",
+      }, webConfig),
+      { katoDir },
+    );
+
+    assertEquals(response.status, 303);
+    const location = response.headers.get("location");
+    assertExists(location);
+    const redirectUrl = new URL(location);
+    const notice = redirectUrl.searchParams.get("notice");
+    assertExists(notice);
+    assertEquals(notice.includes("render policy updated"), true);
+    assertEquals(notice.includes("thinking exclude"), true);
+
+    const store = new PersistentSessionStateStore({ katoDir });
+    const metadata = (await store.listSessionMetadata()).find((entry) =>
+      entry.sessionId === "sess-web-route-overrides"
+    );
+    assertExists(metadata);
+    assertEquals(
+      metadata.workspaceOutputs?.[0]?.writerFeatureFlagOverrides,
+      { writerIncludeThinking: false },
+    );
+
+    const content = await Deno.readTextFile(outputPath);
+    assertEquals(content.includes("kato-writerFeatureFlags:"), true);
+    assertEquals(content.includes("writerIncludeThinking: false"), true);
+    assertEquals(content.includes("Existing body."), true);
+  });
+});
+
+Deno.test("handleRecordingsPagePost replaces per-output tags and frontmatter", async () => {
+  await withTestTempDir("web-recordings-route-tags-", async (homeDir) => {
+    const { katoDir, alphaRoot, alphaConfigPath } = await setupWorkspaceFixture(
+      homeDir,
+    );
+    const webConfig = await setupWebAuthFixture(katoDir);
+    const sessionPath = join(homeDir, "provider-session-tags.jsonl");
+    const outputPath = join(alphaRoot, "notes", "tags.md");
+    await Deno.copyFile(CLAUDE_FIXTURE, sessionPath);
+    await Deno.writeTextFile(
+      outputPath,
+      [
+        "---",
+        "id: tags-abc123",
+        "title: 'Tags Target'",
+        "tags: [old]",
+        "---",
+        "",
+        "Existing body.",
+        "",
+      ].join("\n"),
+    );
+
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-web-route-tags",
+      providerSessionId: "provider-session-route-tags",
+      sourceFilePath: sessionPath,
+      workspaceOutputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceAlias: "alpha",
+          workspaceRoot: alphaRoot,
+          configPath: alphaConfigPath,
+          resolvedPath: outputPath,
+          desiredState: "off",
+          outputMetadata: { tags: ["old"] },
+          writeCursor: 4,
+          recordingCycles: [{
+            recordingCycleId: "cycle-tags-route",
+            startedCursor: 4,
+            startedAt: "2026-03-17T17:00:00.000Z",
+            stoppedCursor: 4,
+            stoppedAt: "2026-03-17T17:03:00.000Z",
+            startedBySeq: 4,
+            stoppedBySeq: 4,
+          }],
+        }),
+      ],
+    });
+
+    const response = await handleRecordingsPagePost(
+      await buildAuthenticatedPostRequest("http://kato.local/recordings", {
+        action: "update-recording-metadata",
+        sessionId: "sess-web-route-tags",
+        workspaceId: "ws-alpha",
+        recordingCycleId: "cycle-tags-route",
+        outputPath,
+        tags: "new, another",
+        stateFilter: "stopped",
+        workspaceFilter: "ws-alpha",
+        rowKey: "row-tags-route",
+      }, webConfig),
+      { katoDir },
+    );
+
+    assertEquals(response.status, 303);
+    const location = response.headers.get("location");
+    assertExists(location);
+    const redirectUrl = new URL(location);
+    assertEquals(
+      redirectUrl.searchParams.get("notice"),
+      "recording tags updated (sess-web)",
+    );
+
+    const store = new PersistentSessionStateStore({ katoDir });
+    const metadata = (await store.listSessionMetadata()).find((entry) =>
+      entry.sessionId === "sess-web-route-tags"
+    );
+    assertExists(metadata);
+    assertEquals(metadata.workspaceOutputs?.[0]?.outputMetadata, {
+      tags: ["new", "another"],
+    });
+
+    const content = await Deno.readTextFile(outputPath);
+    assertStringIncludes(content, "tags: [new, another]");
+    assertEquals(content.includes("tags: [old]"), false);
+    assertStringIncludes(content, "Existing body.");
+  });
 });

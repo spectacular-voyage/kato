@@ -20,6 +20,7 @@ export interface ConversationEventSource {
   providerEventType: string;
   providerEventId?: string;
   rawCursor?: ProviderCursor;
+  workingDirectory?: string;
 }
 
 export interface DecisionPayload {

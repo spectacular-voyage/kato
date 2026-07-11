@@ -2,16 +2,28 @@ import type {
   DaemonRecordingStatus,
   DaemonSessionStatus,
   SessionMetadataV1,
+  SessionOutputMetadataV1,
+  SessionWorkspaceAttachmentWriterFeatureFlagsV1,
+  UserConfig,
 } from "@kato/shared";
-import { DEFAULT_STATUS_STALE_AFTER_MS, isSessionStale } from "@kato/shared";
 import {
+  DEFAULT_STATUS_STALE_AFTER_MS,
+  isSessionStale,
+  resolveEffectiveOutputMetadata,
+  resolveOutputTagSuggestions,
+} from "@kato/shared";
+import {
+  createDefaultUserConfig,
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   PersistentSessionStateStore,
   type RegisteredWorkspace,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
+  resolveDefaultUserConfigPath,
   resolveDefaultWorkspaceRegistryPath,
+  UserConfigFileStore,
+  WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
 } from "@kato/runtime";
 import { relative } from "@std/path";
@@ -22,7 +34,12 @@ import {
 } from "../activity_state.ts";
 import { loadRuntimeConfigOrDefault } from "./activity_state.ts";
 import { buildSessionInventorySessionHref } from "../session_routes.ts";
+import {
+  type OutputWriterPolicyProjection,
+  projectOutputWriterPolicy,
+} from "../output_writer_policy.ts";
 import { resolveKatoDirFromStatusPath } from "./logs.ts";
+import { resolveClaudeSubagentParentProviderSessionId } from "../../../daemon/src/providers/claude/mod.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
@@ -37,6 +54,10 @@ export interface SessionRecordingActivityRow {
   stoppedAt?: string;
   lastWriteAt?: string;
   recordingCycleId?: string;
+  effectiveMetadata?: SessionOutputMetadataV1;
+  directMetadata?: SessionOutputMetadataV1;
+  tagSuggestions?: string[];
+  writerPolicy?: OutputWriterPolicyProjection;
 }
 
 export interface SessionActivityRow {
@@ -45,19 +66,27 @@ export interface SessionActivityRow {
   sessionId: string;
   sessionShortId: string;
   providerSessionId: string;
+  relationship?: {
+    kind: "subconversation";
+    parentSessionId?: string;
+  };
+  structuralContext?: boolean;
   snippet?: string;
   updatedAt: string;
   lastEventAt?: string;
+  twinSizeBytes?: number;
   stale: boolean;
   state: ActivityState;
   activeRecordingCount: number;
   staleRecordingCount: number;
   stoppedRecordingCount: number;
+  outputMetadataDefaults?: SessionOutputMetadataV1;
   recordings: SessionRecordingActivityRow[];
 }
 
 export interface SessionsPageData {
   includeStale: boolean;
+  includeSubagents: boolean;
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
@@ -75,8 +104,10 @@ export interface SessionsPageData {
 
 export interface LoadSessionActivityRowsOptions {
   includeStale?: boolean;
+  includeSubagents?: boolean;
   workspaceFilter?: string;
   recordingsMode?: "latest" | "all";
+  retainSubconversationAncestors?: boolean;
   now?: () => Date;
   katoDir?: string;
   statusPath?: string;
@@ -106,6 +137,10 @@ export interface WorkspaceOption {
   workspaceId: string;
   alias: string;
   displayName?: string;
+  filenameTemplate?: string;
+  filenameTemplateIncludesSnippet?: boolean;
+  defaultTags?: string[];
+  tagSuggestions?: string[];
 }
 
 function resolveActivityTimestamp(
@@ -214,6 +249,100 @@ async function loadRegisteredWorkspaces(
   }
 }
 
+interface WorkspaceOutputProfileProjection {
+  writerFeatureFlags: SessionWorkspaceAttachmentWriterFeatureFlagsV1;
+  defaultTags: string[];
+  tagSuggestions: string[];
+}
+
+async function loadUserConfigOrDefault(katoDir: string): Promise<UserConfig> {
+  try {
+    const store = new UserConfigFileStore(
+      resolveDefaultUserConfigPath(katoDir),
+    );
+    return (await store.ensureInitialized(createDefaultUserConfig())).config;
+  } catch {
+    return createDefaultUserConfig();
+  }
+}
+
+async function resolveWorkspaceOutputProfilesById(
+  workspaceEntries: RegisteredWorkspace[],
+  metadataList: SessionMetadataV1[],
+): Promise<Map<string, WorkspaceOutputProfileProjection>> {
+  const usedWorkspaceIds = new Set<string>();
+  for (const metadata of metadataList) {
+    for (const output of metadata.workspaceOutputs ?? []) {
+      usedWorkspaceIds.add(output.workspaceId);
+    }
+  }
+  const profilesById = new Map<string, WorkspaceOutputProfileProjection>();
+  if (usedWorkspaceIds.size === 0) {
+    return profilesById;
+  }
+  const resolver = new WorkspaceProfileResolver();
+  for (const entry of workspaceEntries) {
+    if (!usedWorkspaceIds.has(entry.workspaceId)) {
+      continue;
+    }
+    try {
+      const profile = await resolver.resolveForCommand(entry);
+      profilesById.set(entry.workspaceId, {
+        writerFeatureFlags: { ...profile.writerFeatureFlags },
+        defaultTags: [...profile.defaultTags],
+        tagSuggestions: [...profile.tagSuggestions],
+      });
+    } catch {
+      // Unresolvable workspaces fall back to per-output snapshots.
+    }
+  }
+  return profilesById;
+}
+
+async function resolveWorkspaceOptions(
+  workspaceEntries: RegisteredWorkspace[],
+  userConfig: UserConfig,
+): Promise<WorkspaceOption[]> {
+  const resolver = new WorkspaceProfileResolver();
+  const options = await Promise.all(
+    workspaceEntries.map(async (entry): Promise<WorkspaceOption> => {
+      try {
+        const profile = await resolver.resolveForCommand(entry);
+        return {
+          workspaceId: entry.workspaceId,
+          alias: entry.alias,
+          displayName: entry.displayName,
+          filenameTemplate: profile.filenameTemplate,
+          filenameTemplateIncludesSnippet: profile.filenameTemplate.includes(
+            "{snippetSlug}",
+          ),
+          defaultTags: [...profile.defaultTags],
+          tagSuggestions: resolveOutputTagSuggestions({
+            workspaceTagSuggestions: [
+              ...profile.defaultTags,
+              ...profile.tagSuggestions,
+            ],
+            userGlobalTagSuggestions: userConfig.tagLibraries
+              ?.globalSuggestions,
+            userWorkspaceTagSuggestions: userConfig.tagLibraries
+              ?.workspaceSuggestions[entry.workspaceId],
+          }),
+        };
+      } catch {
+        return {
+          workspaceId: entry.workspaceId,
+          alias: entry.alias,
+          displayName: entry.displayName,
+        };
+      }
+    }),
+  );
+  return options.sort((a, b) =>
+    a.alias.localeCompare(b.alias) ||
+    a.workspaceId.localeCompare(b.workspaceId)
+  );
+}
+
 function sortRecordings(
   rows: SessionRecordingActivityRow[],
 ): SessionRecordingActivityRow[] {
@@ -271,16 +400,22 @@ function hasPersistedTwinState(metadata: SessionMetadataV1): boolean {
     metadata.ingestionActivatedAt !== undefined;
 }
 
-async function twinFileExists(path: string): Promise<boolean> {
+async function readTwinFileInfo(
+  path: string,
+): Promise<Deno.FileInfo | undefined> {
   try {
-    await Deno.stat(path);
-    return true;
+    return await Deno.stat(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
-      return false;
+      return undefined;
     }
     throw error;
   }
+}
+
+interface NormalizedPersistedTwinMetadata {
+  metadata: SessionMetadataV1;
+  twinSizeBytes?: number;
 }
 
 function hasLegacyManualIngestionHistory(metadata: SessionMetadataV1): boolean {
@@ -323,14 +458,24 @@ function normalizePersistedSessionState(
 async function normalizePersistedTwinMetadata(
   sessionStore: PersistentSessionStateStore,
   metadata: SessionMetadataV1,
-): Promise<SessionMetadataV1> {
+): Promise<NormalizedPersistedTwinMetadata> {
   if (!hasPersistedTwinState(metadata)) {
-    return metadata;
+    return { metadata };
   }
-  if (await twinFileExists(metadata.twinPath)) {
-    return metadata;
+  const twinFileInfo = await readTwinFileInfo(metadata.twinPath);
+  if (twinFileInfo) {
+    const twinSizeBytes = hasTwinHistory(metadata) && twinFileInfo.isFile &&
+        Number.isFinite(twinFileInfo.size) && twinFileInfo.size >= 0
+      ? twinFileInfo.size
+      : undefined;
+    return {
+      metadata,
+      ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),
+    };
   }
-  return await sessionStore.resetSessionTwinPersistence(metadata);
+  return {
+    metadata: await sessionStore.resetSessionTwinPersistence(metadata),
+  };
 }
 
 function findActiveCycle(
@@ -355,11 +500,64 @@ function findLatestStoppedCycle(
   )[0];
 }
 
+interface OutputRowProjectionContext {
+  outputMetadataDefaults?: SessionOutputMetadataV1;
+  workspaceOutputProfilesById: ReadonlyMap<
+    string,
+    WorkspaceOutputProfileProjection
+  >;
+  userConfig: UserConfig;
+}
+
+function buildOutputRowProjection(
+  output: SessionWorkspaceOutputState,
+  context: OutputRowProjectionContext,
+): Pick<
+  SessionRecordingActivityRow,
+  "effectiveMetadata" | "directMetadata" | "tagSuggestions" | "writerPolicy"
+> {
+  const workspaceProfile = context.workspaceOutputProfilesById.get(
+    output.workspaceId,
+  );
+  const effectiveMetadata = resolveEffectiveOutputMetadata(
+    context.outputMetadataDefaults,
+    output.outputMetadata,
+    workspaceProfile?.defaultTags ?? output.defaultTags,
+  );
+  const workspaceDefaultFlags = workspaceProfile?.writerFeatureFlags ??
+    output.writerFeatureFlags;
+  const tagSuggestions = resolveOutputTagSuggestions({
+    workspaceTagSuggestions: workspaceProfile
+      ? [
+        ...workspaceProfile.defaultTags,
+        ...workspaceProfile.tagSuggestions,
+      ]
+      : output.defaultTags ?? [],
+    userGlobalTagSuggestions: context.userConfig.tagLibraries
+      ?.globalSuggestions,
+    userWorkspaceTagSuggestions: context.userConfig.tagLibraries
+      ?.workspaceSuggestions[output.workspaceId],
+    existingTags: effectiveMetadata.tags,
+  });
+  return {
+    ...(Object.keys(effectiveMetadata).length > 0 ? { effectiveMetadata } : {}),
+    ...(output.outputMetadata
+      ? { directMetadata: structuredClone(output.outputMetadata) }
+      : {}),
+    ...(tagSuggestions.length > 0 ? { tagSuggestions } : {}),
+    writerPolicy: projectOutputWriterPolicy(
+      workspaceDefaultFlags,
+      output.writerFeatureFlagOverrides,
+    ),
+  };
+}
+
 function buildRecordingRowsForOutput(
   output: SessionWorkspaceOutputState,
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
   now: Date,
+  projectionContext: OutputRowProjectionContext,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -370,6 +568,7 @@ function buildRecordingRowsForOutput(
     output.workspaceRootSnapshot,
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
+  const projection = buildOutputRowProjection(output, projectionContext);
   const activeStartedAt = activeCycle?.startedAt ?? liveRecording?.startedAt;
   const activeLastWriteAt = liveRecording?.lastWriteAt ??
     activeCycle?.lastWriteAt;
@@ -396,6 +595,7 @@ function buildRecordingRowsForOutput(
       startedAt: activeStartedAt,
       lastWriteAt: activeLastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId,
+      ...projection,
     }];
   }
 
@@ -417,6 +617,7 @@ function buildRecordingRowsForOutput(
       lastWriteAt: latestStoppedCycle.lastWriteAt,
       stoppedAt: latestStoppedCycle.stoppedAt,
       recordingCycleId: latestStoppedCycle.recordingCycleId,
+      ...projection,
     }];
   }
 
@@ -445,6 +646,7 @@ function buildRecordingRowsForOutput(
     startedAt: liveRecording.startedAt,
     lastWriteAt: liveRecording.lastWriteAt,
     recordingCycleId: liveRecording.recordingId,
+    ...projection,
   }];
 }
 
@@ -453,6 +655,7 @@ function buildAllRecordingRowsForOutput(
   liveRecordings: DaemonRecordingStatus[],
   sessionStale: boolean,
   now: Date,
+  projectionContext: OutputRowProjectionContext,
 ): SessionRecordingActivityRow[] {
   const activeCycle = findActiveCycle(output);
   const liveRecording = liveRecordings.find((recording) =>
@@ -463,6 +666,7 @@ function buildAllRecordingRowsForOutput(
     output.workspaceRootSnapshot,
     output.currentDestination.relativePathFromWorkspaceRoot,
   );
+  const projection = buildOutputRowProjection(output, projectionContext);
   const rows: SessionRecordingActivityRow[] = [];
 
   for (const cycle of output.recordingCycles) {
@@ -496,6 +700,7 @@ function buildAllRecordingRowsForOutput(
       stoppedAt: active ? undefined : cycle.stoppedAt,
       lastWriteAt,
       recordingCycleId: cycle.recordingCycleId,
+      ...projection,
     });
   }
 
@@ -526,6 +731,7 @@ function buildAllRecordingRowsForOutput(
       lastWriteAt: liveRecording?.lastWriteAt,
       recordingCycleId: activeCycle?.recordingCycleId ??
         liveRecording?.recordingId,
+      ...projection,
     });
   }
 
@@ -537,11 +743,20 @@ function buildRecordingRows(
   live: DaemonSessionStatus | undefined,
   recordingsMode: "latest" | "all" = "latest",
   now: Date,
+  workspaceOutputProfilesById: OutputRowProjectionContext[
+    "workspaceOutputProfilesById"
+  ] = new Map(),
+  userConfig: UserConfig = createDefaultUserConfig(),
 ): SessionRecordingActivityRow[] {
   const liveRecordings = live?.recordings ?? [];
   const rows: SessionRecordingActivityRow[] = [];
   const seenOutputPaths = new Set<string>();
   const sessionStale = live?.stale ?? true;
+  const projectionContext: OutputRowProjectionContext = {
+    outputMetadataDefaults: session.outputMetadataDefaults,
+    workspaceOutputProfilesById,
+    userConfig,
+  };
 
   for (const output of session.workspaceOutputs ?? []) {
     const outputRows = recordingsMode === "all"
@@ -550,12 +765,14 @@ function buildRecordingRows(
         liveRecordings,
         sessionStale,
         now,
+        projectionContext,
       )
       : buildRecordingRowsForOutput(
         output,
         liveRecordings,
         sessionStale,
         now,
+        projectionContext,
       );
     for (const row of outputRows) {
       rows.push(row);
@@ -656,6 +873,60 @@ export function flattenSessionRecordings(
   });
 }
 
+function providerSessionKey(
+  provider: string,
+  providerSessionId: string,
+): string {
+  return `${provider}\u0000${providerSessionId}`;
+}
+
+function resolveParentProviderSessionId(
+  metadata: SessionMetadataV1,
+): string | undefined {
+  if (metadata.parentProviderSessionId) {
+    return metadata.parentProviderSessionId;
+  }
+  if (metadata.provider === "claude") {
+    return resolveClaudeSubagentParentProviderSessionId(
+      metadata.sourceFilePath,
+    );
+  }
+  return undefined;
+}
+
+function resolveSessionRelationships(
+  metadataRows: NormalizedPersistedTwinMetadata[],
+): Map<string, NonNullable<SessionActivityRow["relationship"]>> {
+  const metadataByProviderSession = new Map(
+    metadataRows.map(({ metadata }) => [
+      providerSessionKey(metadata.provider, metadata.providerSessionId),
+      metadata,
+    ]),
+  );
+  const relationships = new Map<
+    string,
+    NonNullable<SessionActivityRow["relationship"]>
+  >();
+
+  for (const { metadata } of metadataRows) {
+    const parentProviderSessionId = resolveParentProviderSessionId(metadata);
+    if (!parentProviderSessionId) {
+      continue;
+    }
+    const parent = metadataByProviderSession.get(
+      providerSessionKey(metadata.provider, parentProviderSessionId),
+    );
+    relationships.set(metadata.sessionId, {
+      kind: "subconversation",
+      ...(parent && parent.sessionId !== metadata.sessionId
+        ? { parentSessionId: parent.sessionId }
+        : {}),
+    });
+  }
+
+  return relationships;
+}
+
 export async function loadSessionActivityRows(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionActivityRow[]> {
@@ -672,17 +943,32 @@ export async function loadSessionActivityRows(
   const workspaceEntriesPromise = options.workspaceEntries
     ? Promise.resolve(options.workspaceEntries)
     : loadRegisteredWorkspaces(katoDir);
-  const [snapshot, metadataList, runtimeConfig, workspaceEntries] =
+  const [snapshot, metadataList, runtimeConfig, workspaceEntries, userConfig] =
     await Promise.all([
       statusStore.load(),
       sessionStore.listSessionMetadata(),
       loadRuntimeConfigOrDefault({ katoDir }),
       workspaceEntriesPromise,
+      loadUserConfigOrDefault(katoDir),
     ]);
-  const normalizedMetadataList = await Promise.all(
+  const normalizedMetadataRows = await Promise.all(
     metadataList.map((metadata) =>
       normalizePersistedTwinMetadata(sessionStore, metadata)
     ),
+  );
+  const relationships = resolveSessionRelationships(normalizedMetadataRows);
+  const includeSubagents = options.includeSubagents ?? true;
+  const visibleMetadataRows = includeSubagents
+    ? normalizedMetadataRows
+    : normalizedMetadataRows.filter(({ metadata }) =>
+      !relationships.has(metadata.sessionId)
+    );
+  const visibleMetadataList = visibleMetadataRows.map(({ metadata }) =>
+    metadata
+  );
+  const workspaceOutputProfilesById = await resolveWorkspaceOutputProfilesById(
+    workspaceEntries,
+    visibleMetadataList,
   );
 
   const liveBySessionId = new Map(
@@ -706,8 +992,8 @@ export async function loadSessionActivityRows(
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
 
-  const rows = (await Promise.all(normalizedMetadataList.map((
-    metadata,
+  const candidateRows = await Promise.all(visibleMetadataRows.map((
+    { metadata, twinSizeBytes },
   ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
     const recordings = buildRecordingRows(
@@ -715,6 +1001,8 @@ export async function loadSessionActivityRows(
       live,
       recordingsMode,
       statusClock,
+      workspaceOutputProfilesById,
+      userConfig,
     );
     const filteredRecordings = resolvedWorkspaceFilter
       ? recordings.filter((row) =>
@@ -759,22 +1047,31 @@ export async function loadSessionActivityRows(
       sessionId: metadata.sessionId,
       sessionShortId: deriveSessionShortId(metadata, live),
       providerSessionId: metadata.providerSessionId,
+      ...(relationships.has(metadata.sessionId)
+        ? { relationship: relationships.get(metadata.sessionId) }
+        : {}),
       snippet: live?.snippet,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
+      ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),
       stale: live?.stale ?? true,
       state,
       activeRecordingCount,
       staleRecordingCount,
       stoppedRecordingCount:
         filteredRecordings.filter((row) => row.state === "stopped").length,
+      ...(metadata.outputMetadataDefaults
+        ? {
+          outputMetadataDefaults: structuredClone(
+            metadata.outputMetadataDefaults,
+          ),
+        }
+        : {}),
       recordings: displayRecordings,
     };
-  }))).filter((row) => includeStale || !row.stale).filter((row) =>
-    !resolvedWorkspaceFilter || row.recordings.length > 0
-  );
+  }));
 
-  rows.sort((a, b) => {
+  candidateRows.sort((a, b) => {
     const staleDiff = Number(a.stale) - Number(b.stale);
     if (staleDiff !== 0) {
       return staleDiff;
@@ -792,22 +1089,63 @@ export async function loadSessionActivityRows(
     );
   });
 
-  return rows;
+  const matchesRequestedFilters = (row: SessionActivityRow): boolean =>
+    (includeStale || !row.stale) &&
+    (!resolvedWorkspaceFilter || row.recordings.length > 0);
+  const matchingSessionIds = new Set(
+    candidateRows.filter(matchesRequestedFilters).map((row) => row.sessionId),
+  );
+  const includedSessionIds = new Set(matchingSessionIds);
+
+  if (options.retainSubconversationAncestors && includeSubagents) {
+    const rowsBySessionId = new Map(
+      candidateRows.map((row) => [row.sessionId, row]),
+    );
+    for (const sessionId of matchingSessionIds) {
+      let current = rowsBySessionId.get(sessionId);
+      const visited = new Set([sessionId]);
+      while (current?.relationship?.parentSessionId) {
+        const parentSessionId = current.relationship.parentSessionId;
+        if (visited.has(parentSessionId)) {
+          break;
+        }
+        visited.add(parentSessionId);
+        const parent = rowsBySessionId.get(parentSessionId);
+        if (!parent) {
+          break;
+        }
+        includedSessionIds.add(parentSessionId);
+        current = parent;
+      }
+    }
+  }
+
+  return candidateRows
+    .filter((row) => includedSessionIds.has(row.sessionId))
+    .map((row) =>
+      matchingSessionIds.has(row.sessionId)
+        ? row
+        : { ...row, structuralContext: true }
+    );
 }
 
 export async function loadSessionsPageData(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
+  const includeSubagents = options.includeSubagents ?? true;
   const statusPath = options.statusPath ??
     resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir());
   const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const workspaceEntries = options.workspaceEntries ??
     await loadRegisteredWorkspaces(katoDir);
+  const userConfig = await loadUserConfigOrDefault(katoDir);
   const [rows, resolvedWorkspaceFilter] = await Promise.all([
     loadSessionActivityRows({
       ...options,
       includeStale,
+      includeSubagents,
+      retainSubconversationAncestors: true,
       katoDir,
       statusPath,
       workspaceEntries,
@@ -818,37 +1156,38 @@ export async function loadSessionsPageData(
       workspaceEntries,
     ),
   ]);
-  const workspaceOptions = workspaceEntries
-    .map((entry) => ({
-      workspaceId: entry.workspaceId,
-      alias: entry.alias,
-      displayName: entry.displayName,
-    }))
-    .sort((a, b) =>
-      a.alias.localeCompare(b.alias) ||
-      a.workspaceId.localeCompare(b.workspaceId)
-    );
+  const workspaceOptions = await resolveWorkspaceOptions(
+    workspaceEntries,
+    userConfig,
+  );
 
   return {
     includeStale,
+    includeSubagents,
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
     workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     workspaceOptions,
-    sessionCount: rows.length,
-    activeSessionCount: rows.filter((row) => row.state === "active").length,
-    staleSessionCount: rows.filter((row) => row.state === "stale").length,
-    inactiveSessionCount: rows.filter((row) => row.state === "inactive").length,
-    activeRecordingCount: rows.reduce(
+    sessionCount: rows.filter((row) => !row.structuralContext).length,
+    activeSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "active")
+        .length,
+    staleSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "stale")
+        .length,
+    inactiveSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "inactive")
+        .length,
+    activeRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.activeRecordingCount,
       0,
     ),
-    staleRecordingCount: rows.reduce(
+    staleRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.staleRecordingCount,
       0,
     ),
-    stoppedRecordingCount: rows.reduce(
+    stoppedRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.stoppedRecordingCount,
       0,
     ),

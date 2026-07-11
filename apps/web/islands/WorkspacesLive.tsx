@@ -6,6 +6,7 @@ import {
   buildSessionInventoryHref,
 } from "../src/session_routes.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
+import { buildWorkspaceConfigEditHref } from "../src/workspace_routes.ts";
 import { useBrowserTimeZone } from "./use_browser_time_zone.ts";
 import { LIVE_POLL_INTERVAL_MS, usePolledJson } from "./use_polled_json.ts";
 
@@ -139,6 +140,12 @@ export default function WorkspacesLive(
                           })}
                         >
                           View Recordings
+                        </a>
+                        <a
+                          class="secondary-button"
+                          href={buildWorkspaceConfigEditHref(row.workspaceId)}
+                        >
+                          Edit
                         </a>
                         <form method="post">
                           <input

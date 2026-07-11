@@ -2,8 +2,11 @@ import {
   type ConversationEvent,
   extractSnippet,
   type MarkdownFrontmatterConfig,
+  normalizeOutputTags,
+  resolveEffectiveOutputMetadata,
   type SecretsPolicyConfig,
   type SessionMetadataV1,
+  type SessionOutputMetadataV1,
   type UserConfig,
 } from "@kato/shared";
 import {
@@ -66,6 +69,10 @@ export interface RunSessionRecordingActionOptions {
   action: SessionRecordingWebAction;
   sessionId: string;
   workspaceSelector: string;
+  creationMetadata?: Pick<
+    SessionOutputMetadataV1,
+    "displayTitle" | "filenameSlug" | "tags"
+  >;
   katoDir?: string;
   now?: () => Date;
   operationalLogger?: StructuredLogger;
@@ -152,6 +159,34 @@ function resolveConversationTitle(
     return snippet;
   }
   return fallback;
+}
+
+function normalizeMetadataString(
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeCreationMetadata(
+  metadata: RunSessionRecordingActionOptions["creationMetadata"],
+):
+  | Pick<
+    SessionOutputMetadataV1,
+    "displayTitle" | "filenameSlug" | "tags"
+  >
+  | undefined {
+  const displayTitle = normalizeMetadataString(metadata?.displayTitle);
+  const filenameSlug = normalizeMetadataString(metadata?.filenameSlug);
+  const tags = metadata?.tags
+    ? normalizeOutputTags(metadata.tags, "creationMetadata.tags")
+    : [];
+  const normalized = {
+    ...(displayTitle ? { displayTitle } : {}),
+    ...(filenameSlug ? { filenameSlug } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -244,6 +279,7 @@ function createOutputOverrides(options: {
   markdownFrontmatter: MarkdownFrontmatterConfig;
   writerFeatureFlags: ResolvedWorkspaceProfile["writerFeatureFlags"];
   workspaceTimezone: string;
+  frontmatterTags?: string[];
   preferredUsername?: string;
   userConfig: UserConfig;
 }): RecordingOutputOverrides {
@@ -257,6 +293,9 @@ function createOutputOverrides(options: {
     includeRecordingIds: options.markdownFrontmatter.includeRecordingIds,
     includeConversationEventKinds:
       options.markdownFrontmatter.includeConversationEventKinds,
+    ...(options.frontmatterTags && options.frontmatterTags.length > 0
+      ? { frontmatterTags: options.frontmatterTags }
+      : {}),
     participantUsername: resolveFrontmatterParticipantUsername({
       markdownFrontmatter: options.markdownFrontmatter,
       userConfig: options.userConfig,
@@ -297,6 +336,7 @@ function createOutputOverrides(options: {
 function createOutputOverridesFromWorkspaceProfile(
   profile: ResolvedWorkspaceProfile,
   userConfig: UserConfig,
+  frontmatterTags?: string[],
 ): RecordingOutputOverrides {
   const preferredUsername = resolvePreferredParticipantUsername({
     userConfig,
@@ -307,6 +347,7 @@ function createOutputOverridesFromWorkspaceProfile(
     markdownFrontmatter: profile.markdownFrontmatter,
     writerFeatureFlags: profile.writerFeatureFlags,
     workspaceTimezone: profile.workspaceTimezone,
+    frontmatterTags,
     preferredUsername,
     userConfig,
   });
@@ -847,20 +888,29 @@ export async function runSessionRecordingAction(
         : {}),
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
     });
-    const outputOverrides = createOutputOverridesFromWorkspaceProfile(
-      profile,
-      userConfig,
-    );
     const outputUsername = resolvePreferredParticipantUsername({
       userConfig,
       workspaceId: workspace.workspaceId,
     }) ?? UNKNOWN_OUTPUT_USERNAME;
     return await withSessionMutationLock(options.sessionId, async () => {
+      const creationMetadata = normalizeCreationMetadata(
+        options.creationMetadata,
+      );
       const actionNow = now();
       const nowIso = actionNow.toISOString();
       const metadata = await resolveSessionMetadata(
         sessionStore,
         options.sessionId,
+      );
+      const effectiveCreationMetadata = resolveEffectiveOutputMetadata(
+        metadata.outputMetadataDefaults,
+        creationMetadata,
+        profile.defaultTags,
+      );
+      const outputOverrides = createOutputOverridesFromWorkspaceProfile(
+        profile,
+        userConfig,
+        effectiveCreationMetadata.tags,
       );
       const history = await loadPersistedSessionHistoryEvents(
         metadata,
@@ -868,10 +918,11 @@ export async function runSessionRecordingAction(
         { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
-      const title = resolveConversationTitle(
-        history.events,
-        metadata.providerSessionId,
-      );
+      const title = creationMetadata?.displayTitle ??
+        resolveConversationTitle(
+          history.events,
+          metadata.providerSessionId,
+        );
       const outputs = readWorkspaceOutputs(metadata);
       const matchingOutputs = outputs.filter((entry) =>
         entry.workspaceId === workspace.workspaceId
@@ -885,6 +936,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
+          filenameSlug: creationMetadata?.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,
@@ -931,6 +983,9 @@ export async function runSessionRecordingAction(
           profile,
           resolved.resolvedDefaultOutputDir,
         );
+        if (creationMetadata) {
+          output.outputMetadata = { ...creationMetadata };
+        }
         const recordingCycleId = openWorkspaceOutputCycle(
           output,
           writeCursor,
@@ -968,6 +1023,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
+          filenameSlug: creationMetadata?.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,
@@ -1013,6 +1069,9 @@ export async function runSessionRecordingAction(
           profile,
           resolved.resolvedDefaultOutputDir,
         );
+        if (creationMetadata) {
+          output.outputMetadata = { ...creationMetadata };
+        }
         openWorkspaceOutputCycle(
           output,
           writeCursor,

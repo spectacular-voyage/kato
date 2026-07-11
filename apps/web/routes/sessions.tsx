@@ -4,12 +4,16 @@ import AppHeader from "../src/app_header.tsx";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSessionsPageData } from "../src/loaders/sessions.ts";
 import { createWebLoggers } from "../src/logging.ts";
-import { parseSessionPageQuery } from "../src/page_queries.ts";
+import { parseSessionsPageQuery } from "../src/page_queries.ts";
 import {
   runSessionRecordingAction,
   runSessionRecordingStopAction,
 } from "../src/session_recording_actions.ts";
-import { buildSessionInventoryHref } from "../src/session_routes.ts";
+import { runSessionOutputMetadataUpdateAction } from "../src/session_metadata_actions.ts";
+import {
+  buildSessionInventoryHref,
+  buildSessionInventorySessionHref,
+} from "../src/session_routes.ts";
 import { define } from "../utils.ts";
 
 function decodeMessage(value: string | null): string | undefined {
@@ -27,16 +31,22 @@ function buildRedirectUrl(
   reqUrl: string,
   options: {
     includeStale: boolean;
+    includeSubagents: boolean;
     workspaceFilter?: string;
+    sessionId?: string;
     notice?: string;
     error?: string;
   },
 ): URL {
+  const routeOptions = {
+    includeStale: options.includeStale,
+    includeSubagents: options.includeSubagents,
+    workspaceFilter: options.workspaceFilter,
+  };
   const url = new URL(
-    buildSessionInventoryHref({
-      includeStale: options.includeStale,
-      workspaceFilter: options.workspaceFilter,
-    }),
+    options.sessionId
+      ? buildSessionInventorySessionHref(options.sessionId, routeOptions)
+      : buildSessionInventoryHref(routeOptions),
     reqUrl,
   );
   if (options.notice) {
@@ -82,6 +92,8 @@ export const handler = define.handlers({
     const form = await ctx.req.formData();
     const action = String(form.get("action") ?? "");
     const includeStale = String(form.get("includeStale") ?? "true") !== "false";
+    const includeSubagents =
+      String(form.get("includeSubagents") ?? "true") !== "false";
     const workspaceFilter = String(form.get("workspaceFilter") ?? "").trim() ||
       undefined;
     const { operationalLogger, auditLogger } = createWebLoggers();
@@ -98,17 +110,30 @@ export const handler = define.handlers({
         if (workspaceSelector.length === 0) {
           throw new Error("Workspace selector is required");
         }
+        const displayTitle = String(form.get("displayTitle") ?? "").trim();
+        const filenameSlug = String(form.get("filenameSlug") ?? "").trim();
+        const tags = String(form.get("tags") ?? "")
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0);
         const result = await runSessionRecordingAction({
           action,
           sessionId,
           workspaceSelector,
+          creationMetadata: {
+            ...(displayTitle.length > 0 ? { displayTitle } : {}),
+            ...(filenameSlug.length > 0 ? { filenameSlug } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
+          },
           operationalLogger,
           auditLogger,
         });
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
+            includeSubagents,
             workspaceFilter,
+            sessionId,
             notice: buildSessionRecordingNotice(result),
           }),
           303,
@@ -134,8 +159,64 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
+            includeSubagents,
             workspaceFilter,
+            sessionId,
             notice: buildSessionRecordingStopNotice(result),
+          }),
+          303,
+        );
+      }
+
+      if (
+        action === "update-session-metadata-defaults" ||
+        action === "update-recording-metadata"
+      ) {
+        const readScalarEdit = (name: string): string | null | undefined => {
+          if (!form.has(name)) {
+            return undefined;
+          }
+          const value = String(form.get(name) ?? "").trim();
+          return value.length > 0 ? value : null;
+        };
+        const tags = form.has("tags")
+          ? String(form.get("tags") ?? "")
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter((tag) => tag.length > 0)
+          : undefined;
+        const result = await runSessionOutputMetadataUpdateAction({
+          scope: action === "update-session-metadata-defaults"
+            ? "session-defaults"
+            : "output",
+          sessionId,
+          selector: {
+            workspaceId: String(form.get("workspaceId") ?? "").trim() ||
+              undefined,
+            outputPath: String(form.get("outputPath") ?? "").trim() ||
+              undefined,
+            recordingCycleId:
+              String(form.get("recordingCycleId") ?? "").trim() ||
+              undefined,
+          },
+          edits: {
+            displayTitle: readScalarEdit("displayTitle"),
+            personaName: readScalarEdit("personaName"),
+            participantUsername: readScalarEdit("participantUsername"),
+            ...(tags !== undefined ? { tags } : {}),
+          },
+          operationalLogger,
+          auditLogger,
+        });
+        return Response.redirect(
+          buildRedirectUrl(ctx.req.url, {
+            includeStale,
+            includeSubagents,
+            workspaceFilter,
+            sessionId,
+            notice: result.scope === "session-defaults"
+              ? `session metadata updated (${result.sessionShortId})`
+              : `recording metadata updated (${result.sessionShortId})`,
           }),
           303,
         );
@@ -154,6 +235,7 @@ export const handler = define.handlers({
       return Response.redirect(
         buildRedirectUrl(ctx.req.url, {
           includeStale,
+          includeSubagents,
           workspaceFilter,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -164,7 +246,7 @@ export const handler = define.handlers({
 });
 
 export default define.page(async function SessionsPage(ctx) {
-  const query = parseSessionPageQuery(ctx.url);
+  const query = parseSessionsPageQuery(ctx.url);
   const [pageData, appStatus] = await Promise.all([
     loadSessionsPageData(query),
     loadAppChromeStatus(),

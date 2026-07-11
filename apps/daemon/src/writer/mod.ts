@@ -1,7 +1,20 @@
 export {
+  KATO_WRITER_FEATURE_FLAGS_KEY,
   makeCompactFrontmatterId,
+  mergeFrontmatterWriterPolicySnapshot,
   slugifyForFrontmatterId,
+  updateFrontmatterMetadataFields,
 } from "./frontmatter.ts";
+export type {
+  FrontmatterMetadataUpdate,
+  FrontmatterMetadataUpdateResult,
+  FrontmatterWriterPolicy,
+} from "./frontmatter.ts";
+export { updateMarkdownFrontmatterMetadata } from "./frontmatter_update.ts";
+export type {
+  MarkdownFrontmatterMetadataUpdateResult,
+  MarkdownFrontmatterMetadataUpdateStatus,
+} from "./frontmatter_update.ts";
 export type {
   ConversationWriteMode,
   ConversationWriterLike,
