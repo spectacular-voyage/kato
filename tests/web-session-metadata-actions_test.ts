@@ -173,6 +173,67 @@ Deno.test("runSessionOutputMetadataUpdateAction updates a selected output and sy
   });
 });
 
+Deno.test("runSessionOutputMetadataUpdateAction distinguishes missing files from other frontmatter failures", async () => {
+  await withTestTempDir("web-metadata-frontmatter-errors-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    const workspaceRoot = join(homeDir, "alpha");
+    const missingPath = join(workspaceRoot, "notes", "missing.md");
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-missing-output",
+      outputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-alpha",
+          workspaceRoot,
+          resolvedPath: missingPath,
+          desiredState: "off",
+        }),
+      ],
+    });
+
+    const missing = await runSessionOutputMetadataUpdateAction({
+      scope: "output",
+      sessionId: "sess-missing-output",
+      selector: { workspaceId: "ws-alpha" },
+      edits: { displayTitle: "Missing Output" },
+      katoDir,
+      now: MUTATION_NOW,
+    });
+    assertEquals(missing.frontmatterStatuses, [{
+      outputPath: missingPath,
+      status: "missing-file",
+    }]);
+
+    const directoryPath = join(workspaceRoot, "notes", "directory.md");
+    await Deno.mkdir(directoryPath, { recursive: true });
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-directory-output",
+      outputs: [
+        makeWorkspaceOutput({
+          workspaceId: "ws-beta",
+          workspaceRoot,
+          resolvedPath: directoryPath,
+          desiredState: "off",
+        }),
+      ],
+    });
+
+    await assertRejects(
+      () =>
+        runSessionOutputMetadataUpdateAction({
+          scope: "output",
+          sessionId: "sess-directory-output",
+          selector: { workspaceId: "ws-beta" },
+          edits: { displayTitle: "Directory Output" },
+          katoDir,
+          now: MUTATION_NOW,
+        }),
+      Error,
+    );
+  });
+});
+
 Deno.test("runSessionOutputMetadataUpdateAction rejects unknown output selectors", async () => {
   await withTestTempDir("web-metadata-unknown-", async (homeDir) => {
     const katoDir = join(homeDir, ".kato");

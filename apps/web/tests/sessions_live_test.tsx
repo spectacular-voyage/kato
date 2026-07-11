@@ -8,10 +8,9 @@ import { renderToString } from "npm:preact-render-to-string@^6.6.3";
 import SessionsLive from "../islands/SessionsLive.tsx";
 import type { SessionsPageData } from "../src/loaders/sessions.ts";
 
-function makeSessionsPageData(includeSubagents: boolean): SessionsPageData {
+function makeSessionsPageData(): SessionsPageData {
   return {
     includeStale: false,
-    includeSubagents,
     workspaceFilter: "ws-alpha",
     workspaceFilterId: "ws-alpha",
     workspaceFilterAlias: "alpha",
@@ -59,68 +58,55 @@ function makeSessionsPageData(includeSubagents: boolean): SessionsPageData {
   };
 }
 
-function renderSessions(
-  includeSubagents: boolean,
-  includeTwinSize = true,
-): string {
-  const initialData = makeSessionsPageData(includeSubagents);
+function renderSessions(includeTwinSize = true): string {
+  const initialData = makeSessionsPageData();
   if (!includeTwinSize && initialData.rows[0]) {
     delete initialData.rows[0].twinSizeBytes;
   }
   return renderToString(
     h(SessionsLive, {
       initialData,
-      endpoint: includeSubagents
-        ? "/api/sessions?view=active&workspace=ws-alpha"
-        : "/api/sessions?view=active&workspace=ws-alpha&subagents=hide",
+      endpoint: "/api/sessions?view=active&workspace=ws-alpha",
       csrfToken: "csrf-123",
     }),
   );
 }
 
 Deno.test("SessionsLive renders twin size and absent states beside the updated timestamp", () => {
-  const sizedHtml = renderSessions(true);
+  const sizedHtml = renderSessions();
 
   assertMatch(
     sizedHtml,
     /Updated\s*<time[^>]*>[^<]+<\/time>\s*· Twin 12\.1 KB/,
   );
 
-  const absentHtml = renderSessions(true, false);
+  const absentHtml = renderSessions(false);
   assertStringIncludes(absentHtml, "· Twin absent");
 });
 
-Deno.test("SessionsLive preserves activity and workspace filters in the sub-conversation controls", () => {
-  const inclusiveHtml = renderSessions(true);
+Deno.test("SessionsLive omits obsolete sub-conversation controls and preserves navigation filters", () => {
+  const html = renderSessions();
 
-  assertStringIncludes(inclusiveHtml, "Sub-conversations");
+  assertEquals(html.includes("Sub-conversations"), false);
+  assertEquals(html.includes(">Grouped<"), false);
+  assertEquals(html.includes(">Hidden<"), false);
+  assertEquals(html.includes("subagents=hide"), false);
   assertMatch(
-    inclusiveHtml,
-    /<a class="secondary-button current-filter" href="\/sessions\?view=active&amp;workspace=ws-alpha">Grouped<\/a>/,
+    html,
+    /<a class="secondary-button" href="\/sessions\?workspace=ws-alpha">All Sessions<\/a>/,
   );
   assertMatch(
-    inclusiveHtml,
-    /<a class="secondary-button" href="\/sessions\?view=active&amp;workspace=ws-alpha&amp;subagents=hide">Hidden<\/a>/,
-  );
-
-  const topLevelOnlyHtml = renderSessions(false);
-
-  assertMatch(
-    topLevelOnlyHtml,
-    /<a class="secondary-button" href="\/sessions\?view=active&amp;workspace=ws-alpha">Grouped<\/a>/,
+    html,
+    /<a class="secondary-button current-filter" href="\/sessions\?view=active&amp;workspace=ws-alpha">Active Only<\/a>/,
   );
   assertMatch(
-    topLevelOnlyHtml,
-    /<a class="secondary-button current-filter" href="\/sessions\?view=active&amp;workspace=ws-alpha&amp;subagents=hide">Hidden<\/a>/,
-  );
-  assertMatch(
-    topLevelOnlyHtml,
-    /<a class="secondary-button current-filter" href="\/sessions\?view=active&amp;workspace=ws-alpha&amp;subagents=hide">Active Only<\/a>/,
+    html,
+    /<a class="secondary-button" href="\/sessions\?view=active">Clear Filter<\/a>/,
   );
 });
 
 Deno.test("SessionsLive renders recursive groups closed by default with child Twin summaries", () => {
-  const initialData = makeSessionsPageData(true);
+  const initialData = makeSessionsPageData();
   const parent = initialData.rows[0];
   assertEquals(parent?.sessionId, "sess-active");
   initialData.sessionCount = 2;
@@ -168,17 +154,14 @@ Deno.test("SessionsLive renders recursive groups closed by default with child Tw
   assertEquals(html.includes("Child content must start collapsed"), false);
 });
 
-Deno.test("SessionsLive preserves the top-level-only filter in recording action forms", () => {
-  const html = renderSessions(false);
+Deno.test("SessionsLive omits obsolete subagent state from recording action forms", () => {
+  const html = renderSessions();
   const recordingForms = html.match(
     /<form[^>]*class="[^"]*session-list-action-form[^"]*"[\s\S]*?<\/form>/g,
   ) ?? [];
 
   assertEquals(recordingForms.length, 2);
   for (const form of recordingForms) {
-    assertStringIncludes(
-      form,
-      '<input type="hidden" name="includeSubagents" value="false">',
-    );
+    assertEquals(form.includes('name="includeSubagents"'), false);
   }
 });

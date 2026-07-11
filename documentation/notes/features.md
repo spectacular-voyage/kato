@@ -110,14 +110,14 @@ The Sessions inventory shows a path-free `Twin <size>` cue for recognized persis
 
 ## Session Inventory Trees
 
-The Sessions inventory groups provider-declared Claude and Codex sub-conversations beneath their parents in recursive trees that default closed. Parent disclosures summarize descendant activity and child Twin bytes; expanded children retain their own rows, actions, recordings, and Twin sizes. A `Grouped` / `Hidden` control preserves both the default contextual tree and a bookmarkable true-exclusion mode. Relationships come only from provider contracts, never repeated titles or timing guesses.
+The Sessions inventory always groups provider-declared Claude and Codex sub-conversations beneath their parents in recursive trees that default closed. Parent disclosures summarize descendant activity and child Twin bytes; expanded children retain their own rows, actions, recordings, and Twin sizes. Relationships come only from provider contracts, never repeated titles or timing guesses; legacy `subagents` query parameters are ignored.
 
 ## Kato Web
 
 Kato Web is a local authenticated operator console. Current pages include:
 
 - Summary dashboard;
-- Sessions inventory with default-closed parent/sub-conversation trees, grouped/hidden filtering, capture/record controls, creation-time metadata fields, snippet reveal, and read-only per-row/child-summary persisted-twin size cues;
+- Sessions inventory with default-closed parent/sub-conversation trees, activity/workspace filtering, capture/record controls, creation-time metadata fields, snippet reveal, and read-only per-row/child-summary persisted-twin size cues;
 - Recordings status, output tag editing, stop controls, and re-arm controls;
 - Workspaces registration, labels, username overrides, shared tag/default config editing, and diagnostics;
 - Logs for operational and security-audit records;

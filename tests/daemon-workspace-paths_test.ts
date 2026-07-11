@@ -5,7 +5,7 @@ import {
   renderWorkspaceFilename,
   resolveWorkspaceDefaultOutputDir,
   type WorkspacePathTemplateProfile,
-} from "../apps/daemon/src/orchestrator/runtime_workspace_paths.ts";
+} from "../apps/runtime/src/mod.ts";
 
 function makeBoundarySnapshot(content: string): ConversationEvent[] {
   return [{

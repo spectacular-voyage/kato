@@ -437,14 +437,13 @@ export class PersistentSessionStateStore {
     }
 
     const nowIso = this.now().toISOString();
+    const parentProviderSessionId = input.parentProviderSessionId?.trim();
     const created: SessionMetadataV1 = {
       schemaVersion: SESSION_METADATA_SCHEMA_VERSION,
       sessionKey,
       provider: input.provider,
       providerSessionId: input.providerSessionId,
-      ...(input.parentProviderSessionId
-        ? { parentProviderSessionId: input.parentProviderSessionId }
-        : {}),
+      ...(parentProviderSessionId ? { parentProviderSessionId } : {}),
       sessionId: this.makeSessionId(),
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -486,13 +485,9 @@ export class PersistentSessionStateStore {
     if (!existing) {
       return "missing";
     }
-    if (existing.parentProviderSessionId === input.parentProviderSessionId) {
-      this.metadataCache.set(sessionKey, existing);
-      return "unchanged";
-    }
     const reconciled = await this.reconcileInputParent(existing, input);
     this.metadataCache.set(sessionKey, reconciled);
-    return "updated";
+    return reconciled === existing ? "unchanged" : "updated";
   }
 
   async saveSessionMetadata(

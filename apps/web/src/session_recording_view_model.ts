@@ -40,6 +40,31 @@ export function resolveTitleDerivedFilenameSlug(options: {
     : deriveFilenameSlugFromTitle(options.title);
 }
 
+export function resolvePolledCreationFields(options: {
+  currentDisplayTitle: string;
+  currentFilenameSlug: string;
+  displayTitleCustomized: boolean;
+  filenameSlugCustomized: boolean;
+  sessionSnippet?: string;
+  defaultDisplayTitle?: string;
+  defaultFilenameSlug?: string;
+}): { displayTitle: string; filenameSlug: string } {
+  const defaultDisplayTitle = options.defaultDisplayTitle ??
+    options.sessionSnippet ?? "";
+  const displayTitle = options.displayTitleCustomized
+    ? options.currentDisplayTitle
+    : defaultDisplayTitle;
+  return {
+    displayTitle,
+    filenameSlug: options.filenameSlugCustomized
+      ? options.currentFilenameSlug
+      : options.displayTitleCustomized
+      ? deriveFilenameSlugFromTitle(displayTitle)
+      : options.defaultFilenameSlug ??
+        deriveFilenameSlugFromTitle(defaultDisplayTitle),
+  };
+}
+
 function normalizeWorkspacePreference(
   value: string | undefined,
 ): string | undefined {

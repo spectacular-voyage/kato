@@ -9,9 +9,9 @@ import {
   resolveDefaultKatoDir,
   resolveDefaultSharedConfigPath,
   resolveDendronWikilinkContext,
+  resolveWorkspaceDefaultOutputDir,
   SharedBehaviorConfigFileStore,
 } from "@kato/runtime";
-import { resolveWorkspaceDefaultOutputDir } from "../../../daemon/src/orchestrator/runtime_workspace_paths.ts";
 import {
   formatWorkspaceRegistryError,
   loadWorkspaceSummary,

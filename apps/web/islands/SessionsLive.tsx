@@ -24,6 +24,7 @@ import {
   readRememberedSessionsWorkspace,
   rememberSessionsWorkspace,
   resolveDefaultWorkspaceSelectorValue,
+  resolvePolledCreationFields,
   resolveTitleDerivedFilenameSlug,
   type SessionRecordingAction,
 } from "../src/session_recording_view_model.ts";
@@ -87,7 +88,6 @@ function SessionPageActionFields(
   props: {
     sessionId: string;
     includeStale: boolean;
-    includeSubagents: boolean;
     workspaceFilter?: string;
     csrfToken?: string;
   },
@@ -99,11 +99,6 @@ function SessionPageActionFields(
         type="hidden"
         name="includeStale"
         value={String(props.includeStale)}
-      />
-      <input
-        type="hidden"
-        name="includeSubagents"
-        value={String(props.includeSubagents)}
       />
       <input
         type="hidden"
@@ -195,10 +190,10 @@ function SessionRecordingActions(
   props: {
     sessionId: string;
     includeStale: boolean;
-    includeSubagents: boolean;
     workspaceFilter?: string;
     workspaceFilterId?: string;
     sessionSnippet?: string;
+    outputMetadataDefaults?: SessionActivityRow["outputMetadataDefaults"];
     csrfToken?: string;
     workspaceOptions: SessionsPageData["workspaceOptions"];
   },
@@ -217,22 +212,30 @@ function SessionRecordingActions(
       rememberedWorkspaceId: readRememberedSessionsWorkspace(),
     }) ?? ""
   );
-  const [displayTitle, setDisplayTitle] = useState(
-    () => props.sessionSnippet ?? "",
-  );
+  const initialDisplayTitle = props.outputMetadataDefaults?.displayTitle ??
+    props.sessionSnippet ?? "";
+  const [displayTitle, setDisplayTitle] = useState(() => initialDisplayTitle);
   const [filenameSlug, setFilenameSlug] = useState(
-    () => deriveFilenameSlugFromTitle(props.sessionSnippet),
+    () =>
+      props.outputMetadataDefaults?.filenameSlug ??
+        deriveFilenameSlugFromTitle(initialDisplayTitle),
   );
   const [tagsInput, setTagsInput] = useState("");
+  const [displayTitleCustomized, setDisplayTitleCustomized] = useState(false);
   const [filenameSlugCustomized, setFilenameSlugCustomized] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const resetCreationFields = () => {
-    const nextTitle = props.sessionSnippet ?? "";
+    const nextTitle = props.outputMetadataDefaults?.displayTitle ??
+      props.sessionSnippet ?? "";
     setDisplayTitle(nextTitle);
-    setFilenameSlug(deriveFilenameSlugFromTitle(nextTitle));
+    setFilenameSlug(
+      props.outputMetadataDefaults?.filenameSlug ??
+        deriveFilenameSlugFromTitle(nextTitle),
+    );
     setTagsInput("");
+    setDisplayTitleCustomized(false);
     setFilenameSlugCustomized(false);
   };
 
@@ -263,13 +266,30 @@ function SessionRecordingActions(
   ]);
 
   useEffect(() => {
-    if (filenameSlugCustomized) {
-      return;
+    const next = resolvePolledCreationFields({
+      currentDisplayTitle: displayTitle,
+      currentFilenameSlug: filenameSlug,
+      displayTitleCustomized,
+      filenameSlugCustomized,
+      sessionSnippet: props.sessionSnippet,
+      defaultDisplayTitle: props.outputMetadataDefaults?.displayTitle,
+      defaultFilenameSlug: props.outputMetadataDefaults?.filenameSlug,
+    });
+    if (next.displayTitle !== displayTitle) {
+      setDisplayTitle(next.displayTitle);
     }
-    const nextTitle = props.sessionSnippet ?? "";
-    setDisplayTitle(nextTitle);
-    setFilenameSlug(deriveFilenameSlugFromTitle(nextTitle));
-  }, [filenameSlugCustomized, props.sessionSnippet]);
+    if (next.filenameSlug !== filenameSlug) {
+      setFilenameSlug(next.filenameSlug);
+    }
+  }, [
+    displayTitle,
+    displayTitleCustomized,
+    filenameSlug,
+    filenameSlugCustomized,
+    props.outputMetadataDefaults?.displayTitle,
+    props.outputMetadataDefaults?.filenameSlug,
+    props.sessionSnippet,
+  ]);
 
   useEffect(() => {
     if (!openAction || pendingCreateAction !== null) {
@@ -431,7 +451,6 @@ function SessionRecordingActions(
               <SessionPageActionFields
                 sessionId={props.sessionId}
                 includeStale={props.includeStale}
-                includeSubagents={props.includeSubagents}
                 workspaceFilter={props.workspaceFilter}
                 csrfToken={props.csrfToken}
               />
@@ -473,13 +492,18 @@ function SessionRecordingActions(
               <input
                 id={`display-title-${openAction}`}
                 class="form-input"
-                name="displayTitle"
+                name={props.outputMetadataDefaults?.displayTitle ===
+                      undefined ||
+                    displayTitleCustomized
+                  ? "displayTitle"
+                  : undefined}
                 type="text"
                 value={displayTitle}
                 onInput={(event) => {
                   const nextTitle = (event.currentTarget as HTMLInputElement)
                     .value;
                   setDisplayTitle(nextTitle);
+                  setDisplayTitleCustomized(true);
                   setFilenameSlug((current) =>
                     resolveTitleDerivedFilenameSlug({
                       title: nextTitle,
@@ -522,7 +546,12 @@ function SessionRecordingActions(
                       <input
                         id={`filename-slug-${openAction}`}
                         class="form-input"
-                        name="filenameSlug"
+                        name={props.outputMetadataDefaults?.filenameSlug ===
+                              undefined ||
+                            displayTitleCustomized ||
+                            filenameSlugCustomized
+                          ? "filenameSlug"
+                          : undefined}
                         type="text"
                         value={filenameSlug}
                         onInput={(event) => {
@@ -539,7 +568,10 @@ function SessionRecordingActions(
                           pendingCreateAction !== null}
                         onClick={() => {
                           setFilenameSlug(
-                            deriveFilenameSlugFromTitle(displayTitle),
+                            displayTitleCustomized
+                              ? deriveFilenameSlugFromTitle(displayTitle)
+                              : props.outputMetadataDefaults?.filenameSlug ??
+                                deriveFilenameSlugFromTitle(displayTitle),
                           );
                           setFilenameSlugCustomized(false);
                         }}
@@ -691,10 +723,10 @@ function SessionRow(
         <SessionRecordingActions
           sessionId={row.sessionId}
           includeStale={props.pageData.includeStale}
-          includeSubagents={props.pageData.includeSubagents}
           workspaceFilter={props.pageData.workspaceFilter}
           workspaceFilterId={props.pageData.workspaceFilterId}
           sessionSnippet={row.snippet}
+          outputMetadataDefaults={row.outputMetadataDefaults}
           csrfToken={props.csrfToken}
           workspaceOptions={props.pageData.workspaceOptions}
         />
@@ -716,7 +748,6 @@ function SessionRow(
                     <SessionPageActionFields
                       sessionId={row.sessionId}
                       includeStale={props.pageData.includeStale}
-                      includeSubagents={props.pageData.includeSubagents}
                       workspaceFilter={props.pageData.workspaceFilter}
                       csrfToken={props.csrfToken}
                     />
@@ -773,7 +804,6 @@ function SessionRow(
                           <SessionPageActionFields
                             sessionId={row.sessionId}
                             includeStale={props.pageData.includeStale}
-                            includeSubagents={props.pageData.includeSubagents}
                             workspaceFilter={props.pageData.workspaceFilter}
                             csrfToken={props.csrfToken}
                           />
@@ -1012,7 +1042,6 @@ export default function SessionsLive(
                     : "secondary-button"}
                   href={buildSessionInventoryHref({
                     includeStale: true,
-                    includeSubagents: pageData.includeSubagents,
                     workspaceFilter: pageData.workspaceFilter,
                   })}
                 >
@@ -1024,42 +1053,10 @@ export default function SessionsLive(
                     : "secondary-button"}
                   href={buildSessionInventoryHref({
                     includeStale: false,
-                    includeSubagents: pageData.includeSubagents,
                     workspaceFilter: pageData.workspaceFilter,
                   })}
                 >
                   Active Only
-                </a>
-              </div>
-            </div>
-            <div class="filter-choice-group">
-              <span class="filter-choice-label muted mono">
-                Sub-conversations
-              </span>
-              <div class="filter-choice-row">
-                <a
-                  class={pageData.includeSubagents
-                    ? "secondary-button current-filter"
-                    : "secondary-button"}
-                  href={buildSessionInventoryHref({
-                    includeStale: pageData.includeStale,
-                    includeSubagents: true,
-                    workspaceFilter: pageData.workspaceFilter,
-                  })}
-                >
-                  Grouped
-                </a>
-                <a
-                  class={!pageData.includeSubagents
-                    ? "secondary-button current-filter"
-                    : "secondary-button"}
-                  href={buildSessionInventoryHref({
-                    includeStale: pageData.includeStale,
-                    includeSubagents: false,
-                    workspaceFilter: pageData.workspaceFilter,
-                  })}
-                >
-                  Hidden
                 </a>
               </div>
             </div>
@@ -1072,7 +1069,6 @@ export default function SessionsLive(
                       class="secondary-button"
                       href={buildSessionInventoryHref({
                         includeStale: pageData.includeStale,
-                        includeSubagents: pageData.includeSubagents,
                       })}
                     >
                       Clear Filter

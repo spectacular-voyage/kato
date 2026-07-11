@@ -840,6 +840,18 @@ export function resolveWorkspaceConfigValues(
   };
 }
 
+function cloneResolvedWorkspaceProfile(
+  profile: ResolvedWorkspaceProfile,
+): ResolvedWorkspaceProfile {
+  return {
+    ...profile,
+    defaultTags: [...profile.defaultTags],
+    tagSuggestions: [...profile.tagSuggestions],
+    markdownFrontmatter: { ...profile.markdownFrontmatter },
+    writerFeatureFlags: { ...profile.writerFeatureFlags },
+  };
+}
+
 function parseWorkspaceMarkdownFrontmatter(
   value: unknown,
   configPath: string,
@@ -936,11 +948,7 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       cached.profile.workspaceRoot === resolvedWorkspaceRoot &&
       cached.sourceMtimeMs === sourceMtimeMs
     ) {
-      return {
-        ...cached.profile,
-        markdownFrontmatter: { ...cached.profile.markdownFrontmatter },
-        writerFeatureFlags: { ...cached.profile.writerFeatureFlags },
-      };
+      return cloneResolvedWorkspaceProfile(cached.profile);
     }
 
     const overrides = await loadWorkspaceConfigOverrides(workspace.configPath);
@@ -971,13 +979,9 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       configPath: workspace.configPath,
       sourceMtimeMs,
       loadedAt: new Date().toISOString(),
-      profile: {
-        ...profile,
-        markdownFrontmatter: { ...profile.markdownFrontmatter },
-        writerFeatureFlags: { ...profile.writerFeatureFlags },
-      },
+      profile: cloneResolvedWorkspaceProfile(profile),
     });
-    return profile;
+    return cloneResolvedWorkspaceProfile(profile);
   }
 
   private async readMtime(path: string): Promise<number | undefined> {

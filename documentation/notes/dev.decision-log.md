@@ -17,27 +17,28 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
-### Sessions Sub-Conversations Are Provider-Declared And Grouped
+### Sessions Sub-Conversations Are Provider-Declared And Always Grouped
 
 - Decision:
   - Replace the flat inclusive Sessions presentation with recursively expandable parent/sub-conversation trees whose parents default closed.
-  - Keep `subagents=hide` as a true exclusion mode and relabel the visible choices `Sub-conversations: Grouped | Hidden`; missing or unknown values remain inclusive and grouped.
+  - Make that tree the only Sessions presentation. Always include recognized children, remove separate sub-conversation visibility controls, and ignore legacy `subagents` query parameters.
   - Recognize Claude parentage from the exact provider `subagents` source layout and Codex parentage only from `session_meta.payload.source.subagent.thread_spawn.parent_thread_id`. Never infer relationships from repeated snippets, timestamps, `agent-*` identifiers, or filename proximity.
   - Persist optional Codex `parentProviderSessionId` in schema-v1 session metadata and backfill existing metadata during provider discovery without replaying transcripts or touching session activity timestamps.
   - Resolve provider parent ids to Kato session ids on the server. The browser receives only the relationship needed for rendering and never receives provider source paths.
-  - Retain nonmatching ancestors as explicitly marked structural context when activity/workspace filters match a descendant; exclude those context shells from page totals. `subagents=hide` excludes children before context retention.
+  - Retain nonmatching ancestors as explicitly marked structural context when activity/workspace filters match a descendant; exclude those context shells from page totals.
   - Keep unlinked or cyclic children visible in a collapsed unlinked group, preserve expansion through live polling, and expand ancestor chains for child fragment links and Sessions action redirects.
 - Owner: Kato engineering
-- Date: 2026-07-10
+- Date: 2026-07-11
 - Why:
   - Recorded Claude and Codex sub-conversations can outnumber their top-level parents enough to overwhelm the Sessions board, while still being useful when an operator deliberately expands a workflow.
   - Codex exposes immediate parent ids, including depth-two descendants, so a truthful recursive tree is possible without heuristic title or activity matching.
-  - Collapsing solves routine scanability, while the retained hidden mode still supports strict top-level inventory totals, smaller responses, and existing bookmarks.
+  - Default-closed parents solve routine scanability without a second visibility mode or its query, loader, toolbar, form, and redirect state.
 - Tradeoffs:
-  - Collapsed children are omitted from the rendered DOM but remain in the inclusive live-API payload; lazy child loading is deferred.
+  - Collapsed child rows are omitted from the rendered DOM but remain in the inclusive live-API payload; lazy child loading is deferred.
   - Existing Codex metadata whose provider source has already disappeared cannot be retroactively enriched and remains visible without an inferred relationship.
   - Claude provider data currently supports a parent-to-child relationship but not invented workflow-agent nesting.
 - Follow-up tasks:
+  - [[task.2026.2026-07-11-session-tree-only-inventory]] removes the superseded visibility mode and records the legacy-query no-op contract.
   - Consider lazy child loading if the inclusive live payload remains too large.
   - Consider provider-declared friendly agent labels separately; labels must not become identity or classification signals.
 
@@ -62,11 +63,11 @@ created: 1771779490894
   - Consider event/message counts or a richer detail view if byte size is not a useful enough length proxy.
   - Consider size sorting or filtering separately if operators need more than a per-row cue.
 
-### Sessions Sub-Agent Filtering Is Explicit And URL-Driven
+### Sessions Sub-Agent Filtering Is Explicit And URL-Driven (Superseded)
 
-Superseded for presentation and provider coverage by “Sessions Sub-Conversations Are Provider-Declared And Grouped”; the `subagents=hide` URL contract remains active.
+Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Always Grouped” and [[task.2026.2026-07-11-session-tree-only-inventory]]. The controls and exclusion behavior described below are historical; legacy `subagents` query parameters are now ignored.
 
-- Decision:
+- Historical decision:
   - Keep the Kato Web Sessions inventory inclusive by default and expose `All` and `Top-level only` controls under a distinct `Session type` filter group.
   - Represent `Top-level only` as `subagents=hide`; a missing or unrecognized `subagents` query value remains inclusive.
   - Classify a session as a sub-agent only when `provider` is `claude` and the persisted provider source path contains an exact path segment named `subagents`, accepting both POSIX and Windows path separators. Do not classify from an `agent-*` provider-session id alone, and leave unknown layouts visible.
@@ -75,15 +76,15 @@ Superseded for presentation and provider coverage by “Sessions Sub-Conversatio
   - Scope the filter to `/sessions`; Recordings and Maintenance remain complete operational inventories.
 - Owner: Kato engineering
 - Date: 2026-07-10
-- Why:
+- Historical rationale:
   - Claude workflows can discover enough separate sub-agent transcripts to overwhelm the routine Sessions inventory, while operators still need an explicit way to include those sessions for recording and troubleshooting.
   - URL-owned state keeps initial server rendering, live polling, refreshes, bookmarks, toolbar links, and mutation redirects on one filter contract.
   - Reusing the parser's source-layout rule avoids false positives from identifier naming and keeps local source paths out of the web page model.
-- Tradeoffs:
+- Historical tradeoffs:
   - The inclusive default preserves compatibility but means operators who prefer top-level sessions must select the filter on each unbookmarked visit.
   - Only the explicit Claude source layout is classified in this slice; sub-agent sessions from providers without a supported layout rule remain visible.
   - This filter does not add badges or parent/child relationships, so included sub-agent rows are not otherwise distinguished in the inventory.
-- Follow-up tasks:
+- Historical follow-up tasks:
   - Decide whether to remember the selected session-type filter across visits.
   - Consider explicit sub-agent badges and parent-session relationships if the filtered inventory does not provide enough context.
 

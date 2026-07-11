@@ -10,7 +10,6 @@ import {
   parseLogsPageQuery,
   parseRecordingsPageQuery,
   parseSessionPageQuery,
-  parseSessionsPageQuery,
 } from "./page_queries.ts";
 
 export interface LiveRouteOptions {
@@ -51,7 +50,7 @@ export async function getSessionsResponse(
 ): Promise<Response> {
   return liveJsonResponse(
     await loadSessionsPageData({
-      ...parseSessionsPageQuery(url),
+      ...parseSessionPageQuery(url),
       katoDir: options.katoDir,
     }),
   );

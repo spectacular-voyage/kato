@@ -56,6 +56,7 @@ Related notes:
 - `apps/daemon/src`: daemon bootstrap + orchestrator + provider parsers.
 - `apps/runtime/src`: shared Deno runtime modules (config stores/path
   resolvers/control-plane/policy/workspace/observability).
+- `apps/runtime/src/workspace/output_paths.ts`: pure workspace directory and filename template rendering shared by daemon and web. The daemon's `runtime_workspace_paths.ts` remains a compatibility re-export; web code must import the runtime owner rather than daemon internals.
 - `shared/src`: contracts and projection utilities (`config`, `status`,
   `session_state`, `events`, `messages`, `ipc`, etc.), including
   `output_metadata.ts` resolvers for effective output metadata/effective tags/effective writer feature flags and `tags.ts` validation/suggestion helpers.
@@ -70,7 +71,7 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, per-row persisted twin size, creation-time output title/filename/tag controls, on-demand snippet reveal, and URL-driven activity/workspace/sub-conversation filters. The default `Grouped` view renders provider-declared Claude and Codex children in recursive, default-closed parent trees; `Hidden` preserves the `subagents=hide` true-exclusion contract.
+- `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, per-row persisted twin size, creation-time output title/filename/tag controls, on-demand snippet reveal, and URL-driven activity/workspace filters. Sessions always renders provider-declared Claude and Codex children in recursive, default-closed parent trees; legacy `subagents` query parameters are ignored.
 - `/recordings`: latest recording-output state across sessions and workspaces (one row per output file, with output tag editing plus stop / same-path `Re-start` for persisted rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label editing, registration-time display-label entry, per-workspace preferred-username overrides, shared workspace config edit links, plus workspace-level recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for workspace fields (`autoRecordConversations`, `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
@@ -90,8 +91,8 @@ Supporting web files worth knowing:
 - `apps/web/src/workspace_config_edit_actions.ts` and `apps/web/src/loaders/workspace_config_edit.ts`: shared web mutation and read-model plumbing for the workspace config editor.
 - `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`filenameSlug`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync. Tag edits replace the effective frontmatter tag list while writer appends remain accretive.
 - `apps/web/src/output_writer_policy.ts` + `apps/web/src/writer_policy_controls.tsx`: default/override/effective writer-policy projection and the compact tri-state (default/include/exclude) controls rendered on Recordings rows.
-- `apps/web/src/session_routes.ts`: canonical href builders for `/maintenance`, `/sessions`, and session anchor links, including composition of Sessions activity, workspace, and sub-agent visibility filters.
-- `apps/web/src/page_queries.ts`: validated URL-query projections for Sessions, Recordings, and Logs. Sessions recognizes only `subagents=hide` as the non-default hidden-sub-conversation view; missing or unknown values keep the grouped inventory visible.
+- `apps/web/src/session_routes.ts`: canonical href builders for `/maintenance`, `/sessions`, and session anchor links, including composition of Sessions activity and workspace filters.
+- `apps/web/src/page_queries.ts`: validated URL-query projections for Sessions, Recordings, and Logs. Sessions uses the base activity/workspace query projection, so legacy `subagents` parameters have no effect.
 - `apps/web/src/format_bytes.ts`: deterministic byte-unit formatting shared by Summary memory metrics and Sessions twin-size labels.
 - `apps/web/src/session_tree.ts`: browser-safe recursive Sessions tree construction, subtree ordering/summaries, unlinked/cycle handling, and ancestor lookup for deep links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for

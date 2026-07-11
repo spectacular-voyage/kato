@@ -1,33 +1,36 @@
 ---
 id: task-2026-07-10-session-subagent-filter
 title: Session Subagent Filter
-desc: ""
+desc: "Historical filter slice superseded by the always-grouped Sessions tree."
 updated: 1783718400000
 created: 1783718400000
 ---
 
-## Goal
+## Status
+
+Superseded by [[task.2026.2026-07-10-session-conversation-trees]] and, finally, [[task.2026.2026-07-11-session-tree-only-inventory]]. This note records the former Sessions visibility-filter implementation; its toolbar, `includeSubagents` contract, and exclusion behavior are no longer current. Sessions now always renders the grouped tree, and legacy `subagents` query parameters are ignored. Literal provider source-path segments named `subagents` remain valid Claude parsing and parentage signals.
+
+## Historical Goal
 
 Keep the Kato Web Sessions inventory usable when Claude workflows discover many sub-agent transcripts by adding a top-level filter that can exclude sub-agent conversations.
 
-## Summary
+## Historical Summary
 
 Claude sub-agent sessions are already identified during parsing by an exact `subagents` source-path segment. The Sessions loader has access to persisted `sourceFilePath`, so it can reuse that provider-aware classification without exposing local paths to the browser or guessing from an `agent-*` provider-session id.
 
 This is the inventory-visibility follow-up deferred by [[task.2026.2026-07-09-claude-subagent-snippets]].
 
-## Discussion
+## Historical Discussion
 
 The Sessions page already uses URL-driven activity and workspace filters, and its live API polls the same query. Sub-agent visibility should follow that model so server rendering, polling, refreshes, bookmarks, and post/redirect/get recording actions agree on the visible inventory.
 
 Filtering should happen before the Sessions page totals are calculated. Counts and the empty state will therefore describe the visible rows, not hidden sub-agent sessions. Unknown or unrecognized provider-session layouts must remain visible rather than being hidden by a heuristic.
 
-## Open Issues
+## Current Outcome
 
-- Should the Sessions page eventually remember the selected sub-agent visibility across visits without requiring a bookmarked URL?
-- Should visible sub-agent rows gain an explicit badge or parent-session relationship after the basic inventory filter has soaked?
+- No filter-specific issues remain because the visibility mode was removed. Provider-declared parent relationships and child badges moved into the always-grouped tree implementation.
 
-## Decisions
+## Historical Decisions (Superseded)
 
 - Classify a row as a sub-agent only when its provider is Claude and its persisted source path matches the existing exact-segment `subagents` rule.
 - Do not classify from an `agent-*` provider-session id alone.
@@ -36,13 +39,13 @@ Filtering should happen before the Sessions page totals are calculated. Counts a
 - Compose sub-agent visibility with activity and workspace filters, and preserve it through Sessions links, live polling, and recording-action redirects.
 - Scope the filter to the Sessions inventory. Recordings and Maintenance remain complete operational inventories.
 
-## Contract Changes
+## Historical Contract Changes (Removed)
 
 - Add `includeSubagents` to the internal Sessions query, route, loader, and page-data contracts.
 - `/api/sessions` accepts the same `subagents=hide` query as `/sessions` and returns filtered rows and totals when selected.
 - No shared persisted-session or provider contract changes are required; classification is derived from existing session metadata.
 
-## Testing
+## Historical Testing
 
 - Cover default, recognized, and unrecognized query values.
 - Cover href composition with activity, workspace, and sub-agent filters.
@@ -50,14 +53,14 @@ Filtering should happen before the Sessions page totals are calculated. Counts a
 - Cover filtered rows and totals from the live Sessions API.
 - Cover Sessions toolbar rendering and hidden form fields so recording actions preserve the selected filter.
 
-## Non-Goals
+## Historical Non-Goals
 
 - Do not hide sub-agent recordings from Recordings or persisted twins from Maintenance.
 - Do not add parent/child session relationships.
 - Do not infer sub-agent status for providers whose source layout has no explicit supported rule.
 - Do not add a sub-agent badge or redesign session rows in this slice.
 
-## Implementation Plan
+## Historical Implementation Plan
 
 - [x] Add focused query, route, loader, API, and toolbar contract tests.
 - [x] Add provider-aware Sessions filtering and filtered totals.

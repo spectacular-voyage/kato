@@ -43,6 +43,14 @@ export type {
 } from "./dendron.ts";
 export { resolveDendronWikilinkContext } from "./dendron.ts";
 export type {
+  WorkspacePathTemplateOptions,
+  WorkspacePathTemplateProfile,
+} from "./output_paths.ts";
+export {
+  renderWorkspaceFilename,
+  resolveWorkspaceDefaultOutputDir,
+} from "./output_paths.ts";
+export type {
   RegisterWorkspaceMutationOptions,
   RegisterWorkspaceMutationResult,
   SetWorkspaceDisplayNameOptions,

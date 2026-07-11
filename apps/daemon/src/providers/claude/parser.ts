@@ -232,6 +232,15 @@ export function isClaudeSubagentSourcePath(filePath: string): boolean {
   return resolveClaudeSubagentParentProviderSessionId(filePath) !== undefined;
 }
 
+export function resolveClaudeSessionParseOptions(
+  provider: string,
+  sourceFilePath: string,
+): Pick<ClaudeParseContext, "includeSidechainEvents"> {
+  return provider === "claude" && isClaudeSubagentSourcePath(sourceFilePath)
+    ? { includeSidechainEvents: true }
+    : {};
+}
+
 export async function* parseClaudeEvents(
   filePath: string,
   fromOffset: number = 0,

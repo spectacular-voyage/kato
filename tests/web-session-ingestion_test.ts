@@ -133,6 +133,69 @@ Deno.test("ingestPersistedSession moves a session from not ingested to idle and 
   });
 });
 
+Deno.test("ingestPersistedSession includes sidechain events for Claude subagent sources", async () => {
+  await withTestTempDir("web-session-ingestion-subagent-", async (homeDir) => {
+    const { katoDir } = await initializeSessionIngestionFixture(homeDir);
+    const subagentDir = join(
+      homeDir,
+      "project",
+      "parent-session",
+      "subagents",
+    );
+    await Deno.mkdir(subagentDir, { recursive: true });
+    const sessionFilePath = join(subagentDir, "agent-child.jsonl");
+    await Deno.writeTextFile(
+      sessionFilePath,
+      [
+        JSON.stringify({
+          type: "user",
+          uuid: "subagent-user",
+          isSidechain: true,
+          sessionId: "parent-session",
+          timestamp: "2026-03-11T10:00:00.000Z",
+          message: {
+            role: "user",
+            content: "summarize the workflow",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "subagent-assistant",
+          parentUuid: "subagent-user",
+          isSidechain: true,
+          sessionId: "parent-session",
+          timestamp: "2026-03-11T10:00:05.000Z",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-6",
+            content: [{ type: "text", text: "Summary complete." }],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    const store = new PersistentSessionStateStore({
+      katoDir,
+      now: () => new Date("2026-03-11T10:00:00.000Z"),
+      makeSessionId: () => "sess-kato-subagent",
+    });
+    await store.getOrCreateSessionMetadata({
+      provider: "claude",
+      providerSessionId: "agent-child",
+      sourceFilePath: sessionFilePath,
+      initialCursor: { kind: "byte-offset", value: 0 },
+    });
+
+    const result = await ingestPersistedSession({
+      sessionId: "sess-kato-subagent",
+      katoDir,
+      now: () => new Date("2026-03-11T10:05:00.000Z"),
+    });
+
+    assertEquals(result.parsedEvents, 2);
+    assertEquals(result.appendedTwinEvents, 2);
+  });
+});
+
 Deno.test("loadSessionsPageData keeps background twin history inactive until ingestion is explicitly activated", async () => {
   await withTestTempDir(
     "web-session-ingestion-background-state-",

@@ -10,7 +10,31 @@ import {
   UserConfigFileStore,
   validateAndNormalizeParticipantUsername,
 } from "../apps/daemon/src/mod.ts";
+import { cloneUserConfig } from "../apps/runtime/src/config/user_config.ts";
 import { makeTestTempDir, removePathIfPresent } from "./test_temp.ts";
+
+Deno.test("cloneUserConfig isolates nested participant and tag collections", () => {
+  const source = createDefaultUserConfig(
+    { workspaceUsernames: { "ws-alpha": "Alice" } },
+    {
+      globalSuggestions: ["global"],
+      workspaceSuggestions: { "ws-alpha": ["workspace"] },
+    },
+  );
+  const cloned = cloneUserConfig(source);
+
+  cloned.participants.workspaceUsernames["ws-alpha"] = "Changed";
+  cloned.tagLibraries?.globalSuggestions.push("changed");
+  cloned.tagLibraries?.workspaceSuggestions["ws-alpha"]?.push("changed");
+
+  assertEquals(source.participants.workspaceUsernames, {
+    "ws-alpha": "Alice",
+  });
+  assertEquals(source.tagLibraries?.globalSuggestions, ["global"]);
+  assertEquals(source.tagLibraries?.workspaceSuggestions, {
+    "ws-alpha": ["workspace"],
+  });
+});
 
 Deno.test("UserConfigFileStore ensureInitialized creates scaffold and reloads", async () => {
   const tempDir = await makeTestTempDir("user-config-init-");

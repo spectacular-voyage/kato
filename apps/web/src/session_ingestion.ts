@@ -6,8 +6,8 @@ import {
   type StructuredLogger,
 } from "@kato/runtime";
 import {
-  isClaudeSubagentSourcePath,
   parseClaudeEvents,
+  resolveClaudeSessionParseOptions,
 } from "../../daemon/src/providers/claude/mod.ts";
 import { parseCodexEvents } from "../../daemon/src/providers/codex/mod.ts";
 import { parseGeminiEvents } from "../../daemon/src/providers/gemini/mod.ts";
@@ -133,10 +133,10 @@ export async function ingestPersistedSession(
       {
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
-        ...(metadata.provider === "claude" &&
-            isClaudeSubagentSourcePath(metadata.sourceFilePath)
-          ? { includeSidechainEvents: true }
-          : {}),
+        ...resolveClaudeSessionParseOptions(
+          metadata.provider,
+          metadata.sourceFilePath,
+        ),
       },
     )
   ) {

@@ -15,6 +15,7 @@ import {
   PersistentSessionStateStore,
   resolveDefaultKatoDir,
   resolveDefaultWorkspaceRegistryPath,
+  type ResolvedWorkspaceProfile,
   type StructuredLogger,
   WorkspaceCatalog,
   WorkspaceProfileResolver,
@@ -215,46 +216,40 @@ async function resolveWorkspaceDefaultWriterFlags(
   katoDir: string,
   output: WorkspaceOutputState,
 ): Promise<SessionWorkspaceAttachmentWriterFeatureFlagsV1> {
-  try {
-    const catalog = new WorkspaceCatalog(
-      new WorkspaceRegistryFileStore(
-        resolveDefaultWorkspaceRegistryPath(katoDir),
-      ),
-    );
-    const registered = await catalog.getByWorkspaceId(output.workspaceId);
-    if (registered) {
-      const profile = await new WorkspaceProfileResolver().resolveForCommand(
-        registered,
-      );
-      return { ...profile.writerFeatureFlags };
-    }
-  } catch {
-    // Fall back to the persisted workspace-default snapshot below.
-  }
-  return { ...output.writerFeatureFlags };
+  const profile = await resolveWorkspaceProfile(katoDir, output.workspaceId);
+  return profile
+    ? { ...profile.writerFeatureFlags }
+    : { ...output.writerFeatureFlags };
 }
 
 async function resolveWorkspaceDefaultTags(
   katoDir: string,
   output: WorkspaceOutputState,
 ): Promise<string[]> {
+  const profile = await resolveWorkspaceProfile(katoDir, output.workspaceId);
+  return profile ? [...profile.defaultTags] : [...(output.defaultTags ?? [])];
+}
+
+async function resolveWorkspaceProfile(
+  katoDir: string,
+  workspaceId: string,
+): Promise<ResolvedWorkspaceProfile | undefined> {
   try {
     const catalog = new WorkspaceCatalog(
       new WorkspaceRegistryFileStore(
         resolveDefaultWorkspaceRegistryPath(katoDir),
       ),
     );
-    const registered = await catalog.getByWorkspaceId(output.workspaceId);
+    const registered = await catalog.getByWorkspaceId(workspaceId);
     if (registered) {
-      const profile = await new WorkspaceProfileResolver().resolveForCommand(
+      return await new WorkspaceProfileResolver().resolveForCommand(
         registered,
       );
-      return [...profile.defaultTags];
     }
   } catch {
-    // Fall back to no workspace defaults when config cannot be resolved.
+    // Callers fall back to their persisted per-output snapshots.
   }
-  return [...(output.defaultTags ?? [])];
+  return undefined;
 }
 
 function isMarkdownOutputPath(outputPath: string): boolean {
@@ -272,8 +267,11 @@ async function bestEffortFrontmatterMetadataUpdate(
 ): Promise<MarkdownFrontmatterMetadataUpdateStatus> {
   try {
     return (await updateMarkdownFrontmatterMetadata(outputPath, update)).status;
-  } catch {
-    return "missing-file";
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return "missing-file";
+    }
+    throw error;
   }
 }
 

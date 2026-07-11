@@ -459,6 +459,42 @@ function writerPolicyEquals(
     a.writerIncludeThinking === b.writerIncludeThinking;
 }
 
+interface ParsedFrontmatterDocument {
+  record: Record<string, unknown>;
+  payload: string;
+  body: string;
+  frontmatterEnd: number;
+}
+
+function parseFrontmatterDocument(
+  content: string,
+): ParsedFrontmatterDocument | undefined {
+  if (!content.startsWith("---\n")) {
+    return undefined;
+  }
+  const closingIndex = content.indexOf("\n---", 4);
+  if (closingIndex < 0) {
+    return undefined;
+  }
+  const frontmatterEnd = closingIndex + 4;
+  const payload = content.slice(4, closingIndex);
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(payload);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  return {
+    record: parsed,
+    payload,
+    body: content.slice(frontmatterEnd),
+    frontmatterEnd,
+  };
+}
+
 // Replaces the effective writer-policy snapshot in an existing frontmatter
 // block. Returns the input unchanged when the snapshot already matches or the
 // frontmatter cannot be parsed.
@@ -466,30 +502,17 @@ export function mergeFrontmatterWriterPolicySnapshot(options: {
   frontmatter: string;
   writerPolicy: FrontmatterWriterPolicy;
 }): string {
-  if (!options.frontmatter.startsWith("---\n")) {
-    return options.frontmatter;
-  }
-  const closingIndex = options.frontmatter.indexOf("\n---", 4);
-  if (closingIndex < 0) {
-    return options.frontmatter;
-  }
-  const payload = options.frontmatter.slice(4, closingIndex);
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(payload);
-  } catch {
-    return options.frontmatter;
-  }
-  if (!isRecord(parsed)) {
+  const document = parseFrontmatterDocument(options.frontmatter);
+  if (!document) {
     return options.frontmatter;
   }
   const existingPolicy = readFrontmatterWriterPolicy(
-    parsed[KATO_WRITER_FEATURE_FLAGS_KEY],
+    document.record[KATO_WRITER_FEATURE_FLAGS_KEY],
   );
   if (writerPolicyEquals(existingPolicy, options.writerPolicy)) {
     return options.frontmatter;
   }
-  const nextRecord: Record<string, unknown> = { ...parsed };
+  const nextRecord: Record<string, unknown> = { ...document.record };
   nextRecord[KATO_WRITER_FEATURE_FLAGS_KEY] = {
     writerIncludeCommentary: options.writerPolicy.writerIncludeCommentary,
     writerIncludeThinking: options.writerPolicy.writerIncludeThinking,
@@ -518,25 +541,11 @@ export function updateFrontmatterMetadataFields(
   content: string,
   update: FrontmatterMetadataUpdate,
 ): FrontmatterMetadataUpdateResult {
-  if (!content.startsWith("---\n")) {
+  const document = parseFrontmatterDocument(content);
+  if (!document) {
     return { content, changed: false, hadFrontmatter: false };
   }
-  const closingIndex = content.indexOf("\n---", 4);
-  if (closingIndex < 0) {
-    return { content, changed: false, hadFrontmatter: false };
-  }
-  const frontmatterEnd = closingIndex + 4;
-  const payload = content.slice(4, closingIndex);
-  const body = content.slice(frontmatterEnd);
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(payload);
-  } catch {
-    return { content, changed: false, hadFrontmatter: false };
-  }
-  if (!isRecord(parsed)) {
-    return { content, changed: false, hadFrontmatter: false };
-  }
+  const parsed = document.record;
 
   const nextRecord: Record<string, unknown> = { ...parsed };
   let changed = false;
@@ -586,7 +595,7 @@ export function updateFrontmatterMetadataFields(
     return { content, changed: false, hadFrontmatter: true };
   }
   return {
-    content: `${renderFrontmatterRecord(nextRecord)}${body}`,
+    content: `${renderFrontmatterRecord(nextRecord)}${document.body}`,
     changed: true,
     hadFrontmatter: true,
   };

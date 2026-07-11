@@ -10,8 +10,8 @@ import {
   type SecretsRuleMatchSummary,
 } from "../policy/mod.ts";
 import {
-  isClaudeSubagentSourcePath,
   parseClaudeEvents,
+  resolveClaudeSessionParseOptions,
 } from "../providers/claude/mod.ts";
 import { parseCodexEvents } from "../providers/codex/mod.ts";
 import { parseGeminiEvents } from "../providers/gemini/mod.ts";
@@ -129,10 +129,10 @@ export async function replayProviderSourceEvents(
       {
         provider: metadata.provider,
         sessionId: metadata.providerSessionId,
-        ...(metadata.provider === "claude" &&
-            isClaudeSubagentSourcePath(metadata.sourceFilePath)
-          ? { includeSidechainEvents: true }
-          : {}),
+        ...resolveClaudeSessionParseOptions(
+          metadata.provider,
+          metadata.sourceFilePath,
+        ),
       },
     )
   ) {

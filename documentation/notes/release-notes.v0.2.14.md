@@ -14,7 +14,7 @@ This release also wires tags into the output metadata model: workspace defaults,
 
 Registered workspaces can now opt into automatic recording for Claude conversations whose provider-reported working directory is inside the workspace root. Automatic recording defaults off, reuses Kato's normal workspace recording state and destination rules, and does not replace an existing output.
 
-The Sessions page now groups provider-declared Claude and Codex sub-conversations beneath expandable parents that default closed. The `Grouped` / `Hidden` control preserves the existing bookmarkable URL behavior; `Hidden` excludes recognized sub-conversations from Sessions rows and totals.
+The Sessions page now always groups provider-declared Claude and Codex sub-conversations beneath expandable parents that default closed. Legacy `subagents` query parameters are ignored, so old bookmarks open the normal grouped inventory.
 
 Sessions rows now also show `Twin <size>` for recognized persisted Kato history or `Twin absent` when no usable twin size is available.
 
@@ -28,13 +28,14 @@ Sessions rows now also show `Twin <size>` for recognized persisted Kato history 
 - Server-rendered web forms now emit editable field values in browser-native markup, so workspace config, Settings, and Maintenance fields are populated before any client-side code runs.
 - Invalid workspace configs are shown as errors instead of crashing the page.
 - Registered workspaces can opt into automatic recording for Claude conversations whose provider-reported working directory is inside the workspace root. The setting defaults off; Codex and Gemini still require manual recording or capture. On first attachment, Kato writes the available conversation context and continues recording future events.
+- The Sessions page `New capture` and `New recording` popovers can set an output title and filename snippet before the output file is created. Title changes derive the filename snippet until the snippet is manually customized.
 - The Sessions page `New capture` and `New recording` popovers now accept direct output tags alongside title and filename snippet overrides.
 - The Sessions page `New capture` and `New recording` popovers now stay within the viewport when opened near the bottom of the page.
 - Claude workflow and sub-agent sessions can now recover snippets from sidechain-marked entries when the source file is itself a recognized sub-agent transcript, avoiding misleading `snippet unavailable` rows without changing top-level sidechain deduplication.
-- The Sessions toolbar now has `Grouped` and `Hidden` sub-conversation controls. `Grouped` is the inclusive default with expandable parents closed initially; `Hidden` uses the bookmarkable `subagents=hide` query and remains selected through live refreshes and Sessions actions.
+- Sessions always includes recognized sub-conversations in default-closed parent trees; the redundant sub-conversation visibility control and its redirect/form state have been removed.
 - Parent disclosures summarize descendant count, active-descendant and active-recording counts, and available descendant Twin bytes. Expanded children retain their own activity, recording actions, and individual Twin sizes.
 - Child links expand their ancestor chain automatically, open branches survive live refreshes, and Sessions actions return to the acted-on child.
-- Recognized children with unavailable or cyclic parents remain accessible under `Unlinked sub-conversations`. When only a child matches an activity or workspace filter, its ancestors appear as uncounted context rows. `Hidden` affects the Sessions inventory only; Recordings and Maintenance remain complete.
+- Recognized children with unavailable or cyclic parents remain accessible under `Unlinked sub-conversations`. When only a child matches an activity or workspace filter, its ancestors appear as uncounted context rows. Recordings and Maintenance remain complete.
 - Each Sessions row now shows `Twin <size>` using 1024-based byte units, or `Twin absent` when Kato has no recognized persisted twin history. The indicator is a rough measure of Kato's JSONL history and can be partial when persistence began after the provider conversation started; twin paths, state, troubleshooting, and cleanup remain in Maintenance.
 - The Recordings page now shows effective output tags and can edit direct per-output tags for active or stopped outputs; markdown frontmatter is updated best-effort without rewriting the body.
 - The Settings page can edit personal global tag suggestions and per-workspace personal tag suggestions. Personal suggestions do not write into output files unless selected or typed for an output.
@@ -59,22 +60,24 @@ Sessions rows now also show `Twin <size>` for recognized persisted Kato history 
 - Workspace config now includes schema-backed `defaultTags` and `tagSuggestions`; user config now includes optional `tagLibraries.globalSuggestions` and `tagLibraries.workspaceSuggestions`.
 - Shared tag helpers validate/normalize tags and resolve suggestions across workspace libraries, personal libraries, and existing output tags.
 - `resolveEffectiveOutputMetadata()` now accepts workspace default tags and resolves tag order as session defaults, workspace defaults, then direct output tags.
+- Session output metadata includes `filenameSlug`, and generated workspace paths can use it as an explicit `{snippetSlug}` source before falling back to the extracted session snippet.
 - Workspace config/profile contracts now include `autoRecordConversations`. Claude events can project `source.workingDirectory`, session metadata persists the inferred working directory, and the daemon reuses normal workspace output state to attach eligible sessions before append processing.
 - Kato Web adds `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()` for the `/workspaces/:workspaceId/edit` route.
 - Kato Web routes and loaders now carry tag suggestions to Sessions/Recordings, persist direct per-output tags via `runSessionOutputMetadataUpdateAction()`, and replace existing markdown frontmatter tags on tag edits.
 - Sessions relationships derive Claude parents from their exact `subagents` source layout and Codex immediate parents from `session_meta.payload.source.subagent.thread_spawn.parent_thread_id`; they never infer from snippets, timing, or ids, and provider source paths remain server-only.
 - Schema-v1 session metadata gains optional `parentProviderSessionId`. Codex discovery performs a metadata-only backfill for existing rows without marking historical sessions dirty or replaying their transcripts.
-- The Sessions loader resolves provider parent ids to Kato session ids, recursively retains filtered ancestors as uncounted structural context, excludes both Claude and Codex children under `subagents=hide`, and fails open into an unlinked group for missing/cyclic parents.
+- The Sessions loader resolves provider parent ids to Kato session ids, always includes recognized children, recursively retains filtered ancestors as uncounted structural context, ignores legacy `subagents` query parameters, and fails open into an unlinked group for missing/cyclic parents.
 - `apps/web/src/session_tree.ts` builds recursive branches, orders parent groups by their best matching subtree row, calculates descendant activity/Twin summaries, detects cycles, and resolves ancestor chains for fragment links.
 - The Sessions island renders explicit accessible disclosure buttons, keeps expansion state outside two-second poll data, keeps controlled child-list elements available for accessibility while omitting collapsed child rows from the DOM, and preserves child anchors through POST redirects.
 - Sessions rows now carry optional path-free `twinSizeBytes`, derived from the twin-file stat already used during persisted-metadata normalization. The implementation reuses that result rather than adding another per-session filesystem lookup to each live poll, and no shared or persisted session contract changes are required.
 - Summary memory values and Sessions twin sizes now share one deterministic formatter with 1024-based `B`, `KB`, `MB`, `GB`, and `TB` units.
 - The recording pipeline now accepts `frontmatterTags` through `RecordingOutputOverrides`, so web-created outputs and daemon in-chat workspace outputs can write effective tags at creation/append time.
 - Claude parsing and replay enable sidechain events only for exact sub-agent source paths across live ingestion, persisted ingestion, source replay, and snippet recovery.
+- Kato Web now pins Vite to a patched 7.3.x release so `deno task audit` passes the high-severity gate.
 - Focused tests cover successful edits, partial programmatic edits that preserve inherited defaults, invalid edits that preserve the existing file, invalid config page data, redirect behavior, and Dendron wikilink diagnostics.
 - Focused auto-recording tests cover workspace config parsing/serialization, Claude working-directory extraction, conservative workspace matching, snapshot attachment, existing-output preservation, and non-Claude exclusion.
 - Additional focused tests cover workspace/user tag config parsing, effective tag resolution, suggestion merging, creation-time tag writes, recordings-page tag edits, and metadata-only frontmatter tag replacement.
-- Focused Sessions tests cover query defaults, route composition, POSIX/Windows Claude parent paths, explicit and nested Codex parents, metadata-only backfill, hidden-mode provider coverage, filtered ancestor context/totals, missing parents/cycles, recursive ordering, toolbar state, collapsed markup, path-free live API data, and action-form preservation.
+- Focused Sessions tests cover legacy-query no-op behavior, route composition, POSIX/Windows Claude parent paths, explicit and nested Codex parents, metadata-only backfill, filtered ancestor context/totals, missing parents/cycles, recursive ordering, visibility-control removal, collapsed markup, path-free live API data, and action forms without sub-conversation state.
 - Focused twin-size tests cover byte-format thresholds, logical persisted-history projection, missing/orphan/growing twins, path-free live-API data, filter composition, and rendered `Twin <size>` / `Twin absent` states.
 - Developer docs now record the canonical-rewrite decision and document the new web route/helper ownership.
 - Internal planning notes now mark the implemented web-first tagging slice and leave CLI tag-library management plus in-chat tag mutation as follow-up work.

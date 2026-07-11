@@ -337,6 +337,56 @@ Deno.test("runSessionRecordingAction recording uses creation title and filename 
   );
 });
 
+for (const action of ["new-recording", "new-capture"] as const) {
+  Deno.test(`runSessionRecordingAction ${action} uses inherited title and filename slug defaults`, async () => {
+    await withTestTempDir(
+      `web-session-${action}-inherited-metadata-`,
+      async (homeDir) => {
+        const { katoDir } = await setupWorkspaceFixture(homeDir, {
+          filenameTemplate: "{timestampHumane}-{snippetSlug}-{provider}.md",
+        });
+        const sessionFilePath = join(homeDir, "provider-session.jsonl");
+        await Deno.copyFile(CLAUDE_FIXTURE, sessionFilePath);
+        const sessionId = `sess-${action}-inherited-metadata`;
+
+        await createSessionFixture({
+          katoDir,
+          sessionId,
+          providerSessionId: `provider-${action}-inherited-metadata`,
+          sourceFilePath: sessionFilePath,
+          outputMetadataDefaults: {
+            displayTitle: "Inherited Session Title",
+            filenameSlug: "inherited filename seed",
+          },
+        });
+
+        const result = await runSessionRecordingAction({
+          action,
+          sessionId,
+          workspaceSelector: "alpha",
+          katoDir,
+          now: () => new Date("2026-03-17T17:05:00.000Z"),
+        });
+
+        assertStringIncludes(
+          basename(result.targetPath),
+          "inherited-filename-seed",
+        );
+        const written = await Deno.readTextFile(result.targetPath);
+        assertStringIncludes(written, "title: 'Inherited Session Title'");
+
+        const sessionStore = new PersistentSessionStateStore({ katoDir });
+        const metadataAfter = (await sessionStore.listSessionMetadata())[0];
+        assertExists(metadataAfter);
+        assertEquals(
+          metadataAfter.workspaceOutputs?.[0]?.outputMetadata,
+          undefined,
+        );
+      },
+    );
+  });
+}
+
 Deno.test("runSessionRecordingAction recording writes effective workspace, session, and selected tags", async () => {
   await withTestTempDir(
     "web-session-record-action-tags-",

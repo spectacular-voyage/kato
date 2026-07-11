@@ -918,7 +918,7 @@ export async function runSessionRecordingAction(
         { secretsPolicy: sharedConfig.secretsPolicy },
       );
       const writeCursor = history.events.length;
-      const title = creationMetadata?.displayTitle ??
+      const title = effectiveCreationMetadata.displayTitle ??
         resolveConversationTitle(
           history.events,
           metadata.providerSessionId,
@@ -936,7 +936,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
-          filenameSlug: creationMetadata?.filenameSlug,
+          filenameSlug: effectiveCreationMetadata.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,
@@ -1023,7 +1023,7 @@ export async function runSessionRecordingAction(
           provider: metadata.provider,
           sessionId: metadata.providerSessionId,
           outputUsername,
-          filenameSlug: creationMetadata?.filenameSlug,
+          filenameSlug: effectiveCreationMetadata.filenameSlug,
           boundarySnapshot: history.events,
           ensureGeneratedPathUnique: true,
           now: actionNow,

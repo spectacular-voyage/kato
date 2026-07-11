@@ -22,6 +22,7 @@ import {
   resolveDefaultStatusPath,
   resolveDefaultUserConfigPath,
   resolveDefaultWorkspaceRegistryPath,
+  type ResolvedWorkspaceProfile,
   UserConfigFileStore,
   WorkspaceProfileResolver,
   WorkspaceRegistryFileStore,
@@ -86,7 +87,6 @@ export interface SessionActivityRow {
 
 export interface SessionsPageData {
   includeStale: boolean;
-  includeSubagents: boolean;
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
@@ -104,7 +104,6 @@ export interface SessionsPageData {
 
 export interface LoadSessionActivityRowsOptions {
   includeStale?: boolean;
-  includeSubagents?: boolean;
   workspaceFilter?: string;
   recordingsMode?: "latest" | "all";
   retainSubconversationAncestors?: boolean;
@@ -113,6 +112,9 @@ export interface LoadSessionActivityRowsOptions {
   statusPath?: string;
   statusStore?: DaemonStatusSnapshotStoreLike;
   workspaceEntries?: RegisteredWorkspace[];
+  workspaceProfilesById?:
+    | ReadonlyMap<string, ResolvedWorkspaceProfile>
+    | PromiseLike<ReadonlyMap<string, ResolvedWorkspaceProfile>>;
 }
 
 export interface ResolvedWorkspaceFilter {
@@ -266,77 +268,94 @@ async function loadUserConfigOrDefault(katoDir: string): Promise<UserConfig> {
   }
 }
 
-async function resolveWorkspaceOutputProfilesById(
-  workspaceEntries: RegisteredWorkspace[],
+function collectUsedWorkspaceIds(
   metadataList: SessionMetadataV1[],
-): Promise<Map<string, WorkspaceOutputProfileProjection>> {
+): Set<string> {
   const usedWorkspaceIds = new Set<string>();
   for (const metadata of metadataList) {
     for (const output of metadata.workspaceOutputs ?? []) {
       usedWorkspaceIds.add(output.workspaceId);
     }
   }
-  const profilesById = new Map<string, WorkspaceOutputProfileProjection>();
-  if (usedWorkspaceIds.size === 0) {
-    return profilesById;
-  }
+  return usedWorkspaceIds;
+}
+
+async function resolveWorkspaceProfilesById(
+  workspaceEntries: RegisteredWorkspace[],
+  workspaceIds?: ReadonlySet<string>,
+): Promise<Map<string, ResolvedWorkspaceProfile>> {
+  const profilesById = new Map<string, ResolvedWorkspaceProfile>();
   const resolver = new WorkspaceProfileResolver();
-  for (const entry of workspaceEntries) {
-    if (!usedWorkspaceIds.has(entry.workspaceId)) {
-      continue;
+  await Promise.all(workspaceEntries.map(async (entry) => {
+    if (workspaceIds && !workspaceIds.has(entry.workspaceId)) {
+      return;
     }
     try {
-      const profile = await resolver.resolveForCommand(entry);
-      profilesById.set(entry.workspaceId, {
-        writerFeatureFlags: { ...profile.writerFeatureFlags },
-        defaultTags: [...profile.defaultTags],
-        tagSuggestions: [...profile.tagSuggestions],
-      });
+      profilesById.set(
+        entry.workspaceId,
+        await resolver.resolveForCommand(entry),
+      );
     } catch {
-      // Unresolvable workspaces fall back to per-output snapshots.
+      // Callers preserve their basic-option or per-output snapshot fallback.
     }
+  }));
+  return profilesById;
+}
+
+function resolveWorkspaceOutputProfilesById(
+  workspaceProfilesById: ReadonlyMap<string, ResolvedWorkspaceProfile>,
+  metadataList: SessionMetadataV1[],
+): Map<string, WorkspaceOutputProfileProjection> {
+  const usedWorkspaceIds = collectUsedWorkspaceIds(metadataList);
+  const profilesById = new Map<string, WorkspaceOutputProfileProjection>();
+  for (const workspaceId of usedWorkspaceIds) {
+    const profile = workspaceProfilesById.get(workspaceId);
+    if (!profile) {
+      continue;
+    }
+    profilesById.set(workspaceId, {
+      writerFeatureFlags: { ...profile.writerFeatureFlags },
+      defaultTags: [...profile.defaultTags],
+      tagSuggestions: [...profile.tagSuggestions],
+    });
   }
   return profilesById;
 }
 
-async function resolveWorkspaceOptions(
+function resolveWorkspaceOptions(
   workspaceEntries: RegisteredWorkspace[],
   userConfig: UserConfig,
-): Promise<WorkspaceOption[]> {
-  const resolver = new WorkspaceProfileResolver();
-  const options = await Promise.all(
-    workspaceEntries.map(async (entry): Promise<WorkspaceOption> => {
-      try {
-        const profile = await resolver.resolveForCommand(entry);
-        return {
-          workspaceId: entry.workspaceId,
-          alias: entry.alias,
-          displayName: entry.displayName,
-          filenameTemplate: profile.filenameTemplate,
-          filenameTemplateIncludesSnippet: profile.filenameTemplate.includes(
-            "{snippetSlug}",
-          ),
-          defaultTags: [...profile.defaultTags],
-          tagSuggestions: resolveOutputTagSuggestions({
-            workspaceTagSuggestions: [
-              ...profile.defaultTags,
-              ...profile.tagSuggestions,
-            ],
-            userGlobalTagSuggestions: userConfig.tagLibraries
-              ?.globalSuggestions,
-            userWorkspaceTagSuggestions: userConfig.tagLibraries
-              ?.workspaceSuggestions[entry.workspaceId],
-          }),
-        };
-      } catch {
-        return {
-          workspaceId: entry.workspaceId,
-          alias: entry.alias,
-          displayName: entry.displayName,
-        };
-      }
-    }),
-  );
+  workspaceProfilesById: ReadonlyMap<string, ResolvedWorkspaceProfile>,
+): WorkspaceOption[] {
+  const options = workspaceEntries.map((entry): WorkspaceOption => {
+    const profile = workspaceProfilesById.get(entry.workspaceId);
+    if (!profile) {
+      return {
+        workspaceId: entry.workspaceId,
+        alias: entry.alias,
+        displayName: entry.displayName,
+      };
+    }
+    return {
+      workspaceId: entry.workspaceId,
+      alias: entry.alias,
+      displayName: entry.displayName,
+      filenameTemplate: profile.filenameTemplate,
+      filenameTemplateIncludesSnippet: profile.filenameTemplate.includes(
+        "{snippetSlug}",
+      ),
+      defaultTags: [...profile.defaultTags],
+      tagSuggestions: resolveOutputTagSuggestions({
+        workspaceTagSuggestions: [
+          ...profile.defaultTags,
+          ...profile.tagSuggestions,
+        ],
+        userGlobalTagSuggestions: userConfig.tagLibraries?.globalSuggestions,
+        userWorkspaceTagSuggestions: userConfig.tagLibraries
+          ?.workspaceSuggestions[entry.workspaceId],
+      }),
+    };
+  });
   return options.sort((a, b) =>
     a.alias.localeCompare(b.alias) ||
     a.workspaceId.localeCompare(b.workspaceId)
@@ -957,18 +976,16 @@ export async function loadSessionActivityRows(
     ),
   );
   const relationships = resolveSessionRelationships(normalizedMetadataRows);
-  const includeSubagents = options.includeSubagents ?? true;
-  const visibleMetadataRows = includeSubagents
-    ? normalizedMetadataRows
-    : normalizedMetadataRows.filter(({ metadata }) =>
-      !relationships.has(metadata.sessionId)
-    );
-  const visibleMetadataList = visibleMetadataRows.map(({ metadata }) =>
+  const normalizedMetadataList = normalizedMetadataRows.map(({ metadata }) =>
     metadata
   );
-  const workspaceOutputProfilesById = await resolveWorkspaceOutputProfilesById(
-    workspaceEntries,
-    visibleMetadataList,
+  const usedWorkspaceIds = collectUsedWorkspaceIds(normalizedMetadataList);
+  const workspaceProfilesById = options.workspaceProfilesById
+    ? await options.workspaceProfilesById
+    : await resolveWorkspaceProfilesById(workspaceEntries, usedWorkspaceIds);
+  const workspaceOutputProfilesById = resolveWorkspaceOutputProfilesById(
+    workspaceProfilesById,
+    normalizedMetadataList,
   );
 
   const liveBySessionId = new Map(
@@ -992,7 +1009,7 @@ export async function loadSessionActivityRows(
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
 
-  const candidateRows = await Promise.all(visibleMetadataRows.map((
+  const candidateRows = await Promise.all(normalizedMetadataRows.map((
     { metadata, twinSizeBytes },
   ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
@@ -1097,7 +1114,7 @@ export async function loadSessionActivityRows(
   );
   const includedSessionIds = new Set(matchingSessionIds);
 
-  if (options.retainSubconversationAncestors && includeSubagents) {
+  if (options.retainSubconversationAncestors) {
     const rowsBySessionId = new Map(
       candidateRows.map((row) => [row.sessionId, row]),
     );
@@ -1133,37 +1150,41 @@ export async function loadSessionsPageData(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
-  const includeSubagents = options.includeSubagents ?? true;
   const statusPath = options.statusPath ??
     resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir());
   const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
   const workspaceEntries = options.workspaceEntries ??
     await loadRegisteredWorkspaces(katoDir);
-  const userConfig = await loadUserConfigOrDefault(katoDir);
-  const [rows, resolvedWorkspaceFilter] = await Promise.all([
-    loadSessionActivityRows({
-      ...options,
-      includeStale,
-      includeSubagents,
-      retainSubconversationAncestors: true,
-      katoDir,
-      statusPath,
-      workspaceEntries,
-    }),
-    resolveWorkspaceFilter(
-      options.workspaceFilter,
-      katoDir,
-      workspaceEntries,
-    ),
-  ]);
-  const workspaceOptions = await resolveWorkspaceOptions(
+  const workspaceProfilesByIdPromise = options.workspaceProfilesById
+    ? Promise.resolve(options.workspaceProfilesById)
+    : resolveWorkspaceProfilesById(workspaceEntries);
+  const [userConfig, rows, resolvedWorkspaceFilter, workspaceProfilesById] =
+    await Promise.all([
+      loadUserConfigOrDefault(katoDir),
+      loadSessionActivityRows({
+        ...options,
+        includeStale,
+        retainSubconversationAncestors: true,
+        katoDir,
+        statusPath,
+        workspaceEntries,
+        workspaceProfilesById: workspaceProfilesByIdPromise,
+      }),
+      resolveWorkspaceFilter(
+        options.workspaceFilter,
+        katoDir,
+        workspaceEntries,
+      ),
+      workspaceProfilesByIdPromise,
+    ]);
+  const workspaceOptions = resolveWorkspaceOptions(
     workspaceEntries,
     userConfig,
+    workspaceProfilesById,
   );
 
   return {
     includeStale,
-    includeSubagents,
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,

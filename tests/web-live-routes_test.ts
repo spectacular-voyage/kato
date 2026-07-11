@@ -370,7 +370,7 @@ Deno.test("live API routes disable caching and return expected page models", asy
   });
 });
 
-Deno.test("sessions, maintenance twins, and recordings APIs preserve current query semantics", async () => {
+Deno.test("sessions always group children while APIs preserve current query semantics", async () => {
   await withTestTempDir("web-live-route-filters-", async (homeDir) => {
     const katoDir = join(homeDir, ".kato");
     await setupLiveRouteFixture(homeDir);
@@ -419,18 +419,14 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
       new URL("http://kato.local/api/sessions?workspace=ws-beta"),
       { katoDir },
     );
-    const sessionsCombinedResponse = await getSessionsResponse(
+    const sessionsCombinedLegacyResponse = await getSessionsResponse(
       new URL(
         "http://kato.local/api/sessions?view=active&workspace=ws-alpha&subagents=hide",
       ),
       { katoDir },
     );
-    const sessionsTopLevelResponse = await getSessionsResponse(
+    const sessionsLegacyHideResponse = await getSessionsResponse(
       new URL("http://kato.local/api/sessions?subagents=hide"),
-      { katoDir },
-    );
-    const sessionsUnknownSubagentFilterResponse = await getSessionsResponse(
-      new URL("http://kato.local/api/sessions?subagents=unknown"),
       { katoDir },
     );
     const twinsActiveResponse = await getMaintenanceTwinsResponse(
@@ -449,9 +445,8 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
         sessionsAllResponse,
         sessionsActiveResponse,
         sessionsWorkspaceResponse,
-        sessionsCombinedResponse,
-        sessionsTopLevelResponse,
-        sessionsUnknownSubagentFilterResponse,
+        sessionsCombinedLegacyResponse,
+        sessionsLegacyHideResponse,
         twinsActiveResponse,
         recordingsFilteredResponse,
       ]
@@ -476,22 +471,16 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
         workspaceFilterId?: string;
         rows: Array<{ sessionId: string }>;
       };
-    const sessionsCombinedData = await sessionsCombinedResponse.json() as {
-      includeStale: boolean;
-      includeSubagents: boolean;
-      workspaceFilterId?: string;
-      rows: Array<{ sessionId: string }>;
-    };
-    const sessionsTopLevelData = await sessionsTopLevelResponse.json() as {
-      includeSubagents: boolean;
+    const sessionsCombinedLegacyData = await sessionsCombinedLegacyResponse
+      .json() as {
+        includeStale: boolean;
+        workspaceFilterId?: string;
+        rows: Array<{ sessionId: string }>;
+      };
+    const sessionsLegacyHideData = await sessionsLegacyHideResponse.json() as {
       sessionCount: number;
       rows: Array<{ sessionId: string }>;
     };
-    const sessionsUnknownSubagentFilterData =
-      await sessionsUnknownSubagentFilterResponse.json() as {
-        includeSubagents: boolean;
-        sessionCount: number;
-      };
     const twinsActiveData = await twinsActiveResponse.json() as {
       includeStale: boolean;
       rows: Array<{ sessionId: string }>;
@@ -546,20 +535,21 @@ Deno.test("sessions, maintenance twins, and recordings APIs preserve current que
     assertEquals(sessionsWorkspaceData.rows.map((row) => row.sessionId), [
       "sess-stale",
     ]);
-    assertEquals(sessionsCombinedData.includeStale, false);
-    assertEquals(sessionsCombinedData.includeSubagents, false);
-    assertEquals(sessionsCombinedData.workspaceFilterId, "ws-alpha");
-    assertEquals(sessionsCombinedData.rows.map((row) => row.sessionId), [
-      "sess-active",
-    ]);
-    assertEquals(sessionsTopLevelData.includeSubagents, false);
-    assertEquals(sessionsTopLevelData.sessionCount, 2);
-    assertEquals(sessionsTopLevelData.rows.map((row) => row.sessionId), [
+    assertEquals(sessionsCombinedLegacyData.includeStale, false);
+    assertEquals(sessionsCombinedLegacyData.workspaceFilterId, "ws-alpha");
+    assertEquals(
+      sessionsCombinedLegacyData.rows.map((row) => row.sessionId),
+      [
+        "sess-active",
+      ],
+    );
+    assertEquals(sessionsLegacyHideData.sessionCount, 4);
+    assertEquals(sessionsLegacyHideData.rows.map((row) => row.sessionId), [
       "sess-active",
       "sess-stale",
+      "sess-subagent",
+      "sess-codex-subconversation",
     ]);
-    assertEquals(sessionsUnknownSubagentFilterData.includeSubagents, true);
-    assertEquals(sessionsUnknownSubagentFilterData.sessionCount, 4);
     assertEquals(twinsActiveData.includeStale, false);
     assertEquals(twinsActiveData.rows.map((row) => row.sessionId), [
       "sess-active",

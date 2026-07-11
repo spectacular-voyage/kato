@@ -146,16 +146,17 @@ Deno.test(
   async () => {
     await withTempDir("session-state-store-parent-", async (dir) => {
       const katoDir = join(dir, ".kato");
+      let nextSessionId = 0;
       const store = new PersistentSessionStateStore({
         katoDir,
         now: () => new Date("2026-07-10T20:00:00.000Z"),
-        makeSessionId: () => "session-child-kato-id",
+        makeSessionId: () => `session-child-kato-id-${++nextSessionId}`,
       });
 
       const createdWithParent = await store.getOrCreateSessionMetadata({
         provider: "codex",
         providerSessionId: "provider-child-new",
-        parentProviderSessionId: "provider-parent",
+        parentProviderSessionId: "  provider-parent  ",
         sourceFilePath: join(dir, "child-new.jsonl"),
         initialCursor: { kind: "byte-offset", value: 7 },
       });
@@ -163,6 +164,29 @@ Deno.test(
         createdWithParent.parentProviderSessionId,
         "provider-parent",
       );
+
+      const createdWithBlankParent = await store.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-child-blank-parent",
+        parentProviderSessionId: "   ",
+        sourceFilePath: join(dir, "child-blank-parent.jsonl"),
+        initialCursor: { kind: "byte-offset", value: 11 },
+      });
+      assertEquals(createdWithBlankParent.parentProviderSessionId, undefined);
+      const initiallyReloaded = await new PersistentSessionStateStore({
+        katoDir,
+      }).listSessionMetadata();
+      assertEquals(
+        initiallyReloaded.find((metadata) =>
+          metadata.providerSessionId === "provider-child-new"
+        )?.parentProviderSessionId,
+        "provider-parent",
+      );
+      const reloadedBlankParent = initiallyReloaded.find((metadata) =>
+        metadata.providerSessionId === "provider-child-blank-parent"
+      );
+      assertExists(reloadedBlankParent);
+      assertEquals(reloadedBlankParent.parentProviderSessionId, undefined);
 
       const legacy = await store.getOrCreateSessionMetadata({
         provider: "codex",
@@ -201,6 +225,45 @@ Deno.test(
           parentProviderSessionId: "provider-parent",
         }),
         "unchanged",
+      );
+      assertEquals(
+        await store.reconcileSessionParentProviderSessionId({
+          provider: "codex",
+          providerSessionId: "provider-child-legacy",
+          sourceFilePath: legacy.sourceFilePath,
+          parentProviderSessionId: "  provider-parent  ",
+        }),
+        "unchanged",
+      );
+      assertEquals(
+        await store.reconcileSessionParentProviderSessionId({
+          provider: "codex",
+          providerSessionId: "provider-child-legacy",
+          sourceFilePath: legacy.sourceFilePath,
+          parentProviderSessionId: "   ",
+        }),
+        "unchanged",
+      );
+      assertEquals(
+        (await store.listSessionMetadata()).find((metadata) =>
+          metadata.providerSessionId === "provider-child-legacy"
+        )?.parentProviderSessionId,
+        "provider-parent",
+      );
+      assertEquals(
+        await store.reconcileSessionParentProviderSessionId({
+          provider: "codex",
+          providerSessionId: "provider-child-legacy",
+          sourceFilePath: legacy.sourceFilePath,
+          parentProviderSessionId: "  provider-parent-next  ",
+        }),
+        "updated",
+      );
+      assertEquals(
+        (await store.listSessionMetadata()).find((metadata) =>
+          metadata.providerSessionId === "provider-child-legacy"
+        )?.parentProviderSessionId,
+        "provider-parent-next",
       );
       assertEquals(
         await store.reconcileSessionParentProviderSessionId({

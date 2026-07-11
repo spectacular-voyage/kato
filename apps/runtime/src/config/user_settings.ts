@@ -8,32 +8,13 @@ import {
   type WorkspaceRegistryStoreLike,
 } from "../workspace/registry.ts";
 import {
+  cloneUserConfig,
   createDefaultUserConfig,
   resolveDefaultUserConfigPath,
   UserConfigFileStore,
   type UserConfigStoreLike,
   validateAndNormalizeParticipantUsername,
 } from "./user_config.ts";
-
-function cloneUserConfig(config: UserConfig): UserConfig {
-  return {
-    schemaVersion: config.schemaVersion,
-    participants: {
-      defaultUsername: config.participants.defaultUsername,
-      workspaceUsernames: { ...config.participants.workspaceUsernames },
-      excludeMeFromParticipantList:
-        config.participants.excludeMeFromParticipantList,
-    },
-    tagLibraries: {
-      globalSuggestions: [...(config.tagLibraries?.globalSuggestions ?? [])],
-      workspaceSuggestions: Object.fromEntries(
-        Object.entries(config.tagLibraries?.workspaceSuggestions ?? {}).map((
-          [workspaceId, tags],
-        ) => [workspaceId, [...tags]]),
-      ),
-    },
-  };
-}
 
 function resolveWorkspaceSelector(selector: string): string {
   const trimmed = selector.trim();

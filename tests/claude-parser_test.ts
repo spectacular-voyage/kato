@@ -1,7 +1,10 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
-import { parseClaudeEvents } from "../apps/daemon/src/providers/claude/mod.ts";
+import {
+  parseClaudeEvents,
+  resolveClaudeSessionParseOptions,
+} from "../apps/daemon/src/providers/claude/mod.ts";
 import { makeTestTempPath, removePathIfPresent } from "./test_temp.ts";
 
 const THIS_DIR = dirname(fromFileUrl(import.meta.url));
@@ -18,6 +21,18 @@ const ASK_USER_QUESTION_FIXTURE = join(
 );
 
 const TEST_CTX = { provider: "claude", sessionId: "sess-001" };
+
+Deno.test("resolveClaudeSessionParseOptions enables sidechains only for Claude subagent sources", () => {
+  const subagentPath = "/tmp/parent/subagents/agent-child.jsonl";
+  assertEquals(resolveClaudeSessionParseOptions("claude", subagentPath), {
+    includeSidechainEvents: true,
+  });
+  assertEquals(
+    resolveClaudeSessionParseOptions("claude", "/tmp/parent/session.jsonl"),
+    {},
+  );
+  assertEquals(resolveClaudeSessionParseOptions("codex", subagentPath), {});
+});
 
 type ParseItem = {
   event: ConversationEvent;

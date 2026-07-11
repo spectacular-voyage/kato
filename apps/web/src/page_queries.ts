@@ -11,10 +11,6 @@ export interface SessionPageQuery {
   workspaceFilter?: string;
 }
 
-export interface SessionsPageQuery extends SessionPageQuery {
-  includeSubagents: boolean;
-}
-
 export interface RecordingsPageQuery {
   workspaceFilter?: string;
   stateFilter: RecordingStateFilter;
@@ -37,15 +33,6 @@ export function parseSessionPageQuery(url: URL): SessionPageQuery {
   return {
     includeStale: url.searchParams.get("view") !== "active",
     workspaceFilter: normalizeSearchValue(url.searchParams.get("workspace")),
-  };
-}
-
-export function parseSessionsPageQuery(url: URL): SessionsPageQuery {
-  const query = parseSessionPageQuery(url);
-  return {
-    includeStale: query.includeStale,
-    includeSubagents: url.searchParams.get("subagents") !== "hide",
-    workspaceFilter: query.workspaceFilter,
   };
 }
 

@@ -15,9 +15,9 @@ import {
   resolveDendronWikilinkContext,
   type ResolvedWorkspaceConfigValues,
   resolveWorkspaceConfigValues,
+  resolveWorkspaceDefaultOutputDir,
   WorkspaceRegistryFileStore,
 } from "@kato/runtime";
-import { resolveWorkspaceDefaultOutputDir } from "../../../daemon/src/orchestrator/runtime_workspace_paths.ts";
 import { formatWorkspaceRegistryError } from "./status.ts";
 
 export interface WorkspaceConfigEditRawValues {

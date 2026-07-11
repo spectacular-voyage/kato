@@ -9,6 +9,7 @@ import {
   recordingsPageStopActionLabel,
   rememberSessionsWorkspace,
   resolveDefaultWorkspaceSelectorValue,
+  resolvePolledCreationFields,
   resolveTitleDerivedFilenameSlug,
   SESSIONS_SELECTED_WORKSPACE_STORAGE_KEY,
 } from "../apps/web/src/session_recording_view_model.ts";
@@ -112,6 +113,77 @@ Deno.test("resolveTitleDerivedFilenameSlug preserves manually customized snippet
       filenameSlugCustomized: true,
     }),
     "hand-picked",
+  );
+});
+
+Deno.test("resolvePolledCreationFields preserves a customized title and derived slug", () => {
+  assertEquals(
+    resolvePolledCreationFields({
+      currentDisplayTitle: "Typed title",
+      currentFilenameSlug: "typed-title",
+      displayTitleCustomized: true,
+      filenameSlugCustomized: false,
+      sessionSnippet: "New polled snippet",
+    }),
+    {
+      displayTitle: "Typed title",
+      filenameSlug: "typed-title",
+    },
+  );
+  assertEquals(
+    resolvePolledCreationFields({
+      currentDisplayTitle: "Old snippet",
+      currentFilenameSlug: "old-snippet",
+      displayTitleCustomized: false,
+      filenameSlugCustomized: false,
+      sessionSnippet: "New polled snippet",
+    }),
+    {
+      displayTitle: "New polled snippet",
+      filenameSlug: "new-polled-snippet",
+    },
+  );
+  assertEquals(
+    resolvePolledCreationFields({
+      currentDisplayTitle: "Old snippet",
+      currentFilenameSlug: "custom-filename",
+      displayTitleCustomized: false,
+      filenameSlugCustomized: true,
+      sessionSnippet: "New polled snippet",
+    }),
+    {
+      displayTitle: "New polled snippet",
+      filenameSlug: "custom-filename",
+    },
+  );
+  assertEquals(
+    resolvePolledCreationFields({
+      currentDisplayTitle: "Old snippet",
+      currentFilenameSlug: "old-snippet",
+      displayTitleCustomized: false,
+      filenameSlugCustomized: false,
+      sessionSnippet: "New polled snippet",
+      defaultDisplayTitle: "Inherited title",
+      defaultFilenameSlug: "inherited-filename",
+    }),
+    {
+      displayTitle: "Inherited title",
+      filenameSlug: "inherited-filename",
+    },
+  );
+  assertEquals(
+    resolvePolledCreationFields({
+      currentDisplayTitle: "New title",
+      currentFilenameSlug: "new-title",
+      displayTitleCustomized: true,
+      filenameSlugCustomized: false,
+      defaultDisplayTitle: "Old title",
+      defaultFilenameSlug: "old-filename",
+    }),
+    {
+      displayTitle: "New title",
+      filenameSlug: "new-title",
+    },
   );
 });
 

@@ -3,12 +3,14 @@ import { basename, join } from "@std/path";
 import {
   createDefaultSharedBehaviorConfig,
   createDefaultUserConfig,
+  createDefaultWorkspaceMarkdownFrontmatterConfig,
   createDefaultWorkspaceWriterFeatureFlags,
   DEFAULT_WORKSPACE_CONFIG_FILENAME,
   PersistentSessionStateStore,
   resolveDefaultSharedConfigPath,
   resolveDefaultUserConfigPath,
   resolveDefaultWorkspaceRegistryPath,
+  type ResolvedWorkspaceProfile,
   SharedBehaviorConfigFileStore,
   UserConfigFileStore,
   WorkspaceRegistryFileStore,
@@ -18,6 +20,63 @@ import { loadRecordingsPageData } from "../apps/web/src/loaders/recordings.ts";
 import { loadSessionsPageData } from "../apps/web/src/loaders/sessions.ts";
 import { loadWorkspacesPageData } from "../apps/web/src/loaders/workspaces.ts";
 import { withTestTempDir } from "./test_temp.ts";
+
+Deno.test("loadSessionsPageData reuses supplied workspace profiles for options", async () => {
+  await withTestTempDir("web-activity-shared-profiles-", async (tempDir) => {
+    const katoDir = join(tempDir, ".kato");
+    const workspaceRoot = join(tempDir, "alpha");
+    const configPath = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+    const workspace = {
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      displayName: "Alpha",
+      workspaceRoot,
+      configPath,
+      registeredAt: "2026-03-07T15:00:00.000Z",
+    };
+    const profile: ResolvedWorkspaceProfile = {
+      workspaceId: workspace.workspaceId,
+      alias: workspace.alias,
+      workspaceRoot,
+      configPath,
+      autoRecordConversations: false,
+      resolvedDefaultOutputDir: join(workspaceRoot, "notes"),
+      defaultOutputDirTemplate: "notes",
+      filenameTemplate: "{snippetSlug}.md",
+      workspaceTimezone: "UTC",
+      defaultTags: ["default"],
+      tagSuggestions: ["suggested"],
+      markdownFrontmatter: createDefaultWorkspaceMarkdownFrontmatterConfig(),
+      writerFeatureFlags: createDefaultWorkspaceWriterFeatureFlags(),
+    };
+
+    const resolved = await loadSessionsPageData({
+      katoDir,
+      workspaceEntries: [workspace],
+      workspaceProfilesById: new Map([[workspace.workspaceId, profile]]),
+    });
+    assertEquals(resolved.workspaceOptions, [{
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      displayName: "Alpha",
+      filenameTemplate: "{snippetSlug}.md",
+      filenameTemplateIncludesSnippet: true,
+      defaultTags: ["default"],
+      tagSuggestions: ["default", "suggested"],
+    }]);
+
+    const unresolved = await loadSessionsPageData({
+      katoDir,
+      workspaceEntries: [workspace],
+      workspaceProfilesById: new Map(),
+    });
+    assertEquals(unresolved.workspaceOptions, [{
+      workspaceId: "ws-alpha",
+      alias: "alpha",
+      displayName: "Alpha",
+    }]);
+  });
+});
 
 function makeWorkspaceOutput(options: {
   workspaceId: string;
@@ -226,7 +285,7 @@ Deno.test("loadSessionsPageData projects only logical persisted twin sizes", asy
   });
 });
 
-Deno.test("loadSessionsPageData can hide only source-classified Claude sub-agent sessions", async () => {
+Deno.test("loadSessionsPageData classifies exact Claude subagent sources without hiding rows", async () => {
   await withTestTempDir("web-activity-subagent-filter-", async (homeDir) => {
     const katoDir = join(homeDir, ".kato");
     await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
@@ -279,37 +338,34 @@ Deno.test("loadSessionsPageData can hide only source-classified Claude sub-agent
       sourceFilePath: join(homeDir, "subagents", "agent-codex.jsonl"),
     });
 
-    const inclusive = await loadSessionsPageData({ katoDir });
-    assertEquals(inclusive.includeSubagents, true);
-    assertEquals(inclusive.sessionCount, 5);
+    const grouped = await loadSessionsPageData({ katoDir });
+    assertEquals(grouped.sessionCount, 5);
     assertEquals(
-      inclusive.rows.find((row) =>
-        row.sessionId === "sess-claude-subagent-posix"
+      grouped.rows.find((row) => row.sessionId === "sess-claude-subagent-posix")
+        ?.relationship,
+      {
+        kind: "subconversation",
+        parentSessionId: "sess-claude-parent",
+      },
+    );
+    assertEquals(
+      grouped.rows.find((row) =>
+        row.sessionId === "sess-claude-subagent-windows"
       )?.relationship,
       {
         kind: "subconversation",
         parentSessionId: "sess-claude-parent",
       },
     );
-
-    const topLevelOnly = await loadSessionsPageData({
-      katoDir,
-      includeSubagents: false,
-    });
-    assertEquals(topLevelOnly.includeSubagents, false);
-    assertEquals(topLevelOnly.sessionCount, 3);
     assertEquals(
-      topLevelOnly.rows.map((row) => row.sessionId).sort(),
-      [
-        "sess-claude-parent",
-        "sess-claude-top-level",
-        "sess-codex-subagents-path",
-      ],
+      grouped.rows.find((row) => row.sessionId === "sess-claude-top-level")
+        ?.relationship,
+      undefined,
     );
     assertEquals(
-      topLevelOnly.activeSessionCount + topLevelOnly.staleSessionCount +
-        topLevelOnly.inactiveSessionCount,
-      3,
+      grouped.rows.find((row) => row.sessionId === "sess-codex-subagents-path")
+        ?.relationship,
+      undefined,
     );
   });
 });
@@ -406,14 +462,6 @@ Deno.test(
           ),
           false,
         );
-
-        const hidden = await loadSessionsPageData({
-          katoDir,
-          includeStale: false,
-          includeSubagents: false,
-        });
-        assertEquals(hidden.sessionCount, 0);
-        assertEquals(hidden.rows, []);
       },
     );
   },

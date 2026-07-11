@@ -297,7 +297,7 @@ function parseUserConfig(
   }
 }
 
-function cloneUserConfig(config: UserConfig): UserConfig {
+export function cloneUserConfig(config: UserConfig): UserConfig {
   return {
     schemaVersion: config.schemaVersion,
     participants: {

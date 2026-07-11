@@ -7,39 +7,17 @@ import {
   buildSessionInventoryHref,
   buildSessionInventorySessionHref,
 } from "../apps/web/src/session_routes.ts";
-import {
-  parseSessionPageQuery,
-  parseSessionsPageQuery,
-} from "../apps/web/src/page_queries.ts";
+import { parseSessionPageQuery } from "../apps/web/src/page_queries.ts";
 
-Deno.test("sessions query parser only hides subagents when explicitly requested", () => {
+Deno.test("session query parsing ignores the legacy subagent filter", () => {
   assertEquals(
-    parseSessionsPageQuery(new URL("http://kato.local/sessions")),
-    {
-      includeStale: true,
-      includeSubagents: true,
-      workspaceFilter: undefined,
-    },
-  );
-  assertEquals(
-    parseSessionsPageQuery(
-      new URL("http://kato.local/sessions?subagents=unknown"),
-    ),
-    {
-      includeStale: true,
-      includeSubagents: true,
-      workspaceFilter: undefined,
-    },
-  );
-  assertEquals(
-    parseSessionsPageQuery(
+    parseSessionPageQuery(
       new URL(
         "http://kato.local/sessions?view=active&workspace=ws-alpha&subagents=hide",
       ),
     ),
     {
       includeStale: false,
-      includeSubagents: false,
       workspaceFilter: "ws-alpha",
     },
   );
@@ -91,33 +69,6 @@ Deno.test("session route builders normalize active-view and workspace filters", 
       workspaceFilter: " ws-beta ",
     }),
     "/maintenance?view=active&workspace=ws-beta",
-  );
-});
-
-Deno.test("session route builders compose the subagent filter without changing maintenance routes", () => {
-  assertEquals(
-    buildSessionInventoryHref({
-      includeStale: false,
-      includeSubagents: false,
-      workspaceFilter: "  ws-alpha  ",
-    }),
-    "/sessions?view=active&workspace=ws-alpha&subagents=hide",
-  );
-  assertEquals(
-    buildSessionInventorySessionHref("sess-123", {
-      includeStale: false,
-      includeSubagents: false,
-      workspaceFilter: "  ws-alpha  ",
-    }),
-    "/sessions?view=active&workspace=ws-alpha&subagents=hide#session-sess-123",
-  );
-  assertEquals(
-    buildMaintenanceHref({
-      includeStale: false,
-      includeSubagents: false,
-      workspaceFilter: "  ws-alpha  ",
-    }),
-    "/maintenance?view=active&workspace=ws-alpha",
   );
 });
 

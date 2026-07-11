@@ -101,6 +101,31 @@ Deno.test("updateFrontmatterMetadataFields reports unchanged content and missing
   assertEquals(noFrontmatter.hadFrontmatter, false);
 });
 
+Deno.test("frontmatter metadata helpers preserve invalid or missing frontmatter", () => {
+  const inputs = [
+    "plain body\n",
+    "---\ntitle: Missing close\nbody\n",
+    "---\ntitle: [\n---\nbody\n",
+    "---\n- list item\n---\nbody\n",
+  ];
+  for (const content of inputs) {
+    assertEquals(
+      updateFrontmatterMetadataFields(content, { title: "Renamed" }),
+      { content, changed: false, hadFrontmatter: false },
+    );
+    assertEquals(
+      mergeFrontmatterWriterPolicySnapshot({
+        frontmatter: content,
+        writerPolicy: {
+          writerIncludeCommentary: true,
+          writerIncludeThinking: false,
+        },
+      }),
+      content,
+    );
+  }
+});
+
 Deno.test("updateFrontmatterMetadataFields replaces tags when requested", () => {
   const replaced = updateFrontmatterMetadataFields(SAMPLE_CONTENT, {
     replaceTags: ["new"],

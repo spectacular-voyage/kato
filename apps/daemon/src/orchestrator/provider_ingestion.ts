@@ -24,8 +24,8 @@ import {
   StructuredLogger,
 } from "../observability/mod.ts";
 import {
-  isClaudeSubagentSourcePath,
   parseClaudeEvents,
+  resolveClaudeSessionParseOptions,
 } from "../providers/claude/mod.ts";
 import {
   parseCodexEvents,
@@ -1917,7 +1917,7 @@ export function createClaudeIngestionRunner(
     parseEvents: (filePath, fromOffset, ctx) =>
       parseClaudeEvents(filePath, fromOffset, {
         ...ctx,
-        includeSidechainEvents: isClaudeSubagentSourcePath(filePath),
+        ...resolveClaudeSessionParseOptions("claude", filePath),
       }),
     sessionSnapshotStore: options.sessionSnapshotStore,
     sessionStateStore: options.sessionStateStore,

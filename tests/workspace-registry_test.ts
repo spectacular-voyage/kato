@@ -477,6 +477,43 @@ Deno.test("loadWorkspaceConfigOverrides normalizes workspace default tags and ta
   });
 });
 
+Deno.test("WorkspaceProfileResolver isolates cached tag arrays from callers", async () => {
+  await withTestTempDir("workspace-profile-cache-tags-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "Cached.Tags");
+    const configPath = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "defaultTags:",
+        "  - alpha",
+        "tagSuggestions:",
+        "  - topic",
+      ].join("\n") + "\n",
+    );
+    const workspace = makeWorkspace({
+      workspaceId: "ws-cache-tags",
+      workspaceRoot,
+      configPath,
+    });
+    const resolver = new WorkspaceProfileResolver();
+
+    const first = await resolver.resolveForCommand(workspace);
+    first.defaultTags.push("mutated-first");
+    first.tagSuggestions.push("mutated-first");
+
+    const second = await resolver.resolveForCommand(workspace);
+    assertEquals(second.defaultTags, ["alpha"]);
+    assertEquals(second.tagSuggestions, ["topic"]);
+    second.defaultTags.push("mutated-second");
+    second.tagSuggestions.push("mutated-second");
+
+    const third = await resolver.resolveForCommand(workspace);
+    assertEquals(third.defaultTags, ["alpha"]);
+    assertEquals(third.tagSuggestions, ["topic"]);
+  });
+});
+
 Deno.test("loadWorkspaceConfigOverrides rejects malformed workspace tag fields", async () => {
   await withTestTempDir("workspace-profile-tags-invalid-", async (tempDir) => {
     const workspaceRoot = join(tempDir, "Tags.Invalid");

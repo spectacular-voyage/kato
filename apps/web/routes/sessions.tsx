@@ -4,7 +4,7 @@ import AppHeader from "../src/app_header.tsx";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSessionsPageData } from "../src/loaders/sessions.ts";
 import { createWebLoggers } from "../src/logging.ts";
-import { parseSessionsPageQuery } from "../src/page_queries.ts";
+import { parseSessionPageQuery } from "../src/page_queries.ts";
 import {
   runSessionRecordingAction,
   runSessionRecordingStopAction,
@@ -31,7 +31,6 @@ function buildRedirectUrl(
   reqUrl: string,
   options: {
     includeStale: boolean;
-    includeSubagents: boolean;
     workspaceFilter?: string;
     sessionId?: string;
     notice?: string;
@@ -40,7 +39,6 @@ function buildRedirectUrl(
 ): URL {
   const routeOptions = {
     includeStale: options.includeStale,
-    includeSubagents: options.includeSubagents,
     workspaceFilter: options.workspaceFilter,
   };
   const url = new URL(
@@ -87,13 +85,18 @@ function buildSessionRecordingStopNotice(
     : `recording stopped (${result.sessionShortId})`;
 }
 
+function parseTagsField(form: FormData): string[] {
+  return String(form.get("tags") ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+}
+
 export const handler = define.handlers({
   async POST(ctx) {
     const form = await ctx.req.formData();
     const action = String(form.get("action") ?? "");
     const includeStale = String(form.get("includeStale") ?? "true") !== "false";
-    const includeSubagents =
-      String(form.get("includeSubagents") ?? "true") !== "false";
     const workspaceFilter = String(form.get("workspaceFilter") ?? "").trim() ||
       undefined;
     const { operationalLogger, auditLogger } = createWebLoggers();
@@ -112,10 +115,7 @@ export const handler = define.handlers({
         }
         const displayTitle = String(form.get("displayTitle") ?? "").trim();
         const filenameSlug = String(form.get("filenameSlug") ?? "").trim();
-        const tags = String(form.get("tags") ?? "")
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter((tag) => tag.length > 0);
+        const tags = parseTagsField(form);
         const result = await runSessionRecordingAction({
           action,
           sessionId,
@@ -131,7 +131,6 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
-            includeSubagents,
             workspaceFilter,
             sessionId,
             notice: buildSessionRecordingNotice(result),
@@ -159,7 +158,6 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
-            includeSubagents,
             workspaceFilter,
             sessionId,
             notice: buildSessionRecordingStopNotice(result),
@@ -179,12 +177,7 @@ export const handler = define.handlers({
           const value = String(form.get(name) ?? "").trim();
           return value.length > 0 ? value : null;
         };
-        const tags = form.has("tags")
-          ? String(form.get("tags") ?? "")
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter((tag) => tag.length > 0)
-          : undefined;
+        const tags = form.has("tags") ? parseTagsField(form) : undefined;
         const result = await runSessionOutputMetadataUpdateAction({
           scope: action === "update-session-metadata-defaults"
             ? "session-defaults"
@@ -211,7 +204,6 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
-            includeSubagents,
             workspaceFilter,
             sessionId,
             notice: result.scope === "session-defaults"
@@ -235,7 +227,6 @@ export const handler = define.handlers({
       return Response.redirect(
         buildRedirectUrl(ctx.req.url, {
           includeStale,
-          includeSubagents,
           workspaceFilter,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -246,7 +237,7 @@ export const handler = define.handlers({
 });
 
 export default define.page(async function SessionsPage(ctx) {
-  const query = parseSessionsPageQuery(ctx.url);
+  const query = parseSessionPageQuery(ctx.url);
   const [pageData, appStatus] = await Promise.all([
     loadSessionsPageData(query),
     loadAppChromeStatus(),
