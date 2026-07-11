@@ -37,6 +37,7 @@ function makeProfile(
     workspaceRoot,
     configPath: overrides.configPath ??
       resolve(workspaceRoot, ".kato", "workspace.yaml"),
+    autoRecordConversations: overrides.autoRecordConversations ?? false,
     resolvedDefaultOutputDir: overrides.resolvedDefaultOutputDir ??
       resolve(workspaceRoot, "notes"),
     defaultOutputDirTemplate: overrides.defaultOutputDirTemplate ?? "notes",
@@ -383,6 +384,25 @@ Deno.test(
     );
   },
 );
+
+Deno.test("workspace output cycles omit seq aliases at cursor zero", () => {
+  const output = makeOutputState(makeProfile());
+
+  openWorkspaceOutputCycle(
+    output,
+    0,
+    "2026-02-22T10:01:00.000Z",
+    "cycle-zero",
+  );
+  assertEquals(output.recordingCycles[0]?.startedCursor, 0);
+  assertEquals(output.recordingCycles[0]?.startedBySeq, undefined);
+  assertEquals(
+    closeWorkspaceOutputCycle(output, 0, "2026-02-22T10:02:00.000Z"),
+    true,
+  );
+  assertEquals(output.recordingCycles[0]?.stoppedCursor, 0);
+  assertEquals(output.recordingCycles[0]?.stoppedBySeq, undefined);
+});
 
 Deno.test(
   "closeWorkspaceOutputCycle handles missing pointers and stopAllWorkspaceOutputs reports changed outputs",

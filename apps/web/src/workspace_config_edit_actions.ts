@@ -85,6 +85,10 @@ function buildEditInput(form: FormData) {
   }
 
   return {
+    autoRecordConversations: readCheckboxField(
+      form,
+      "autoRecordConversations",
+    ),
     defaultOutputDir: readRequiredTextField(form, "defaultOutputDir"),
     filenameTemplate: readRequiredTextField(form, "filenameTemplate"),
     workspaceTimezone: readRequiredTextField(form, "workspaceTimezone"),

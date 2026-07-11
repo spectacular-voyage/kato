@@ -262,6 +262,30 @@ Deno.test(
   },
 );
 
+Deno.test("isSessionMetadataV1 validates optional workingDirectory", () => {
+  const metadata = makeSessionMetadata();
+  metadata.workingDirectory = "C:/workspace/project";
+  assert(isSessionMetadataV1(metadata));
+
+  metadata.workingDirectory = "   ";
+  assertEquals(isSessionMetadataV1(metadata), false);
+});
+
+Deno.test(
+  "isSessionMetadataV1 validates an optional parent provider-session id",
+  () => {
+    const metadata = makeSessionMetadata();
+    metadata.parentProviderSessionId = "parent-session-1";
+    assert(isSessionMetadataV1(metadata));
+
+    metadata.parentProviderSessionId = "   ";
+    assertEquals(isSessionMetadataV1(metadata), false);
+
+    metadata.parentProviderSessionId = 42 as unknown as string;
+    assertEquals(isSessionMetadataV1(metadata), false);
+  },
+);
+
 Deno.test(
   "isSessionTwinEventV1 rejects empty-string optional metadata that should be omitted instead",
   () => {
@@ -273,6 +297,16 @@ Deno.test(
           source: {
             ...makeSessionTwinEvent().source,
             providerEventId: "",
+          },
+        },
+      },
+      {
+        label: "workingDirectory",
+        event: {
+          ...makeSessionTwinEvent(),
+          source: {
+            ...makeSessionTwinEvent().source,
+            workingDirectory: "   ",
           },
         },
       },
@@ -322,6 +356,7 @@ Deno.test("isSessionTwinEventV1 accepts non-empty optional metadata", () => {
     source: {
       ...makeSessionTwinEvent().source,
       providerEventId: "evt-1",
+      workingDirectory: "C:/workspace/project",
     },
     time: {
       providerTimestamp: "2026-03-14T10:00:00.000Z",

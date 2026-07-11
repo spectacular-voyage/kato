@@ -69,6 +69,7 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
 ] as const;
 const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceId",
+  "autoRecordConversations",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
@@ -78,6 +79,7 @@ const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceFeatureFlags",
 ] as const;
 const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
+  "autoRecordConversations",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
@@ -127,6 +129,7 @@ export interface WorkspaceCatalogLike {
 }
 
 export interface WorkspaceConfigOverrides {
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -138,6 +141,7 @@ export interface WorkspaceConfigOverrides {
 
 export interface WorkspaceConfigFileValues {
   workspaceId?: string;
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -148,6 +152,7 @@ export interface WorkspaceConfigFileValues {
 }
 
 export interface ResolvedWorkspaceConfigValues {
+  autoRecordConversations: boolean;
   defaultOutputDir: string;
   filenameTemplate: string;
   workspaceTimezone: string;
@@ -162,6 +167,7 @@ export interface ResolvedWorkspaceProfile {
   alias: string;
   workspaceRoot: string;
   configPath: string;
+  autoRecordConversations: boolean;
   resolvedDefaultOutputDir: string;
   defaultOutputDirTemplate: string;
   filenameTemplate: string;
@@ -670,6 +676,17 @@ function parseWorkspaceConfigLikeDocument(
   }
 
   const defaultOutputDirRaw = parsed["defaultOutputDir"];
+  const autoRecordConversationsRaw = parsed["autoRecordConversations"];
+  let autoRecordConversations: boolean | undefined;
+  if (autoRecordConversationsRaw !== undefined) {
+    if (typeof autoRecordConversationsRaw !== "boolean") {
+      throw new Error(
+        `autoRecordConversations must be a boolean: ${configPath}`,
+      );
+    }
+    autoRecordConversations = autoRecordConversationsRaw;
+  }
+
   const defaultOutputDir = trimOptionalString(defaultOutputDirRaw);
   if (
     defaultOutputDirRaw !== undefined &&
@@ -719,6 +736,9 @@ function parseWorkspaceConfigLikeDocument(
   );
 
   return {
+    ...(autoRecordConversations !== undefined
+      ? { autoRecordConversations }
+      : {}),
     ...(defaultOutputDir ? { defaultOutputDir } : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
     ...(workspaceTimezone ? { workspaceTimezone } : {}),
@@ -735,6 +755,9 @@ function workspaceConfigFileValuesToDocument(
   const document: Record<string, unknown> = {};
   if (values.workspaceId !== undefined) {
     document.workspaceId = values.workspaceId;
+  }
+  if (values.autoRecordConversations !== undefined) {
+    document.autoRecordConversations = values.autoRecordConversations;
   }
   if (values.defaultOutputDir !== undefined) {
     document.defaultOutputDir = values.defaultOutputDir;
@@ -803,6 +826,7 @@ export function resolveWorkspaceConfigValues(
   overrides: WorkspaceConfigOverrides,
 ): ResolvedWorkspaceConfigValues {
   return {
+    autoRecordConversations: overrides.autoRecordConversations ?? false,
     defaultOutputDir: overrides.defaultOutputDir ??
       DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
     filenameTemplate: overrides.filenameTemplate ??
@@ -930,6 +954,7 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       alias: workspace.alias,
       workspaceRoot: resolvedWorkspaceRoot,
       configPath: workspace.configPath,
+      autoRecordConversations: overrides.autoRecordConversations ?? false,
       resolvedDefaultOutputDir,
       defaultOutputDirTemplate,
       filenameTemplate: overrides.filenameTemplate ??
@@ -981,6 +1006,7 @@ export class DefaultWorkspaceConfigFileStore {
     if (
       options.allowMissing &&
       loaded.defaultOutputDir === undefined &&
+      loaded.autoRecordConversations === undefined &&
       loaded.filenameTemplate === undefined &&
       loaded.workspaceTimezone === undefined &&
       loaded.defaultTags === undefined &&
@@ -1059,6 +1085,7 @@ export async function findNearestWorkspaceConfig(
 
 export function createWorkspaceConfigScaffold(): string {
   return [
+    "autoRecordConversations: false",
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
     `workspaceTimezone: "${DEFAULT_WORKSPACE_TIMEZONE}"`,

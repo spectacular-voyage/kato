@@ -21,6 +21,7 @@ import { resolveWorkspaceDefaultOutputDir } from "../../../daemon/src/orchestrat
 import { formatWorkspaceRegistryError } from "./status.ts";
 
 export interface WorkspaceConfigEditRawValues {
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -191,6 +192,9 @@ export async function loadWorkspaceConfigEditPageData(
     return {
       workspace,
       raw: {
+        ...(overrides.autoRecordConversations !== undefined
+          ? { autoRecordConversations: overrides.autoRecordConversations }
+          : {}),
         ...(overrides.defaultOutputDir !== undefined
           ? { defaultOutputDir: overrides.defaultOutputDir }
           : {}),

@@ -39,6 +39,7 @@ import {
   projectOutputWriterPolicy,
 } from "../output_writer_policy.ts";
 import { resolveKatoDirFromStatusPath } from "./logs.ts";
+import { resolveClaudeSubagentParentProviderSessionId } from "../../../daemon/src/providers/claude/mod.ts";
 
 export interface SessionRecordingActivityRow {
   key: string;
@@ -65,9 +66,15 @@ export interface SessionActivityRow {
   sessionId: string;
   sessionShortId: string;
   providerSessionId: string;
+  relationship?: {
+    kind: "subconversation";
+    parentSessionId?: string;
+  };
+  structuralContext?: boolean;
   snippet?: string;
   updatedAt: string;
   lastEventAt?: string;
+  twinSizeBytes?: number;
   stale: boolean;
   state: ActivityState;
   activeRecordingCount: number;
@@ -79,6 +86,7 @@ export interface SessionActivityRow {
 
 export interface SessionsPageData {
   includeStale: boolean;
+  includeSubagents: boolean;
   workspaceFilter?: string;
   workspaceFilterId?: string;
   workspaceFilterAlias?: string;
@@ -96,8 +104,10 @@ export interface SessionsPageData {
 
 export interface LoadSessionActivityRowsOptions {
   includeStale?: boolean;
+  includeSubagents?: boolean;
   workspaceFilter?: string;
   recordingsMode?: "latest" | "all";
+  retainSubconversationAncestors?: boolean;
   now?: () => Date;
   katoDir?: string;
   statusPath?: string;
@@ -390,16 +400,22 @@ function hasPersistedTwinState(metadata: SessionMetadataV1): boolean {
     metadata.ingestionActivatedAt !== undefined;
 }
 
-async function twinFileExists(path: string): Promise<boolean> {
+async function readTwinFileInfo(
+  path: string,
+): Promise<Deno.FileInfo | undefined> {
   try {
-    await Deno.stat(path);
-    return true;
+    return await Deno.stat(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
-      return false;
+      return undefined;
     }
     throw error;
   }
+}
+
+interface NormalizedPersistedTwinMetadata {
+  metadata: SessionMetadataV1;
+  twinSizeBytes?: number;
 }
 
 function hasLegacyManualIngestionHistory(metadata: SessionMetadataV1): boolean {
@@ -442,14 +458,24 @@ function normalizePersistedSessionState(
 async function normalizePersistedTwinMetadata(
   sessionStore: PersistentSessionStateStore,
   metadata: SessionMetadataV1,
-): Promise<SessionMetadataV1> {
+): Promise<NormalizedPersistedTwinMetadata> {
   if (!hasPersistedTwinState(metadata)) {
-    return metadata;
+    return { metadata };
   }
-  if (await twinFileExists(metadata.twinPath)) {
-    return metadata;
+  const twinFileInfo = await readTwinFileInfo(metadata.twinPath);
+  if (twinFileInfo) {
+    const twinSizeBytes = hasTwinHistory(metadata) && twinFileInfo.isFile &&
+        Number.isFinite(twinFileInfo.size) && twinFileInfo.size >= 0
+      ? twinFileInfo.size
+      : undefined;
+    return {
+      metadata,
+      ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),
+    };
   }
-  return await sessionStore.resetSessionTwinPersistence(metadata);
+  return {
+    metadata: await sessionStore.resetSessionTwinPersistence(metadata),
+  };
 }
 
 function findActiveCycle(
@@ -847,6 +873,60 @@ export function flattenSessionRecordings(
   });
 }
 
+function providerSessionKey(
+  provider: string,
+  providerSessionId: string,
+): string {
+  return `${provider}\u0000${providerSessionId}`;
+}
+
+function resolveParentProviderSessionId(
+  metadata: SessionMetadataV1,
+): string | undefined {
+  if (metadata.parentProviderSessionId) {
+    return metadata.parentProviderSessionId;
+  }
+  if (metadata.provider === "claude") {
+    return resolveClaudeSubagentParentProviderSessionId(
+      metadata.sourceFilePath,
+    );
+  }
+  return undefined;
+}
+
+function resolveSessionRelationships(
+  metadataRows: NormalizedPersistedTwinMetadata[],
+): Map<string, NonNullable<SessionActivityRow["relationship"]>> {
+  const metadataByProviderSession = new Map(
+    metadataRows.map(({ metadata }) => [
+      providerSessionKey(metadata.provider, metadata.providerSessionId),
+      metadata,
+    ]),
+  );
+  const relationships = new Map<
+    string,
+    NonNullable<SessionActivityRow["relationship"]>
+  >();
+
+  for (const { metadata } of metadataRows) {
+    const parentProviderSessionId = resolveParentProviderSessionId(metadata);
+    if (!parentProviderSessionId) {
+      continue;
+    }
+    const parent = metadataByProviderSession.get(
+      providerSessionKey(metadata.provider, parentProviderSessionId),
+    );
+    relationships.set(metadata.sessionId, {
+      kind: "subconversation",
+      ...(parent && parent.sessionId !== metadata.sessionId
+        ? { parentSessionId: parent.sessionId }
+        : {}),
+    });
+  }
+
+  return relationships;
+}
+
 export async function loadSessionActivityRows(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionActivityRow[]> {
@@ -871,14 +951,24 @@ export async function loadSessionActivityRows(
       workspaceEntriesPromise,
       loadUserConfigOrDefault(katoDir),
     ]);
-  const normalizedMetadataList = await Promise.all(
+  const normalizedMetadataRows = await Promise.all(
     metadataList.map((metadata) =>
       normalizePersistedTwinMetadata(sessionStore, metadata)
     ),
   );
+  const relationships = resolveSessionRelationships(normalizedMetadataRows);
+  const includeSubagents = options.includeSubagents ?? true;
+  const visibleMetadataRows = includeSubagents
+    ? normalizedMetadataRows
+    : normalizedMetadataRows.filter(({ metadata }) =>
+      !relationships.has(metadata.sessionId)
+    );
+  const visibleMetadataList = visibleMetadataRows.map(({ metadata }) =>
+    metadata
+  );
   const workspaceOutputProfilesById = await resolveWorkspaceOutputProfilesById(
     workspaceEntries,
-    normalizedMetadataList,
+    visibleMetadataList,
   );
 
   const liveBySessionId = new Map(
@@ -902,8 +992,8 @@ export async function loadSessionActivityRows(
   const includeStale = options.includeStale ?? true;
   const recordingsMode = options.recordingsMode ?? "latest";
 
-  const rows = (await Promise.all(normalizedMetadataList.map((
-    metadata,
+  const candidateRows = await Promise.all(visibleMetadataRows.map((
+    { metadata, twinSizeBytes },
   ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
     const recordings = buildRecordingRows(
@@ -957,9 +1047,13 @@ export async function loadSessionActivityRows(
       sessionId: metadata.sessionId,
       sessionShortId: deriveSessionShortId(metadata, live),
       providerSessionId: metadata.providerSessionId,
+      ...(relationships.has(metadata.sessionId)
+        ? { relationship: relationships.get(metadata.sessionId) }
+        : {}),
       snippet: live?.snippet,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
+      ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),
       stale: live?.stale ?? true,
       state,
       activeRecordingCount,
@@ -975,11 +1069,9 @@ export async function loadSessionActivityRows(
         : {}),
       recordings: displayRecordings,
     };
-  }))).filter((row) => includeStale || !row.stale).filter((row) =>
-    !resolvedWorkspaceFilter || row.recordings.length > 0
-  );
+  }));
 
-  rows.sort((a, b) => {
+  candidateRows.sort((a, b) => {
     const staleDiff = Number(a.stale) - Number(b.stale);
     if (staleDiff !== 0) {
       return staleDiff;
@@ -997,13 +1089,51 @@ export async function loadSessionActivityRows(
     );
   });
 
-  return rows;
+  const matchesRequestedFilters = (row: SessionActivityRow): boolean =>
+    (includeStale || !row.stale) &&
+    (!resolvedWorkspaceFilter || row.recordings.length > 0);
+  const matchingSessionIds = new Set(
+    candidateRows.filter(matchesRequestedFilters).map((row) => row.sessionId),
+  );
+  const includedSessionIds = new Set(matchingSessionIds);
+
+  if (options.retainSubconversationAncestors && includeSubagents) {
+    const rowsBySessionId = new Map(
+      candidateRows.map((row) => [row.sessionId, row]),
+    );
+    for (const sessionId of matchingSessionIds) {
+      let current = rowsBySessionId.get(sessionId);
+      const visited = new Set([sessionId]);
+      while (current?.relationship?.parentSessionId) {
+        const parentSessionId = current.relationship.parentSessionId;
+        if (visited.has(parentSessionId)) {
+          break;
+        }
+        visited.add(parentSessionId);
+        const parent = rowsBySessionId.get(parentSessionId);
+        if (!parent) {
+          break;
+        }
+        includedSessionIds.add(parentSessionId);
+        current = parent;
+      }
+    }
+  }
+
+  return candidateRows
+    .filter((row) => includedSessionIds.has(row.sessionId))
+    .map((row) =>
+      matchingSessionIds.has(row.sessionId)
+        ? row
+        : { ...row, structuralContext: true }
+    );
 }
 
 export async function loadSessionsPageData(
   options: LoadSessionActivityRowsOptions = {},
 ): Promise<SessionsPageData> {
   const includeStale = options.includeStale ?? true;
+  const includeSubagents = options.includeSubagents ?? true;
   const statusPath = options.statusPath ??
     resolveDefaultStatusPath(options.katoDir ?? resolveDefaultKatoDir());
   const katoDir = options.katoDir ?? resolveKatoDirFromStatusPath(statusPath);
@@ -1014,6 +1144,8 @@ export async function loadSessionsPageData(
     loadSessionActivityRows({
       ...options,
       includeStale,
+      includeSubagents,
+      retainSubconversationAncestors: true,
       katoDir,
       statusPath,
       workspaceEntries,
@@ -1031,24 +1163,31 @@ export async function loadSessionsPageData(
 
   return {
     includeStale,
+    includeSubagents,
     workspaceFilter: resolvedWorkspaceFilter?.selector,
     workspaceFilterId: resolvedWorkspaceFilter?.workspaceId,
     workspaceFilterAlias: resolvedWorkspaceFilter?.workspaceAlias,
     workspaceFilterDisplayName: resolvedWorkspaceFilter?.workspaceDisplayName,
     workspaceOptions,
-    sessionCount: rows.length,
-    activeSessionCount: rows.filter((row) => row.state === "active").length,
-    staleSessionCount: rows.filter((row) => row.state === "stale").length,
-    inactiveSessionCount: rows.filter((row) => row.state === "inactive").length,
-    activeRecordingCount: rows.reduce(
+    sessionCount: rows.filter((row) => !row.structuralContext).length,
+    activeSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "active")
+        .length,
+    staleSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "stale")
+        .length,
+    inactiveSessionCount:
+      rows.filter((row) => !row.structuralContext && row.state === "inactive")
+        .length,
+    activeRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.activeRecordingCount,
       0,
     ),
-    staleRecordingCount: rows.reduce(
+    staleRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.staleRecordingCount,
       0,
     ),
-    stoppedRecordingCount: rows.reduce(
+    stoppedRecordingCount: rows.filter((row) => !row.structuralContext).reduce(
       (sum, row) => sum + row.stoppedRecordingCount,
       0,
     ),

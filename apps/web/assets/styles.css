@@ -826,6 +826,20 @@ a {
   list-style: none;
 }
 
+.session-tree-node,
+.session-tree-unlinked {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-tree-children {
+  margin: 0 0 0 1.25rem;
+  padding: 0 0 0 0.8rem;
+  list-style: none;
+  border-left: 2px solid rgba(140, 53, 16, 0.15);
+}
+
 .session-list-row {
   display: grid;
   grid-template-columns: 1.25rem minmax(0, 1fr) clamp(18rem, 24vw, 23rem);
@@ -836,12 +850,18 @@ a {
   border-top: 1px solid var(--line);
 }
 
-.session-list-row:first-child {
+.session-list-rows > .session-tree-node:first-child > .session-list-row,
+.session-tree-children > .session-tree-node:first-child > .session-list-row {
   border-top: 0;
 }
 
-.session-list-row:last-child {
+.session-list-rows > .session-tree-node:last-child > .session-list-row,
+.session-tree-children > .session-tree-node:last-child > .session-list-row {
   padding-bottom: 0;
+}
+
+.session-list-row.structural-context .session-list-copy {
+  opacity: 0.7;
 }
 
 .session-list-action {
@@ -895,6 +915,63 @@ a {
 .session-list-updated {
   font-size: 0.72rem;
   line-height: 1.15;
+}
+
+.session-list-flags {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: var(--accent-dark);
+}
+
+.session-tree-toggle,
+.session-tree-unlinked-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.35rem;
+  width: fit-content;
+  min-height: 1.75rem;
+  border: 0;
+  padding: 0.2rem 0;
+  background: transparent;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-tree-toggle:hover,
+.session-tree-toggle:focus-visible,
+.session-tree-unlinked-toggle:hover,
+.session-tree-unlinked-toggle:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.session-tree-chevron {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.session-tree-toggle[aria-expanded="true"] .session-tree-chevron,
+.session-tree-unlinked-toggle[aria-expanded="true"] .session-tree-chevron {
+  transform: rotate(90deg);
+}
+
+.session-tree-unlinked {
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+}
+
+.session-tree-unlinked-toggle {
+  margin-bottom: 0.35rem;
+}
+
+.session-tree-unlinked-children {
+  margin-left: 0;
 }
 
 .session-recordings-block {
@@ -1670,6 +1747,11 @@ a {
   .session-list-row {
     grid-template-columns: 1.25rem minmax(0, 1fr);
     gap: 6px;
+  }
+
+  .session-tree-children {
+    margin-left: 0.5rem;
+    padding-left: 0.55rem;
   }
 
   .session-list-right {

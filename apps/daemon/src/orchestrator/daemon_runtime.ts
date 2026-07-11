@@ -15,6 +15,7 @@ import {
   resolveEffectiveOutputMetadata,
   resolveEffectiveWriterFeatureFlags,
 } from "@kato/shared";
+import { isAbsolute, relative, resolve } from "@std/path";
 import {
   AuditLogger,
   NoopSink,
@@ -352,6 +353,21 @@ interface PersistentRecordingCommandContext {
   secretsPolicy?: SecretsPolicyConfig;
 }
 
+interface ApplyWorkspaceAutoRecordingOptions {
+  provider: string;
+  providerSessionId: string;
+  snapshotSnippet?: string;
+  events: ConversationEvent[];
+  metadata: SessionMetadataV1;
+  recordingPipeline: RecordingPipelineLike;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+  now: () => Date;
+  workspaceCatalog: WorkspaceCatalogLike;
+  workspaceProfileResolver: WorkspaceProfileResolverLike;
+  userConfig: UserConfig;
+}
+
 async function assertCaptureDestinationDoesNotExist(
   targetPath: string,
 ): Promise<void> {
@@ -385,6 +401,13 @@ function isAlreadyExistsError(error: unknown): boolean {
   }
   return typeof candidate.message === "string" &&
     /^Capture destination already exists:/.test(candidate.message);
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const resolvedCandidate = resolve(candidatePath);
+  const resolvedRoot = resolve(rootPath);
+  const rel = relative(resolvedRoot, resolvedCandidate);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 async function captureSnapshotWithRetries(options: {
@@ -646,6 +669,130 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
     captureIncludeSystemEvents: options.captureIncludeSystemEvents,
     userConfig: options.userConfig,
   });
+}
+
+async function applyWorkspaceAutoRecording(
+  options: ApplyWorkspaceAutoRecordingOptions,
+): Promise<boolean> {
+  if (options.provider !== "claude") {
+    return false;
+  }
+  const workingDirectory = options.metadata.workingDirectory?.trim();
+  if (!workingDirectory || options.events.length === 0) {
+    return false;
+  }
+
+  const workspaces = await options.workspaceCatalog.list();
+  let metadataChanged = false;
+  for (const workspace of workspaces) {
+    try {
+      const profile = await options.workspaceProfileResolver.resolveForCommand(
+        workspace,
+      );
+      if (!profile.autoRecordConversations) {
+        continue;
+      }
+      if (!isPathWithinRoot(workingDirectory, profile.workspaceRoot)) {
+        continue;
+      }
+      if (findWorkspaceOutput(options.metadata, workspace.workspaceId)) {
+        continue;
+      }
+
+      const outputUsername = resolvePreferredParticipantUsername({
+        userConfig: options.userConfig,
+        workspaceId: workspace.workspaceId,
+      }) ?? UNKNOWN_OUTPUT_USERNAME;
+      const autoRecordNow = options.now();
+      const resolved = await resolveWorkspaceCommandDestination({
+        profile,
+        provider: options.provider,
+        sessionId: options.providerSessionId,
+        outputUsername,
+        snapshotSnippet: options.snapshotSnippet,
+        boundarySnapshot: options.events,
+        now: autoRecordNow,
+      });
+      const resolvedDestination = await validateDestinationPathForCommand(
+        options.recordingPipeline,
+        options.provider,
+        options.providerSessionId,
+        resolved.resolvedPath,
+        "record",
+      );
+      const targetBinding = resolveBindingForRetargetedWorkspacePath({
+        profile,
+        currentBinding: resolved.binding,
+        resolvedPath: resolvedDestination,
+      });
+      const nowIso = options.now().toISOString();
+      const output = createWorkspaceOutputState({
+        profile,
+        binding: targetBinding,
+        resolvedPath: resolvedDestination,
+        resolvedDefaultOutputDir: resolved.resolvedDefaultOutputDir,
+        desiredState: "off",
+        writeCursor: 0,
+        nowIso,
+      });
+      const recordingCycleId = openWorkspaceOutputCycle(output, 0, nowIso);
+      readWorkspaceOutputs(options.metadata).push(output);
+      metadataChanged = true;
+
+      await options.operationalLogger.info(
+        "recording.auto_record.activated",
+        "Workspace auto-recording activated for provider session",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: profile.alias,
+          workingDirectory,
+          targetPath: resolvedDestination,
+          recordingCycleId,
+        },
+      );
+      await options.auditLogger.record(
+        "recording.auto_record.activated",
+        "Workspace auto-recording activated for provider session",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: profile.alias,
+          workingDirectory,
+          targetPath: resolvedDestination,
+          recordingCycleId,
+        },
+      );
+    } catch (error) {
+      await options.operationalLogger.error(
+        "recording.auto_record.failed",
+        "Failed to activate workspace auto-recording",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          workingDirectory,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      await options.auditLogger.record(
+        "recording.auto_record.failed",
+        "Failed to activate workspace auto-recording",
+        {
+          provider: options.provider,
+          sessionId: options.providerSessionId,
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          workingDirectory,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+  return metadataChanged;
 }
 
 function matchesCaptureBoundaryEvent(
@@ -2073,6 +2220,22 @@ async function processPersistentRecordingUpdates(
       metadataChanged = true;
     }
 
+    const autoRecordingChanged = await applyWorkspaceAutoRecording({
+      provider,
+      providerSessionId,
+      snapshotSnippet: snapshot.metadata.snippet,
+      events: snapshot.events,
+      metadata,
+      recordingPipeline,
+      operationalLogger,
+      auditLogger,
+      now,
+      workspaceCatalog,
+      workspaceProfileResolver,
+      userConfig,
+    });
+    metadataChanged = metadataChanged || autoRecordingChanged;
+
     const recordingTitle = resolveConversationTitle(
       snapshot.events,
       providerSessionId,
@@ -2424,6 +2587,11 @@ async function mergeLatestSessionMetadataBeforeSave(
     merged.ingestionActivatedAt = metadata.ingestionActivatedAt;
   } else {
     delete merged.ingestionActivatedAt;
+  }
+  if (metadata.workingDirectory !== undefined) {
+    merged.workingDirectory = metadata.workingDirectory;
+  } else {
+    delete merged.workingDirectory;
   }
   if (metadata.commandCursor !== undefined) {
     merged.commandCursor = metadata.commandCursor;

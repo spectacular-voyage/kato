@@ -22,6 +22,8 @@ export type {
   ProviderIngestionPollResult,
   ProviderIngestionRunner,
   ProviderSessionFile,
+  ReconcileSessionParentProviderSessionIdInput,
+  ReconcileSessionParentProviderSessionIdResult,
   RuntimeSessionSnapshot,
   SessionSnapshotStatusMetadata,
   SessionSnapshotStore,

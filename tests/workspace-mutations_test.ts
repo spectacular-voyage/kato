@@ -253,6 +253,7 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
       katoDir,
       selector: "demo",
       edits: {
+        autoRecordConversations: true,
         defaultOutputDir: "notes/{provider}",
         filenameTemplate: "{YYYY}-{MM}-{DD}-{provider}.md",
         workspaceTimezone: "UTC",
@@ -284,6 +285,7 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
     });
 
     assertEquals(result.changed, true);
+    assertEquals(result.resolved.autoRecordConversations, true);
     assertEquals(result.resolved.defaultOutputDir, "notes/{provider}");
     assertEquals(
       result.resolved.filenameTemplate,
@@ -311,6 +313,7 @@ Deno.test("updateWorkspaceConfig writes editable workspace config fields", async
     );
 
     const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.autoRecordConversations, true);
     assertEquals(loaded.defaultOutputDir, "notes/{provider}");
     assertEquals(loaded.filenameTemplate, "{YYYY}-{MM}-{DD}-{provider}.md");
     assertEquals(loaded.workspaceTimezone, "UTC");

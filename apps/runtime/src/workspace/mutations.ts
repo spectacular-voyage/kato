@@ -444,6 +444,7 @@ export async function unregisterWorkspace(
 }
 
 export interface WorkspaceConfigEditInput {
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -493,6 +494,11 @@ function mergeWorkspaceConfigEdits(
 
   return {
     workspaceId,
+    ...(edits.autoRecordConversations !== undefined
+      ? { autoRecordConversations: edits.autoRecordConversations }
+      : current.autoRecordConversations !== undefined
+      ? { autoRecordConversations: current.autoRecordConversations }
+      : {}),
     ...(edits.defaultOutputDir !== undefined
       ? { defaultOutputDir: edits.defaultOutputDir }
       : current.defaultOutputDir !== undefined

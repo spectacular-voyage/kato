@@ -4,13 +4,16 @@ import AppHeader from "../src/app_header.tsx";
 import { loadAppChromeStatus } from "../src/loaders/status.ts";
 import { loadSessionsPageData } from "../src/loaders/sessions.ts";
 import { createWebLoggers } from "../src/logging.ts";
-import { parseSessionPageQuery } from "../src/page_queries.ts";
+import { parseSessionsPageQuery } from "../src/page_queries.ts";
 import {
   runSessionRecordingAction,
   runSessionRecordingStopAction,
 } from "../src/session_recording_actions.ts";
 import { runSessionOutputMetadataUpdateAction } from "../src/session_metadata_actions.ts";
-import { buildSessionInventoryHref } from "../src/session_routes.ts";
+import {
+  buildSessionInventoryHref,
+  buildSessionInventorySessionHref,
+} from "../src/session_routes.ts";
 import { define } from "../utils.ts";
 
 function decodeMessage(value: string | null): string | undefined {
@@ -28,16 +31,22 @@ function buildRedirectUrl(
   reqUrl: string,
   options: {
     includeStale: boolean;
+    includeSubagents: boolean;
     workspaceFilter?: string;
+    sessionId?: string;
     notice?: string;
     error?: string;
   },
 ): URL {
+  const routeOptions = {
+    includeStale: options.includeStale,
+    includeSubagents: options.includeSubagents,
+    workspaceFilter: options.workspaceFilter,
+  };
   const url = new URL(
-    buildSessionInventoryHref({
-      includeStale: options.includeStale,
-      workspaceFilter: options.workspaceFilter,
-    }),
+    options.sessionId
+      ? buildSessionInventorySessionHref(options.sessionId, routeOptions)
+      : buildSessionInventoryHref(routeOptions),
     reqUrl,
   );
   if (options.notice) {
@@ -83,6 +92,8 @@ export const handler = define.handlers({
     const form = await ctx.req.formData();
     const action = String(form.get("action") ?? "");
     const includeStale = String(form.get("includeStale") ?? "true") !== "false";
+    const includeSubagents =
+      String(form.get("includeSubagents") ?? "true") !== "false";
     const workspaceFilter = String(form.get("workspaceFilter") ?? "").trim() ||
       undefined;
     const { operationalLogger, auditLogger } = createWebLoggers();
@@ -120,7 +131,9 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
+            includeSubagents,
             workspaceFilter,
+            sessionId,
             notice: buildSessionRecordingNotice(result),
           }),
           303,
@@ -146,7 +159,9 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
+            includeSubagents,
             workspaceFilter,
+            sessionId,
             notice: buildSessionRecordingStopNotice(result),
           }),
           303,
@@ -196,7 +211,9 @@ export const handler = define.handlers({
         return Response.redirect(
           buildRedirectUrl(ctx.req.url, {
             includeStale,
+            includeSubagents,
             workspaceFilter,
+            sessionId,
             notice: result.scope === "session-defaults"
               ? `session metadata updated (${result.sessionShortId})`
               : `recording metadata updated (${result.sessionShortId})`,
@@ -218,6 +235,7 @@ export const handler = define.handlers({
       return Response.redirect(
         buildRedirectUrl(ctx.req.url, {
           includeStale,
+          includeSubagents,
           workspaceFilter,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -228,7 +246,7 @@ export const handler = define.handlers({
 });
 
 export default define.page(async function SessionsPage(ctx) {
-  const query = parseSessionPageQuery(ctx.url);
+  const query = parseSessionsPageQuery(ctx.url);
   const [pageData, appStatus] = await Promise.all([
     loadSessionsPageData(query),
     loadAppChromeStatus(),

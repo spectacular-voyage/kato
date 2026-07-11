@@ -69,7 +69,11 @@ export function closeWorkspaceOutputCycle(
     }
     cycle.stoppedCursor = stopCursor;
     cycle.stoppedAt = nowIso;
-    cycle.stoppedBySeq = stopCursor;
+    if (stopCursor > 0) {
+      cycle.stoppedBySeq = stopCursor;
+    } else {
+      delete cycle.stoppedBySeq;
+    }
     break;
   }
   delete output.activeRecordingCycleId;
@@ -102,7 +106,7 @@ export function openWorkspaceOutputCycle(
     startedCursor: startCursor,
     startedAt: nowIso,
     lastWriteAt: nowIso,
-    startedBySeq: startCursor,
+    ...(startCursor > 0 ? { startedBySeq: startCursor } : {}),
   });
   output.activeRecordingCycleId = recordingCycleId;
   output.desiredState = "on";

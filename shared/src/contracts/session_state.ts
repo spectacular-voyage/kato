@@ -102,10 +102,13 @@ export interface SessionMetadataV1 {
   sessionKey: string;
   provider: string;
   providerSessionId: string;
+  /** Provider-native immediate parent for a recognized sub-conversation. */
+  parentProviderSessionId?: string;
   sessionId: string;
   createdAt: string;
   updatedAt: string;
   sourceFilePath: string;
+  workingDirectory?: string;
   lastObservedMtimeMs?: number;
   ingestCursor: ProviderCursor;
   ingestAnchor?: SessionIngestAnchorV1;
@@ -438,10 +441,22 @@ export function isSessionMetadataV1(
     return false;
   }
   if (
+    value["parentProviderSessionId"] !== undefined &&
+    !isNonEmptyString(value["parentProviderSessionId"])
+  ) {
+    return false;
+  }
+  if (
     value["lastObservedMtimeMs"] !== undefined &&
     (typeof value["lastObservedMtimeMs"] !== "number" ||
       !Number.isFinite(value["lastObservedMtimeMs"]) ||
       value["lastObservedMtimeMs"] < 0)
+  ) {
+    return false;
+  }
+  if (
+    value["workingDirectory"] !== undefined &&
+    !isNonEmptyString(value["workingDirectory"])
   ) {
     return false;
   }

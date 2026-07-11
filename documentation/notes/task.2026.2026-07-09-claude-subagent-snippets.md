@@ -18,9 +18,11 @@ Claude sub-agent source files live under `subagents/` and are discovered by Kato
 
 The issue is not necessarily that a later user message is missed. In sub-agent workflows, the initial sub-agent task/prompt may be the only user-authored text useful for a label, and that row is sidechain-marked. The parser should keep skipping sidechains for normal Claude transcript files, but include them when the source file itself is a sub-agent transcript.
 
+The later inventory-visibility follow-up is implemented in [[task.2026.2026-07-10-session-subagent-filter]], and provider-declared labels/parent relationships are implemented in [[task.2026.2026-07-10-session-conversation-trees]].
+
 ## Open Issues
 
-- Should Kato visually label Claude `agent-*` sessions as sub-agents in the Sessions UI later?
+- No open issues remain for this parser/snippet slice; later inventory presentation is tracked by the linked follow-up tasks.
 
 ## Decisions
 

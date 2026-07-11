@@ -71,6 +71,7 @@ function setCheckboxes(
 }
 
 function makeEditForm(options: {
+  autoRecordConversations?: boolean;
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -80,6 +81,9 @@ function makeEditForm(options: {
 } = {}): FormData {
   const form = new FormData();
   form.set("action", "save-workspace-config");
+  if (options.autoRecordConversations) {
+    form.set("autoRecordConversations", "on");
+  }
   form.set("defaultOutputDir", options.defaultOutputDir ?? "notes");
   form.set(
     "filenameTemplate",
@@ -98,6 +102,7 @@ Deno.test("loadWorkspaceConfigEditPageData exposes raw, effective, and wikilink 
     async (homeDir) => {
       const { katoDir, workspaceRoot } = await setupWorkspaceFixture(homeDir, [
         "workspaceId: ws-alpha",
+        "autoRecordConversations: true",
         "defaultOutputDir: notes",
         'filenameTemplate: "{provider}.md"',
         'workspaceTimezone: "UTC"',
@@ -127,6 +132,7 @@ Deno.test("loadWorkspaceConfigEditPageData exposes raw, effective, and wikilink 
 
       assertExists(data);
       assertEquals(data.workspace.workspaceId, "ws-alpha");
+      assertEquals(data.raw?.autoRecordConversations, true);
       assertEquals(data.raw?.defaultOutputDir, "notes");
       assertEquals(data.raw?.workspaceTimezone, "UTC");
       assertEquals(data.raw?.defaultTags, ["workspace", "research"]);
@@ -152,6 +158,7 @@ Deno.test("loadWorkspaceConfigEditPageData exposes raw, effective, and wikilink 
         data.effective?.writerFeatureFlags.writerUseDendronStyleWikilinks,
         true,
       );
+      assertEquals(data.effective?.autoRecordConversations, true);
       assertEquals(data.diagnostics.wikilinkContextMode, "dendron-config");
       assertEquals(
         data.diagnostics.dendronConfigPath,
@@ -200,6 +207,7 @@ Deno.test("handleWorkspaceConfigEditPost saves workspace config edits and redire
     ]);
     const { operationalLogger, auditLogger } = makeNoopLoggers();
     const form = makeEditForm({
+      autoRecordConversations: true,
       defaultOutputDir: "notes/{provider}",
       filenameTemplate: "{YYYY}-{MM}-{DD}-{provider}.md",
       workspaceTimezone: "America/Los_Angeles",
@@ -234,6 +242,7 @@ Deno.test("handleWorkspaceConfigEditPost saves workspace config edits and redire
     );
 
     const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.autoRecordConversations, true);
     assertEquals(loaded.defaultOutputDir, "notes/{provider}");
     assertEquals(loaded.filenameTemplate, "{YYYY}-{MM}-{DD}-{provider}.md");
     assertEquals(loaded.workspaceTimezone, "America/Los_Angeles");

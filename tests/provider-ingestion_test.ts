@@ -438,6 +438,72 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "FileProviderIngestionRunner backfills discovered parents without replaying historical sessions",
+  async () => {
+    await withTempDir("provider-ingestion-parent-backfill-", async (dir) => {
+      const sessionFile = join(dir, "child.jsonl");
+      await Deno.writeTextFile(sessionFile, "historical child\n");
+      const katoDir = join(dir, ".kato");
+      const originalStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-07-09T10:00:00.000Z"),
+        makeSessionId: () => "kato-child-session",
+      });
+      const original = await originalStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-child",
+        sourceFilePath: sessionFile,
+        initialCursor: { kind: "byte-offset", value: 91 },
+      });
+      original.nextTwinSeq = 4;
+      original.recentFingerprints = ["existing-fingerprint"];
+      await originalStore.saveSessionMetadata(original);
+
+      let parseCalls = 0;
+      const harness = makeWatchHarness();
+      const runner = makeFileProviderTestRunner({
+        dir,
+        provider: "codex",
+        now: () => new Date("2026-07-10T10:00:00.000Z"),
+        watchFs: harness.watchFn,
+        sessionSnapshotStore: new InMemorySessionSnapshotStore(),
+        sessionStateStore: new PersistentSessionStateStore({ katoDir }),
+        autoGenerateTwins: false,
+        discoverSessions() {
+          return Promise.resolve([{
+            sessionId: "provider-child",
+            parentProviderSessionId: "provider-parent",
+            filePath: sessionFile,
+            modifiedAtMs: Date.parse("2026-07-09T09:00:00.000Z"),
+          }]);
+        },
+        parseEvents() {
+          parseCalls += 1;
+          return (async function* () {})();
+        },
+      });
+
+      await runner.start();
+      const result = await runner.poll();
+      await runner.stop();
+
+      assertEquals(result.sessionsUpdated, 0);
+      assertEquals(result.eventsObserved, 0);
+      assertEquals(parseCalls, 0);
+      const reloaded = (await new PersistentSessionStateStore({ katoDir })
+        .listSessionMetadata())[0];
+      assertExists(reloaded);
+      assertEquals(reloaded.parentProviderSessionId, "provider-parent");
+      assertEquals(reloaded.sessionId, original.sessionId);
+      assertEquals(reloaded.updatedAt, original.updatedAt);
+      assertEquals(reloaded.ingestCursor, original.ingestCursor);
+      assertEquals(reloaded.nextTwinSeq, 4);
+      assertEquals(reloaded.recentFingerprints, ["existing-fingerprint"]);
+    });
+  },
+);
+
 Deno.test("FileProviderIngestionRunner rebuilds first-user snippet from twin history without persisting metadata snippets", async () => {
   await withTempDir("provider-ingestion-snippet-persist-", async (dir) => {
     const sessionFile = join(dir, "session-snippet-persist.jsonl");
@@ -1373,6 +1439,7 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
           type: "user",
           uuid: "u1",
           timestamp: "2026-02-22T20:20:00.000Z",
+          cwd: projectDir,
           message: {
             role: "user",
             content: [{ type: "text", text: "hello" }],
@@ -1392,9 +1459,15 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
     );
 
     const store = new InMemorySessionSnapshotStore();
+    const sessionStateStore = new PersistentSessionStateStore({
+      katoDir: join(dir, ".kato"),
+      now: () => new Date("2026-02-22T19:59:59.000Z"),
+      makeSessionId: () => "kato-claude-session-1",
+    });
     const harness = makeWatchHarness();
     const runner = createClaudeIngestionRunner({
       sessionSnapshotStore: store,
+      sessionStateStore,
       sessionRoots: [dir],
       now: () => new Date("2026-02-22T19:59:59.000Z"),
       watchFs: harness.watchFn,
@@ -1411,7 +1484,13 @@ Deno.test("createClaudeIngestionRunner ingests discovered Claude sessions", asyn
     assertExists(snapshot);
     assertEquals(snapshot.provider, "claude");
     assert(snapshot.events.length >= 1);
+    assertEquals(snapshot.events[0]?.source.workingDirectory, projectDir);
     assertEquals(snapshot.cursor.kind, "byte-offset");
+    const metadata = (await sessionStateStore.listSessionMetadata()).find((
+      entry,
+    ) => entry.providerSessionId === "session-claude");
+    assertExists(metadata);
+    assertEquals(metadata.workingDirectory, projectDir);
   });
 });
 
@@ -1542,6 +1621,100 @@ Deno.test("createCodexIngestionRunner ingests discovered Codex sessions", async 
     assertEquals(snapshot.cursor.kind, "byte-offset");
   });
 });
+
+Deno.test(
+  "createCodexIngestionRunner backfills the parent discovered from Codex session_meta",
+  async () => {
+    await withTempDir("provider-ingestion-codex-parent-meta-", async (dir) => {
+      const dayDir = join(dir, "2026", "07", "10");
+      await Deno.mkdir(dayDir, { recursive: true });
+      const parentPath = join(dayDir, "parent.jsonl");
+      const childPath = join(dayDir, "child.jsonl");
+      await Deno.writeTextFile(
+        parentPath,
+        `${
+          JSON.stringify({
+            type: "session_meta",
+            payload: {
+              id: "codex-parent",
+              source: "vscode",
+              thread_source: "user",
+            },
+          })
+        }\n`,
+      );
+      await Deno.writeTextFile(
+        childPath,
+        `${
+          JSON.stringify({
+            type: "session_meta",
+            payload: {
+              id: "codex-child",
+              session_id: "codex-parent",
+              thread_source: "subagent",
+              source: {
+                subagent: {
+                  thread_spawn: {
+                    parent_thread_id: "codex-parent",
+                    depth: 1,
+                    agent_path: "/root/relation_audit",
+                  },
+                },
+              },
+            },
+          })
+        }\n`,
+      );
+      const historicalTime = new Date("2026-07-10T09:00:00.000Z");
+      await Deno.utime(parentPath, historicalTime, historicalTime);
+      await Deno.utime(childPath, historicalTime, historicalTime);
+
+      const katoDir = join(dir, ".kato");
+      let nextSession = 0;
+      const initialStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-07-10T10:00:00.000Z"),
+        makeSessionId: () => `kato-session-${++nextSession}`,
+      });
+      await initialStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "codex-parent",
+        sourceFilePath: parentPath,
+        initialCursor: { kind: "byte-offset", value: 0 },
+      });
+      const legacyChild = await initialStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "codex-child",
+        sourceFilePath: childPath,
+        initialCursor: { kind: "byte-offset", value: 17 },
+      });
+
+      const harness = makeWatchHarness();
+      const runner = createCodexIngestionRunner({
+        sessionSnapshotStore: new InMemorySessionSnapshotStore(),
+        sessionStateStore: new PersistentSessionStateStore({ katoDir }),
+        autoGenerateTwins: false,
+        sessionRoots: [dir],
+        now: () => new Date("2030-07-10T10:00:00.000Z"),
+        watchFs: harness.watchFn,
+      });
+      await runner.start();
+      const result = await runner.poll();
+      await runner.stop();
+
+      assertEquals(result.sessionsUpdated, 0);
+      const reloadedChild = (await new PersistentSessionStateStore({ katoDir })
+        .listSessionMetadata()).find((metadata) =>
+          metadata.providerSessionId === "codex-child"
+        );
+      assertExists(reloadedChild);
+      assertEquals(reloadedChild.parentProviderSessionId, "codex-parent");
+      assertEquals(reloadedChild.sessionId, legacyChild.sessionId);
+      assertEquals(reloadedChild.ingestCursor, legacyChild.ingestCursor);
+      assertEquals(reloadedChild.updatedAt, legacyChild.updatedAt);
+    });
+  },
+);
 
 Deno.test("createGeminiIngestionRunner ingests discovered Gemini sessions", async () => {
   await withTempDir("provider-ingestion-gemini-", async (dir) => {

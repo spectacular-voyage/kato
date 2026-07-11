@@ -189,6 +189,14 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                   <section class="workspace-config-layout">
                     <div class="workspace-config-section">
                       <h2>Output</h2>
+                      <label class="checkbox-line">
+                        <input
+                          type="checkbox"
+                          name="autoRecordConversations"
+                          checked={Boolean(effective.autoRecordConversations)}
+                        />
+                        <span>Auto-record conversations</span>
+                      </label>
                       <label class="form-label" for="defaultOutputDir">
                         Default Output Dir
                       </label>

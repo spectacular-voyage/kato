@@ -133,6 +133,7 @@ Deno.test("claude parser emits user message correctly", async () => {
     );
     assertEquals(userEvent.turnId, "msg-u1");
     assertEquals(userEvent.timestamp, "2026-02-10T23:36:18.000Z");
+    assertEquals(userEvent.source.workingDirectory, "/home/user/project");
   }
 });
 

@@ -3,6 +3,7 @@ import { hashStringFNV1a } from "@kato/runtime";
 
 export interface SessionRouteOptions {
   includeStale?: boolean;
+  includeSubagents?: boolean;
   workspaceFilter?: string;
 }
 
@@ -29,6 +30,11 @@ export function buildSessionInventoryHref(
 ): string {
   const url = new URL("http://kato.local/sessions");
   applySessionRouteOptions(url, options);
+  if (options.includeSubagents === false) {
+    url.searchParams.set("subagents", "hide");
+  } else {
+    url.searchParams.delete("subagents");
+  }
   return `${url.pathname}${url.search}`;
 }
 

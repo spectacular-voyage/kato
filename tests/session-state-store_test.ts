@@ -141,6 +141,80 @@ Deno.test("PersistentSessionStateStore uses Windows-safe storage keys", async ()
   });
 });
 
+Deno.test(
+  "PersistentSessionStateStore creates and backfills parent relationships without touching session activity",
+  async () => {
+    await withTempDir("session-state-store-parent-", async (dir) => {
+      const katoDir = join(dir, ".kato");
+      const store = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-07-10T20:00:00.000Z"),
+        makeSessionId: () => "session-child-kato-id",
+      });
+
+      const createdWithParent = await store.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-child-new",
+        parentProviderSessionId: "provider-parent",
+        sourceFilePath: join(dir, "child-new.jsonl"),
+        initialCursor: { kind: "byte-offset", value: 7 },
+      });
+      assertEquals(
+        createdWithParent.parentProviderSessionId,
+        "provider-parent",
+      );
+
+      const legacy = await store.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "provider-child-legacy",
+        sourceFilePath: join(dir, "child-legacy.jsonl"),
+        initialCursor: { kind: "byte-offset", value: 17 },
+      });
+      legacy.nextTwinSeq = 9;
+      legacy.recentFingerprints = ["fingerprint-1"];
+      await store.saveSessionMetadata(legacy);
+
+      const result = await store.reconcileSessionParentProviderSessionId({
+        provider: "codex",
+        providerSessionId: "provider-child-legacy",
+        sourceFilePath: legacy.sourceFilePath,
+        parentProviderSessionId: "provider-parent",
+      });
+      assertEquals(result, "updated");
+
+      const reloaded = (await store.listSessionMetadata()).find((metadata) =>
+        metadata.providerSessionId === "provider-child-legacy"
+      );
+      assertExists(reloaded);
+      assertEquals(reloaded.parentProviderSessionId, "provider-parent");
+      assertEquals(reloaded.sessionId, legacy.sessionId);
+      assertEquals(reloaded.updatedAt, legacy.updatedAt);
+      assertEquals(reloaded.ingestCursor, legacy.ingestCursor);
+      assertEquals(reloaded.nextTwinSeq, 9);
+      assertEquals(reloaded.recentFingerprints, ["fingerprint-1"]);
+
+      assertEquals(
+        await store.reconcileSessionParentProviderSessionId({
+          provider: "codex",
+          providerSessionId: "provider-child-legacy",
+          sourceFilePath: legacy.sourceFilePath,
+          parentProviderSessionId: "provider-parent",
+        }),
+        "unchanged",
+      );
+      assertEquals(
+        await store.reconcileSessionParentProviderSessionId({
+          provider: "codex",
+          providerSessionId: "missing-child",
+          sourceFilePath: join(dir, "missing-child.jsonl"),
+          parentProviderSessionId: "provider-parent",
+        }),
+        "missing",
+      );
+    });
+  },
+);
+
 Deno.test({
   name: "PersistentSessionStateStore migrates legacy colon storage keys",
   ignore: Deno.build.os === "windows",

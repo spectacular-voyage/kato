@@ -1,7 +1,7 @@
 ---
 id: 583ef0d537b7329ad2d183b8
 title: User Guide Recording
-desc: ''
+desc: ""
 updated: 1781200000003
 created: 1781200000003
 ---
@@ -42,6 +42,10 @@ supported by policy.
 Tell the AI assistant that lines beginning with `::` are Kato control commands
 and should be ignored. Kato consumes the command; the model may still see it in
 the provider chat.
+
+## Automatic Workspace Recording
+
+Workspace config can enable `autoRecordConversations`. When it is enabled for a registered workspace, Kato automatically starts a workspace-scoped recording for Claude conversations whose provider working directory is inside that workspace root. Codex and Gemini conversations still require manual recording or capture.
 
 ## Web Capture And Recording
 

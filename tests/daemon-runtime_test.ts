@@ -263,6 +263,7 @@ function cloneWorkspaceProfile(
     alias: profile.alias,
     workspaceRoot: profile.workspaceRoot,
     configPath: profile.configPath,
+    autoRecordConversations: profile.autoRecordConversations,
     resolvedDefaultOutputDir: profile.resolvedDefaultOutputDir,
     defaultOutputDirTemplate: profile.defaultOutputDirTemplate,
     filenameTemplate: profile.filenameTemplate,
@@ -375,6 +376,7 @@ async function createTestWorkspaceFixture(
     alias: entry.alias,
     workspaceRoot: entry.workspaceRoot,
     configPath: entry.configPath,
+    autoRecordConversations: false,
     resolvedDefaultOutputDir,
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "{provider}-{sessionShortId}.md",
@@ -471,7 +473,10 @@ function findWorkspaceOutputState(
 interface PersistentInChatScenarioOptions {
   events: ConversationEvent[];
   recordingPipeline: RecordingPipelineLike;
+  provider?: string;
+  providerSessionId?: string;
   snapshotSnippetOverride?: string;
+  configureWorkspace?: (workspace: TestWorkspaceFixture) => void;
   prepopulate?: (
     sessionStateStore: PersistentSessionStateStore,
     workspace: TestWorkspaceFixture,
@@ -492,6 +497,9 @@ async function runPersistentInChatScenario(
 }> {
   const stateDir = await makeTestTempDir("daemon-runtime-inchat-redesign-");
   const workspace = await createTestWorkspaceFixture(stateDir);
+  options.configureWorkspace?.(workspace);
+  const provider = options.provider ?? "codex";
+  const providerSessionId = options.providerSessionId ?? "session-1";
 
   const nowIso = "2026-02-22T10:00:00.000Z";
   let currentStatus: DaemonStatusSnapshot = {
@@ -534,7 +542,7 @@ async function runPersistentInChatScenario(
 
   let pollCount = 0;
   const ingestionRunner: ProviderIngestionRunner = {
-    provider: "codex",
+    provider,
     start() {
       return Promise.resolve();
     },
@@ -542,8 +550,8 @@ async function runPersistentInChatScenario(
       pollCount += 1;
       if (pollCount === 1) {
         sessionSnapshotStore.upsert({
-          provider: "codex",
-          sessionId: "session-1",
+          provider,
+          sessionId: providerSessionId,
           cursor: { kind: "byte-offset", value: 1 },
           events: options.events,
           ...(options.snapshotSnippetOverride
@@ -551,14 +559,14 @@ async function runPersistentInChatScenario(
             : {}),
         });
         return Promise.resolve({
-          provider: "codex",
+          provider,
           polledAt: nowIso,
           sessionsUpdated: 1,
           eventsObserved: options.events.length,
         });
       }
       return Promise.resolve({
-        provider: "codex",
+        provider,
         polledAt: "2026-02-22T10:00:01.000Z",
         sessionsUpdated: 0,
         eventsObserved: 0,
@@ -819,6 +827,175 @@ function makeRuntimeStatusStore(): DaemonStatusSnapshotStoreLike {
     },
   };
 }
+
+Deno.test(
+  "runDaemonRuntimeLoop auto-records Claude sessions for matching enabled workspaces",
+  async () => {
+    await withStateDirCleanup(async (setStateDir) => {
+      const { sink, operationalLogger, auditLogger } = makeDebugLoggers();
+      const appended: Array<{
+        targetPath: string;
+        events: ConversationEvent[];
+        workspaceIds?: string[];
+        recordingCycleIds?: string[];
+      }> = [];
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appended.push({
+            targetPath: input.targetPath,
+            events: input.events,
+            workspaceIds: input.workspaceIds,
+            recordingCycleIds: input.recordingCycleIds,
+          });
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const result = await runPersistentInChatScenario({
+        provider: "claude",
+        providerSessionId: "session-claude",
+        events: [
+          makeClaudeReplayEvent(
+            "session-claude",
+            "u1",
+            "message.user",
+            "please review this workspace",
+            "2026-02-22T10:00:00.000Z",
+          ),
+          makeClaudeReplayEvent(
+            "session-claude",
+            "a1",
+            "message.assistant",
+            "I can help with that.",
+            "2026-02-22T10:00:01.000Z",
+          ),
+        ],
+        recordingPipeline,
+        operationalLogger,
+        auditLogger,
+        configureWorkspace(workspace) {
+          workspace.profile.autoRecordConversations = true;
+        },
+        prepopulate: async (sessionStateStore, workspace) => {
+          const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+            provider: "claude",
+            providerSessionId: "session-claude",
+            sourceFilePath: join(
+              workspace.profile.workspaceRoot,
+              ".claude-session.jsonl",
+            ),
+            initialCursor: { kind: "byte-offset", value: 0 },
+          });
+          metadata.workingDirectory = join(
+            workspace.profile.workspaceRoot,
+            "src",
+          );
+          await sessionStateStore.saveSessionMetadata(metadata);
+          const saved = await sessionStateStore.listSessionMetadata();
+          assert(
+            saved.some((entry) => entry.providerSessionId === "session-claude"),
+          );
+        },
+      });
+      setStateDir(result.stateDir);
+
+      const metadata = result.metadataList.find((entry) =>
+        entry.providerSessionId === "session-claude"
+      );
+      assert(
+        metadata,
+        JSON.stringify(
+          result.metadataList.map((entry) => ({
+            provider: entry.provider,
+            providerSessionId: entry.providerSessionId,
+            sessionKey: entry.sessionKey,
+          })),
+        ),
+      );
+      const output = metadata.workspaceOutputs?.[0];
+      assertExists(
+        output,
+        JSON.stringify(
+          sink.records.map((record) => ({
+            event: record.event,
+            attributes: record.attributes,
+          })),
+        ),
+      );
+      assertEquals(output.workspaceId, TEST_WORKSPACE_ID);
+      assertEquals(output.desiredState, "on");
+      assertEquals(output.writeCursor, 2);
+      assertEquals(output.recordingCycles[0]?.startedCursor, 0);
+      assertEquals(appended.length, 1);
+      assertEquals(appended[0]?.events.length, 2);
+      assertEquals(appended[0]?.workspaceIds, [TEST_WORKSPACE_ID]);
+      assertEquals(
+        appended[0]?.recordingCycleIds,
+        [output.activeRecordingCycleId],
+      );
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop does not auto-record non-Claude sessions",
+  async () => {
+    await withStateDirCleanup(async (setStateDir) => {
+      const appended: ConversationEvent[][] = [];
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appended.push(input.events);
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const result = await runPersistentInChatScenario({
+        provider: "codex",
+        providerSessionId: "session-codex",
+        events: [
+          makeEventForSession(
+            "session-codex",
+            "u1",
+            "message.user",
+            "please review this workspace",
+          ),
+        ],
+        recordingPipeline,
+        configureWorkspace(workspace) {
+          workspace.profile.autoRecordConversations = true;
+        },
+        prepopulate: async (sessionStateStore, workspace) => {
+          const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+            provider: "codex",
+            providerSessionId: "session-codex",
+            sourceFilePath: DAEMON_RUNTIME_MOCK_SOURCE_PATH,
+            initialCursor: { kind: "byte-offset", value: 0 },
+          });
+          metadata.workingDirectory = workspace.profile.workspaceRoot;
+          await sessionStateStore.saveSessionMetadata(metadata);
+        },
+      });
+      setStateDir(result.stateDir);
+
+      const metadata = result.metadataList.find((entry) =>
+        entry.providerSessionId === "session-codex"
+      );
+      assertExists(metadata);
+      assertEquals(metadata.workspaceOutputs ?? [], []);
+      assertEquals(appended.length, 0);
+    });
+  },
+);
 
 Deno.test(
   "runDaemonRuntimeLoop persistent in-chat rejects bare ::init as unsupported",

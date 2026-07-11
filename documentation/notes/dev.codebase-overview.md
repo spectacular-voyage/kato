@@ -40,9 +40,7 @@ Related notes:
   (`provider + providerSessionId`) used as the durable state key.
 - **Source file**: provider transcript file discovered by ingestion
   (`sourceFilePath`) and parsed into canonical events.
-- **Session metadata**: durable per-provider-session state (`*.meta.json`) with
-  ingest cursor, dedupe fingerprints, command cursor/anchor, and recording
-  bindings.
+- **Session metadata**: durable per-provider-session state (`*.meta.json`) with ingest cursor, dedupe fingerprints, command cursor/anchor, recording bindings, and an optional provider-declared immediate parent id for recognized sub-conversations.
 - **SessionTwin**: canonical per-provider-session event log (`*.twin.jsonl`) for
   replay and opt-in persisted conversation history.
 - **Runtime snapshot**: bounded in-memory projection of parsed events used by
@@ -72,10 +70,10 @@ Current top-level web routes are:
 
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
-- `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, creation-time output title/filename/tag controls, and on-demand snippet reveal.
+- `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, per-row persisted twin size, creation-time output title/filename/tag controls, on-demand snippet reveal, and URL-driven activity/workspace/sub-conversation filters. The default `Grouped` view renders provider-declared Claude and Codex children in recursive, default-closed parent trees; `Hidden` preserves the `subagents=hide` true-exclusion contract.
 - `/recordings`: latest recording-output state across sessions and workspaces (one row per output file, with output tag editing plus stop / same-path `Re-start` for persisted rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label editing, registration-time display-label entry, per-workspace preferred-username overrides, shared workspace config edit links, plus workspace-level recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
-- `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for workspace fields (`defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
+- `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for workspace fields (`autoRecordConversations`, `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
 - `/logs`: combined daemon + web operational/security log view with shared
   filter semantics, backed by `loadLogPageData()` and `/api/logs`.
 - `/settings`: guided user-default, workspace-username mapping, and personal tag suggestion workflows.
@@ -92,8 +90,10 @@ Supporting web files worth knowing:
 - `apps/web/src/workspace_config_edit_actions.ts` and `apps/web/src/loaders/workspace_config_edit.ts`: shared web mutation and read-model plumbing for the workspace config editor.
 - `apps/web/src/session_metadata_actions.ts`: lock-guarded mutations for session-level output metadata defaults, per-output metadata (`displayTitle`/`filenameSlug`/`tags`/persona fields), and per-output writer flag overrides, with best-effort metadata-only markdown frontmatter sync. Tag edits replace the effective frontmatter tag list while writer appends remain accretive.
 - `apps/web/src/output_writer_policy.ts` + `apps/web/src/writer_policy_controls.tsx`: default/override/effective writer-policy projection and the compact tri-state (default/include/exclude) controls rendered on Recordings rows.
-- `apps/web/src/session_routes.ts`: canonical href builders for
-  `/maintenance`, `/sessions`, and session anchor links.
+- `apps/web/src/session_routes.ts`: canonical href builders for `/maintenance`, `/sessions`, and session anchor links, including composition of Sessions activity, workspace, and sub-agent visibility filters.
+- `apps/web/src/page_queries.ts`: validated URL-query projections for Sessions, Recordings, and Logs. Sessions recognizes only `subagents=hide` as the non-default hidden-sub-conversation view; missing or unknown values keep the grouped inventory visible.
+- `apps/web/src/format_bytes.ts`: deterministic byte-unit formatting shared by Summary memory metrics and Sessions twin-size labels.
+- `apps/web/src/session_tree.ts`: browser-safe recursive Sessions tree construction, subtree ordering/summaries, unlinked/cycle handling, and ancestor lookup for deep links.
 - `apps/web/src/live_routes.ts`: shared live JSON handlers for
   `/api/chrome-status`, `/api/summary`, `/api/maintenance-twins`,
   `/api/sessions`, `/api/recordings`, `/api/session-snippet`,
@@ -347,19 +347,10 @@ Missing/invalid/empty snapshots fail safe (no silent empty writes).
 
 ## Current Web Live Refresh Model
 
-- Only the Summary body is live-polled today.
-- `apps/web/islands/SummaryLive.tsx` polls `/api/summary` every `2s` and keeps
-  the last good render if a request fails.
-- `/api/summary` returns `SummaryPageData` with no-store cache headers via
-  `apps/web/src/summary_api.ts`.
-- The shared `DAEMON` / `SNAPSHOT` header stack is still server-rendered on
-  non-Summary pages from `loadAppChromeStatus()`; it is not yet a reusable live
-  island.
-- `Twins`, `Sessions`, `Recordings`, `Workspaces`, `Logs`, `Settings`, and
-  `Maintenance` are currently server-rendered page loads with URL-driven
-  filters and PRG mutation flows where applicable.
-- Any future live-expansion work should preserve route/query semantics rather
-  than inventing separate client-only filter state.
+- Summary, Sessions, Recordings, Workspaces, Logs results, Maintenance twin results, and the shared app-header status render server-provided initial data and then poll their corresponding no-store JSON endpoints through `usePolledJson()`.
+- Live islands keep the last good render if a poll fails. Page filters remain URL-driven, and each filtered endpoint receives the same query string as the initial page request.
+- Settings and bounded edit forms remain server-rendered and use post/redirect/get mutation flows where applicable.
+- New live-expansion work should preserve route/query semantics rather than inventing separate client-only filter state. Mutation forms on filtered pages must carry enough hidden state for their redirect to restore the same view.
 
 ## Source-of-Truth Boundaries
 
@@ -392,6 +383,7 @@ Page-level web source-of-truth guidance:
   come from persistent session metadata/twin state under
   `~/.kato/shared/sessions/*`, with the current daemon snapshot merged in where
   live runtime status exists.
+- Sessions projects optional `twinSizeBytes` from the existing twin-existence stat and exposes only that path-free numeric metric. `Twin absent` means no recognized persisted twin history; Maintenance remains the surface for twin paths, freshness, troubleshooting, and cleanup.
 - `Workspaces` additionally depends on
   `~/.kato/shared/workspace-registry.json`,
   workspace-local `.kato-workspace-config.yaml`, shared behavior config, and

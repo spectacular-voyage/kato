@@ -85,6 +85,8 @@ export { DenoDetachedDaemonLauncher } from "./orchestrator/launcher.ts";
 export type {
   GetOrCreateSessionMetadataInput,
   PersistentSessionStateStoreOptions,
+  ReconcileSessionParentProviderSessionIdInput,
+  ReconcileSessionParentProviderSessionIdResult,
   ResetSessionTwinPersistenceOptions,
   SessionStateIdentity,
   SessionStateLocation,

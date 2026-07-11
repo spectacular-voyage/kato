@@ -46,6 +46,8 @@ export {
 export type {
   GetOrCreateSessionMetadataInput,
   PersistentSessionStateStoreOptions,
+  ReconcileSessionParentProviderSessionIdInput,
+  ReconcileSessionParentProviderSessionIdResult,
   SessionStateIdentity,
   SessionStateLocation,
 } from "./session_state_store.ts";

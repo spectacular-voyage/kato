@@ -17,6 +17,76 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Sessions Sub-Conversations Are Provider-Declared And Grouped
+
+- Decision:
+  - Replace the flat inclusive Sessions presentation with recursively expandable parent/sub-conversation trees whose parents default closed.
+  - Keep `subagents=hide` as a true exclusion mode and relabel the visible choices `Sub-conversations: Grouped | Hidden`; missing or unknown values remain inclusive and grouped.
+  - Recognize Claude parentage from the exact provider `subagents` source layout and Codex parentage only from `session_meta.payload.source.subagent.thread_spawn.parent_thread_id`. Never infer relationships from repeated snippets, timestamps, `agent-*` identifiers, or filename proximity.
+  - Persist optional Codex `parentProviderSessionId` in schema-v1 session metadata and backfill existing metadata during provider discovery without replaying transcripts or touching session activity timestamps.
+  - Resolve provider parent ids to Kato session ids on the server. The browser receives only the relationship needed for rendering and never receives provider source paths.
+  - Retain nonmatching ancestors as explicitly marked structural context when activity/workspace filters match a descendant; exclude those context shells from page totals. `subagents=hide` excludes children before context retention.
+  - Keep unlinked or cyclic children visible in a collapsed unlinked group, preserve expansion through live polling, and expand ancestor chains for child fragment links and Sessions action redirects.
+- Owner: Kato engineering
+- Date: 2026-07-10
+- Why:
+  - Recorded Claude and Codex sub-conversations can outnumber their top-level parents enough to overwhelm the Sessions board, while still being useful when an operator deliberately expands a workflow.
+  - Codex exposes immediate parent ids, including depth-two descendants, so a truthful recursive tree is possible without heuristic title or activity matching.
+  - Collapsing solves routine scanability, while the retained hidden mode still supports strict top-level inventory totals, smaller responses, and existing bookmarks.
+- Tradeoffs:
+  - Collapsed children are omitted from the rendered DOM but remain in the inclusive live-API payload; lazy child loading is deferred.
+  - Existing Codex metadata whose provider source has already disappeared cannot be retroactively enriched and remains visible without an inferred relationship.
+  - Claude provider data currently supports a parent-to-child relationship but not invented workflow-agent nesting.
+- Follow-up tasks:
+  - Consider lazy child loading if the inclusive live payload remains too large.
+  - Consider provider-declared friendly agent labels separately; labels must not become identity or classification signals.
+
+### Sessions Twin Size Is A Path-Free Derived Metric
+
+- Decision:
+  - Show `Twin <size>` on a Sessions row when Kato has a recognized regular-file twin with persisted history, and show `Twin absent` otherwise.
+  - Derive optional `twinSizeBytes` from the existing twin-file stat used while normalizing persisted metadata; do not add another filesystem lookup to the live-poll path, persist the derived size, or expose `twinPath` through the Sessions page model.
+  - Format byte counts with the shared deterministic web formatter using 1024-based `B`, `KB`, `MB`, `GB`, and `TB` units.
+  - Keep the indicator read-only and compact. Maintenance remains the owner of twin paths, freshness/current/behind state, troubleshooting, and cleanup actions.
+- Owner: Kato engineering
+- Date: 2026-07-10
+- Why:
+  - Operators need a quick way to distinguish short and long persisted histories without opening or reading each twin.
+  - Reusing metadata normalization's existing stat keeps server rendering and two-second live polling current without adding per-session polling I/O.
+  - A numeric, path-free read-model field gives the browser only the information needed for the indicator.
+- Tradeoffs:
+  - Twin bytes are only a rough proxy for conversation length: JSONL structure and tool-heavy events affect size, and a twin can contain only partial history when persistence began after the provider conversation started.
+  - `Twin absent` intentionally combines intentionally unpersisted, missing, and non-file twin cases in the compact Sessions surface; Maintenance retains the richer diagnostic distinction.
+  - Surfacing a read-only twin metric on Sessions is a narrow exception to the normal Sessions/Maintenance separation, not a move of twin-management responsibilities.
+- Follow-up tasks:
+  - Consider event/message counts or a richer detail view if byte size is not a useful enough length proxy.
+  - Consider size sorting or filtering separately if operators need more than a per-row cue.
+
+### Sessions Sub-Agent Filtering Is Explicit And URL-Driven
+
+Superseded for presentation and provider coverage by “Sessions Sub-Conversations Are Provider-Declared And Grouped”; the `subagents=hide` URL contract remains active.
+
+- Decision:
+  - Keep the Kato Web Sessions inventory inclusive by default and expose `All` and `Top-level only` controls under a distinct `Session type` filter group.
+  - Represent `Top-level only` as `subagents=hide`; a missing or unrecognized `subagents` query value remains inclusive.
+  - Classify a session as a sub-agent only when `provider` is `claude` and the persisted provider source path contains an exact path segment named `subagents`, accepting both POSIX and Windows path separators. Do not classify from an `agent-*` provider-session id alone, and leave unknown layouts visible.
+  - Derive classification from existing server-side metadata without persisting another session field or exposing source paths to the browser.
+  - Apply the filter before Sessions rows and totals are projected, and preserve it while composing activity/workspace filters, polling `/api/sessions`, and completing Sessions recording or metadata POST/redirect/get flows.
+  - Scope the filter to `/sessions`; Recordings and Maintenance remain complete operational inventories.
+- Owner: Kato engineering
+- Date: 2026-07-10
+- Why:
+  - Claude workflows can discover enough separate sub-agent transcripts to overwhelm the routine Sessions inventory, while operators still need an explicit way to include those sessions for recording and troubleshooting.
+  - URL-owned state keeps initial server rendering, live polling, refreshes, bookmarks, toolbar links, and mutation redirects on one filter contract.
+  - Reusing the parser's source-layout rule avoids false positives from identifier naming and keeps local source paths out of the web page model.
+- Tradeoffs:
+  - The inclusive default preserves compatibility but means operators who prefer top-level sessions must select the filter on each unbookmarked visit.
+  - Only the explicit Claude source layout is classified in this slice; sub-agent sessions from providers without a supported layout rule remain visible.
+  - This filter does not add badges or parent/child relationships, so included sub-agent rows are not otherwise distinguished in the inventory.
+- Follow-up tasks:
+  - Decide whether to remember the selected session-type filter across visits.
+  - Consider explicit sub-agent badges and parent-session relationships if the filtered inventory does not provide enough context.
+
 ### Workspace Config Web Editing Uses Canonical Schema Rewrites
 
 - Decision:

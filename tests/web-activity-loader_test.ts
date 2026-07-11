@@ -77,6 +77,7 @@ function makeWorkspaceOutput(options: {
 async function createSessionFixture(options: {
   katoDir: string;
   sessionId: string;
+  provider?: string;
   providerSessionId: string;
   snippet: string;
   updatedAt: string;
@@ -86,6 +87,7 @@ async function createSessionFixture(options: {
   lastObservedMtimeMs?: number;
   nextTwinSeq?: number;
   commandCursor?: number;
+  parentProviderSessionId?: string;
 }) {
   const store = new PersistentSessionStateStore({
     katoDir: options.katoDir,
@@ -93,12 +95,13 @@ async function createSessionFixture(options: {
     makeSessionId: () => options.sessionId,
   });
   const metadata = await store.getOrCreateSessionMetadata({
-    provider: "codex",
+    provider: options.provider ?? "codex",
     providerSessionId: options.providerSessionId,
     sourceFilePath: options.sourceFilePath,
     initialCursor: { kind: "byte-offset", value: 0 },
   });
   metadata.updatedAt = options.updatedAt;
+  metadata.parentProviderSessionId = options.parentProviderSessionId;
   metadata.workspaceOutputs = options.workspaceOutputs;
   if (options.outputMetadataDefaults) {
     metadata.outputMetadataDefaults = options.outputMetadataDefaults;
@@ -111,7 +114,377 @@ async function createSessionFixture(options: {
     metadata.commandCursor = options.commandCursor;
   }
   await store.saveSessionMetadata(metadata);
+  return metadata;
 }
+
+Deno.test("loadSessionsPageData projects only logical persisted twin sizes", async () => {
+  await withTestTempDir("web-activity-twin-size-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+
+    const logicalTwin = await createSessionFixture({
+      katoDir,
+      sessionId: "sess-logical-twin",
+      providerSessionId: "provider-logical-twin",
+      snippet: "logical twin",
+      updatedAt: "2026-07-10T12:03:00.000Z",
+      sourceFilePath: join(homeDir, "logical-source.jsonl"),
+      nextTwinSeq: 2,
+    });
+    const missingTwin = await createSessionFixture({
+      katoDir,
+      sessionId: "sess-missing-twin",
+      providerSessionId: "provider-missing-twin",
+      snippet: "missing twin",
+      updatedAt: "2026-07-10T12:02:00.000Z",
+      sourceFilePath: join(homeDir, "missing-source.jsonl"),
+      nextTwinSeq: 2,
+    });
+    const orphanTwin = await createSessionFixture({
+      katoDir,
+      sessionId: "sess-orphan-twin",
+      providerSessionId: "provider-orphan-twin",
+      snippet: "orphan twin",
+      updatedAt: "2026-07-10T12:01:00.000Z",
+      sourceFilePath: join(homeDir, "orphan-source.jsonl"),
+    });
+    const nonFileTwin = await createSessionFixture({
+      katoDir,
+      sessionId: "sess-non-file-twin",
+      providerSessionId: "provider-non-file-twin",
+      snippet: "non-file twin",
+      updatedAt: "2026-07-10T12:00:00.000Z",
+      sourceFilePath: join(homeDir, "non-file-source.jsonl"),
+      nextTwinSeq: 2,
+    });
+
+    const initialTwinContents = '{"payload":{"text":"café"}}\n';
+    const orphanTwinContents = '{"payload":{"text":"orphan"}}\n';
+    const encoder = new TextEncoder();
+    await Deno.writeTextFile(logicalTwin.twinPath, initialTwinContents);
+    await Deno.writeTextFile(orphanTwin.twinPath, orphanTwinContents);
+    await Deno.mkdir(nonFileTwin.twinPath);
+
+    const initialData = await loadSessionsPageData({ katoDir });
+    const initialLogicalRow = initialData.rows.find((row) =>
+      row.sessionId === logicalTwin.sessionId
+    );
+    const missingRow = initialData.rows.find((row) =>
+      row.sessionId === missingTwin.sessionId
+    );
+    const orphanRow = initialData.rows.find((row) =>
+      row.sessionId === orphanTwin.sessionId
+    );
+    const nonFileRow = initialData.rows.find((row) =>
+      row.sessionId === nonFileTwin.sessionId
+    );
+    assertExists(initialLogicalRow);
+    assertExists(missingRow);
+    assertExists(orphanRow);
+    assertExists(nonFileRow);
+    assertEquals(
+      initialLogicalRow.twinSizeBytes,
+      encoder.encode(initialTwinContents).byteLength,
+    );
+    assertEquals(missingRow.twinSizeBytes, undefined);
+    assertEquals(orphanRow.twinSizeBytes, undefined);
+    assertEquals(nonFileRow.twinSizeBytes, undefined);
+
+    const reloadedMetadata = await new PersistentSessionStateStore({ katoDir })
+      .listSessionMetadata();
+    const resetMissingTwin = reloadedMetadata.find((metadata) =>
+      metadata.sessionId === missingTwin.sessionId
+    );
+    const unchangedOrphanTwin = reloadedMetadata.find((metadata) =>
+      metadata.sessionId === orphanTwin.sessionId
+    );
+    const unchangedNonFileTwin = reloadedMetadata.find((metadata) =>
+      metadata.sessionId === nonFileTwin.sessionId
+    );
+    assertExists(resetMissingTwin);
+    assertExists(unchangedOrphanTwin);
+    assertExists(unchangedNonFileTwin);
+    assertEquals(resetMissingTwin.nextTwinSeq, 1);
+    assertEquals(resetMissingTwin.recentFingerprints, []);
+    assertEquals(unchangedOrphanTwin.nextTwinSeq, 1);
+    assertEquals(unchangedNonFileTwin.nextTwinSeq, 2);
+
+    const appendedTwinContents = '{"payload":{"text":"grown 🚀"}}\n';
+    await Deno.writeTextFile(logicalTwin.twinPath, appendedTwinContents, {
+      append: true,
+    });
+
+    const grownData = await loadSessionsPageData({ katoDir });
+    const grownLogicalRow = grownData.rows.find((row) =>
+      row.sessionId === logicalTwin.sessionId
+    );
+    assertExists(grownLogicalRow);
+    assertEquals(
+      grownLogicalRow.twinSizeBytes,
+      encoder.encode(initialTwinContents + appendedTwinContents).byteLength,
+    );
+  });
+});
+
+Deno.test("loadSessionsPageData can hide only source-classified Claude sub-agent sessions", async () => {
+  await withTestTempDir("web-activity-subagent-filter-", async (homeDir) => {
+    const katoDir = join(homeDir, ".kato");
+    await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-claude-top-level",
+      provider: "claude",
+      providerSessionId: "agent-top-level-name-only",
+      snippet: "top-level Claude session",
+      updatedAt: "2026-07-10T12:04:00.000Z",
+      sourceFilePath: join(homeDir, "claude", "session-top-level.jsonl"),
+    });
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-claude-parent",
+      provider: "claude",
+      providerSessionId: "example",
+      snippet: "Claude parent session",
+      updatedAt: "2026-07-10T12:03:30.000Z",
+      sourceFilePath: "/home/operator/.claude/projects/example.jsonl",
+    });
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-claude-subagent-posix",
+      provider: "claude",
+      providerSessionId: "agent-posix",
+      snippet: "POSIX sub-agent session",
+      updatedAt: "2026-07-10T12:03:00.000Z",
+      sourceFilePath:
+        "/home/operator/.claude/projects/example/subagents/agent-posix.jsonl",
+    });
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-claude-subagent-windows",
+      provider: "claude",
+      providerSessionId: "agent-windows",
+      snippet: "Windows sub-agent session",
+      updatedAt: "2026-07-10T12:02:00.000Z",
+      sourceFilePath:
+        "C:\\Users\\operator\\.claude\\projects\\example\\subagents\\agent-windows.jsonl",
+    });
+    await createSessionFixture({
+      katoDir,
+      sessionId: "sess-codex-subagents-path",
+      provider: "codex",
+      providerSessionId: "agent-codex",
+      snippet: "Codex session in a coincidental directory",
+      updatedAt: "2026-07-10T12:01:00.000Z",
+      sourceFilePath: join(homeDir, "subagents", "agent-codex.jsonl"),
+    });
+
+    const inclusive = await loadSessionsPageData({ katoDir });
+    assertEquals(inclusive.includeSubagents, true);
+    assertEquals(inclusive.sessionCount, 5);
+    assertEquals(
+      inclusive.rows.find((row) =>
+        row.sessionId === "sess-claude-subagent-posix"
+      )?.relationship,
+      {
+        kind: "subconversation",
+        parentSessionId: "sess-claude-parent",
+      },
+    );
+
+    const topLevelOnly = await loadSessionsPageData({
+      katoDir,
+      includeSubagents: false,
+    });
+    assertEquals(topLevelOnly.includeSubagents, false);
+    assertEquals(topLevelOnly.sessionCount, 3);
+    assertEquals(
+      topLevelOnly.rows.map((row) => row.sessionId).sort(),
+      [
+        "sess-claude-parent",
+        "sess-claude-top-level",
+        "sess-codex-subagents-path",
+      ],
+    );
+    assertEquals(
+      topLevelOnly.activeSessionCount + topLevelOnly.staleSessionCount +
+        topLevelOnly.inactiveSessionCount,
+      3,
+    );
+  });
+});
+
+Deno.test(
+  "loadSessionsPageData groups exact Codex children and retains filtered ancestors as uncounted context",
+  async () => {
+    await withTestTempDir(
+      "web-activity-codex-tree-context-",
+      async (homeDir) => {
+        const katoDir = join(homeDir, ".kato");
+        const statusPath = join(katoDir, "shared", "status.json");
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-codex-parent",
+          provider: "codex",
+          providerSessionId: "provider-codex-parent",
+          snippet: "same repeated request",
+          updatedAt: "2026-07-10T12:00:00.000Z",
+          sourceFilePath: join(homeDir, "parent.jsonl"),
+        });
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-codex-child",
+          provider: "codex",
+          providerSessionId: "provider-codex-child",
+          parentProviderSessionId: "provider-codex-parent",
+          snippet: "same repeated request",
+          updatedAt: "2026-07-10T12:05:00.000Z",
+          sourceFilePath: join(homeDir, "child.jsonl"),
+        });
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-codex-similar-top-level",
+          provider: "codex",
+          providerSessionId: "provider-codex-similar-top-level",
+          snippet: "same repeated request",
+          updatedAt: "2026-07-10T12:04:00.000Z",
+          sourceFilePath: join(homeDir, "similar.jsonl"),
+        });
+
+        await Deno.writeTextFile(
+          statusPath,
+          JSON.stringify({
+            schemaVersion: 2,
+            generatedAt: "2026-07-10T12:05:10.000Z",
+            heartbeatAt: "2026-07-10T12:05:10.000Z",
+            daemonRunning: true,
+            providers: [{
+              provider: "codex",
+              activeSessions: 1,
+              lastEventAt: "2026-07-10T12:05:00.000Z",
+            }],
+            recordings: { activeRecordings: 0, destinations: 0 },
+            sessions: [{
+              provider: "codex",
+              sessionId: "sess-codex-child",
+              providerSessionId: "provider-codex-child",
+              updatedAt: "2026-07-10T12:05:00.000Z",
+              lastEventAt: "2026-07-10T12:05:00.000Z",
+              stale: false,
+              snippet: "same repeated request",
+              recordings: [],
+            }],
+          }),
+        );
+
+        const grouped = await loadSessionsPageData({
+          katoDir,
+          includeStale: false,
+        });
+        assertEquals(grouped.sessionCount, 1);
+        assertEquals(grouped.activeSessionCount, 1);
+        assertEquals(grouped.rows.length, 2);
+        const child = grouped.rows.find((row) =>
+          row.sessionId === "sess-codex-child"
+        );
+        const parent = grouped.rows.find((row) =>
+          row.sessionId === "sess-codex-parent"
+        );
+        assertExists(child);
+        assertExists(parent);
+        assertEquals(child.relationship, {
+          kind: "subconversation",
+          parentSessionId: "sess-codex-parent",
+        });
+        assertEquals(child.structuralContext, undefined);
+        assertEquals(parent.structuralContext, true);
+        assertEquals(
+          grouped.rows.some((row) =>
+            row.sessionId === "sess-codex-similar-top-level"
+          ),
+          false,
+        );
+
+        const hidden = await loadSessionsPageData({
+          katoDir,
+          includeStale: false,
+          includeSubagents: false,
+        });
+        assertEquals(hidden.sessionCount, 0);
+        assertEquals(hidden.rows, []);
+      },
+    );
+  },
+);
+
+Deno.test(
+  "loadSessionsPageData retains a parent as context when only its child matches a workspace",
+  async () => {
+    await withTestTempDir(
+      "web-activity-tree-workspace-context-",
+      async (homeDir) => {
+        const katoDir = join(homeDir, ".kato");
+        await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+        const workspaceRoot = join(homeDir, "alpha");
+        const configPath = join(
+          workspaceRoot,
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        );
+        const outputPath = join(workspaceRoot, "notes", "child.md");
+
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-workspace-parent",
+          providerSessionId: "provider-workspace-parent",
+          snippet: "workspace parent",
+          updatedAt: "2026-07-10T12:00:00.000Z",
+          sourceFilePath: join(homeDir, "workspace-parent.jsonl"),
+        });
+        await createSessionFixture({
+          katoDir,
+          sessionId: "sess-workspace-child",
+          providerSessionId: "provider-workspace-child",
+          parentProviderSessionId: "provider-workspace-parent",
+          snippet: "workspace child",
+          updatedAt: "2026-07-10T12:01:00.000Z",
+          sourceFilePath: join(homeDir, "workspace-child.jsonl"),
+          workspaceOutputs: [makeWorkspaceOutput({
+            workspaceId: "ws-alpha",
+            workspaceAlias: "alpha",
+            workspaceRoot,
+            configPath,
+            resolvedPath: outputPath,
+            desiredState: "off",
+            recordingCycles: [{
+              recordingCycleId: "cycle-child",
+              startedCursor: 1,
+              stoppedCursor: 2,
+              startedAt: "2026-07-10T11:00:00.000Z",
+              stoppedAt: "2026-07-10T11:30:00.000Z",
+            }],
+          })],
+        });
+
+        const data = await loadSessionsPageData({
+          katoDir,
+          workspaceFilter: "ws-alpha",
+        });
+        assertEquals(data.sessionCount, 1);
+        assertEquals(data.rows.map((row) => row.sessionId), [
+          "sess-workspace-child",
+          "sess-workspace-parent",
+        ]);
+        assertEquals(
+          data.rows.find((row) => row.sessionId === "sess-workspace-parent")
+            ?.structuralContext,
+          true,
+        );
+      },
+    );
+  },
+);
 
 Deno.test("loadSessionsPageData integrates live sessions with persistent recording history", async () => {
   await withTestTempDir("web-activity-sessions-", async (homeDir) => {

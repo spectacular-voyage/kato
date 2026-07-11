@@ -144,6 +144,37 @@ If you want per-file coverage confirmation for that helper, run:
 That focused coverage run currently drives
 `apps/web/src/session_snippets.ts` to `100%` branch and `100%` line coverage.
 
+When working on the Sessions sub-agent inventory filter, the most useful focused slice is:
+
+- `deno test -A tests/web-session-routes_test.ts`
+- `deno test -A tests/web-activity-loader_test.ts --filter "sub-agent"`
+- `deno test -A tests/web-live-routes_test.ts --filter "current query semantics"`
+- `deno test -A --frozen --config apps/web/deno.json apps/web/tests/sessions_live_test.tsx`
+- `deno task --cwd apps/web check`
+
+That slice covers the inclusive default and exact `subagents=hide` query value, activity/workspace/filter href composition, provider-aware Claude source-path classification across POSIX and Windows separators, filtered live-API rows and totals, toolbar selected states, and hidden form fields that preserve the filter through Sessions POST redirects.
+
+When working on the Sessions twin-size indicator, the most useful focused slice is:
+
+- `deno test -A tests/web-format-bytes_test.ts`
+- `deno test -A tests/web-activity-loader_test.ts --filter "logical persisted twin sizes"`
+- `deno test -A tests/web-live-routes_test.ts --filter "current query semantics"`
+- `deno test -A --frozen --config apps/web/deno.json apps/web/tests/sessions_live_test.tsx`
+- `deno task --cwd apps/web check`
+
+That slice covers the shared 1024-based byte formatter, recognized persisted-twin size projection, missing and orphan twin behavior, growth across live reloads, the path-free `twinSizeBytes` API projection, composition with current Sessions filters, and rendered `Twin <size>` / `Twin absent` row states. The loader reuses metadata normalization's existing twin stat, so the indicator does not add another per-session filesystem lookup to each poll.
+
+When working on Sessions conversation trees or Codex sub-conversation recognition, the most useful focused slice is:
+
+- `deno test -A tests/codex-session-meta_test.ts tests/session-contracts_test.ts tests/session-state-store_test.ts`
+- `deno test -A tests/provider-ingestion_test.ts --filter "parent"`
+- `deno test -A tests/web-activity-loader_test.ts --filter "context|sub-agent"`
+- `deno test -A tests/web-session-tree_test.ts tests/web-live-routes_test.ts`
+- `deno test -A --frozen --config apps/web/deno.json apps/web/tests/sessions_live_test.tsx`
+- `deno task --cwd apps/web check`
+
+That slice covers strict Codex `session_meta` parent extraction, schema-v1 optional parent metadata and metadata-only discovery backfill, exact Claude/Codex classification, hidden-mode provider coverage, activity/workspace ancestor context and totals, recursive ordering and Twin summaries, cycle/unlinked handling, browser-safe API relationships, grouped/hidden controls, default-closed disclosure markup, and action-form preservation.
+
 When working on session inventory/manual-ingestion route behavior, the most
 useful focused slice is:
 
