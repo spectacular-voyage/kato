@@ -74,6 +74,7 @@ Sessions rows now also show `Twin <size>` for recognized persisted Kato history 
 - The recording pipeline now accepts `frontmatterTags` through `RecordingOutputOverrides`, so web-created outputs and daemon in-chat workspace outputs can write effective tags at creation/append time.
 - Claude parsing and replay enable sidechain events only for exact sub-agent source paths across live ingestion, persisted ingestion, source replay, and snippet recovery.
 - Kato Web now pins Vite to a patched 7.3.x release so `deno task audit` passes the high-severity gate.
+- Kato Web's lockfile now retains Fresh's transitive Vite resolution, and the ordinary CI gate verifies the same frozen web install required by release artifact builds.
 - Focused tests cover successful edits, partial programmatic edits that preserve inherited defaults, invalid edits that preserve the existing file, invalid config page data, redirect behavior, and Dendron wikilink diagnostics.
 - Focused auto-recording tests cover workspace config parsing/serialization, Claude working-directory extraction, conservative workspace matching, snapshot attachment, existing-output preservation, and non-Claude exclusion.
 - Additional focused tests cover workspace/user tag config parsing, effective tag resolution, suggestion merging, creation-time tag writes, recordings-page tag edits, and metadata-only frontmatter tag replacement.

@@ -7,6 +7,7 @@
     "jsr:@fresh/build-id@1": "1.0.1",
     "jsr:@fresh/core@2": "2.3.3",
     "jsr:@fresh/core@^2.3.3": "2.3.3",
+    "jsr:@fresh/plugin-vite@1.1.2": "1.1.2",
     "jsr:@fresh/plugin-vite@^1.1.2": "1.1.2",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
@@ -53,6 +54,7 @@
     "npm:preact@^10.29.1": "10.29.2",
     "npm:preact@^10.29.2": "10.29.2",
     "npm:rollup@^4.55.1": "4.60.4",
+    "npm:vite@^7.1.4": "7.3.6",
     "npm:vite@^7.3.5": "7.3.6"
   },
   "jsr": {
@@ -116,7 +118,8 @@
         "npm:@prefresh/vite",
         "npm:@remix-run/node-fetch-server",
         "npm:@types/babel__core",
-        "npm:rollup"
+        "npm:rollup",
+        "npm:vite@^7.1.4"
       ]
     },
     "@std/assert@1.0.19": {

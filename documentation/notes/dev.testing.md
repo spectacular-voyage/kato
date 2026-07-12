@@ -67,11 +67,10 @@ Smoke validation on 2026-03-18 confirmed:
 
 GitHub CI uses a split gate:
 
-- `deno task ci:quality` for `fmt` + `lint` + `check`
+- `deno task ci:quality` for the frozen Kato Web dependency install plus `fmt` + `lint` + `check`
 - `deno task test:coverage --frozen` for the test suite and coverage artifact
 
-This keeps local `deno task ci` as the full pre-PR gate while avoiding running
-the full test suite twice in GitHub Actions.
+The frozen install matches the first dependency step in release binary generation, so an incomplete Kato Web lock graph fails in ordinary CI instead of after release starts. This keeps local `deno task ci` as the full pre-PR gate while avoiding running the full test suite twice in GitHub Actions.
 
 ## Contract-First Test Strategy
 
