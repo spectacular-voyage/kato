@@ -7,20 +7,27 @@ import {
   type WorkspacePathTemplateProfile,
 } from "../apps/runtime/src/mod.ts";
 
-function makeBoundarySnapshot(content: string): ConversationEvent[] {
-  return [{
-    eventId: "event-1",
+function makeBoundaryEvent(
+  content: string,
+  options: { eventId?: string; timestamp?: string } = {},
+): ConversationEvent {
+  return {
+    eventId: options.eventId ?? "event-1",
     provider: "codex",
     sessionId: "session-1",
-    timestamp: "2026-02-22T19:00:00.000Z",
+    ...(options.timestamp ? { timestamp: options.timestamp } : {}),
     kind: "message.user",
     role: "user",
     content,
     source: {
       providerEventType: "user",
-      providerEventId: "event-1",
+      providerEventId: options.eventId ?? "event-1",
     },
-  } as ConversationEvent];
+  } as ConversationEvent;
+}
+
+function makeBoundarySnapshot(content: string): ConversationEvent[] {
+  return [makeBoundaryEvent(content)];
 }
 
 function makeProfile(
@@ -77,6 +84,50 @@ Deno.test(
         boundarySnapshot,
       }),
       "conv.2026.26-07-15_1300-leading-snippet-codex.md",
+    );
+  },
+);
+
+Deno.test(
+  "renderWorkspaceFilename derives timestamp tokens from the newest timestamped event",
+  () => {
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile(),
+        provider: "codex",
+        sessionId: "session-filename-event-timestamp",
+        now: new Date("2026-07-15T20:00:00.000Z"),
+        outputUsername: "Jane User",
+        boundarySnapshot: [
+          makeBoundaryEvent("Leading Snippet", {
+            eventId: "event-1",
+            timestamp: "2026-02-22T19:00:00.000Z",
+          }),
+          makeBoundaryEvent("newer message", {
+            eventId: "event-2",
+            timestamp: "2026-03-01T18:30:00.000Z",
+          }),
+        ],
+      }),
+      "2026-03-01_1030-leading-snippet-codex.md",
+    );
+
+    assertEquals(
+      renderWorkspaceFilename({
+        profile: makeProfile(),
+        provider: "codex",
+        sessionId: "session-filename-untimestamped-tail",
+        now: new Date("2026-07-15T20:00:00.000Z"),
+        outputUsername: "Jane User",
+        boundarySnapshot: [
+          makeBoundaryEvent("Leading Snippet", {
+            eventId: "event-1",
+            timestamp: "2026-02-22T19:00:00.000Z",
+          }),
+          makeBoundaryEvent("untimestamped tail", { eventId: "event-2" }),
+        ],
+      }),
+      "2026-02-22_1100-leading-snippet-codex.md",
     );
   },
 );
