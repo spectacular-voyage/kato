@@ -1,4 +1,8 @@
-import type { ConversationEvent, ProviderCursor } from "@kato/shared";
+import type {
+  ConversationEvent,
+  ProviderCursor,
+  ProviderSessionTitleSource,
+} from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
 import { utf8ByteLength } from "../utils/text.ts";
 
@@ -11,6 +15,17 @@ export interface SessionSnapshotStatusMetadata {
   fileModifiedAtMs?: number;
   /** First non-blank user message, truncated. Cached to avoid re-scanning events. */
   snippet?: string;
+  /** Latest provider-maintained session title (custom outranks ai). */
+  providerTitle?: string;
+  providerTitleSource?: ProviderSessionTitleSource;
+}
+
+/** Custom titles outrank AI titles regardless of arrival order. */
+export function shouldReplaceProviderTitle(
+  previous: ProviderSessionTitleSource | undefined,
+  incoming: ProviderSessionTitleSource,
+): boolean {
+  return !(previous === "custom" && incoming === "ai");
 }
 
 export interface RuntimeSessionSnapshot {
@@ -30,6 +45,8 @@ export interface SessionSnapshotUpsert {
   fileModifiedAtMs?: number;
   /** Optional authoritative snippet (first user message) supplied by caller. */
   snippetOverride?: string;
+  /** Provider-maintained session title observed in this ingest batch. */
+  providerTitle?: { title: string; source: ProviderSessionTitleSource };
 }
 
 export interface SessionSnapshotMetadataEntry {
@@ -207,7 +224,20 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
   upsert(input: SessionSnapshotUpsert): RuntimeSessionSnapshot {
     const provider = requireNonEmpty(input.provider, "provider");
     const sessionId = requireNonEmpty(input.sessionId, "sessionId");
-    const previousSnippet = this.snapshots.get(sessionId)?.metadata.snippet;
+    const previousMetadata = this.snapshots.get(sessionId)?.metadata;
+    const previousSnippet = previousMetadata?.snippet;
+    let providerTitle = previousMetadata?.providerTitle;
+    let providerTitleSource = previousMetadata?.providerTitleSource;
+    if (
+      input.providerTitle &&
+      shouldReplaceProviderTitle(
+        providerTitleSource,
+        input.providerTitle.source,
+      )
+    ) {
+      providerTitle = input.providerTitle.title;
+      providerTitleSource = input.providerTitle.source;
+    }
     const retainedEvents = input.events.slice(
       -this.retention.maxEventsPerSession,
     );
@@ -235,6 +265,9 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
         truncatedEvents,
         ...(lastEventAt ? { lastEventAt } : {}),
         ...(snippet !== undefined ? { snippet } : {}),
+        ...(providerTitle !== undefined && providerTitleSource !== undefined
+          ? { providerTitle, providerTitleSource }
+          : {}),
         ...(input.fileModifiedAtMs !== undefined
           ? { fileModifiedAtMs: input.fileModifiedAtMs }
           : {}),

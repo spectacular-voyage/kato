@@ -17,6 +17,33 @@ created: 1771779490894
 
 ## Decisions (Locked for MVP)
 
+### Auto-Record Matches Explicit Conversation Roots
+
+- Decision:
+  - Add top-level workspace config key `autoRecordRoots: string[]`; a Claude session auto-records when its working directory is lexically within any resolved root, with an absent/empty list falling back to the workspace root (the original contract).
+  - Resolve entries per profile: absolute as-is, `~` expanded, relative against the workspace root; exact duplicates dropped; no existence checks; `~user` stays literal.
+  - Resolve auto-record workspace profiles once per persistent poll pass (even with zero snapshots); log workspace-scoped config-resolution failures once per workspace per distinct error and clear on recovery, while session-scoped activation failures keep per-session context.
+  - Keep auto-record Claude-only and persistent-mode-only; keep "any prior output for the workspace blocks re-arming"; all matching workspaces attach.
+- Owner: Kato engineering
+- Date: 2026-07-28
+- Why: Workspace roots are notes vaults nested inside project repos, so the original cwd-inside-workspace-root contract never matched real conversations (audit logs show zero activations ever), and per-session failure spam hid the one real config error ([[task.2026.2026-07-28-auto-record-conversation-roots]]).
+- Tradeoffs: Lexical matching accepts stale cwd strings under configured roots; older Kato binaries reject configs containing the new key (fail closed).
+- Follow-up tasks: publish per-workspace auto-record health into daemon status JSON and render it on `/workspaces`; sequence config-surface work with [[task.2026.2026-07-12-auto-record-subconversation-scope]].
+
+### Claude Session Titles Outrank Reconstructed Snippets
+
+- Decision:
+  - Parse Claude `custom-title` and `ai-title` transcript lines as title-update parse items that advance the ingest cursor like events; ignore records whose `sessionId` mismatches the transcript's session.
+  - Persist the latest title as `providerTitle`/`providerTitleSource` on snapshots and schema-v1 session metadata, with custom always outranking ai regardless of file order and titles never overwritten by reconstructed snippets.
+  - Project the effective title through the existing status `snippet` field (additive `titleSource` marks its origin) so legacy consumers keep working; keep the sticky reconstructed snippet as fallback.
+  - Backfill sessions whose cursor already passed their title lines with a one-time cached full-file scan; run titles through the shared secrets policy fail-closed with count-only audit events.
+  - Keep the manual session-title surface as `outputMetadataDefaults.displayTitle`; do not add a parallel field.
+- Owner: Kato engineering
+- Date: 2026-07-28
+- Why: First-user-message snippets often misrepresent conversations; Claude already maintains meaningful titles that operators expect to see ([[task.2026.2026-07-28-claude-session-titles]]).
+- Tradeoffs: Older binaries drop the new metadata fields on rewrite (re-derived on a later daemon pass); full-file backfill scan costs one extra read per pre-title session per daemon run.
+- Follow-up tasks: codex/gemini provider titles if those providers grow real title metadata; twin-viewer manual title editing ([[task.2026.2026-07-28-session-twin-viewer]]).
+
 ### Sessions Sub-Conversations Are Provider-Declared And Always Grouped
 
 - Decision:

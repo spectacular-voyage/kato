@@ -30,6 +30,7 @@ export {
   readWorkspaceConfigWorkspaceId,
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
+  resolveWorkspaceAutoRecordRoots,
   resolveWorkspaceConfigPath,
   resolveWorkspaceConfigValues,
   serializeWorkspaceConfigFileValues,

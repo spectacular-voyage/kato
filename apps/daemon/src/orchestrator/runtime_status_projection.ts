@@ -212,6 +212,17 @@ export function toSessionStatuses(
         lastEventAt: snapshot.metadata.lastEventAt,
         fileModifiedAtMs: snapshot.metadata.fileModifiedAtMs,
         snippet: snapshot.metadata.snippet,
+        ...(snapshot.metadata.providerTitle
+          ? {
+            providerTitle: snapshot.metadata.providerTitle,
+            providerTitleSource: snapshot.metadata.providerTitleSource,
+          }
+          : metadata?.providerTitle
+          ? {
+            providerTitle: metadata.providerTitle,
+            providerTitleSource: metadata.providerTitleSource,
+          }
+          : {}),
       },
       recordings: recordings?.map((recording) => ({
         provider: recording.provider,

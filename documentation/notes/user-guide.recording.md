@@ -45,7 +45,11 @@ the provider chat.
 
 ## Automatic Workspace Recording
 
-Workspace config can enable `autoRecordConversations`. When it is enabled for a registered workspace, Kato automatically starts a workspace-scoped recording for Claude conversations whose provider working directory is inside that workspace root. Codex and Gemini conversations still require manual recording or capture.
+Workspace config can enable `autoRecordConversations`. When it is enabled for a registered workspace, Kato automatically starts a workspace-scoped recording for matching Claude conversations. Codex and Gemini conversations still require manual recording or capture.
+
+By default a conversation matches when its provider working directory is inside the workspace root. Because workspace roots are usually notes vaults while conversations run at project repo roots, the workspace config can list `autoRecordRoots` — one directory per entry (absolute, `~`, or workspace-root-relative) — and a Claude conversation whose working directory is inside any listed root auto-records to that workspace. An empty or absent list keeps the workspace-root-only behavior. Matching is lexical; listed roots do not need to exist on disk.
+
+Workspace config resolution failures no longer spam the audit log once per session per poll: each broken workspace logs once per distinct error and clears when the config is repaired. Auto-record only runs while the daemon is running in persistent mode.
 
 ## Web Capture And Recording
 

@@ -263,6 +263,8 @@ interface ProcessPersistentRecordingUpdatesOptions {
   workspaceProfileResolver: WorkspaceProfileResolverLike;
   userConfig: UserConfig;
   secretsPolicy?: SecretsPolicyConfig;
+  /** workspaceId -> last logged auto-record resolution error, loop-owned. */
+  autoRecordResolutionFailures: Map<string, string>;
 }
 
 interface ApplyControlCommandsForEventOptions {
@@ -314,6 +316,16 @@ function makeRuntimeEventSignature(event: ConversationEvent): string {
   }
 }
 
+/**
+ * Effective display title for a session snapshot: the provider-maintained
+ * title when present, else the sticky reconstructed snippet.
+ */
+function resolveSnapshotDisplayTitle(
+  metadata: { snippet?: string; providerTitle?: string },
+): string | undefined {
+  return metadata.providerTitle ?? metadata.snippet;
+}
+
 function resolveConversationTitle(
   events: ConversationEvent[],
   fallback: string,
@@ -363,9 +375,89 @@ interface ApplyWorkspaceAutoRecordingOptions {
   operationalLogger: StructuredLogger;
   auditLogger: AuditLogger;
   now: () => Date;
+  /** Auto-record-enabled profiles, resolved once per poll pass. */
+  autoRecordProfiles: ResolvedWorkspaceProfile[];
+  userConfig: UserConfig;
+}
+
+/**
+ * A session matches a workspace when its working directory is lexically
+ * within any resolved auto-record root; an empty root list falls back to the
+ * workspace root itself (the original contract).
+ */
+function matchesAutoRecordRoots(
+  workingDirectory: string,
+  profile: ResolvedWorkspaceProfile,
+): boolean {
+  const roots = profile.autoRecordRoots.length > 0
+    ? profile.autoRecordRoots
+    : [profile.workspaceRoot];
+  return roots.some((root) => isPathWithinRoot(workingDirectory, root));
+}
+
+interface ResolveAutoRecordWorkspaceProfilesOptions {
   workspaceCatalog: WorkspaceCatalogLike;
   workspaceProfileResolver: WorkspaceProfileResolverLike;
-  userConfig: UserConfig;
+  operationalLogger: StructuredLogger;
+  auditLogger: AuditLogger;
+  /** workspaceId -> last logged resolution error; owned by the runtime loop. */
+  resolutionFailures: Map<string, string>;
+}
+
+/**
+ * Resolves every registered workspace once per poll pass and returns the
+ * auto-record-enabled profiles. Workspace-scoped resolution failures are
+ * logged once per workspace per distinct error (cleared on recovery) instead
+ * of once per session per tick.
+ */
+async function resolveAutoRecordWorkspaceProfiles(
+  options: ResolveAutoRecordWorkspaceProfilesOptions,
+): Promise<ResolvedWorkspaceProfile[]> {
+  const profiles: ResolvedWorkspaceProfile[] = [];
+  const workspaces = await options.workspaceCatalog.list();
+  const registeredIds = new Set<string>();
+  for (const workspace of workspaces) {
+    registeredIds.add(workspace.workspaceId);
+    try {
+      const profile = await options.workspaceProfileResolver.resolveForCommand(
+        workspace,
+      );
+      options.resolutionFailures.delete(workspace.workspaceId);
+      if (profile.autoRecordConversations) {
+        profiles.push(profile);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (options.resolutionFailures.get(workspace.workspaceId) === message) {
+        continue;
+      }
+      options.resolutionFailures.set(workspace.workspaceId, message);
+      await options.operationalLogger.error(
+        "recording.auto_record.failed",
+        "Failed to resolve workspace config for auto-recording",
+        {
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          error: message,
+        },
+      );
+      await options.auditLogger.record(
+        "recording.auto_record.failed",
+        "Failed to resolve workspace config for auto-recording",
+        {
+          workspaceId: workspace.workspaceId,
+          workspaceAlias: workspace.alias,
+          error: message,
+        },
+      );
+    }
+  }
+  for (const workspaceId of [...options.resolutionFailures.keys()]) {
+    if (!registeredIds.has(workspaceId)) {
+      options.resolutionFailures.delete(workspaceId);
+    }
+  }
+  return profiles;
 }
 
 async function assertCaptureDestinationDoesNotExist(
@@ -682,26 +774,19 @@ async function applyWorkspaceAutoRecording(
     return false;
   }
 
-  const workspaces = await options.workspaceCatalog.list();
   let metadataChanged = false;
-  for (const workspace of workspaces) {
+  for (const profile of options.autoRecordProfiles) {
     try {
-      const profile = await options.workspaceProfileResolver.resolveForCommand(
-        workspace,
-      );
-      if (!profile.autoRecordConversations) {
+      if (!matchesAutoRecordRoots(workingDirectory, profile)) {
         continue;
       }
-      if (!isPathWithinRoot(workingDirectory, profile.workspaceRoot)) {
-        continue;
-      }
-      if (findWorkspaceOutput(options.metadata, workspace.workspaceId)) {
+      if (findWorkspaceOutput(options.metadata, profile.workspaceId)) {
         continue;
       }
 
       const outputUsername = resolvePreferredParticipantUsername({
         userConfig: options.userConfig,
-        workspaceId: workspace.workspaceId,
+        workspaceId: profile.workspaceId,
       }) ?? UNKNOWN_OUTPUT_USERNAME;
       const autoRecordNow = options.now();
       const resolved = await resolveWorkspaceCommandDestination({
@@ -745,7 +830,7 @@ async function applyWorkspaceAutoRecording(
         {
           provider: options.provider,
           sessionId: options.providerSessionId,
-          workspaceId: workspace.workspaceId,
+          workspaceId: profile.workspaceId,
           workspaceAlias: profile.alias,
           workingDirectory,
           targetPath: resolvedDestination,
@@ -758,7 +843,7 @@ async function applyWorkspaceAutoRecording(
         {
           provider: options.provider,
           sessionId: options.providerSessionId,
-          workspaceId: workspace.workspaceId,
+          workspaceId: profile.workspaceId,
           workspaceAlias: profile.alias,
           workingDirectory,
           targetPath: resolvedDestination,
@@ -772,8 +857,8 @@ async function applyWorkspaceAutoRecording(
         {
           provider: options.provider,
           sessionId: options.providerSessionId,
-          workspaceId: workspace.workspaceId,
-          workspaceAlias: workspace.alias,
+          workspaceId: profile.workspaceId,
+          workspaceAlias: profile.alias,
           workingDirectory,
           error: error instanceof Error ? error.message : String(error),
         },
@@ -784,8 +869,8 @@ async function applyWorkspaceAutoRecording(
         {
           provider: options.provider,
           sessionId: options.providerSessionId,
-          workspaceId: workspace.workspaceId,
-          workspaceAlias: workspace.alias,
+          workspaceId: profile.workspaceId,
+          workspaceAlias: profile.alias,
           workingDirectory,
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1963,7 +2048,7 @@ async function processInChatRecordingUpdates(
       snapshot.events,
       sessionId,
       {
-        snapshotSnippet: snapshot.metadata.snippet,
+        snapshotSnippet: resolveSnapshotDisplayTitle(snapshot.metadata),
       },
     );
     for (let i = 0; i < snapshot.events.length; i += 1) {
@@ -1979,7 +2064,7 @@ async function processInChatRecordingUpdates(
         await applyControlCommandsForEvent({
           provider,
           sessionId,
-          snapshotSnippet: snapshot.metadata.snippet,
+          snapshotSnippet: resolveSnapshotDisplayTitle(snapshot.metadata),
           events: snapshot.events,
           eventIndex: i,
           event: event as ConversationEvent & { kind: "message.user" },
@@ -2070,6 +2155,16 @@ async function processPersistentRecordingUpdates(
     userConfig,
     secretsPolicy,
   } = options;
+
+  // Resolve auto-record workspaces once per pass — even with zero snapshots —
+  // so broken configs surface (and recover) without session traffic.
+  const autoRecordProfiles = await resolveAutoRecordWorkspaceProfiles({
+    workspaceCatalog,
+    workspaceProfileResolver,
+    operationalLogger,
+    auditLogger,
+    resolutionFailures: options.autoRecordResolutionFailures,
+  });
 
   const snapshots = sessionSnapshotStore.listMetadataOnly
     ? sessionSnapshotStore.listMetadataOnly()
@@ -2188,7 +2283,7 @@ async function processPersistentRecordingUpdates(
       const changed = await applyPersistentControlCommandsForEvent({
         provider,
         providerSessionId,
-        snapshotSnippet: snapshot.metadata.snippet,
+        snapshotSnippet: resolveSnapshotDisplayTitle(snapshot.metadata),
         events: snapshot.events,
         eventIndex: i,
         event: event as ConversationEvent & { kind: "message.user" },
@@ -2223,15 +2318,14 @@ async function processPersistentRecordingUpdates(
     const autoRecordingChanged = await applyWorkspaceAutoRecording({
       provider,
       providerSessionId,
-      snapshotSnippet: snapshot.metadata.snippet,
+      snapshotSnippet: resolveSnapshotDisplayTitle(snapshot.metadata),
       events: snapshot.events,
       metadata,
       recordingPipeline,
       operationalLogger,
       auditLogger,
       now,
-      workspaceCatalog,
-      workspaceProfileResolver,
+      autoRecordProfiles,
       userConfig,
     });
     metadataChanged = metadataChanged || autoRecordingChanged;
@@ -2239,7 +2333,7 @@ async function processPersistentRecordingUpdates(
     const recordingTitle = resolveConversationTitle(
       snapshot.events,
       providerSessionId,
-      { snapshotSnippet: snapshot.metadata.snippet },
+      { snapshotSnippet: resolveSnapshotDisplayTitle(snapshot.metadata) },
     );
     const activeOutputs = activeWorkspaceOutputs(metadata);
     for (const output of activeOutputs) {
@@ -2700,6 +2794,7 @@ export async function runDaemonRuntimeLoop(
     new WorkspaceCatalog(workspaceRegistryStore);
   const workspaceProfileResolver = options.workspaceProfileResolver ??
     new WorkspaceProfileResolver();
+  const autoRecordResolutionFailures = new Map<string, string>();
   const loadSessionSnapshot = options.loadSessionSnapshot ??
     ((sessionSnapshotStore || sessionStateStore)
       ? async (sessionId: string) => {
@@ -2928,6 +3023,7 @@ export async function runDaemonRuntimeLoop(
               workspaceProfileResolver,
               userConfig,
               secretsPolicy: options.secretsPolicy,
+              autoRecordResolutionFailures,
             });
           sessionMetadataMayHaveChanged = sessionMetadataMayHaveChanged ||
             persistentUpdatesChanged;

@@ -140,7 +140,9 @@ export async function ingestPersistedSession(
       },
     )
   ) {
-    incomingEvents.push(event);
+    if (event) {
+      incomingEvents.push(event);
+    }
     latestCursor = cursor;
   }
 

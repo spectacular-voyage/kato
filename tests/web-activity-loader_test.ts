@@ -40,6 +40,7 @@ Deno.test("loadSessionsPageData reuses supplied workspace profiles for options",
       workspaceRoot,
       configPath,
       autoRecordConversations: false,
+      autoRecordRoots: [],
       resolvedDefaultOutputDir: join(workspaceRoot, "notes"),
       defaultOutputDirTemplate: "notes",
       filenameTemplate: "{snippetSlug}.md",
@@ -1258,6 +1259,82 @@ Deno.test("loadWorkspacesPageData surfaces Dendron wikilink diagnostics for work
       true,
     );
   });
+});
+
+Deno.test("loadWorkspacesPageData resolves auto-record state per workspace", async () => {
+  await withTestTempDir(
+    "web-activity-workspaces-autorecord-",
+    async (homeDir) => {
+      const katoDir = join(homeDir, ".kato");
+      const sharedConfigPath = resolveDefaultSharedConfigPath(katoDir);
+      await Deno.mkdir(join(katoDir, "shared"), { recursive: true });
+
+      async function makeWorkspace(
+        name: string,
+        configLines: string[] | undefined,
+      ): Promise<{ workspaceId: string; configPath: string }> {
+        const workspaceRoot = join(homeDir, name);
+        const configPath = join(
+          workspaceRoot,
+          DEFAULT_WORKSPACE_CONFIG_FILENAME,
+        );
+        await Deno.mkdir(workspaceRoot, { recursive: true });
+        if (configLines) {
+          await Deno.writeTextFile(
+            configPath,
+            [`workspaceId: ws-${name}`, ...configLines].join("\n") + "\n",
+          );
+        }
+        return { workspaceId: `ws-${name}`, configPath };
+      }
+
+      const enabled = await makeWorkspace("enabled", [
+        "autoRecordConversations: true",
+      ]);
+      const absent = await makeWorkspace("absent", []);
+      const explicitOff = await makeWorkspace("explicit-off", [
+        "autoRecordConversations: false",
+      ]);
+      const broken = await makeWorkspace("broken", [
+        "autoRecordConversations: [not, a, boolean]",
+      ]);
+
+      await new WorkspaceRegistryFileStore(
+        resolveDefaultWorkspaceRegistryPath(katoDir),
+      ).save(
+        [enabled, absent, explicitOff, broken].map((workspace, index) => ({
+          workspaceId: workspace.workspaceId,
+          alias: workspace.workspaceId.replace("ws-", ""),
+          workspaceRoot: join(
+            homeDir,
+            workspace.workspaceId.replace("ws-", ""),
+          ),
+          configPath: workspace.configPath,
+          registeredAt: `2026-03-0${index + 1}T15:00:00.000Z`,
+        })),
+      );
+      await new SharedBehaviorConfigFileStore(sharedConfigPath).save(
+        createDefaultSharedBehaviorConfig({ allowedWriteRoots: [homeDir] }),
+      );
+      await new UserConfigFileStore(resolveDefaultUserConfigPath(katoDir)).save(
+        createDefaultUserConfig(),
+      );
+
+      const data = await loadWorkspacesPageData({ katoDir });
+      const byId = new Map(data.rows.map((row) => [row.workspaceId, row]));
+
+      assertEquals(byId.get("ws-enabled")?.autoRecordConversations, true);
+      assertEquals(byId.get("ws-absent")?.autoRecordConversations, false);
+      assertEquals(byId.get("ws-explicit-off")?.autoRecordConversations, false);
+      assertEquals(byId.get("ws-broken")?.valid, false);
+      assertEquals(byId.get("ws-broken")?.autoRecordConversations, undefined);
+      assertEquals(
+        JSON.parse(JSON.stringify(byId.get("ws-enabled")))
+          .autoRecordConversations,
+        true,
+      );
+    },
+  );
 });
 
 Deno.test("loadSessionsPageData handles twin prompts and recording fallbacks", async () => {

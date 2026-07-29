@@ -1067,7 +1067,7 @@ export async function loadSessionActivityRows(
       ...(relationships.has(metadata.sessionId)
         ? { relationship: relationships.get(metadata.sessionId) }
         : {}),
-      snippet: live?.snippet,
+      snippet: live?.snippet ?? metadata.providerTitle,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
       ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),

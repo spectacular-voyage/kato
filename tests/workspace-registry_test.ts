@@ -80,6 +80,83 @@ Deno.test("loadWorkspaceConfigOverrides supports auto-recording settings", async
       ),
       true,
     );
+    assertEquals(
+      createWorkspaceConfigScaffold().includes("autoRecordRoots: []"),
+      true,
+    );
+  });
+});
+
+Deno.test("loadWorkspaceConfigOverrides parses and resolves autoRecordRoots", async () => {
+  await withTestTempDir("workspace-auto-record-roots-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "project", "notes");
+    const configPath = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+    const repoRoot = join(tempDir, "project");
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+    await Deno.writeTextFile(
+      configPath,
+      [
+        "autoRecordConversations: true",
+        "autoRecordRoots:",
+        `  - ${repoRoot}`,
+        "  - ../..",
+        `  - ${repoRoot}`,
+        "defaultOutputDir: .",
+      ].join("\n") + "\n",
+    );
+
+    const loaded = await loadWorkspaceConfigOverrides(configPath);
+    assertEquals(loaded.autoRecordRoots, [repoRoot, "../..", repoRoot]);
+
+    const profile = await new WorkspaceProfileResolver().resolveForCommand(
+      makeWorkspace({
+        workspaceId: "ws-roots",
+        alias: "roots",
+        workspaceRoot,
+        configPath,
+      }),
+    );
+    // Absolute entries stay put, relative entries resolve against the
+    // workspace root, exact duplicates are dropped.
+    assertEquals(profile.autoRecordRoots, [repoRoot, tempDir]);
+  });
+});
+
+Deno.test("loadWorkspaceConfigOverrides rejects malformed autoRecordRoots", async () => {
+  await withTestTempDir("workspace-auto-record-roots-bad-", async (tempDir) => {
+    const workspaceRoot = join(tempDir, "notes");
+    const configPath = join(workspaceRoot, DEFAULT_WORKSPACE_CONFIG_FILENAME);
+    await Deno.mkdir(workspaceRoot, { recursive: true });
+
+    await Deno.writeTextFile(
+      configPath,
+      "autoRecordRoots: not-a-list\n",
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "autoRecordRoots must be a list",
+    );
+
+    await Deno.writeTextFile(
+      configPath,
+      ["autoRecordRoots:", "  - ''", ""].join("\n"),
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "autoRecordRoots entries must be non-empty strings",
+    );
+
+    await Deno.writeTextFile(
+      configPath,
+      ["autoRecordRoots:", "  - 7", ""].join("\n"),
+    );
+    await assertRejects(
+      () => loadWorkspaceConfigOverrides(configPath),
+      Error,
+      "autoRecordRoots entries must be non-empty strings",
+    );
   });
 });
 

@@ -41,6 +41,20 @@ function readCheckboxField(form: FormData, name: string): boolean {
   throw new Error(`${name} must be a checkbox value`);
 }
 
+function readPathListField(form: FormData, name: string): string[] {
+  const value = form.get(name);
+  if (value === null) {
+    return [];
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be text`);
+  }
+  return value
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 function readTagListField(form: FormData, name: string): string[] {
   const value = form.get(name);
   if (value === null) {
@@ -89,6 +103,7 @@ function buildEditInput(form: FormData) {
       form,
       "autoRecordConversations",
     ),
+    autoRecordRoots: readPathListField(form, "autoRecordRoots"),
     defaultOutputDir: readRequiredTextField(form, "defaultOutputDir"),
     filenameTemplate: readRequiredTextField(form, "filenameTemplate"),
     workspaceTimezone: readRequiredTextField(form, "workspaceTimezone"),

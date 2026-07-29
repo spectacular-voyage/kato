@@ -291,6 +291,7 @@ async function runWorkspaceResolutionScenario(
         workspaceRoot: PARTICIPANT_RUNTIME_WORKSPACE_ROOT,
         configPath: PARTICIPANT_RUNTIME_WORKSPACE_CONFIG_PATH,
         autoRecordConversations: false,
+        autoRecordRoots: [],
         resolvedDefaultOutputDir: PARTICIPANT_RUNTIME_DEFAULT_OUTPUT_DIR,
         defaultOutputDirTemplate: "{workspace_dir}/notes",
         filenameTemplate: "{provider}.md",

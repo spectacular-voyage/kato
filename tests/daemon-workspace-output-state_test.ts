@@ -38,6 +38,7 @@ function makeProfile(
     configPath: overrides.configPath ??
       resolve(workspaceRoot, ".kato", "workspace.yaml"),
     autoRecordConversations: overrides.autoRecordConversations ?? false,
+    autoRecordRoots: overrides.autoRecordRoots ?? [],
     resolvedDefaultOutputDir: overrides.resolvedDefaultOutputDir ??
       resolve(workspaceRoot, "notes"),
     defaultOutputDirTemplate: overrides.defaultOutputDirTemplate ?? "notes",

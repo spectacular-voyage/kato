@@ -97,6 +97,9 @@ export interface SessionWorkspaceAttachmentWriterFeatureFlagsV1 {
   writerUseDendronStyleWikilinks?: boolean;
 }
 
+/** Origin of a provider-maintained session title. */
+export type ProviderSessionTitleSource = "custom" | "ai";
+
 export interface SessionMetadataV1 {
   schemaVersion: typeof SESSION_METADATA_SCHEMA_VERSION;
   sessionKey: string;
@@ -104,6 +107,9 @@ export interface SessionMetadataV1 {
   providerSessionId: string;
   /** Provider-native immediate parent for a recognized sub-conversation. */
   parentProviderSessionId?: string;
+  /** Latest provider-maintained session title (custom outranks ai). */
+  providerTitle?: string;
+  providerTitleSource?: ProviderSessionTitleSource;
   sessionId: string;
   createdAt: string;
   updatedAt: string;
@@ -443,6 +449,19 @@ export function isSessionMetadataV1(
   if (
     value["parentProviderSessionId"] !== undefined &&
     !isNonEmptyString(value["parentProviderSessionId"])
+  ) {
+    return false;
+  }
+  if (
+    value["providerTitle"] !== undefined &&
+    !isNonEmptyString(value["providerTitle"])
+  ) {
+    return false;
+  }
+  if (
+    value["providerTitleSource"] !== undefined &&
+    value["providerTitleSource"] !== "custom" &&
+    value["providerTitleSource"] !== "ai"
   ) {
     return false;
   }

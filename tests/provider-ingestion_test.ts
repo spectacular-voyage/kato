@@ -1982,3 +1982,215 @@ Deno.test("FileProviderIngestionRunner caches empty head-snippet reads across po
     assertEquals(store.get("session-head-cache"), undefined);
   });
 });
+
+Deno.test("FileProviderIngestionRunner captures provider titles and title-only appends", async () => {
+  await withTempDir("provider-ingestion-titles-", async (dir) => {
+    const sessionFile = join(dir, "session-titles.jsonl");
+    // Long enough that the stubbed byte-offset cursors stay within the file,
+    // so cursor-resume never mistakes them for a truncated source.
+    await Deno.writeTextFile(sessionFile, "placeholder-".repeat(4) + "\n");
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const parseOffsets: number[] = [];
+
+    const runner = new FileProviderIngestionRunner({
+      provider: "test-provider",
+      watchRoots: [dir],
+      sessionSnapshotStore: store,
+      watchFs: harness.watchFn,
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-titles",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        parseOffsets.push(fromOffset);
+        return (async function* () {
+          if (fromOffset === 0) {
+            yield {
+              event: makeEvent("m1", "2026-07-28T20:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+            return;
+          }
+          if (fromOffset === 10) {
+            // A rename appended only a title line: no conversation event.
+            yield {
+              titleUpdate: {
+                title: "Renamed by user",
+                source: "custom" as const,
+              },
+              cursor: { kind: "byte-offset" as const, value: 20 },
+            };
+          }
+        })();
+      },
+    });
+
+    await runner.start();
+    const firstPoll = await runner.poll();
+    assertEquals(firstPoll.sessionsUpdated, 1);
+    assertEquals(
+      store.get("session-titles")?.metadata.providerTitle,
+      undefined,
+    );
+
+    await harness.emitModify(sessionFile);
+    const secondPoll = await runner.poll();
+    assertEquals(secondPoll.sessionsUpdated, 1);
+    assertEquals(secondPoll.eventsObserved, 0);
+
+    const snapshot = store.get("session-titles");
+    assertExists(snapshot);
+    assertEquals(snapshot.metadata.providerTitle, "Renamed by user");
+    assertEquals(snapshot.metadata.providerTitleSource, "custom");
+    assertEquals(snapshot.metadata.snippet, undefined);
+    assertEquals(snapshot.cursor, { kind: "byte-offset", value: 20 });
+
+    await harness.emitModify(sessionFile);
+    const thirdPoll = await runner.poll();
+    assertEquals(thirdPoll.sessionsUpdated, 0);
+    assertEquals(parseOffsets, [0, 10, 20]);
+
+    await runner.stop();
+  });
+});
+
+Deno.test("FileProviderIngestionRunner redacts secrets in provider titles fail-closed", async () => {
+  await withTempDir("provider-ingestion-title-secrets-", async (dir) => {
+    const sessionFile = join(dir, "session-title-secret.jsonl");
+    await Deno.writeTextFile(sessionFile, "placeholder-".repeat(4) + "\n");
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const secretToken = "ghp_" + "a1B2".repeat(9);
+
+    const runner = new FileProviderIngestionRunner({
+      provider: "test-provider",
+      watchRoots: [dir],
+      sessionSnapshotStore: store,
+      watchFs: harness.watchFn,
+      // No secretsPolicy: the fail-closed default redact mode applies.
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-title-secret",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        return (async function* () {
+          if (fromOffset === 0) {
+            yield {
+              titleUpdate: {
+                title: `Rotate ghp_ token ${secretToken}`,
+                source: "custom" as const,
+              },
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+            yield {
+              event: makeEvent("m1", "2026-07-28T20:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 20 },
+            };
+          }
+        })();
+      },
+    });
+
+    await runner.start();
+    await runner.poll();
+
+    const snapshot = store.get("session-title-secret");
+    assertExists(snapshot);
+    const title = snapshot.metadata.providerTitle;
+    assertExists(title);
+    assert(!title.includes(secretToken), `title leaked secret: ${title}`);
+    assertEquals(snapshot.metadata.providerTitleSource, "custom");
+
+    await runner.stop();
+  });
+});
+
+Deno.test("FileProviderIngestionRunner backfills Claude provider titles past the cursor", async () => {
+  await withTempDir("provider-ingestion-title-backfill-", async (dir) => {
+    const sessionFile = join(dir, "session-backfill.jsonl");
+    await Deno.writeTextFile(sessionFile, "placeholder\n");
+
+    const store = new InMemorySessionSnapshotStore();
+    const harness = makeWatchHarness();
+    const parseCalls: number[] = [];
+    let zeroOffsetCalls = 0;
+
+    const runner = new FileProviderIngestionRunner({
+      provider: "claude",
+      watchRoots: [dir],
+      sessionSnapshotStore: store,
+      watchFs: harness.watchFn,
+      discoverSessions() {
+        return Promise.resolve([{
+          sessionId: "session-backfill",
+          filePath: sessionFile,
+          modifiedAtMs: Date.now(),
+        }]);
+      },
+      parseEvents(
+        _filePath: string,
+        fromOffset: number,
+        _ctx: { provider: string; sessionId: string },
+      ) {
+        parseCalls.push(fromOffset);
+        return (async function* () {
+          if (fromOffset === 0) {
+            zeroOffsetCalls += 1;
+            // The title line only surfaces on the backfill re-scan; the
+            // initial ingest pass simulates a pre-title-support consumer.
+            if (zeroOffsetCalls > 1) {
+              yield {
+                titleUpdate: {
+                  title: "Recovered AI title",
+                  source: "ai" as const,
+                },
+                cursor: { kind: "byte-offset" as const, value: 5 },
+              };
+            }
+            yield {
+              event: makeEvent("m1", "2026-07-28T20:00:00.000Z"),
+              cursor: { kind: "byte-offset" as const, value: 10 },
+            };
+          }
+        })();
+      },
+    });
+
+    await runner.start();
+    await runner.poll();
+    assertEquals(
+      store.get("session-backfill")?.metadata.providerTitle,
+      undefined,
+    );
+
+    await harness.emitModify(sessionFile);
+    const secondPoll = await runner.poll();
+    assertEquals(secondPoll.sessionsUpdated, 1);
+    const snapshot = store.get("session-backfill");
+    assertExists(snapshot);
+    assertEquals(snapshot.metadata.providerTitle, "Recovered AI title");
+    assertEquals(snapshot.metadata.providerTitleSource, "ai");
+
+    // The backfill scan ran exactly once (cursor pass at 10 plus one 0-scan).
+    assertEquals(parseCalls.filter((offset) => offset === 0).length, 2);
+
+    await runner.stop();
+  });
+});

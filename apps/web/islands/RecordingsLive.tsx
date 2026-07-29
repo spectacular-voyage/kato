@@ -11,6 +11,7 @@ import {
 import {
   buildRecordingRowAnchorId,
   buildRecordingsHref,
+  buildSessionDetailHref,
 } from "../src/session_routes.ts";
 import { TimestampText } from "../src/TimestampText.tsx";
 import {
@@ -287,6 +288,12 @@ export default function RecordingsLive(
                           href={row.sessionHref}
                         >
                           ({row.sessionShortId})
+                        </a>{" "}
+                        <a
+                          class="workspace-session-link mono"
+                          href={buildSessionDetailHref(row.sessionId)}
+                        >
+                          View
                         </a>
                       </div>
                       {row.writerPolicy

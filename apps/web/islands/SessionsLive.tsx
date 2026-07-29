@@ -8,6 +8,7 @@ import type {
 } from "../src/loaders/sessions.ts";
 import {
   buildRecordingsRecordingHref,
+  buildSessionDetailHref,
   buildSessionInventoryHref,
 } from "../src/session_routes.ts";
 import {
@@ -698,6 +699,16 @@ function SessionRow(
           {row.twinSizeBytes === undefined
             ? "absent"
             : formatBytes(row.twinSizeBytes)}
+          {row.twinSizeBytes !== undefined
+            ? (
+              <>
+                {" · "}
+                <a href={buildSessionDetailHref(row.sessionId)}>
+                  View
+                </a>
+              </>
+            )
+            : null}
         </span>
         {row.relationship || row.structuralContext
           ? (

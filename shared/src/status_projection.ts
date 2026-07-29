@@ -8,6 +8,7 @@ import type {
   DaemonRecordingStatus,
   DaemonSessionStatus,
 } from "./contracts/status.ts";
+import type { ProviderSessionTitleSource } from "./contracts/session_state.ts";
 
 export const DEFAULT_STATUS_STALE_AFTER_MS = 5 * 60_000;
 const SNIPPET_MAX_CHARS = 60;
@@ -25,6 +26,9 @@ export interface SessionProjectionInput {
   fileModifiedAtMs?: number;
   /** Pre-computed snippet from metadata. Preferred over scanning events. */
   snippet?: string;
+  /** Provider-maintained session title. Preferred over the snippet. */
+  providerTitle?: string;
+  providerTitleSource?: ProviderSessionTitleSource;
   /** Events array — only needed when snippet is not cached. */
   events?: ConversationEvent[];
 }
@@ -113,7 +117,11 @@ export function projectSessionStatus(opts: {
     ...(session.providerSessionId
       ? { providerSessionId: session.providerSessionId }
       : {}),
-    snippet: session.snippet ?? extractSnippet(session.events ?? []),
+    snippet: session.providerTitle ?? session.snippet ??
+      extractSnippet(session.events ?? []),
+    ...(session.providerTitle && session.providerTitleSource
+      ? { titleSource: session.providerTitleSource }
+      : {}),
     updatedAt: session.updatedAt,
     ...(session.lastEventAt ? { lastEventAt: session.lastEventAt } : {}),
     stale,

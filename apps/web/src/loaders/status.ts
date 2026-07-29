@@ -33,6 +33,7 @@ export interface WorkspaceSummaryRow {
   displayName?: string;
   workspaceRoot: string;
   configPath: string;
+  registeredAt?: string;
   valid: boolean;
   invalidReason?: string;
 }
@@ -457,6 +458,7 @@ export async function loadWorkspaceSummary(options: {
             displayName: entry.displayName,
             workspaceRoot: entry.workspaceRoot,
             configPath: entry.configPath,
+            registeredAt: entry.registeredAt,
             valid: false,
             invalidReason:
               `workspaceId mismatch (registry=${entry.workspaceId}, config=${configuredWorkspaceId})`,
@@ -468,6 +470,7 @@ export async function loadWorkspaceSummary(options: {
           displayName: entry.displayName,
           workspaceRoot: entry.workspaceRoot,
           configPath: entry.configPath,
+          registeredAt: entry.registeredAt,
           valid: true,
         };
       } catch (error) {
@@ -477,6 +480,7 @@ export async function loadWorkspaceSummary(options: {
           displayName: entry.displayName,
           workspaceRoot: entry.workspaceRoot,
           configPath: entry.configPath,
+          registeredAt: entry.registeredAt,
           valid: false,
           invalidReason: formatWorkspaceConfigError(error),
         };

@@ -87,6 +87,7 @@ export {
 export type {
   DaemonControlIndexV1,
   DaemonControlSessionIndexEntryV1,
+  ProviderSessionTitleSource,
   RecordingDesiredState,
   SessionCommandCursorAnchorV1,
   SessionIngestAnchorV1,

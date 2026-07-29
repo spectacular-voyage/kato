@@ -22,6 +22,7 @@ import { formatWorkspaceRegistryError } from "./status.ts";
 
 export interface WorkspaceConfigEditRawValues {
   autoRecordConversations?: boolean;
+  autoRecordRoots?: string[];
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -194,6 +195,9 @@ export async function loadWorkspaceConfigEditPageData(
       raw: {
         ...(overrides.autoRecordConversations !== undefined
           ? { autoRecordConversations: overrides.autoRecordConversations }
+          : {}),
+        ...(overrides.autoRecordRoots !== undefined
+          ? { autoRecordRoots: [...overrides.autoRecordRoots] }
           : {}),
         ...(overrides.defaultOutputDir !== undefined
           ? { defaultOutputDir: overrides.defaultOutputDir }

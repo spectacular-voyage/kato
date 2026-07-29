@@ -2,6 +2,7 @@ import type {
   ConversationEvent,
   ProviderAutoGenerateTwins,
   ProviderCursor,
+  ProviderSessionTitleSource,
   SecretsPolicyConfig,
   SessionIngestAnchorV1,
   SessionMetadataV1,
@@ -37,6 +38,7 @@ import type {
   ProviderIngestionRunner,
   SessionSnapshotStore,
 } from "./ingestion_runtime.ts";
+import { shouldReplaceProviderTitle } from "./ingestion_runtime.ts";
 import {
   makeDefaultSessionCursor,
   type PersistentSessionStateStore,
@@ -70,6 +72,12 @@ import {
   type MergeEventsOptions,
 } from "./provider_ingestion_merge.ts";
 
+/** Provider-maintained session title observed while parsing source lines. */
+export interface ProviderIngestionTitleUpdate {
+  title: string;
+  source: ProviderSessionTitleSource;
+}
+
 export interface ProviderSessionFile {
   sessionId: string;
   parentProviderSessionId?: string;
@@ -94,7 +102,11 @@ export interface FileProviderIngestionRunnerOptions {
     filePath: string,
     fromOffset: number,
     ctx: { provider: string; sessionId: string },
-  ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
+  ) => AsyncIterable<{
+    event?: ConversationEvent;
+    titleUpdate?: ProviderIngestionTitleUpdate;
+    cursor: ProviderCursor;
+  }>;
   sessionSnapshotStore: SessionSnapshotStore;
   sessionStateStore?: PersistentSessionStateStore;
   autoGenerateTwins?: boolean;
@@ -671,7 +683,11 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     filePath: string,
     fromOffset: number,
     ctx: { provider: string; sessionId: string },
-  ) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
+  ) => AsyncIterable<{
+    event?: ConversationEvent;
+    titleUpdate?: ProviderIngestionTitleUpdate;
+    cursor: ProviderCursor;
+  }>;
   private readonly watchRoots: string[];
   private readonly sessions = new Map<string, ProviderSessionFile>();
   private readonly sessionByFilePath = new Map<string, string>();
@@ -694,6 +710,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
    * session with no user message is not re-scanned every poll.
    */
   private readonly headSnippets = new Map<string, string | undefined>();
+  private readonly providerTitleBackfills = new Map<
+    string,
+    ProviderIngestionTitleUpdate | undefined
+  >();
 
   constructor(options: FileProviderIngestionRunnerOptions) {
     this.provider = options.provider;
@@ -803,6 +823,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           sessionId,
         })
       ) {
+        if (!event) {
+          continue;
+        }
         scanned += 1;
         if (event.kind === "message.user") {
           const candidate = extractSnippet(
@@ -832,6 +855,109 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     this.headSnippets.set(cacheKey, snippet);
     return snippet;
+  }
+
+  /**
+   * Applies the secrets policy to a provider session title with the same
+   * fail-closed semantics as event redaction: a title the transform throws on
+   * is dropped, never passed through. Audit events carry rule counts only,
+   * never title text.
+   */
+  private async applySecretsPolicyToTitle(
+    update: ProviderIngestionTitleUpdate,
+    sessionId: string,
+  ): Promise<ProviderIngestionTitleUpdate | undefined> {
+    if (this.secretsRedactor.mode === "off") {
+      return update;
+    }
+    try {
+      const result = this.secretsRedactor.processText(update.title);
+      if (result.matches.length > 0) {
+        const countsByRule: Record<string, number> = {};
+        for (const match of result.matches) {
+          countsByRule[match.ruleId] = (countsByRule[match.ruleId] ?? 0) +
+            match.count;
+        }
+        await this.auditLogger.record(
+          this.secretsRedactor.mode === "redact"
+            ? "secrets.redacted"
+            : "secrets.detected",
+          this.secretsRedactor.mode === "redact"
+            ? "Secrets redacted from provider session title"
+            : "Secrets detected in provider session title",
+          {
+            provider: this.provider,
+            sessionId,
+            mode: this.secretsRedactor.mode,
+            field: "providerTitle",
+            countsByRule,
+          },
+        );
+      }
+      return this.secretsRedactor.mode === "redact"
+        ? { ...update, title: result.text }
+        : update;
+    } catch {
+      await this.operationalLogger.error(
+        "provider.ingestion.secrets_redaction_failed",
+        "Secrets redaction failed for provider session title; title dropped fail-closed",
+        { provider: this.provider, sessionId },
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * One-time full-file scan recovering provider title lines for sessions whose
+   * cursor already passed them (pre-feature snapshots, mid-file resumes).
+   * Never fails ingestion: any error resolves to `undefined`. Results
+   * (including misses) are cached per session/file for the daemon's lifetime.
+   */
+  private async resolveProviderTitleBackfill(
+    sessionId: string,
+    filePath: string,
+  ): Promise<ProviderIngestionTitleUpdate | undefined> {
+    const cacheKey = `${sessionId}:${filePath}`;
+    if (this.providerTitleBackfills.has(cacheKey)) {
+      return this.providerTitleBackfills.get(cacheKey);
+    }
+
+    const latest: { custom?: string; ai?: string } = {};
+    try {
+      for await (
+        const { titleUpdate } of this.parseEvents(filePath, 0, {
+          provider: this.provider,
+          sessionId,
+        })
+      ) {
+        if (titleUpdate) {
+          latest[titleUpdate.source] = titleUpdate.title;
+        }
+      }
+    } catch (error) {
+      await this.operationalLogger.debug(
+        "provider.ingestion.title_backfill_failed",
+        "Source scan for provider session title failed; title stays unset",
+        {
+          provider: this.provider,
+          sessionId,
+          filePath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+
+    const update: ProviderIngestionTitleUpdate | undefined =
+      latest.custom !== undefined
+        ? { title: latest.custom, source: "custom" }
+        : latest.ai !== undefined
+        ? { title: latest.ai, source: "ai" }
+        : undefined;
+    const processed = update
+      ? await this.applySecretsPolicyToTitle(update, sessionId)
+      : undefined;
+    this.providerTitleBackfills.set(cacheKey, processed);
+    return processed;
   }
 
   async start(): Promise<void> {
@@ -1424,6 +1550,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       }
     }
 
+    const batchTitles: { custom?: string; ai?: string } = {};
+
     let twinAvailableForHydration = false;
     if (stateMetadata && this.sessionStateStore) {
       let twinExists = true;
@@ -1473,13 +1601,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           : makeByteOffsetCursor(0);
         try {
           for await (
-            const { event, cursor } of this.parseEvents(
+            const { event, titleUpdate, cursor } of this.parseEvents(
               session.filePath,
               0,
               { provider: this.provider, sessionId },
             )
           ) {
-            bootstrapEvents.push(event);
+            if (titleUpdate) {
+              batchTitles[titleUpdate.source] = titleUpdate.title;
+            }
+            if (event) {
+              bootstrapEvents.push(event);
+            }
             if (
               cursor.kind === "byte-offset" || cursor.kind === "item-index"
             ) {
@@ -1571,13 +1704,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
 
     try {
       for await (
-        const { event, cursor } of this.parseEvents(
+        const { event, titleUpdate, cursor } of this.parseEvents(
           session.filePath,
           fromOffset,
           { provider: this.provider, sessionId },
         )
       ) {
-        incomingEvents.push(event);
+        if (titleUpdate) {
+          batchTitles[titleUpdate.source] = titleUpdate.title;
+        }
+        if (event) {
+          incomingEvents.push(event);
+        }
         if (cursor.kind === "byte-offset" || cursor.kind === "item-index") {
           const current = resolveCursorPosition(latestCursor);
           const incoming = resolveCursorPosition(cursor);
@@ -1606,6 +1744,31 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
 
     incomingEvents = await this.applySecretsPolicy(incomingEvents, sessionId);
+
+    const batchTitleUpdate: ProviderIngestionTitleUpdate | undefined =
+      batchTitles.custom !== undefined
+        ? { title: batchTitles.custom, source: "custom" }
+        : batchTitles.ai !== undefined
+        ? { title: batchTitles.ai, source: "ai" }
+        : undefined;
+    let providerTitleUpdate = batchTitleUpdate
+      ? await this.applySecretsPolicyToTitle(batchTitleUpdate, sessionId)
+      : undefined;
+    if (
+      !providerTitleUpdate &&
+      this.provider === "claude" &&
+      fromOffset > 0 &&
+      stateMetadata?.providerTitle === undefined &&
+      currentSnapshot?.metadata.providerTitle === undefined
+    ) {
+      // Sessions ingested before title support (or resumed mid-file) already
+      // consumed the offsets holding their title lines; recover them once
+      // from the source head-to-tail scan.
+      providerTitleUpdate = await this.resolveProviderTitleBackfill(
+        sessionId,
+        session.filePath,
+      );
+    }
 
     const latestOffset = resolveCursorPosition(latestCursor);
     const fileModifiedAtMs = fileStat.mtime?.getTime();
@@ -1729,12 +1892,27 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         stateMetadata.lastObservedMtimeMs !== fileModifiedAtMs;
       const sourceFileChanged =
         stateMetadata.sourceFilePath !== session.filePath;
+      let providerTitleChanged = false;
+      if (
+        providerTitleUpdate &&
+        shouldReplaceProviderTitle(
+          stateMetadata.providerTitleSource,
+          providerTitleUpdate.source,
+        ) &&
+        (stateMetadata.providerTitle !== providerTitleUpdate.title ||
+          stateMetadata.providerTitleSource !== providerTitleUpdate.source)
+      ) {
+        stateMetadata.providerTitle = providerTitleUpdate.title;
+        stateMetadata.providerTitleSource = providerTitleUpdate.source;
+        providerTitleChanged = true;
+      }
       if (
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
         workingDirectoryChanged ||
-        anchorChanged
+        anchorChanged ||
+        providerTitleChanged
       ) {
         stateMetadata.ingestCursor = latestCursor;
         if (nextWorkingDirectory) {
@@ -1752,7 +1930,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         cursorChanged ||
         fileMtimeChanged ||
         sourceFileChanged ||
-        anchorChanged;
+        anchorChanged ||
+        providerTitleChanged;
       const shouldHydrateFromTwin = twinAvailableForHydration &&
         !currentSnapshot;
 
@@ -1790,6 +1969,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               events: rebuiltMerged.mergedEvents,
               fileModifiedAtMs,
               ...(snippetOverride ? { snippetOverride } : {}),
+              ...(providerTitleUpdate
+                ? { providerTitle: providerTitleUpdate }
+                : {}),
             });
           }
         } else if (
@@ -1822,6 +2004,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             events: merged.mergedEvents,
             fileModifiedAtMs,
             ...(snippetOverride ? { snippetOverride } : {}),
+            ...(providerTitleUpdate
+              ? { providerTitle: providerTitleUpdate }
+              : {}),
           });
         } else if (incomingEvents.length > 0 || currentSnapshot) {
           const merged = mergeEvents(
@@ -1854,6 +2039,9 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             events: mergedEvents,
             fileModifiedAtMs,
             ...(snippetOverride ? { snippetOverride } : {}),
+            ...(providerTitleUpdate
+              ? { providerTitle: providerTitleUpdate }
+              : {}),
           });
         }
       }
@@ -1865,7 +2053,17 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       };
     }
 
-    if (incomingEvents.length === 0 && latestOffset === fromOffset) {
+    const providerTitleAdvancesSnapshot = providerTitleUpdate !== undefined &&
+      currentSnapshot !== undefined &&
+      shouldReplaceProviderTitle(
+        currentSnapshot.metadata.providerTitleSource,
+        providerTitleUpdate.source,
+      ) &&
+      currentSnapshot.metadata.providerTitle !== providerTitleUpdate.title;
+    if (
+      incomingEvents.length === 0 && latestOffset === fromOffset &&
+      !providerTitleAdvancesSnapshot
+    ) {
       return { updated: false, eventsObserved: 0 };
     }
 
@@ -1899,6 +2097,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       events: mergedEvents,
       fileModifiedAtMs,
       ...(snippetOverride ? { snippetOverride } : {}),
+      ...(providerTitleUpdate ? { providerTitle: providerTitleUpdate } : {}),
     });
     this.setCursor(sessionId, latestCursor, session.filePath);
 

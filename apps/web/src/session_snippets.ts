@@ -69,6 +69,10 @@ async function loadTwinSnippet(
   sessionStore: PersistentSessionStateStore,
   secretsPolicy: SecretsPolicyConfig | undefined,
 ): Promise<string | undefined> {
+  const providerTitle = normalizeSnippet(metadata.providerTitle);
+  if (providerTitle) {
+    return providerTitle;
+  }
   try {
     const twinEvents = await sessionStore.readTwinEvents(metadata, 1);
     if (twinEvents.length === 0) {

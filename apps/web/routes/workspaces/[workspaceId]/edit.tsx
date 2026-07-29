@@ -197,6 +197,24 @@ export default define.page(async function WorkspaceConfigEditPage(ctx) {
                         />
                         <span>Auto-record conversations</span>
                       </label>
+                      <label class="form-label" for="autoRecordRoots">
+                        Auto-Record Conversation Roots
+                      </label>
+                      <textarea
+                        class="form-input mono workspace-config-tag-field"
+                        id="autoRecordRoots"
+                        name="autoRecordRoots"
+                        rows={3}
+                        placeholder="one directory per line; blank = workspace root only"
+                      >
+                        {effective.autoRecordRoots.join("\n")}
+                      </textarea>
+                      <p class="workspace-settings-note muted">
+                        Conversations whose working directory is inside any
+                        listed root auto-record here. Absolute, ~, or
+                        workspace-root-relative paths; blank falls back to the
+                        workspace root itself.
+                      </p>
                       <label class="form-label" for="defaultOutputDir">
                         Default Output Dir
                       </label>
