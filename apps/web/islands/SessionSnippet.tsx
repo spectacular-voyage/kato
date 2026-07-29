@@ -7,6 +7,7 @@ interface SessionSnippetProps {
   snippetClass?: string;
   title?: string;
   href?: string;
+  onSnippetResolved?: (snippet: string) => void;
 }
 
 interface SessionSnippetResponse {
@@ -68,12 +69,15 @@ export default function SessionSnippet(props: SessionSnippetProps) {
       return;
     }
     const cachedSnippet = readCachedSnippet(props.sessionId);
+    if (cachedSnippet) {
+      props.onSnippetResolved?.(cachedSnippet);
+    }
     setState(
       cachedSnippet
         ? { status: "ready", snippet: cachedSnippet }
         : { status: "idle" },
     );
-  }, [props.sessionId, props.snippet]);
+  }, [props.sessionId, props.snippet, props.onSnippetResolved]);
 
   if (state.status === "ready") {
     if (props.href) {
@@ -130,6 +134,7 @@ export default function SessionSnippet(props: SessionSnippetProps) {
       if (payload.status === "ready" && normalizeSnippet(payload.snippet)) {
         const snippet = normalizeSnippet(payload.snippet)!;
         cacheSnippet(props.sessionId, snippet);
+        props.onSnippetResolved?.(snippet);
         setState({
           status: "ready",
           snippet,

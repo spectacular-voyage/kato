@@ -187,6 +187,41 @@ Deno.test("resolveSessionSnippet redacts legacy twin snippets when source replay
   );
 });
 
+Deno.test("resolveSessionSnippet prefers persisted provider titles and redacts them", async () => {
+  await withTestTempDir(
+    "web-session-snippets-provider-title-",
+    async (rootDir) => {
+      const katoDir = `${rootDir}/.kato`;
+      const { metadata, store } = await createSnippetSessionFixture({
+        katoDir,
+        sessionId: "sess-provider-title",
+        providerSessionId: "provider-title",
+        sourceName: "provider-title",
+      });
+      await store.appendTwinEvents(metadata, [
+        makeTwinEvent(metadata.sessionId, 0, "first user message"),
+      ]);
+      metadata.providerTitle = `Rotate aws key ${PLANTED_AWS_KEY}`;
+      metadata.providerTitleSource = "custom";
+      await store.saveSessionMetadata(metadata);
+
+      const result = await resolveSessionSnippet({
+        sessionId: metadata.sessionId,
+        katoDir,
+        allowSourceReplay: false,
+        statusStore: makeStatusStore([]),
+      });
+
+      assertEquals(result, {
+        sessionId: metadata.sessionId,
+        status: "ready",
+        snippet: "Rotate aws key [REDACTED:aws-access-key-id]",
+        source: "twin",
+      });
+    },
+  );
+});
+
 Deno.test("resolveSessionSnippet uses twin history before source replay when both are allowed", async () => {
   await withTestTempDir("web-session-snippets-twin-first-", async (rootDir) => {
     const katoDir = `${rootDir}/.kato`;

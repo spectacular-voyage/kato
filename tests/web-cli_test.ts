@@ -174,6 +174,28 @@ Deno.test("cli parser parses web subcommands", () => {
     throw new Error("expected web-restart command");
   }
 
+  const start = parseDaemonCliArgs(["web", "start"]);
+  assertEquals(start.kind, "command");
+  if (start.kind !== "command" || start.command.name !== "web-start") {
+    throw new Error("expected web-start command");
+  }
+  assertEquals(start.command.hostname, undefined);
+
+  const startWithHost = parseDaemonCliArgs([
+    "web",
+    "start",
+    "--host",
+    "0.0.0.0",
+  ]);
+  assertEquals(startWithHost.kind, "command");
+  if (
+    startWithHost.kind !== "command" ||
+    startWithHost.command.name !== "web-start"
+  ) {
+    throw new Error("expected web-start command");
+  }
+  assertEquals(startWithHost.command.hostname, "0.0.0.0");
+
   assertThrows(() => parseDaemonCliArgs(["web", "init", "--port", "0"]));
 });
 
@@ -603,6 +625,90 @@ Deno.test(
       assertEquals(statusPayload.state, "running");
       assertEquals(statusPayload.stale, false);
       assertEquals(statusPayload.port, 3187);
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonCli web start --host overrides the configured hostname for one run",
+  async () => {
+    await withTestTempDir("web-cli-host-override-", async (rootDir) => {
+      const runtimeDir = join(rootDir, "daemon");
+      await Deno.mkdir(runtimeDir, { recursive: true });
+      const webConfigStore = new WebConfigFileStore(
+        join(rootDir, "web", "kato-web-config.yaml"),
+      );
+      const webStatusStore = new WebServerStatusFileStore(
+        join(rootDir, "web", "kato-web-status.json"),
+        () => new Date("2026-03-07T20:00:00.000Z"),
+      );
+      const launchedPid = Deno.pid;
+      const launchOptions: { hostname: string; port: number }[] = [];
+      const webLauncher: WebProcessLauncherLike = {
+        async launchDetached(options) {
+          launchOptions.push(options);
+          await webStatusStore.save({
+            schemaVersion: 1,
+            running: true,
+            hostname: options.hostname,
+            port: options.port,
+            pid: launchedPid,
+            startedAt: "2026-03-07T20:00:00.000Z",
+            heartbeatAt: "2026-03-07T20:00:00.000Z",
+            url: `http://${options.hostname}:${options.port}/`,
+            version: "test-build",
+          });
+          return launchedPid;
+        },
+      };
+      const webPortSelector = makeFixedWebPortSelector();
+
+      const initHarness = makeRuntimeHarness(runtimeDir, {
+        webInitPassword: {
+          readPasswordFromEnv: () => "secret-pass",
+        },
+      });
+      const initCode = await runDaemonCli(
+        ["web", "init", "--username", "dj", "--port", "3187"],
+        {
+          runtime: initHarness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+          webConfigStore,
+          webStatusStore,
+          webLauncher,
+          webPortSelector,
+        },
+      );
+      assertEquals(initCode, 0);
+
+      const startHarness = makeRuntimeHarness(runtimeDir);
+      const startCode = await runDaemonCli(
+        ["web", "start", "--host", "0.0.0.0"],
+        {
+          runtime: startHarness.runtime,
+          defaultRuntimeConfig: makeDefaultRuntimeConfig(runtimeDir, rootDir),
+          defaultSharedConfig: makeDefaultSharedConfig(),
+          webConfigStore,
+          webStatusStore,
+          webLauncher,
+          webPortSelector,
+        },
+      );
+      assertEquals(startCode, 0);
+      assertEquals(launchOptions, [{ hostname: "0.0.0.0", port: 3187 }]);
+      assertStringIncludes(
+        startHarness.stdout.join(""),
+        "at http://0.0.0.0:3187/",
+      );
+      assertStringIncludes(
+        startHarness.stderr.join(""),
+        "warning: kato web will listen on 0.0.0.0 over plain HTTP",
+      );
+      const savedStatus = await webStatusStore.load();
+      assertEquals(savedStatus.hostname, "0.0.0.0");
+      const savedConfig = await webConfigStore.load();
+      assertEquals(savedConfig.hostname, "127.0.0.1");
     });
   },
 );

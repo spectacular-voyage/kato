@@ -57,6 +57,7 @@ function makeProfile(workspaceRoot: string): ResolvedWorkspaceProfile {
     workspaceRoot,
     configPath: join(workspaceRoot, ".kato", "workspace.yaml"),
     autoRecordConversations: false,
+    autoRecordRoots: [],
     resolvedDefaultOutputDir: join(workspaceRoot, "notes"),
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "{provider}.md",

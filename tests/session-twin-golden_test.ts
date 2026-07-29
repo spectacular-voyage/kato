@@ -6,11 +6,13 @@ import { parseGeminiEvents } from "../apps/daemon/src/providers/gemini/mod.ts";
 import { mapConversationEventsToTwin } from "../apps/daemon/src/orchestrator/mod.ts";
 
 async function collectConversationEvents(
-  iterable: AsyncIterable<{ event: ConversationEvent }>,
+  iterable: AsyncIterable<{ event?: ConversationEvent }>,
 ): Promise<ConversationEvent[]> {
   const events: ConversationEvent[] = [];
   for await (const item of iterable) {
-    events.push(item.event);
+    if (item.event) {
+      events.push(item.event);
+    }
   }
   return events;
 }

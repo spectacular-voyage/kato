@@ -173,6 +173,7 @@ export {
   resolveDefaultWorkspaceRegistryPath,
   resolveDefaultWorkspaceTemplateConfigPath,
   resolveDendronWikilinkContext,
+  resolveWorkspaceAutoRecordRoots,
   resolveWorkspaceConfigPath,
   resolveWorkspaceConfigValues,
   resolveWorkspaceDefaultOutputDir,

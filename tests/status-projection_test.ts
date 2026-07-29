@@ -498,3 +498,35 @@ Deno.test("summarizeRecordingActivity falls back when sessions are unavailable",
   assertEquals(summary.inactiveRecordings, 0);
   assertEquals(summary.destinations, 2);
 });
+
+Deno.test("projectSessionStatus prefers provider titles over snippets", () => {
+  const now = new Date("2026-07-28T10:00:00.000Z");
+  const updatedAt = new Date(now.getTime() - 60_000).toISOString();
+  const withTitle = projectSessionStatus({
+    session: {
+      provider: "claude",
+      sessionId: "abc",
+      updatedAt,
+      lastEventAt: updatedAt,
+      snippet: "first user message",
+      providerTitle: "Fix the login flow",
+      providerTitleSource: "custom",
+    },
+    now,
+  });
+  assertEquals(withTitle.snippet, "Fix the login flow");
+  assertEquals(withTitle.titleSource, "custom");
+
+  const withoutTitle = projectSessionStatus({
+    session: {
+      provider: "claude",
+      sessionId: "abc",
+      updatedAt,
+      lastEventAt: updatedAt,
+      snippet: "first user message",
+    },
+    now,
+  });
+  assertEquals(withoutTitle.snippet, "first user message");
+  assertEquals(withoutTitle.titleSource, undefined);
+});

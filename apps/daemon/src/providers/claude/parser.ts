@@ -1,4 +1,8 @@
-import type { ConversationEvent, ProviderCursor } from "@kato/shared";
+import type {
+  ConversationEvent,
+  ProviderCursor,
+  ProviderSessionTitleSource,
+} from "@kato/shared";
 import { normalizeText, utf8ByteLength } from "../../utils/text.ts";
 
 interface RawContentBlock {
@@ -13,6 +17,9 @@ interface RawEntry {
   cwd?: string;
   isSidechain?: boolean;
   toolUseResult?: unknown;
+  sessionId?: unknown;
+  customTitle?: unknown;
+  aiTitle?: unknown;
   message?: {
     role: string;
     model?: string;
@@ -52,10 +59,11 @@ function* parseLines(
     }
 
     const entry = parsed as RawEntry;
-    // Accept user, assistant, and system entries.
+    // Accept user, assistant, system, and session-title entries.
     if (
       entry.type !== "user" && entry.type !== "assistant" &&
-      entry.type !== "system"
+      entry.type !== "system" && entry.type !== "custom-title" &&
+      entry.type !== "ai-title"
     ) {
       currentOffset = endOffset;
       continue;
@@ -212,6 +220,42 @@ export interface ClaudeParseContext {
   includeSidechainEvents?: boolean;
 }
 
+export interface ProviderSessionTitleUpdate {
+  title: string;
+  source: ProviderSessionTitleSource;
+}
+
+export interface ClaudeParseItem {
+  event?: ConversationEvent;
+  titleUpdate?: ProviderSessionTitleUpdate;
+  cursor: ProviderCursor;
+}
+
+const PROVIDER_TITLE_MAX_CHARS = 200;
+
+/**
+ * Normalizes a provider-supplied session title: trims, collapses newlines and
+ * control characters to single spaces, and caps length. Returns `undefined`
+ * for non-string or empty-after-normalization input.
+ */
+export function normalizeProviderTitle(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  // deno-lint-ignore no-control-regex
+  const collapsed = value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(
+    /\s+/g,
+    " ",
+  ).trim();
+  if (collapsed.length === 0) {
+    return undefined;
+  }
+  if (collapsed.length <= PROVIDER_TITLE_MAX_CHARS) {
+    return collapsed;
+  }
+  return collapsed.slice(0, PROVIDER_TITLE_MAX_CHARS - 1) + "…";
+}
+
 export function resolveClaudeSubagentParentProviderSessionId(
   filePath: string,
 ): string | undefined {
@@ -245,11 +289,33 @@ export async function* parseClaudeEvents(
   filePath: string,
   fromOffset: number = 0,
   ctx: ClaudeParseContext,
-): AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }> {
+): AsyncIterable<ClaudeParseItem> {
   const content = await Deno.readTextFile(filePath);
   const { provider, sessionId } = ctx;
 
   for (const { entry, endOffset } of parseLines(content, fromOffset)) {
+    if (entry.type === "custom-title" || entry.type === "ai-title") {
+      const title = normalizeProviderTitle(
+        entry.type === "custom-title" ? entry.customTitle : entry.aiTitle,
+      );
+      const entrySessionId = typeof entry.sessionId === "string"
+        ? entry.sessionId.trim()
+        : undefined;
+      // Require a matching sessionId: malformed/partial title records must
+      // not be attributed to whatever transcript happens to be parsed.
+      if (!title || entrySessionId !== sessionId) {
+        continue;
+      }
+      yield {
+        titleUpdate: {
+          title,
+          source: entry.type === "custom-title" ? "custom" : "ai",
+        },
+        cursor: makeByteOffsetCursor(endOffset),
+      };
+      continue;
+    }
+
     if (entry.isSidechain && !ctx.includeSidechainEvents) {
       continue;
     }

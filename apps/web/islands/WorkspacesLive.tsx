@@ -87,6 +87,17 @@ export default function WorkspacesLive(
                               ? "write root covered"
                               : "write root not covered"}
                           </span>
+                          <span
+                            class={row.autoRecordConversations
+                              ? "ok mono"
+                              : "muted mono"}
+                          >
+                            {row.autoRecordConversations === undefined
+                              ? "auto-record unavailable"
+                              : row.autoRecordConversations
+                              ? "auto-record on"
+                              : "auto-record off"}
+                          </span>
                         </div>
                         {row.workspaceUsername
                           ? (

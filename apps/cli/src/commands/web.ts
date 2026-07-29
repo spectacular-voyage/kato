@@ -411,8 +411,15 @@ export async function runWebInitCommand(
   );
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "::1" ||
+    normalized === "[::1]" || normalized.startsWith("127.");
+}
+
 export async function runWebStartCommand(
   ctx: DaemonCliCommandContext,
+  options: { hostname?: string } = {},
 ): Promise<void> {
   const webConfig = ctx.webConfig;
   if (!webConfig) {
@@ -420,6 +427,7 @@ export async function runWebStartCommand(
       "Web config not found. Run `kato web init` before `kato web start`.",
     );
   }
+  const hostname = options.hostname ?? webConfig.hostname;
 
   const existingStatus = await ctx.webStatusStore.load();
   if (existingStatus.running && isProcessAlive(existingStatus.pid)) {
@@ -432,20 +440,26 @@ export async function runWebStartCommand(
     return;
   }
 
+  if (!isLoopbackHostname(hostname)) {
+    ctx.runtime.writeStderr(
+      `warning: kato web will listen on ${hostname} over plain HTTP; anyone who can reach that address gets the login page, and credentials are unencrypted in transit. Prefer a TLS reverse proxy or VPN for remote access.\n`,
+    );
+  }
+
   const selectedPort = await ctx.webPortSelector.selectAvailablePort({
-    hostname: webConfig.hostname,
+    hostname,
     preferredPort: webConfig.port,
   });
   const portFallback = selectedPort !== webConfig.port;
   const launchStartedAtMs = ctx.runtime.now().getTime();
   const launchResult = ctx.webLauncher.launchDetachedDetailed
     ? await ctx.webLauncher.launchDetachedDetailed({
-      hostname: webConfig.hostname,
+      hostname,
       port: selectedPort,
     })
     : {
       pid: await ctx.webLauncher.launchDetached({
-        hostname: webConfig.hostname,
+        hostname,
         port: selectedPort,
       }),
     };
@@ -458,7 +472,7 @@ export async function runWebStartCommand(
     startupStdoutLogPath: launchResult.startupStdoutLogPath,
     startupStderrLogPath: launchResult.startupStderrLogPath,
   };
-  const url = `http://${webConfig.hostname}:${selectedPort}/`;
+  const url = `http://${hostname}:${selectedPort}/`;
   const startedAt = new Date(launchStartedAtMs).toISOString();
   const ack = await waitForWebStartupAck(
     ctx,
@@ -472,7 +486,7 @@ export async function runWebStartCommand(
       await ctx.webStatusStore.save({
         schemaVersion: 1,
         running: false,
-        hostname: webConfig.hostname,
+        hostname,
         port: selectedPort,
         heartbeatAt: ctx.runtime.now().toISOString(),
         url,
@@ -484,7 +498,7 @@ export async function runWebStartCommand(
   await ctx.webStatusStore.save({
     schemaVersion: 1,
     running: true,
-    hostname: webConfig.hostname,
+    hostname,
     port: selectedPort,
     pid: serverPid,
     startedAt,
@@ -499,7 +513,8 @@ export async function runWebStartCommand(
     {
       pid: serverPid,
       launcherPid: pid,
-      hostname: webConfig.hostname,
+      hostname,
+      configuredHostname: webConfig.hostname,
       port: selectedPort,
       configuredPort: webConfig.port,
       portFallback,
@@ -518,7 +533,8 @@ export async function runWebStartCommand(
   await ctx.auditLogger.command("web.start", {
     pid: serverPid,
     launcherPid: pid,
-    hostname: webConfig.hostname,
+    hostname,
+    configuredHostname: webConfig.hostname,
     port: selectedPort,
     configuredPort: webConfig.port,
     portFallback,

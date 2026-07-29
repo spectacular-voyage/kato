@@ -742,7 +742,9 @@ export async function runDaemonCli(
         });
         return 0;
       case "web-start":
-        await runWebStartCommand(commandContext);
+        await runWebStartCommand(commandContext, {
+          hostname: intent.command.hostname,
+        });
         return 0;
       case "web-restart":
         await runWebRestartCommand(commandContext);

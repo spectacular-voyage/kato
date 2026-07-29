@@ -317,6 +317,7 @@ function parseWebInit(rest: string[]): DaemonCliIntent {
 function parseWebStart(rest: string[]): DaemonCliIntent {
   const parsed = parseStrictArgs(rest, {
     boolean: ["help"],
+    string: ["host"],
     alias: { h: "help" },
   });
 
@@ -325,7 +326,14 @@ function parseWebStart(rest: string[]): DaemonCliIntent {
   }
 
   requireNoPositionals("web-start", toPositionals(parsed));
-  return { kind: "command", command: { name: "web-start" } };
+  const hostname =
+    typeof parsed.host === "string" && parsed.host.trim().length > 0
+      ? parsed.host.trim()
+      : undefined;
+  return {
+    kind: "command",
+    command: { name: "web-start", ...(hostname ? { hostname } : {}) },
+  };
 }
 
 function parseWebStop(rest: string[]): DaemonCliIntent {

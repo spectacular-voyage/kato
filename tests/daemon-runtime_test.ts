@@ -264,6 +264,7 @@ function cloneWorkspaceProfile(
     workspaceRoot: profile.workspaceRoot,
     configPath: profile.configPath,
     autoRecordConversations: profile.autoRecordConversations,
+    autoRecordRoots: [...profile.autoRecordRoots],
     resolvedDefaultOutputDir: profile.resolvedDefaultOutputDir,
     defaultOutputDirTemplate: profile.defaultOutputDirTemplate,
     filenameTemplate: profile.filenameTemplate,
@@ -377,6 +378,7 @@ async function createTestWorkspaceFixture(
     workspaceRoot: entry.workspaceRoot,
     configPath: entry.configPath,
     autoRecordConversations: false,
+    autoRecordRoots: [],
     resolvedDefaultOutputDir,
     defaultOutputDirTemplate: "notes",
     filenameTemplate: "{provider}-{sessionShortId}.md",
@@ -938,6 +940,89 @@ Deno.test(
         appended[0]?.recordingCycleIds,
         [output.activeRecordingCycleId],
       );
+    });
+  },
+);
+
+Deno.test(
+  "runDaemonRuntimeLoop auto-records Claude sessions matching autoRecordRoots outside the workspace root",
+  async () => {
+    await withStateDirCleanup(async (setStateDir) => {
+      const { sink, operationalLogger, auditLogger } = makeDebugLoggers();
+      const appended: Array<{ targetPath: string }> = [];
+      const recordingPipeline = makePersistentInChatRecordingPipeline({
+        appendToDestination(input) {
+          appended.push({ targetPath: input.targetPath });
+          return Promise.resolve({
+            mode: "append",
+            outputPath: input.targetPath,
+            wrote: true,
+            deduped: false,
+          });
+        },
+      });
+
+      const result = await runPersistentInChatScenario({
+        provider: "claude",
+        providerSessionId: "session-claude-roots",
+        events: [
+          makeClaudeReplayEvent(
+            "session-claude-roots",
+            "u1",
+            "message.user",
+            "conversation at the repo root",
+            "2026-07-28T10:00:00.000Z",
+          ),
+        ],
+        recordingPipeline,
+        operationalLogger,
+        auditLogger,
+        configureWorkspace(workspace) {
+          workspace.profile.autoRecordConversations = true;
+          // The conversation cwd contains the workspace root, not the
+          // reverse; only the configured root makes it eligible.
+          workspace.profile.autoRecordRoots = [
+            join(workspace.profile.workspaceRoot, "..", "repo"),
+          ];
+        },
+        prepopulate: async (sessionStateStore, workspace) => {
+          const metadata = await sessionStateStore.getOrCreateSessionMetadata({
+            provider: "claude",
+            providerSessionId: "session-claude-roots",
+            sourceFilePath: join(
+              workspace.profile.workspaceRoot,
+              ".claude-session.jsonl",
+            ),
+            initialCursor: { kind: "byte-offset", value: 0 },
+          });
+          metadata.workingDirectory = join(
+            workspace.profile.workspaceRoot,
+            "..",
+            "repo",
+            "src",
+          );
+          await sessionStateStore.saveSessionMetadata(metadata);
+        },
+      });
+      setStateDir(result.stateDir);
+
+      const metadata = result.metadataList.find((entry) =>
+        entry.providerSessionId === "session-claude-roots"
+      );
+      assert(metadata);
+      const output = metadata.workspaceOutputs?.[0];
+      assertExists(
+        output,
+        JSON.stringify(
+          sink.records.map((record) => ({
+            event: record.event,
+            attributes: record.attributes,
+          })),
+        ),
+      );
+      assertEquals(output.workspaceId, TEST_WORKSPACE_ID);
+      assertEquals(output.desiredState, "on");
+      assertEquals(appended.length, 1);
     });
   },
 );

@@ -72,6 +72,7 @@ Current top-level web routes are:
 - `/`: Summary dashboard. Server-rendered first paint plus the `SummaryLive`
   island, backed by `loadSummaryPageData()` and `/api/summary`.
 - `/sessions`: primary discovered chat-session inventory, backed by `loadSessionsPageData()` and `/api/sessions`, with live activity, recording state, per-row persisted twin size, creation-time output title/filename/tag controls, on-demand snippet reveal, and URL-driven activity/workspace filters. Sessions always renders provider-declared Claude and Codex children in recursive, default-closed parent trees; legacy `subagents` query parameters are ignored.
+- `/sessions/:sessionId`: read-only persisted-twin content viewer backed by `loadSessionTwinViewData()` (`apps/web/src/loaders/session_twin_view.ts`) over the bounded `readTwinEventsWindow` store reader — seq-cursor paging (count and byte caps), canonical twin-path resolution from session identity, fail-closed re-redaction of every served page, messages expanded with other twin kinds collapsed, escaped plain-text rendering only. Linked from `/sessions` (twin `View`) and `/recordings` rows.
 - `/recordings`: latest recording-output state across sessions and workspaces (one row per output file, with output tag editing plus stop / same-path `Re-start` for persisted rows), backed by `loadRecordingsPageData()` and `/api/recordings`.
 - `/workspaces`: workspace register/unregister, operator-facing display-label editing, registration-time display-label entry, per-workspace preferred-username overrides, shared workspace config edit links, plus workspace-level recording rollups, backed by `loadWorkspacesPageData()` and `/api/workspaces`.
 - `/workspaces/:workspaceId/edit`: shared `.kato-workspace-config.yaml` editor for workspace fields (`autoRecordConversations`, `defaultOutputDir`, `filenameTemplate`, `workspaceTimezone`, `defaultTags`, `tagSuggestions`, markdown frontmatter toggles, and workspace writer flags), backed by `loadWorkspaceConfigEditPageData()` and `handleWorkspaceConfigEditPost()`.
@@ -307,11 +308,14 @@ Ingestion runners:
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
 
-Session snippets (the operator-facing session labels) always reflect the
-conversation's first user message: when a snapshot is created from a mid-file
-resume without twin hydration, the runner does a one-time bounded read of the
-source-file head (cached per run, secrets policy applied) instead of letting
-the label drift to the first post-restart message.
+Reconstructed session snippets (the fallback operator-facing session labels)
+reflect the conversation's first user message: when a snapshot is created from
+a mid-file resume without twin hydration, the runner does a one-time bounded
+read of the source-file head (cached per run, secrets policy applied) instead
+of letting the label drift to the first post-restart message. Provider titles
+(below) take precedence over reconstructed snippets whenever they exist.
+
+Claude additionally maintains its own session titles as `custom-title` (user rename) and `ai-title` (auto-generated) transcript lines. The Claude parser yields them as title-update parse items (they advance the cursor like events), ingestion stores the latest per source with custom outranking ai (`providerTitle`/`providerTitleSource` on snapshot and persisted session metadata, secrets policy applied), and status projection prefers the provider title over the reconstructed snippet in the status `snippet` field, marking its origin in `titleSource`. Sessions whose cursor already passed their title lines get a one-time cached full-file backfill scan.
 
 Freshly parsed events pass the shared secrets policy
 (`apps/runtime/src/policy/secrets_redaction.ts`) before snapshot projection,

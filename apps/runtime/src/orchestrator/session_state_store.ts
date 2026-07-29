@@ -149,6 +149,12 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
     ...(metadata.parentProviderSessionId
       ? { parentProviderSessionId: metadata.parentProviderSessionId }
       : {}),
+    ...(metadata.providerTitle !== undefined
+      ? { providerTitle: metadata.providerTitle }
+      : {}),
+    ...(metadata.providerTitleSource !== undefined
+      ? { providerTitleSource: metadata.providerTitleSource }
+      : {}),
     sessionId: metadata.sessionId,
     createdAt: metadata.createdAt,
     updatedAt: metadata.updatedAt,
@@ -670,6 +676,126 @@ export class PersistentSessionStateStore {
       events.push(parsed);
     }
     return events;
+  }
+
+  /**
+   * Bounded seq-window read over a session twin. The twin path is derived
+   * canonically from session identity — a stored `twinPath` pointing
+   * elsewhere is never followed. Events are returned in seq order; malformed,
+   * invalid, and duplicate-seq lines are skipped and counted. `beforeSeq`
+   * pages toward older events, `afterSeq` toward newer; with neither the
+   * newest window is returned. `limit` and `maxBytes` cap the response (the
+   * first event always fits).
+   */
+  async readTwinEventsWindow(
+    metadata: SessionMetadataV1,
+    options: {
+      beforeSeq?: number;
+      afterSeq?: number;
+      limit?: number;
+      maxBytes?: number;
+    } = {},
+  ): Promise<{
+    events: SessionTwinEventV1[];
+    hasOlder: boolean;
+    hasNewer: boolean;
+    skippedLines: number;
+    totalParsed: number;
+  }> {
+    const limit = Math.max(1, Math.min(options.limit ?? 200, 200));
+    const maxBytes = Math.max(
+      1024,
+      Math.min(options.maxBytes ?? 1_000_000, 1_000_000),
+    );
+    const { twinPath } = toSessionFilePaths(this.sessionsDir, {
+      provider: metadata.provider,
+      providerSessionId: metadata.providerSessionId,
+    });
+
+    let raw: string;
+    try {
+      raw = await Deno.readTextFile(twinPath);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return {
+          events: [],
+          hasOlder: false,
+          hasNewer: false,
+          skippedLines: 0,
+          totalParsed: 0,
+        };
+      }
+      throw error;
+    }
+
+    let skippedLines = 0;
+    const seenSeqs = new Set<number>();
+    const all: SessionTwinEventV1[] = [];
+    for (const line of raw.split(/\r?\n/)) {
+      if (line.trim().length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line) as unknown;
+      } catch {
+        skippedLines += 1;
+        continue;
+      }
+      if (!isSessionTwinEventV1(parsed) || seenSeqs.has(parsed.seq)) {
+        skippedLines += 1;
+        continue;
+      }
+      seenSeqs.add(parsed.seq);
+      all.push(parsed);
+    }
+    all.sort((a, b) => a.seq - b.seq);
+
+    let windowed: SessionTwinEventV1[];
+    if (options.afterSeq !== undefined) {
+      const afterSeq = options.afterSeq;
+      windowed = all.filter((event) => event.seq > afterSeq).slice(0, limit);
+    } else if (options.beforeSeq !== undefined) {
+      const beforeSeq = options.beforeSeq;
+      windowed = all.filter((event) => event.seq < beforeSeq).slice(-limit);
+    } else {
+      windowed = all.slice(-limit);
+    }
+
+    // Byte cap keeps the events nearest the requested cursor: forward pages
+    // keep the earliest of the window, backward/newest pages keep the latest.
+    const forward = options.afterSeq !== undefined;
+    const ordered = forward ? windowed : [...windowed].reverse();
+    let bytes = 0;
+    const capped: SessionTwinEventV1[] = [];
+    for (const event of ordered) {
+      bytes += JSON.stringify(event).length;
+      if (capped.length > 0 && bytes > maxBytes) {
+        break;
+      }
+      capped.push(event);
+    }
+    const events = forward ? capped : capped.reverse();
+
+    // Empty windows fall back to the requested cursor so pagination never
+    // dead-ends (e.g. beforeSeq at the oldest event still offers "newer").
+    const firstSeq = events[0]?.seq;
+    const lastSeq = events[events.length - 1]?.seq;
+    const beforeSeq = options.beforeSeq;
+    const afterSeq = options.afterSeq;
+    return {
+      events,
+      hasOlder: firstSeq !== undefined
+        ? all.some((event) => event.seq < firstSeq)
+        : afterSeq !== undefined
+        ? all.some((event) => event.seq <= afterSeq)
+        : false,
+      hasNewer: lastSeq !== undefined
+        ? all.some((event) => event.seq > lastSeq)
+        : beforeSeq !== undefined
+        ? all.some((event) => event.seq >= beforeSeq)
+        : false,
+      skippedLines,
+      totalParsed: all.length,
+    };
   }
 
   async resetSessionTwinPersistence(

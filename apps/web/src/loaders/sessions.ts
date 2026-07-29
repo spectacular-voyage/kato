@@ -1067,6 +1067,9 @@ export async function loadSessionActivityRows(
       ...(relationships.has(metadata.sessionId)
         ? { relationship: relationships.get(metadata.sessionId) }
         : {}),
+      // Persisted-only rows resolve their label lazily via the snippet API,
+      // which applies read-time redaction to provider titles; no unredacted
+      // metadata field is surfaced directly here.
       snippet: live?.snippet,
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,

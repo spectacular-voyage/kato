@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
 import {
+  normalizeProviderTitle,
   parseClaudeEvents,
   resolveClaudeSessionParseOptions,
 } from "../apps/daemon/src/providers/claude/mod.ts";
@@ -401,3 +402,82 @@ Deno.test(
     }
   },
 );
+
+Deno.test("claude parser yields provider title updates with validation and cursor advance", async () => {
+  const tempPath = makeTestTempPath("claude-titles-") + ".jsonl";
+  const lines = [
+    JSON.stringify({
+      type: "ai-title",
+      aiTitle: "First AI title",
+      sessionId: "sess-001",
+    }),
+    JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      timestamp: "2026-07-28T10:00:00.000Z",
+      message: { role: "user", content: "hello there" },
+    }),
+    JSON.stringify({
+      type: "custom-title",
+      customTitle: "  My\nCustom\t Title ",
+      sessionId: "sess-001",
+    }),
+    JSON.stringify({
+      type: "ai-title",
+      aiTitle: "Wrong session",
+      sessionId: "sess-999",
+    }),
+    JSON.stringify({ type: "ai-title", aiTitle: "No session id" }),
+    JSON.stringify({
+      type: "custom-title",
+      customTitle: "   ",
+      sessionId: "sess-001",
+    }),
+    JSON.stringify({
+      type: "ai-title",
+      aiTitle: "Second AI title",
+      sessionId: "sess-001",
+    }),
+  ];
+  const content = lines.join("\n") + "\n";
+  await Deno.writeTextFile(tempPath, content);
+  try {
+    const titles: Array<{ title: string; source: string }> = [];
+    let events = 0;
+    let lastCursorValue = 0;
+    for await (const item of parseClaudeEvents(tempPath, 0, TEST_CTX)) {
+      if (item.titleUpdate) {
+        titles.push(item.titleUpdate);
+      }
+      if (item.event) {
+        events += 1;
+      }
+      lastCursorValue = (item.cursor as { value: number }).value;
+    }
+    assertEquals(titles, [
+      { title: "First AI title", source: "ai" },
+      { title: "My Custom Title", source: "custom" },
+      { title: "Second AI title", source: "ai" },
+    ]);
+    assertEquals(events, 1);
+    // The trailing title-only line advances the cursor to end of file.
+    assertEquals(lastCursorValue, new TextEncoder().encode(content).length);
+  } finally {
+    await removePathIfPresent(tempPath);
+  }
+});
+
+Deno.test("normalizeProviderTitle trims, collapses, and caps titles", () => {
+  assertEquals(normalizeProviderTitle("  plain title "), "plain title");
+  assertEquals(
+    normalizeProviderTitle("line one\r\nline two\u0007!"),
+    "line one line two !",
+  );
+  assertEquals(normalizeProviderTitle("   "), undefined);
+  assertEquals(normalizeProviderTitle(42), undefined);
+  assertEquals(normalizeProviderTitle(undefined), undefined);
+  const long = "x".repeat(300);
+  const capped = normalizeProviderTitle(long);
+  assertEquals(capped?.length, 200);
+  assert(capped?.endsWith("…"));
+});

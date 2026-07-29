@@ -28,7 +28,7 @@ export type DaemonCliCommand =
     username: string;
     passwordFromStdin?: boolean;
   }
-  | { name: "web-start" }
+  | { name: "web-start"; hostname?: string }
   | { name: "web-restart" }
   | { name: "web-stop" }
   | { name: "web-status"; asJson: boolean }

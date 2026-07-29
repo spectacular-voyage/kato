@@ -13,6 +13,11 @@ export interface WorkspacePathTemplateOptions {
   profile: WorkspacePathTemplateProfile;
   provider: string;
   sessionId: string;
+  /**
+   * Fallback for timestamp tokens; the newest timestamped event in
+   * `boundarySnapshot` wins so paths reflect conversation activity rather
+   * than when the command happened to run.
+   */
   now: Date;
   outputUsername: string;
   filenameSlug?: string;
@@ -114,11 +119,28 @@ function readTimestampTemplateParts(
   };
 }
 
+function resolveTemplateTimestamp(
+  options: WorkspacePathTemplateOptions,
+): Date {
+  const events = options.boundarySnapshot ?? [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const raw = events[index]?.timestamp;
+    if (!raw) {
+      continue;
+    }
+    const parsedMs = Date.parse(raw);
+    if (Number.isFinite(parsedMs)) {
+      return new Date(parsedMs);
+    }
+  }
+  return options.now;
+}
+
 function buildWorkspaceTemplateTokens(
   options: WorkspacePathTemplateOptions,
 ): Record<string, string> {
   const timestampTokens = readTimestampTemplateParts(
-    options.now,
+    resolveTemplateTimestamp(options),
     options.profile.workspaceTimezone,
   );
   return {

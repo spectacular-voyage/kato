@@ -44,7 +44,7 @@ type ProviderReplayParser = (
     sessionId: string;
     includeSidechainEvents?: boolean;
   },
-) => AsyncIterable<{ event: ConversationEvent; cursor: ProviderCursor }>;
+) => AsyncIterable<{ event?: ConversationEvent; cursor: ProviderCursor }>;
 
 function resolveProviderReplayParser(provider: string): ProviderReplayParser {
   switch (provider) {
@@ -136,7 +136,9 @@ export async function replayProviderSourceEvents(
       },
     )
   ) {
-    events.push(event);
+    if (event) {
+      events.push(event);
+    }
     latestCursor = cursor;
   }
 

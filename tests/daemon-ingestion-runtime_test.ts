@@ -178,6 +178,62 @@ Deno.test("InMemorySessionSnapshotStore snippetOverride can repair resumed snipp
   assertEquals(second.metadata.snippet, "original first user message");
 });
 
+Deno.test("InMemorySessionSnapshotStore keeps provider titles with custom-over-ai precedence", () => {
+  const store = new InMemorySessionSnapshotStore({
+    now: () => new Date("2026-07-28T19:30:00.000Z"),
+  });
+  const base = {
+    provider: "claude",
+    sessionId: "session-titles",
+    events: [
+      makeUserEvent("u-1", "2026-07-28T19:29:00.000Z", "first user message"),
+    ],
+  };
+
+  const withAi = store.upsert({
+    ...base,
+    cursor: { kind: "byte-offset", value: 10 },
+    providerTitle: { title: "AI title", source: "ai" },
+  });
+  assertEquals(withAi.metadata.providerTitle, "AI title");
+  assertEquals(withAi.metadata.providerTitleSource, "ai");
+  assertEquals(withAi.metadata.snippet, "first user message");
+
+  // A later AI title replaces an earlier AI title.
+  const withNewerAi = store.upsert({
+    ...base,
+    cursor: { kind: "byte-offset", value: 20 },
+    providerTitle: { title: "Newer AI title", source: "ai" },
+  });
+  assertEquals(withNewerAi.metadata.providerTitle, "Newer AI title");
+
+  // A custom title replaces an AI title.
+  const withCustom = store.upsert({
+    ...base,
+    cursor: { kind: "byte-offset", value: 30 },
+    providerTitle: { title: "Custom title", source: "custom" },
+  });
+  assertEquals(withCustom.metadata.providerTitle, "Custom title");
+  assertEquals(withCustom.metadata.providerTitleSource, "custom");
+
+  // An AI title never replaces a custom title.
+  const afterAi = store.upsert({
+    ...base,
+    cursor: { kind: "byte-offset", value: 40 },
+    providerTitle: { title: "Late AI title", source: "ai" },
+  });
+  assertEquals(afterAi.metadata.providerTitle, "Custom title");
+  assertEquals(afterAi.metadata.providerTitleSource, "custom");
+
+  // Titles stick across upserts without title input; snippet is untouched.
+  const noTitleInput = store.upsert({
+    ...base,
+    cursor: { kind: "byte-offset", value: 50 },
+  });
+  assertEquals(noTitleInput.metadata.providerTitle, "Custom title");
+  assertEquals(noTitleInput.metadata.snippet, "first user message");
+});
+
 Deno.test("InMemorySessionSnapshotStore omits lastEventAt for empty event lists", () => {
   const store = new InMemorySessionSnapshotStore({
     now: () => new Date("2026-02-22T19:31:00.000Z"),

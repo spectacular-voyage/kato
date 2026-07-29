@@ -11,6 +11,7 @@ import {
   resolveDendronWikilinkContext,
   resolveWorkspaceDefaultOutputDir,
   SharedBehaviorConfigFileStore,
+  WorkspaceProfileResolver,
 } from "@kato/runtime";
 import {
   formatWorkspaceRegistryError,
@@ -38,6 +39,8 @@ export interface WorkspaceRecordingEntry {
 
 export interface WorkspaceManagementRow extends WorkspaceSummaryRow {
   workspaceUsername?: string;
+  /** Resolved value; undefined when config resolution fails. */
+  autoRecordConversations?: boolean;
   writePathCovered?: boolean;
   wikilinkContextMode?: DendronWikilinkContextMode;
   dendronConfigPath?: string;
@@ -192,6 +195,29 @@ export async function loadWorkspacesPageData(
     }
   }
 
+  const workspaceProfileResolver = new WorkspaceProfileResolver();
+
+  async function resolveAutoRecordConversations(
+    row: WorkspaceSummaryRow,
+  ): Promise<boolean | undefined> {
+    if (!row.valid) {
+      return undefined;
+    }
+    try {
+      const profile = await workspaceProfileResolver.resolveForCommand({
+        workspaceId: row.workspaceId,
+        alias: row.alias,
+        displayName: row.displayName,
+        workspaceRoot: row.workspaceRoot,
+        configPath: row.configPath,
+        registeredAt: row.registeredAt ?? "",
+      });
+      return profile.autoRecordConversations;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function augmentRows(
     rows: WorkspaceSummaryRow[],
     allowedWriteRoots: string[] | undefined,
@@ -218,6 +244,7 @@ export async function loadWorkspacesPageData(
       return {
         ...row,
         workspaceUsername: workspaceUsernames.get(row.workspaceId),
+        autoRecordConversations: await resolveAutoRecordConversations(row),
         writePathCovered: allowedWriteRoots
           ? isPathWithinRoots(row.workspaceRoot, allowedWriteRoots)
           : undefined,

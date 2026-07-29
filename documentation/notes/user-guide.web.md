@@ -56,7 +56,7 @@ kato web status --json
 ## Pages
 
 - Summary: high-level daemon, session, recording, and workspace status.
-- Sessions: discovered provider sessions grouped into default-closed parent/sub-conversation trees, snippets, persisted-twin size indicators, activity/workspace filters, and capture/record controls with creation-time title, filename snippet, and tag fields.
+- Sessions: discovered provider sessions grouped into default-closed parent/sub-conversation trees, snippets, persisted-twin size indicators, activity/workspace filters, and capture/record controls with creation-time title, filename snippet, and tag fields. Claude sessions display Claude's own session title when one exists (a `/rename` custom title first, then the AI-generated title), falling back to the first user message. Sessions with a persisted twin link to a read-only detail page (`View`) that renders the twin's conversation content — messages expanded, thinking/tool/system events collapsed — with seq-cursor paging and the same secrets redaction as snippets; Recordings rows link to it too.
 - Recordings: per-file output state, output tag editing, stop controls, and re-arm controls.
 - Workspaces: registration, display labels, shared workspace config editing, shared tag fields, username overrides, and workspace diagnostics.
 - Logs: operational and security-audit records.

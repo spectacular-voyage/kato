@@ -13,6 +13,7 @@ import {
 } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { resolveDefaultKatoDir } from "../orchestrator/session_state_store.ts";
+import { expandHomePath } from "../utils/env.ts";
 
 export const DEFAULT_WORKSPACE_REGISTRY_FILENAME = "workspace-registry.json";
 export const DEFAULT_WORKSPACE_CONFIG_FILENAME = ".kato-workspace-config.yaml";
@@ -70,6 +71,7 @@ const WORKSPACE_MARKDOWN_FRONTMATTER_KEYS = [
 const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
   "workspaceId",
   "autoRecordConversations",
+  "autoRecordRoots",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
@@ -80,6 +82,7 @@ const WORKSPACE_CONFIG_TOP_LEVEL_KEYS = [
 ] as const;
 const WORKSPACE_TEMPLATE_TOP_LEVEL_KEYS = [
   "autoRecordConversations",
+  "autoRecordRoots",
   "defaultOutputDir",
   "filenameTemplate",
   "workspaceTimezone",
@@ -130,6 +133,8 @@ export interface WorkspaceCatalogLike {
 
 export interface WorkspaceConfigOverrides {
   autoRecordConversations?: boolean;
+  /** Raw entries as configured (absolute, `~`, or workspace-root-relative). */
+  autoRecordRoots?: string[];
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -142,6 +147,7 @@ export interface WorkspaceConfigOverrides {
 export interface WorkspaceConfigFileValues {
   workspaceId?: string;
   autoRecordConversations?: boolean;
+  autoRecordRoots?: string[];
   defaultOutputDir?: string;
   filenameTemplate?: string;
   workspaceTimezone?: string;
@@ -153,6 +159,8 @@ export interface WorkspaceConfigFileValues {
 
 export interface ResolvedWorkspaceConfigValues {
   autoRecordConversations: boolean;
+  /** Raw entries as configured; resolution to absolute paths happens per profile. */
+  autoRecordRoots: string[];
   defaultOutputDir: string;
   filenameTemplate: string;
   workspaceTimezone: string;
@@ -168,6 +176,8 @@ export interface ResolvedWorkspaceProfile {
   workspaceRoot: string;
   configPath: string;
   autoRecordConversations: boolean;
+  /** Resolved absolute conversation roots; empty means "workspace root only". */
+  autoRecordRoots: string[];
   resolvedDefaultOutputDir: string;
   defaultOutputDirTemplate: string;
   filenameTemplate: string;
@@ -687,6 +697,24 @@ function parseWorkspaceConfigLikeDocument(
     autoRecordConversations = autoRecordConversationsRaw;
   }
 
+  const autoRecordRootsRaw = parsed["autoRecordRoots"];
+  let autoRecordRoots: string[] | undefined;
+  if (autoRecordRootsRaw !== undefined) {
+    if (!Array.isArray(autoRecordRootsRaw)) {
+      throw new Error(
+        `autoRecordRoots must be a list of paths: ${configPath}`,
+      );
+    }
+    autoRecordRoots = autoRecordRootsRaw.map((entry) => {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        throw new Error(
+          `autoRecordRoots entries must be non-empty strings: ${configPath}`,
+        );
+      }
+      return entry.trim();
+    });
+  }
+
   const defaultOutputDir = trimOptionalString(defaultOutputDirRaw);
   if (
     defaultOutputDirRaw !== undefined &&
@@ -739,6 +767,7 @@ function parseWorkspaceConfigLikeDocument(
     ...(autoRecordConversations !== undefined
       ? { autoRecordConversations }
       : {}),
+    ...(autoRecordRoots !== undefined ? { autoRecordRoots } : {}),
     ...(defaultOutputDir ? { defaultOutputDir } : {}),
     ...(filenameTemplate ? { filenameTemplate } : {}),
     ...(workspaceTimezone ? { workspaceTimezone } : {}),
@@ -758,6 +787,9 @@ function workspaceConfigFileValuesToDocument(
   }
   if (values.autoRecordConversations !== undefined) {
     document.autoRecordConversations = values.autoRecordConversations;
+  }
+  if (values.autoRecordRoots !== undefined) {
+    document.autoRecordRoots = values.autoRecordRoots;
   }
   if (values.defaultOutputDir !== undefined) {
     document.defaultOutputDir = values.defaultOutputDir;
@@ -827,6 +859,7 @@ export function resolveWorkspaceConfigValues(
 ): ResolvedWorkspaceConfigValues {
   return {
     autoRecordConversations: overrides.autoRecordConversations ?? false,
+    autoRecordRoots: [...(overrides.autoRecordRoots ?? [])],
     defaultOutputDir: overrides.defaultOutputDir ??
       DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE,
     filenameTemplate: overrides.filenameTemplate ??
@@ -845,11 +878,35 @@ function cloneResolvedWorkspaceProfile(
 ): ResolvedWorkspaceProfile {
   return {
     ...profile,
+    autoRecordRoots: [...profile.autoRecordRoots],
     defaultTags: [...profile.defaultTags],
     tagSuggestions: [...profile.tagSuggestions],
     markdownFrontmatter: { ...profile.markdownFrontmatter },
     writerFeatureFlags: { ...profile.writerFeatureFlags },
   };
+}
+
+/**
+ * Resolves raw `autoRecordRoots` entries to absolute paths: `~` expands to the
+ * home directory, relative entries resolve against the workspace root, and
+ * exact duplicates are dropped. Matching stays lexical — entries need not
+ * exist on disk.
+ */
+export function resolveWorkspaceAutoRecordRoots(
+  entries: string[] | undefined,
+  workspaceRoot: string,
+): string[] {
+  const resolved: string[] = [];
+  for (const entry of entries ?? []) {
+    const expanded = expandHomePath(entry);
+    const absolute = isAbsolute(expanded)
+      ? resolve(expanded)
+      : resolve(workspaceRoot, expanded);
+    if (!resolved.includes(absolute)) {
+      resolved.push(absolute);
+    }
+  }
+  return resolved;
 }
 
 function parseWorkspaceMarkdownFrontmatter(
@@ -963,6 +1020,10 @@ export class WorkspaceProfileResolver implements WorkspaceProfileResolverLike {
       workspaceRoot: resolvedWorkspaceRoot,
       configPath: workspace.configPath,
       autoRecordConversations: overrides.autoRecordConversations ?? false,
+      autoRecordRoots: resolveWorkspaceAutoRecordRoots(
+        overrides.autoRecordRoots,
+        resolvedWorkspaceRoot,
+      ),
       resolvedDefaultOutputDir,
       defaultOutputDirTemplate,
       filenameTemplate: overrides.filenameTemplate ??
@@ -1011,6 +1072,7 @@ export class DefaultWorkspaceConfigFileStore {
       options.allowMissing &&
       loaded.defaultOutputDir === undefined &&
       loaded.autoRecordConversations === undefined &&
+      loaded.autoRecordRoots === undefined &&
       loaded.filenameTemplate === undefined &&
       loaded.workspaceTimezone === undefined &&
       loaded.defaultTags === undefined &&
@@ -1090,6 +1152,7 @@ export async function findNearestWorkspaceConfig(
 export function createWorkspaceConfigScaffold(): string {
   return [
     "autoRecordConversations: false",
+    "autoRecordRoots: []",
     `defaultOutputDir: "${DEFAULT_WORKSPACE_OUTPUT_DIR_RELATIVE}"`,
     `filenameTemplate: "${DEFAULT_WORKSPACE_FILENAME_TEMPLATE}"`,
     `workspaceTimezone: "${DEFAULT_WORKSPACE_TIMEZONE}"`,

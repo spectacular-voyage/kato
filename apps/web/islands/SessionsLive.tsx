@@ -8,6 +8,7 @@ import type {
 } from "../src/loaders/sessions.ts";
 import {
   buildRecordingsRecordingHref,
+  buildSessionDetailHref,
   buildSessionInventoryHref,
 } from "../src/session_routes.ts";
 import {
@@ -652,6 +653,9 @@ function SessionRow(
   },
 ) {
   const row = props.row;
+  const [revealedSnippet, setRevealedSnippet] = useState<string | undefined>(
+    undefined,
+  );
   const engagedRecordings = row.recordings.filter((recording) =>
     recording.state !== "stopped"
   );
@@ -685,6 +689,7 @@ function SessionRow(
             snippet={row.snippet}
             snippetClass="session-list-snippet"
             title={`Session ${row.sessionShortId}`}
+            onSnippetResolved={setRevealedSnippet}
           />
         </span>{" "}
         <span class="muted mono session-list-updated">
@@ -694,6 +699,16 @@ function SessionRow(
           {row.twinSizeBytes === undefined
             ? "absent"
             : formatBytes(row.twinSizeBytes)}
+          {row.twinSizeBytes !== undefined
+            ? (
+              <>
+                {" · "}
+                <a href={buildSessionDetailHref(row.sessionId)}>
+                  View
+                </a>
+              </>
+            )
+            : null}
         </span>
         {row.relationship || row.structuralContext
           ? (
@@ -725,7 +740,7 @@ function SessionRow(
           includeStale={props.pageData.includeStale}
           workspaceFilter={props.pageData.workspaceFilter}
           workspaceFilterId={props.pageData.workspaceFilterId}
-          sessionSnippet={row.snippet}
+          sessionSnippet={row.snippet ?? revealedSnippet}
           outputMetadataDefaults={row.outputMetadataDefaults}
           csrfToken={props.csrfToken}
           workspaceOptions={props.pageData.workspaceOptions}

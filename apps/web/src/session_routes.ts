@@ -39,6 +39,10 @@ export function buildSessionInventorySessionHref(
   return `${buildSessionInventoryHref(options)}#session-${sessionId}`;
 }
 
+export function buildSessionDetailHref(sessionId: string): string {
+  return `/sessions/${encodeURIComponent(sessionId)}`;
+}
+
 export function buildMaintenanceHref(
   options: SessionRouteOptions = {},
 ): string {

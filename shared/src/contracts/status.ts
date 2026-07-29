@@ -1,3 +1,5 @@
+import type { ProviderSessionTitleSource } from "./session_state.ts";
+
 export interface ProviderStatus {
   provider: string;
   activeSessions: number;
@@ -48,6 +50,8 @@ export interface DaemonSessionStatus {
   sessionShortId?: string;
   providerSessionId?: string;
   snippet?: string;
+  /** Present when `snippet` carries a provider-maintained session title. */
+  titleSource?: ProviderSessionTitleSource;
   updatedAt: string;
   lastEventAt?: string;
   stale: boolean;
