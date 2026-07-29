@@ -301,7 +301,9 @@ export async function* parseClaudeEvents(
       const entrySessionId = typeof entry.sessionId === "string"
         ? entry.sessionId.trim()
         : undefined;
-      if (!title || (entrySessionId && entrySessionId !== sessionId)) {
+      // Require a matching sessionId: malformed/partial title records must
+      // not be attributed to whatever transcript happens to be parsed.
+      if (!title || entrySessionId !== sessionId) {
         continue;
       }
       yield {

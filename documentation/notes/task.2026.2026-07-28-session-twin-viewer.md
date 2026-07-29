@@ -86,6 +86,7 @@ This task supersedes the stub [[task.2026.2026-03-22-conversation-detail-page]] 
 - [ ] Slice 2: display-title set/clear on the viewer via the existing `outputMetadataDefaults.displayTitle` action path.
 - [x] Slice 1 tests: seq-window paging, malformed/duplicate-line skipping, kind classification, legacy-twin secret redaction, unknown session.
 - [ ] Remaining tests: byte-cap edge, oversized single event, symlinked twin path, XSS fixtures (rendering is escaped-by-construction via JSX text nodes/`<pre>`), concurrent-append stability.
+- [ ] Follow-up (CodeRabbit, PR #45): make the window reader I/O-bounded (single-pass streaming instead of reading/parsing the whole twin file per request; response is already bounded).
 - [ ] Slice 3 (re-evaluate first): bounded source-replay fallback action for twin-less sessions.
 - [x] Update [[dev.codebase-overview]] and [[user-guide.web]] (release notes at next `bump:version`).
 - [x] Run focused validation and the production web build.

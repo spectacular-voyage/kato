@@ -93,6 +93,22 @@ Deno.test("readTwinEventsWindow pages by seq with hasOlder/hasNewer", async () =
     assertEquals(everything.events.length, 5);
     assertEquals(everything.hasOlder, false);
     assertEquals(everything.skippedLines, 0);
+
+    // Empty windows never dead-end: the requested cursor still reports the
+    // direction that has events.
+    const beforeOldest = await store.readTwinEventsWindow(metadata, {
+      beforeSeq: 1,
+    });
+    assertEquals(beforeOldest.events.length, 0);
+    assertEquals(beforeOldest.hasOlder, false);
+    assertEquals(beforeOldest.hasNewer, true);
+
+    const afterNewest = await store.readTwinEventsWindow(metadata, {
+      afterSeq: 5,
+    });
+    assertEquals(afterNewest.events.length, 0);
+    assertEquals(afterNewest.hasOlder, true);
+    assertEquals(afterNewest.hasNewer, false);
   });
 });
 

@@ -427,7 +427,12 @@ Deno.test("claude parser yields provider title updates with validation and curso
       aiTitle: "Wrong session",
       sessionId: "sess-999",
     }),
-    JSON.stringify({ type: "custom-title", customTitle: "   " }),
+    JSON.stringify({ type: "ai-title", aiTitle: "No session id" }),
+    JSON.stringify({
+      type: "custom-title",
+      customTitle: "   ",
+      sessionId: "sess-001",
+    }),
     JSON.stringify({
       type: "ai-title",
       aiTitle: "Second AI title",

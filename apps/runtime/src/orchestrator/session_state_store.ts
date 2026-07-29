@@ -775,15 +775,23 @@ export class PersistentSessionStateStore {
     }
     const events = forward ? capped : capped.reverse();
 
+    // Empty windows fall back to the requested cursor so pagination never
+    // dead-ends (e.g. beforeSeq at the oldest event still offers "newer").
     const firstSeq = events[0]?.seq;
     const lastSeq = events[events.length - 1]?.seq;
+    const beforeSeq = options.beforeSeq;
+    const afterSeq = options.afterSeq;
     return {
       events,
       hasOlder: firstSeq !== undefined
         ? all.some((event) => event.seq < firstSeq)
+        : afterSeq !== undefined
+        ? all.some((event) => event.seq <= afterSeq)
         : false,
       hasNewer: lastSeq !== undefined
         ? all.some((event) => event.seq > lastSeq)
+        : beforeSeq !== undefined
+        ? all.some((event) => event.seq >= beforeSeq)
         : false,
       skippedLines,
       totalParsed: all.length,

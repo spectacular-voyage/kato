@@ -71,7 +71,19 @@ async function loadTwinSnippet(
 ): Promise<string | undefined> {
   const providerTitle = normalizeSnippet(metadata.providerTitle);
   if (providerTitle) {
-    return providerTitle;
+    // Same read-time re-redaction as twin content: persisted titles were
+    // policy-processed at ingestion, but the policy may have changed since.
+    const redactor = createSecretsRedactor(
+      secretsPolicy ?? FAIL_CLOSED_SECRETS_POLICY,
+    );
+    if (redactor.mode !== "redact") {
+      return providerTitle;
+    }
+    try {
+      return normalizeSnippet(redactor.processText(providerTitle).text);
+    } catch {
+      return undefined;
+    }
   }
   try {
     const twinEvents = await sessionStore.readTwinEvents(metadata, 1);

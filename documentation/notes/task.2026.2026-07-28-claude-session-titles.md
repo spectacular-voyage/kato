@@ -97,6 +97,7 @@ Status compatibility: daemon status JSON keeps the existing `snippet` field and 
 - [x] Wire consumers: web sessions rows, snippet resolution/API, recording default title, `{snippetSlug}`, markdown title, CLI status.
 - [x] Tests: parser (last-wins, validation, normalization, cursor advance), runner (title capture, title-only append, redact-mode secrets, Claude backfill with scan caching), store precedence, projection preference.
 - [ ] Remaining tests: secrets `detect`/`off` modes on titles, metadata clone round-trip, UTF-8 offsets around title lines, `updatedAt` ordering pin.
+- [ ] Follow-up (CodeRabbit, PR #45): invalid/skipped title lines do not advance the parse cursor (consistent with other skipped trailing lines, but a trailing malformed title re-parses each poll); consider eager provider-title display for persisted-only Sessions rows (currently lazy via the redacting snippet API so no unredacted metadata field reaches the browser directly).
 - [x] Update [[user-guide.web]], [[dev.codebase-overview]], and [[dev.decision-log]] (release notes at next `bump:version`; [[dev.event-kinds]] untouched — titles are a parse-item channel, not an event kind).
 - [x] Focused validation: full standard test slices (923 passed), `deno task check`, `deno task lint`.
 - [ ] Run `deno task ci` before PR.

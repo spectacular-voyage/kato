@@ -1925,6 +1925,16 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         await this.sessionStateStore.saveSessionMetadata(stateMetadata);
       }
 
+      // Snapshot upserts use the resolved persisted title so a cold snapshot
+      // store cannot let an incoming ai title shadow a persisted custom one.
+      const snapshotProviderTitle = stateMetadata.providerTitle !== undefined &&
+          stateMetadata.providerTitleSource !== undefined
+        ? {
+          title: stateMetadata.providerTitle,
+          source: stateMetadata.providerTitleSource,
+        }
+        : providerTitleUpdate;
+
       const shouldHydrateSnapshot = appendedTwinCount > 0 ||
         (!currentSnapshot && twinAvailableForHydration) ||
         cursorChanged ||
@@ -1969,8 +1979,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
               events: rebuiltMerged.mergedEvents,
               fileModifiedAtMs,
               ...(snippetOverride ? { snippetOverride } : {}),
-              ...(providerTitleUpdate
-                ? { providerTitle: providerTitleUpdate }
+              ...(snapshotProviderTitle
+                ? { providerTitle: snapshotProviderTitle }
                 : {}),
             });
           }
@@ -2004,8 +2014,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             events: merged.mergedEvents,
             fileModifiedAtMs,
             ...(snippetOverride ? { snippetOverride } : {}),
-            ...(providerTitleUpdate
-              ? { providerTitle: providerTitleUpdate }
+            ...(snapshotProviderTitle
+              ? { providerTitle: snapshotProviderTitle }
               : {}),
           });
         } else if (incomingEvents.length > 0 || currentSnapshot) {
@@ -2039,8 +2049,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
             events: mergedEvents,
             fileModifiedAtMs,
             ...(snippetOverride ? { snippetOverride } : {}),
-            ...(providerTitleUpdate
-              ? { providerTitle: providerTitleUpdate }
+            ...(snapshotProviderTitle
+              ? { providerTitle: snapshotProviderTitle }
               : {}),
           });
         }
