@@ -12,6 +12,8 @@ created: 1774200374680
 
 ## Summary
 
+Superseded by [[task.2026.2026-07-28-session-twin-viewer]], which covers the session/twin content viewer including the recordings click-through described above.
+
 ## Discussion
 
 ## Open Issues
