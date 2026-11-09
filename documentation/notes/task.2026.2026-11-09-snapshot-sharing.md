@@ -43,9 +43,24 @@ See [[dev.decision-log]] "Snapshot Store Shares Sealed Events".
 - Merge and runtime signatures are memoized in `WeakMap`s only for sealed events.
 - `saveSessionMetadata` uses `ensureDaemonControlEntry`, so the index is rewritten only when the entry differs. Nothing reads the index's top-level `updatedAt`.
 
+### Galactica after v0.2.17 (npm install, 2026-11-09)
+
+Sampled every 30 s for the first 10 minutes after start:
+
+| | v0.2.16 (11–21 min after start) | v0.2.17 (1–10 min after start) |
+|---|---|---|
+| CPU | 35–48%, rising | 10–15%, flat |
+| Snapshots | 20–25 sessions, 94k–127k events | 17–26 sessions, 79k–124k events |
+| Heap used | 0.2–1.0 GB sawtooth | 0.24–0.6 GB |
+| RSS | 1.0–1.5 GB | 0.53–0.79 GB, ~0.56 GB at the end |
+
+The first 30 s (63% CPU, 3.3 GB read) is the documented one-time full read of each active Codex rollout. No warnings or errors were logged.
+
 ## Open Issues
 
 - Twin hydration (`readTwinEvents(metadata, 1)`) still reads and maps the whole twin on a session's first update after start or after eviction. A tail-window read would need the snippet to come from metadata rather than the full event stream.
+- `daemon-control.json` is still rewritten about 0.6 times per second while conversations are active (down from about 0.9): twin appends save metadata with `touchUpdatedAt: true`, which changes the index entry's `updatedAt`. Each rewrite costs about 3 ms of CPU, but about 0.7 MB/s of writes. Nothing reads the index entry's `updatedAt`, so excluding it from the comparison (or from the entry) would stop these.
+- Steady reads stay at about 3.5 MB/s (100–120 MB per 30 s), as on v0.2.16; not yet attributed.
 
 ## Implementation Plan
 
@@ -55,4 +70,4 @@ See [[dev.decision-log]] "Snapshot Store Shares Sealed Events".
 - [x] Skip `daemon-control.json` rewrites when the session's entry is unchanged.
 - [x] Tests: isolation contract (mutating a stored event throws; array, metadata, and cursor are per-call copies), caller objects are copied and not frozen, stored events are shared by reference, size estimate equals the snapshot's JSON size.
 - [x] `deno task ci`: 976 tests passed.
-- [ ] Release and verify on galactica (CPU and RSS after the startup catch-up settles).
+- [x] Release v0.2.17 and verify on galactica (CPU and RSS after the startup catch-up settles).
