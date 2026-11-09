@@ -366,9 +366,10 @@ jobs:
       - name: Download macOS ARM64 Binary Artifact Bundle
         uses: actions/download-artifact@v8
         with:
-          path: .test-tmp/downloaded-bundles
-          pattern: kato-macos-arm64
-          merge-multiple: false
+          # A single matched artifact is extracted straight into `path`, so give
+          # it its own directory; the release step only looks one level down.
+          name: kato-macos-arm64
+          path: .test-tmp/downloaded-bundles/kato-macos-arm64
 
       - name: Prepare Release Metadata
         id: prepare-release
