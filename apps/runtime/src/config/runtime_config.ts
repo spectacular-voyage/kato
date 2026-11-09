@@ -12,6 +12,7 @@ import {
   createDefaultDaemonFeatureFlags,
   mergeDaemonFeatureFlags,
 } from "../feature_flags/mod.ts";
+import { isValidLogRetentionDays } from "../observability/log_rotation.ts";
 import {
   expandHomePath,
   readOptionalEnv,
@@ -32,9 +33,10 @@ const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = [
   "warn",
   "error",
 ];
+const RUNTIME_LOG_LEVEL_KEYS = ["operationalLevel", "auditLevel"] as const;
 const RUNTIME_LOGGING_CONFIG_KEYS: Array<keyof RuntimeLoggingConfig> = [
-  "operationalLevel",
-  "auditLevel",
+  ...RUNTIME_LOG_LEVEL_KEYS,
+  "retentionDays",
 ];
 const RUNTIME_CONFIG_KEYS: Array<keyof RuntimeConfig> = [
   "schemaVersion",
@@ -145,6 +147,9 @@ export function createDefaultRuntimeLoggingConfig(
   return {
     operationalLevel: overrides.operationalLevel ?? defaults.operationalLevel,
     auditLevel: overrides.auditLevel ?? defaults.auditLevel,
+    ...(overrides.retentionDays !== undefined
+      ? { retentionDays: overrides.retentionDays }
+      : {}),
   };
 }
 
@@ -167,7 +172,7 @@ function parseRuntimeLoggingConfig(
   }
 
   const resolved = createDefaultRuntimeLoggingConfig();
-  for (const key of RUNTIME_LOGGING_CONFIG_KEYS) {
+  for (const key of RUNTIME_LOG_LEVEL_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
       continue;
@@ -180,6 +185,14 @@ function parseRuntimeLoggingConfig(
       return undefined;
     }
     resolved[key] = level;
+  }
+
+  const retentionDays = value["retentionDays"];
+  if (retentionDays !== undefined) {
+    if (!isValidLogRetentionDays(retentionDays)) {
+      return undefined;
+    }
+    resolved.retentionDays = retentionDays;
   }
 
   return resolved;
@@ -516,6 +529,7 @@ export function createDefaultRuntimeConfig(options: {
     operationalLevel: options.logging?.operationalLevel ??
       envOperationalLevel,
     auditLevel: options.logging?.auditLevel ?? envAuditLevel,
+    retentionDays: options.logging?.retentionDays,
   });
   if (
     !isRuntimeLogLevel(resolvedLogging.operationalLevel) ||
@@ -524,6 +538,12 @@ export function createDefaultRuntimeConfig(options: {
     throw new Error(
       "logging levels must be one of: debug, info, warn, error",
     );
+  }
+  if (
+    resolvedLogging.retentionDays !== undefined &&
+    !isValidLogRetentionDays(resolvedLogging.retentionDays)
+  ) {
+    throw new Error("logging.retentionDays must be a positive integer");
   }
 
   const envMemoryMb = readOptionalEnv("KATO_DAEMON_MAX_MEMORY_MB");

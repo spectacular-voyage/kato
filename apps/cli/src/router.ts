@@ -222,6 +222,7 @@ function resolveAutoInitOnStartDefault(): boolean {
 
 async function createCliLogSink(
   path: string,
+  retentionDays: number | undefined,
 ): Promise<JsonLineFileSink | NoopSink> {
   try {
     await Deno.mkdir(dirname(path), { recursive: true });
@@ -234,7 +235,7 @@ async function createCliLogSink(
     }
     throw error;
   }
-  return new JsonLineFileSink(path);
+  return new JsonLineFileSink(path, { retentionDays });
 }
 
 function shouldWarnOnIgnoredLocalState(commandName: string): boolean {
@@ -628,14 +629,24 @@ export async function runDaemonCli(
     "security-audit.jsonl",
   );
   const operationalLogger = options.operationalLogger ??
-    new StructuredLogger([await createCliLogSink(cliOperationalLogPath)], {
+    new StructuredLogger([
+      await createCliLogSink(
+        cliOperationalLogPath,
+        cliConfig.logging.retentionDays,
+      ),
+    ], {
       channel: "operational",
       minLevel: cliConfig.logging.operationalLevel,
       now: runtime.now,
     });
   const auditLogger = options.auditLogger ??
     new AuditLogger(
-      new StructuredLogger([await createCliLogSink(cliAuditLogPath)], {
+      new StructuredLogger([
+        await createCliLogSink(
+          cliAuditLogPath,
+          cliConfig.logging.retentionDays,
+        ),
+      ], {
         channel: "security-audit",
         minLevel: cliConfig.logging.auditLevel,
         now: runtime.now,

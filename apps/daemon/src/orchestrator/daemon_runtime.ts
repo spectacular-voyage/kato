@@ -2173,7 +2173,20 @@ async function processPersistentRecordingUpdates(
     return false;
   }
 
-  const metadataList = await sessionStateStore.listSessionMetadata();
+  // Only the in-memory snapshots' metadata is needed. Read just those files
+  // (fresh from disk, so web-written changes are seen) instead of every
+  // session on disk; this pass runs on every poll.
+  const snapshotSessionKeys = new Set<string>();
+  for (const entry of snapshots) {
+    const provider = readString(entry.provider);
+    const providerSessionId = readString(entry.sessionId);
+    if (provider && providerSessionId) {
+      snapshotSessionKeys.add(`${provider}:${providerSessionId}`);
+    }
+  }
+  const metadataList = await sessionStateStore.listSessionMetadataForKeys(
+    snapshotSessionKeys,
+  );
   const metadataBySessionKey = new Map<string, SessionMetadataV1>();
   for (const metadata of metadataList) {
     metadataBySessionKey.set(
@@ -2649,6 +2662,12 @@ async function loadLatestSessionMetadataForMerge(
   sessionStateStore: PersistentSessionStateStore,
   metadata: SessionMetadataV1,
 ): Promise<SessionMetadataV1 | undefined> {
+  const [byKey] = await sessionStateStore.listSessionMetadataForKeys([
+    metadata.sessionKey,
+  ]);
+  if (byKey) {
+    return byKey;
+  }
   return (await sessionStateStore.listSessionMetadata()).find((entry) =>
     entry.sessionKey === metadata.sessionKey ||
     entry.providerSessionId === metadata.providerSessionId ||
@@ -3082,7 +3101,6 @@ export async function runDaemonRuntimeLoop(
     if (sessionMetadataMayHaveChanged) {
       summaryMetadataDirty = true;
     }
-    const summaryMetadata = await loadSummaryMetadata();
 
     const currentTimeMs = now().getTime();
     if (currentTimeMs >= nextHeartbeatAt) {
@@ -3090,8 +3108,11 @@ export async function runDaemonRuntimeLoop(
       const heartbeatNow = now();
       const sessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
         sessionSnapshotStore?.list() ?? [];
+      // The full metadata listing is only needed for the heartbeat; loading it
+      // here (not every poll) keeps busy sessions from re-reading every
+      // session's metadata once per second.
       const heartbeatMetadata = sessionStateStore
-        ? summaryMetadata ?? await loadSummaryMetadata()
+        ? await loadSummaryMetadata()
         : undefined;
       const heartbeatMetadataByKey = heartbeatMetadata
         ? new Map(heartbeatMetadata.map((entry) => [entry.sessionKey, entry]))
@@ -3132,10 +3153,16 @@ export async function runDaemonRuntimeLoop(
         phase: "heartbeat",
       });
 
+      const ingestionFailures = ingestionRunners.flatMap((runner) =>
+        runner.getIngestionFailures?.() ?? []
+      );
+      const { ingestionFailures: _previousFailures, ...snapshotBase } =
+        snapshot;
       snapshot = {
-        ...snapshot,
+        ...snapshotBase,
         providers,
         sessions,
+        ...(ingestionFailures.length > 0 ? { ingestionFailures } : {}),
         recordings: {
           activeRecordings: recordingSummary.activeRecordings,
           destinations: recordingSummary.destinations,
@@ -3262,6 +3289,7 @@ export async function runDaemonRuntimeLoop(
     },
   };
   delete snapshot.daemonPid;
+  delete snapshot.ingestionFailures;
   await statusStore.save(snapshot);
 
   await operationalLogger.info(

@@ -340,8 +340,13 @@ export async function runDaemonSubprocess(
     "security-audit.jsonl",
   );
 
+  // Rotation compares against real file mtimes, so sinks use the wall clock
+  // rather than the injectable logical clock.
+  const logSinkOptions = {
+    retentionDays: runtimeConfig.logging.retentionDays,
+  };
   const operationalLogger = new StructuredLogger([
-    new JsonLineFileSink(operationalLogPath),
+    new JsonLineFileSink(operationalLogPath, logSinkOptions),
   ], {
     channel: "operational",
     minLevel: logLevels.operationalLevel,
@@ -358,7 +363,7 @@ export async function runDaemonSubprocess(
     },
   );
   const auditLogger = new AuditLogger(
-    new StructuredLogger([new JsonLineFileSink(auditLogPath)], {
+    new StructuredLogger([new JsonLineFileSink(auditLogPath, logSinkOptions)], {
       channel: "security-audit",
       minLevel: logLevels.auditLevel,
       now,

@@ -1,5 +1,6 @@
 import type {
   ConversationEvent,
+  DaemonIngestionFailureStatus,
   ProviderAutoGenerateTwins,
   ProviderCursor,
   ProviderSessionTitleSource,
@@ -29,10 +30,19 @@ import {
   resolveClaudeSessionParseOptions,
 } from "../providers/claude/mod.ts";
 import {
+  type CodexSessionMeta,
   parseCodexEvents,
   readCodexSessionMeta,
 } from "../providers/codex/mod.ts";
 import { parseGeminiEvents } from "../providers/gemini/mod.ts";
+import type {
+  ProviderParseCheckpoint,
+  ProviderParseResumeOptions,
+} from "../providers/parse_checkpoint.ts";
+import {
+  type JsonlCheckpoint,
+  openJsonlLineReader,
+} from "../utils/jsonl_line_reader.ts";
 import type {
   ProviderIngestionPollResult,
   ProviderIngestionRunner,
@@ -94,6 +104,11 @@ export interface ProviderSessionFile {
   layoutType?: "hash" | "slug" | "unknown";
 }
 
+/** Context passed to provider parsers; Gemini ignores the resume options. */
+export type ProviderParseContext =
+  & { provider: string; sessionId: string }
+  & ProviderParseResumeOptions;
+
 export interface FileProviderIngestionRunnerOptions {
   provider: string;
   watchRoots: string[];
@@ -101,7 +116,7 @@ export interface FileProviderIngestionRunnerOptions {
   parseEvents: (
     filePath: string,
     fromOffset: number,
-    ctx: { provider: string; sessionId: string },
+    ctx: ProviderParseContext,
   ) => AsyncIterable<{
     event?: ConversationEvent;
     titleUpdate?: ProviderIngestionTitleUpdate;
@@ -181,6 +196,37 @@ const DEFAULT_WATCH_DEBOUNCE_MS = 250;
 /** Upper bound on events scanned from the source head for a stable snippet. */
 const HEAD_SNIPPET_MAX_EVENTS = 200;
 const CODEX_COMPACTION_BACKTRACK_BYTES = 4 * 1024;
+const PARSE_FAILURE_INITIAL_BACKOFF_MS = 30_000;
+const PARSE_FAILURE_MAX_BACKOFF_MS = 15 * 60_000;
+
+/** Latest parse checkpoint for a session, kept in memory only. */
+interface SessionParseCheckpoint {
+  filePath: string;
+  /** Persisted cursor value produced by the parse that made the checkpoint. */
+  cursorAtCheckpoint: number;
+  checkpoint: ProviderParseCheckpoint;
+}
+
+/** Incremental Codex compaction-marker scan state for one session. */
+interface CodexCompactionScanState {
+  filePath: string;
+  /** End of the last newline-terminated line scanned, with its guard. */
+  checkpoint: JsonlCheckpoint;
+  /** Latest compaction marker on a terminated line at or before checkpoint. */
+  latestTerminated?: ProviderIngestionCodexCompactionAnchor;
+}
+
+interface IngestionFailureState {
+  error: string;
+  firstFailedAtMs: number;
+  lastFailedAtMs: number;
+  consecutiveFailures: number;
+  nextRetryAtMs: number;
+}
+
+function isPowerOfTwo(value: number): boolean {
+  return value > 0 && (value & (value - 1)) === 0;
+}
 type ProviderReadOperation = "stat" | "readDir" | "open";
 
 class ProviderIngestionReadDeniedError extends Error {
@@ -411,115 +457,147 @@ async function discoverClaudeSessions(
   return sessions;
 }
 
-async function readLatestCodexCompactionAnchor(
-  filePath: string,
-): Promise<ProviderIngestionCodexCompactionAnchor | undefined> {
-  let file: Deno.FsFile | undefined;
-  let lineEnd = 0;
-  let latest: ProviderIngestionCodexCompactionAnchor | undefined;
-  const decoder = new TextDecoder();
-
-  const processLine = (
-    lineBytes: Uint8Array,
-    hasTrailingNewline: boolean,
-  ): void => {
-    const line = decoder.decode(lineBytes);
-    lineEnd += lineBytes.length + (hasTrailingNewline ? 1 : 0);
-    if (!line.includes('"type":"compacted"')) {
-      return;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (!isRecordValue(parsed) || parsed["type"] !== "compacted") {
-      return;
-    }
-    latest = {
-      lineEnd,
-      anchor: {
-        messageId: `codex-compacted:${lineEnd}`,
-        payloadHash: hashStringFNV1a(line),
-      },
-    };
-  };
-
+function parseCompactionLine(
+  text: string,
+  lineEnd: number,
+): ProviderIngestionCodexCompactionAnchor | undefined {
+  if (!text.includes('"type":"compacted"')) {
+    return undefined;
+  }
+  let parsed: unknown;
   try {
-    file = await Deno.open(filePath, { read: true });
-    const reader = file.readable.getReader();
-    let pending = new Uint8Array(0);
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!isRecordValue(parsed) || parsed["type"] !== "compacted") {
+    return undefined;
+  }
+  return {
+    lineEnd,
+    anchor: {
+      messageId: `codex-compacted:${lineEnd}`,
+      payloadHash: hashStringFNV1a(text),
+    },
+  };
+}
+
+/**
+ * Finds the latest Codex `compacted` marker, scanning only bytes appended
+ * since `previous` when its guard still matches (otherwise from the start).
+ * Returns the anchor (including an unterminated final line, as the full scan
+ * always did) and the next scan state (terminated lines only).
+ */
+async function scanCodexCompactionAnchor(
+  filePath: string,
+  previous: CodexCompactionScanState | undefined,
+): Promise<{
+  latest: ProviderIngestionCodexCompactionAnchor | undefined;
+  state: CodexCompactionScanState | undefined;
+}> {
+  try {
+    let opened = previous && previous.filePath === filePath
+      ? await openJsonlLineReader(filePath, {
+        startOffset: previous.checkpoint.offset,
+        expectedGuard: previous.checkpoint.guard,
+      })
+      : undefined;
+    let latestTerminated = opened && !opened.guardMismatch
+      ? previous?.latestTerminated
+      : undefined;
+    if (!opened || opened.guardMismatch) {
+      opened = await openJsonlLineReader(filePath);
+      latestTerminated = undefined;
+    }
+    if (opened.guardMismatch) {
+      throw new Error("unreachable: guard mismatch without expected guard");
+    }
+    const reader = opened.reader;
+    let latest = latestTerminated;
     try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
+      for await (const line of reader.lines()) {
+        const anchor = parseCompactionLine(line.text, line.end);
+        if (!anchor) continue;
+        latest = anchor;
+        if (line.terminated) {
+          latestTerminated = anchor;
         }
-        if (!value || value.length === 0) {
-          continue;
-        }
-        const chunk = pending.length === 0 ? value : (() => {
-          const combined = new Uint8Array(pending.length + value.length);
-          combined.set(pending);
-          combined.set(value, pending.length);
-          return combined;
-        })();
-        let lineStart = 0;
-        for (let i = 0; i < chunk.length; i += 1) {
-          if (chunk[i] !== 0x0a) {
-            continue;
-          }
-          processLine(chunk.subarray(lineStart, i), true);
-          lineStart = i + 1;
-        }
-        pending = lineStart === 0 ? chunk : chunk.subarray(lineStart);
-        if (pending.length > 0 && pending.buffer === chunk.buffer) {
-          pending = pending.slice();
-        }
-      }
-      if (pending.length > 0) {
-        processLine(pending, false);
       }
     } finally {
-      reader.releaseLock();
+      reader.close();
     }
+    const checkpoint = reader.checkpoint();
+    return {
+      latest,
+      state: checkpoint
+        ? { filePath, checkpoint, latestTerminated }
+        : undefined,
+    };
   } catch (error) {
     if (error instanceof Deno.errors.PermissionDenied) {
       throw new ProviderIngestionReadDeniedError("open", filePath, error);
     }
     if (error instanceof Deno.errors.NotFound) {
-      return undefined;
+      return { latest: undefined, state: undefined };
     }
     throw error;
-  } finally {
-    if (file) {
-      try {
-        file.close();
-      } catch {
-        // file.readable may already close the file once the stream drains
-      }
-    }
   }
-
-  return latest;
 }
 
-async function discoverCodexSessions(
+interface CodexSessionMetaCacheEntry {
+  ino: number | null;
+  size: number;
+  meta: CodexSessionMeta;
+}
+
+/**
+ * Per-runner memo of each rollout's first-line `session_meta`, keyed by path.
+ * Rollouts are append-only, so the first line is stable while the file keeps
+ * its inode and never shrinks; replaced or truncated files are re-read.
+ */
+export type CodexSessionMetaCache = Map<string, CodexSessionMetaCacheEntry>;
+
+export async function discoverCodexSessions(
   roots: string[],
+  metaCache?: CodexSessionMetaCache,
 ): Promise<ProviderSessionFile[]> {
   const sessions: ProviderSessionFile[] = [];
+  const seenPaths = new Set<string>();
   for (const root of roots) {
     if (!(await pathExists(root))) continue;
     for await (const filePath of walkJsonlFiles(root)) {
-      let meta;
+      let stat: Deno.FileInfo;
       try {
-        meta = await readCodexSessionMeta(filePath);
+        stat = await Deno.stat(filePath);
       } catch (error) {
+        if (error instanceof Deno.errors.NotFound) continue;
         if (error instanceof Deno.errors.PermissionDenied) {
-          throw new ProviderIngestionReadDeniedError("open", filePath, error);
+          throw new ProviderIngestionReadDeniedError("stat", filePath, error);
         }
         throw error;
+      }
+      seenPaths.add(filePath);
+      const cached = metaCache?.get(filePath);
+      let meta: CodexSessionMeta | undefined;
+      if (cached && cached.ino === stat.ino && stat.size >= cached.size) {
+        cached.size = stat.size;
+        meta = cached.meta;
+      } else {
+        try {
+          meta = await readCodexSessionMeta(filePath);
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) continue;
+          if (error instanceof Deno.errors.PermissionDenied) {
+            throw new ProviderIngestionReadDeniedError("open", filePath, error);
+          }
+          throw error;
+        }
+        if (meta) {
+          metaCache?.set(filePath, { ino: stat.ino, size: stat.size, meta });
+        } else {
+          // No complete first line yet: retry on the next discovery pass.
+          metaCache?.delete(filePath);
+        }
       }
       if (!meta || meta.source === "exec") continue;
       sessions.push({
@@ -528,8 +606,13 @@ async function discoverCodexSessions(
           ? { parentProviderSessionId: meta.parentProviderSessionId }
           : {}),
         filePath,
-        modifiedAtMs: await statModifiedAtMs(filePath),
+        modifiedAtMs: stat.mtime?.getTime() ?? 0,
       });
+    }
+  }
+  if (metaCache) {
+    for (const path of metaCache.keys()) {
+      if (!seenPaths.has(path)) metaCache.delete(path);
     }
   }
   return sessions;
@@ -682,7 +765,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly parseEvents: (
     filePath: string,
     fromOffset: number,
-    ctx: { provider: string; sessionId: string },
+    ctx: ProviderParseContext,
   ) => AsyncIterable<{
     event?: ConversationEvent;
     titleUpdate?: ProviderIngestionTitleUpdate;
@@ -692,6 +775,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly sessions = new Map<string, ProviderSessionFile>();
   private readonly sessionByFilePath = new Map<string, string>();
   private readonly dirtySessions = new Set<string>();
+  /**
+   * Tracked sessions whose source gained content kato never ingested (written
+   * while the daemon was down or while ingestion kept failing). Drained one
+   * per poll so a large backlog cannot stall the daemon loop.
+   */
+  private readonly catchUpQueue: string[] = [];
+  private readonly catchUpPending = new Set<string>();
   private readonly cursors = new Map<string, ProviderCursor>();
   private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
@@ -714,6 +804,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     string,
     ProviderIngestionTitleUpdate | undefined
   >();
+  /** Latest complete-parse checkpoint per session (memory only). */
+  private readonly parseCheckpoints = new Map<string, SessionParseCheckpoint>();
+  private readonly compactionScans = new Map<
+    string,
+    CodexCompactionScanState
+  >();
+  private readonly ingestionFailures = new Map<string, IngestionFailureState>();
 
   constructor(options: FileProviderIngestionRunnerOptions) {
     this.provider = options.provider;
@@ -1034,13 +1131,21 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       await this.discoverAndTrackSessions();
     }
 
+    this.scheduleNextCatchUp();
     const dirtySessions = Array.from(this.dirtySessions.values()).sort();
     this.dirtySessions.clear();
 
     let sessionsUpdated = 0;
     let eventsObserved = 0;
+    const nowMs = this.now().getTime();
 
     for (const sessionId of dirtySessions) {
+      const failure = this.ingestionFailures.get(sessionId);
+      if (failure && failure.nextRetryAtMs > nowMs) {
+        // Backing off after parse failures; retry when due.
+        this.dirtySessions.add(sessionId);
+        continue;
+      }
       const result = await this.ingestSession(sessionId);
       if (result.updated) sessionsUpdated += 1;
       eventsObserved += result.eventsObserved;
@@ -1153,6 +1258,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     }
     const deduped = await this.dedupeDiscoveredSessions(discovered);
     const activeSessionIds = new Set<string>();
+    const catchUpCandidates: ProviderSessionFile[] = [];
 
     for (const session of deduped) {
       activeSessionIds.add(session.sessionId);
@@ -1181,6 +1287,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.sessionByFilePath.delete(current.filePath);
           this.cursors.delete(session.sessionId);
           this.cursorSourcePaths.delete(session.sessionId);
+          this.forgetSessionParseCaches(session.sessionId);
         }
         if (
           filePathChanged ||
@@ -1188,6 +1295,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           this.shouldProactivelyIngestDiscoveredSession(session)
         ) {
           this.dirtySessions.add(session.sessionId);
+        } else if (isNewSession) {
+          catchUpCandidates.push(session);
         }
       }
     }
@@ -1198,8 +1307,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         this.sessionByFilePath.delete(existing.filePath);
         this.cursors.delete(sessionId);
         this.cursorSourcePaths.delete(sessionId);
+        this.forgetSessionParseCaches(sessionId);
+        this.ingestionFailures.delete(sessionId);
+        this.catchUpPending.delete(sessionId);
       }
     }
+
+    await this.queueStaleSessionCatchUp(catchUpCandidates);
 
     this.needsDiscovery = false;
     this.nextDiscoveryAtMs = this.now().getTime() + this.discoveryIntervalMs;
@@ -1245,6 +1359,110 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         return;
       }
       throw error;
+    }
+  }
+
+  /**
+   * Queues tracked sessions whose source has content kato has not ingested
+   * although it predates this runner. Only sessions with persisted metadata
+   * are considered, so startup never replays the whole provider history.
+   * A source counts as stale when its mtime is newer than the last ingested
+   * mtime and, for byte-offset cursors, its size differs from the cursor:
+   * a touched-but-unchanged file must not trigger a Codex warm-up pass.
+   */
+  private async queueStaleSessionCatchUp(
+    candidates: ProviderSessionFile[],
+  ): Promise<void> {
+    if (!this.sessionStateStore || candidates.length === 0) return;
+    const bySessionKey = new Map(
+      candidates.map((session) => [
+        `${this.provider}:${session.sessionId}`,
+        session,
+      ]),
+    );
+    let metadataEntries: SessionMetadataV1[];
+    try {
+      metadataEntries = await this.sessionStateStore
+        .listSessionMetadataForKeys(bySessionKey.keys());
+    } catch (error) {
+      await this.operationalLogger.warn(
+        "provider.ingestion.catch_up.skipped",
+        "Could not load session metadata to detect stale sessions",
+        {
+          provider: this.provider,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return;
+    }
+
+    const stale: Array<
+      { session: ProviderSessionFile; backlogBytes?: number }
+    > = [];
+    for (const metadata of metadataEntries) {
+      const session = bySessionKey.get(metadata.sessionKey);
+      if (!session || metadata.sourceFilePath !== session.filePath) continue;
+      const lastObservedMtimeMs = metadata.lastObservedMtimeMs;
+      if (
+        lastObservedMtimeMs === undefined ||
+        session.modifiedAtMs <= lastObservedMtimeMs
+      ) {
+        continue;
+      }
+      let backlogBytes: number | undefined;
+      if (metadata.ingestCursor.kind === "byte-offset") {
+        let size: number;
+        try {
+          size = (await Deno.stat(session.filePath)).size;
+        } catch {
+          // Missing or unreadable now; regular ingestion reports it later.
+          continue;
+        }
+        if (size === metadata.ingestCursor.value) continue;
+        backlogBytes = size - metadata.ingestCursor.value;
+      }
+      stale.push({ session, backlogBytes });
+    }
+    if (stale.length === 0) return;
+
+    // Most recently active first: those are the sessions people look at.
+    stale.sort((a, b) => b.session.modifiedAtMs - a.session.modifiedAtMs);
+    let queued = 0;
+    for (const { session } of stale) {
+      if (this.catchUpPending.has(session.sessionId)) continue;
+      this.catchUpPending.add(session.sessionId);
+      this.catchUpQueue.push(session.sessionId);
+      queued += 1;
+    }
+    if (queued === 0) return;
+    await this.operationalLogger.info(
+      "provider.ingestion.catch_up.queued",
+      "Queued stale sessions for catch-up ingestion",
+      {
+        provider: this.provider,
+        sessions: queued,
+        backlogBytes: stale.reduce(
+          (total, entry) => total + Math.max(0, entry.backlogBytes ?? 0),
+          0,
+        ),
+        sessionIds: stale.map((entry) => entry.session.sessionId),
+      },
+    );
+  }
+
+  /**
+   * Moves at most one queued catch-up session into this poll's work. Sessions
+   * already ingested since they were queued (e.g. after a watch event) are
+   * skipped.
+   */
+  private scheduleNextCatchUp(): void {
+    while (this.catchUpQueue.length > 0) {
+      const sessionId = this.catchUpQueue.shift()!;
+      if (!this.catchUpPending.delete(sessionId)) continue;
+      if (!this.sessions.has(sessionId)) continue;
+      if (this.dirtySessions.has(sessionId)) continue;
+      this.dirtySessions.add(sessionId);
+      return;
     }
   }
 
@@ -1294,6 +1512,127 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     return deduped.sessions;
   }
 
+  /**
+   * Returns the session's cached checkpoint when resuming from it yields the
+   * same events as parsing from `fromOffset`: either the checkpoint is at or
+   * before `fromOffset` (provider state carries forward; nothing is skipped),
+   * or `fromOffset` is exactly the cursor the checkpointed parse persisted, so
+   * the skipped range `(fromOffset, checkpoint]` produced no events.
+   */
+  private resolveResumeFrom(
+    sessionId: string,
+    filePath: string,
+    fromOffset: number,
+    fileSize: number,
+  ): ProviderParseCheckpoint | undefined {
+    const entry = this.parseCheckpoints.get(sessionId);
+    if (!entry || entry.filePath !== filePath) {
+      return undefined;
+    }
+    const { checkpoint } = entry;
+    if (checkpoint.offset > fileSize) {
+      return undefined;
+    }
+    if (
+      checkpoint.offset <= fromOffset ||
+      fromOffset === entry.cursorAtCheckpoint
+    ) {
+      return checkpoint;
+    }
+    return undefined;
+  }
+
+  private forgetSessionParseCaches(sessionId: string): void {
+    this.parseCheckpoints.delete(sessionId);
+    this.compactionScans.delete(sessionId);
+  }
+
+  /** Sessions whose source currently fails to ingest. */
+  getIngestionFailures(): DaemonIngestionFailureStatus[] {
+    return [...this.ingestionFailures.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([sessionId, failure]) => ({
+        provider: this.provider,
+        sessionId,
+        error: failure.error,
+        firstFailedAt: new Date(failure.firstFailedAtMs).toISOString(),
+        lastFailedAt: new Date(failure.lastFailedAtMs).toISOString(),
+        consecutiveFailures: failure.consecutiveFailures,
+        nextRetryAt: new Date(failure.nextRetryAtMs).toISOString(),
+      }));
+  }
+
+  /**
+   * Records a parse failure with exponential backoff. Logs the first failure,
+   * each doubling of the failure count, and any change of error message, so a
+   * deterministic failure cannot flood the log.
+   */
+  private async recordParseFailure(
+    sessionId: string,
+    filePath: string,
+    error: unknown,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const nowMs = this.now().getTime();
+    const previous = this.ingestionFailures.get(sessionId);
+    const consecutiveFailures = (previous?.consecutiveFailures ?? 0) + 1;
+    const backoffMs = Math.min(
+      PARSE_FAILURE_INITIAL_BACKOFF_MS * 2 ** (consecutiveFailures - 1),
+      PARSE_FAILURE_MAX_BACKOFF_MS,
+    );
+    const failure: IngestionFailureState = {
+      error: message,
+      firstFailedAtMs: previous?.firstFailedAtMs ?? nowMs,
+      lastFailedAtMs: nowMs,
+      consecutiveFailures,
+      nextRetryAtMs: nowMs + backoffMs,
+    };
+    this.ingestionFailures.set(sessionId, failure);
+    this.forgetSessionParseCaches(sessionId);
+    // Stay dirty so the session is retried once the backoff elapses, even if
+    // the source stops changing.
+    this.dirtySessions.add(sessionId);
+
+    if (
+      consecutiveFailures === 1 || isPowerOfTwo(consecutiveFailures) ||
+      previous?.error !== message
+    ) {
+      await this.operationalLogger.error(
+        "provider.ingestion.parse_error",
+        "Provider ingestion parse failed",
+        {
+          provider: this.provider,
+          sessionId,
+          filePath,
+          error: message,
+          consecutiveFailures,
+          firstFailedAt: new Date(failure.firstFailedAtMs).toISOString(),
+          nextRetryAt: new Date(failure.nextRetryAtMs).toISOString(),
+        },
+      );
+    }
+  }
+
+  private async clearParseFailure(
+    sessionId: string,
+    filePath: string,
+  ): Promise<void> {
+    const previous = this.ingestionFailures.get(sessionId);
+    if (!previous) return;
+    this.ingestionFailures.delete(sessionId);
+    await this.operationalLogger.info(
+      "provider.ingestion.parse_recovered",
+      "Provider ingestion recovered after parse failures",
+      {
+        provider: this.provider,
+        sessionId,
+        filePath,
+        consecutiveFailures: previous.consecutiveFailures,
+        firstFailedAt: new Date(previous.firstFailedAtMs).toISOString(),
+      },
+    );
+  }
+
   private setCursor(
     sessionId: string,
     cursor: ProviderCursor,
@@ -1306,6 +1645,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private async ingestSession(sessionId: string): Promise<IngestSessionResult> {
     const session = this.sessions.get(sessionId);
     if (!session) return { updated: false, eventsObserved: 0 };
+    // Any ingest reads to EOF, which satisfies a pending catch-up.
+    this.catchUpPending.delete(sessionId);
 
     const currentSnapshot = this.sessionSnapshotStore.get(sessionId);
     let stateMetadata: SessionMetadataV1 | undefined;
@@ -1393,6 +1734,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     fromOffset = truncatedResume.fromOffset;
     if (truncatedResume.truncated) {
       const resetCursor = existingCursor!;
+      this.forgetSessionParseCaches(sessionId);
       this.setCursor(sessionId, resetCursor, session.filePath);
       if (stateMetadata) {
         stateMetadata.ingestCursor = resetCursor;
@@ -1445,9 +1787,16 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         | ProviderIngestionCodexCompactionAnchor
         | undefined;
       try {
-        latestCompactionAnchor = await readLatestCodexCompactionAnchor(
+        const scan = await scanCodexCompactionAnchor(
           session.filePath,
+          this.compactionScans.get(sessionId),
         );
+        latestCompactionAnchor = scan.latest;
+        if (scan.state) {
+          this.compactionScans.set(sessionId, scan.state);
+        } else {
+          this.compactionScans.delete(sessionId);
+        }
       } catch (error) {
         if (await this.handleReadDenied(error, "open", session.filePath)) {
           return { updated: false, eventsObserved: 0 };
@@ -1599,12 +1948,19 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
         let bootstrapCursor: ProviderCursor = this.provider === "gemini"
           ? makeItemIndexCursor(0)
           : makeByteOffsetCursor(0);
+        let bootstrapCheckpoint: ProviderParseCheckpoint | undefined;
         try {
           for await (
             const { event, titleUpdate, cursor } of this.parseEvents(
               session.filePath,
               0,
-              { provider: this.provider, sessionId },
+              {
+                provider: this.provider,
+                sessionId,
+                onCheckpoint: (checkpoint) => {
+                  bootstrapCheckpoint = checkpoint;
+                },
+              },
             )
           ) {
             if (titleUpdate) {
@@ -1631,7 +1987,15 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
           if (await this.handleReadDenied(error, "open", session.filePath)) {
             return { updated: false, eventsObserved: 0 };
           }
-          throw error;
+          await this.recordParseFailure(sessionId, session.filePath, error);
+          return { updated: false, eventsObserved: 0 };
+        }
+        if (bootstrapCheckpoint) {
+          this.parseCheckpoints.set(sessionId, {
+            filePath: session.filePath,
+            cursorAtCheckpoint: resolveCursorPosition(bootstrapCursor),
+            checkpoint: bootstrapCheckpoint,
+          });
         }
 
         const redactedBootstrapEvents = await this.applySecretsPolicy(
@@ -1701,13 +2065,29 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     let latestCursor: ProviderCursor = existingCursor?.kind === "item-index"
       ? makeItemIndexCursor(fromOffset)
       : makeByteOffsetCursor(fromOffset);
+    const resumeFrom = existingCursor?.kind === "item-index"
+      ? undefined
+      : this.resolveResumeFrom(
+        sessionId,
+        session.filePath,
+        fromOffset,
+        fileStat.size ?? 0,
+      );
+    let parseCheckpoint: ProviderParseCheckpoint | undefined;
 
     try {
       for await (
         const { event, titleUpdate, cursor } of this.parseEvents(
           session.filePath,
           fromOffset,
-          { provider: this.provider, sessionId },
+          {
+            provider: this.provider,
+            sessionId,
+            ...(resumeFrom ? { resumeFrom } : {}),
+            onCheckpoint: (checkpoint) => {
+              parseCheckpoint = checkpoint;
+            },
+          },
         )
       ) {
         if (titleUpdate) {
@@ -1730,17 +2110,18 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       if (await this.handleReadDenied(error, "open", session.filePath)) {
         return { updated: false, eventsObserved: 0 };
       }
-      await this.operationalLogger.error(
-        "provider.ingestion.parse_error",
-        "Provider ingestion parse failed",
-        {
-          provider: this.provider,
-          sessionId,
-          filePath: session.filePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
+      await this.recordParseFailure(sessionId, session.filePath, error);
       return { updated: false, eventsObserved: 0 };
+    }
+    await this.clearParseFailure(sessionId, session.filePath);
+    if (parseCheckpoint) {
+      this.parseCheckpoints.set(sessionId, {
+        filePath: session.filePath,
+        cursorAtCheckpoint: resolveCursorPosition(latestCursor),
+        checkpoint: parseCheckpoint,
+      });
+    } else {
+      this.parseCheckpoints.delete(sessionId);
     }
 
     incomingEvents = await this.applySecretsPolicy(incomingEvents, sessionId);
@@ -2145,10 +2526,11 @@ export function createCodexIngestionRunner(
   options: CreateProviderIngestionRunnerOptions,
 ): ProviderIngestionRunner {
   const roots = resolveCodexSessionRoots(options.sessionRoots);
+  const metaCache: CodexSessionMetaCache = new Map();
   return new FileProviderIngestionRunner({
     provider: "codex",
     watchRoots: roots,
-    discoverSessions: () => discoverCodexSessions(roots),
+    discoverSessions: () => discoverCodexSessions(roots, metaCache),
     parseEvents: (filePath, fromOffset, ctx) =>
       parseCodexEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,

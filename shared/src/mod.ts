@@ -1,4 +1,5 @@
 export type {
+  DaemonIngestionFailureStatus,
   DaemonRecordingStatus,
   DaemonSessionStatus,
   DaemonStatusSnapshot,

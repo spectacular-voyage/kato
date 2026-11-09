@@ -456,3 +456,57 @@ Deno.test("runMaintenanceClean rejects negative recordings cleanup windows", asy
     "recordingsDays must be greater than or equal to 0",
   );
 });
+
+Deno.test("runMaintenanceClean deletes rotated log files alongside flushing active logs", async () => {
+  await withTestTempDir("maintenance-clean-rotated-", async (rootDir) => {
+    const runtimeDir = `${rootDir}/daemon`;
+    const daemonLogsDir = `${runtimeDir}/logs`;
+    const webLogsDir = `${rootDir}/web/logs`;
+    await Deno.mkdir(daemonLogsDir, { recursive: true });
+    await Deno.mkdir(webLogsDir, { recursive: true });
+    await Deno.writeTextFile(`${daemonLogsDir}/security-audit.jsonl`, "{}\n");
+    const rotated = [
+      `${daemonLogsDir}/security-audit.2026-11-06.jsonl`,
+      `${daemonLogsDir}/security-audit.2026-11-07.1.jsonl`,
+      `${daemonLogsDir}/operational.2026-11-07.jsonl`,
+      `${webLogsDir}/security-audit.2026-11-07.jsonl`,
+    ];
+    for (const path of rotated) {
+      await Deno.writeTextFile(path, "{}\n");
+    }
+    const unrelated = `${daemonLogsDir}/security-audit.backup.jsonl`;
+    await Deno.writeTextFile(unrelated, "{}\n");
+
+    const dryRun = await runMaintenanceClean({
+      all: true,
+      dryRun: true,
+      runtimeDir,
+      katoDir: rootDir,
+    });
+    assertEquals(dryRun.stats.logFilesWouldDelete, 4);
+    assertEquals(dryRun.stats.logFilesDeleted, 0);
+    assertStringIncludes(dryRun.summary, "logsToDelete=4");
+    for (const path of rotated) {
+      assertEquals((await Deno.stat(path)).isFile, true);
+    }
+
+    const executed = await runMaintenanceClean({
+      all: true,
+      dryRun: false,
+      runtimeDir,
+      katoDir: rootDir,
+    });
+    assertEquals(executed.stats.logFilesDeleted, 4);
+    assertEquals(executed.stats.logFilesFlushed, 1);
+    assertEquals(executed.stats.deletionFailures, 0);
+    assertStringIncludes(executed.summary, "logsDeleted=4");
+    for (const path of rotated) {
+      await assertRejects(() => Deno.stat(path), Deno.errors.NotFound);
+    }
+    assertEquals(await Deno.readTextFile(unrelated), "{}\n");
+    assertEquals(
+      await Deno.readTextFile(`${daemonLogsDir}/security-audit.jsonl`),
+      "",
+    );
+  });
+});

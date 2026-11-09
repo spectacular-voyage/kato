@@ -710,6 +710,25 @@ function SessionRow(
             )
             : null}
         </span>
+        {row.ingestionFailure
+          ? (
+            <span
+              class="session-list-flags danger mono"
+              title={row.ingestionFailure.error}
+            >
+              Ingestion failing since{" "}
+              <TimestampText
+                value={row.ingestionFailure.firstFailedAt}
+                timeZone={props.timeZone}
+              />
+              {" · "}
+              {row.ingestionFailure.consecutiveFailures}{" "}
+              {row.ingestionFailure.consecutiveFailures === 1
+                ? "attempt"
+                : "attempts"}
+            </span>
+          )
+          : null}
         {row.relationship || row.structuralContext
           ? (
             <span class="session-list-flags muted mono">

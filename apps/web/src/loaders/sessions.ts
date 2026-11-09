@@ -17,6 +17,7 @@ import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   PersistentSessionStateStore,
+  readIngestionFailures,
   type RegisteredWorkspace,
   resolveDefaultKatoDir,
   resolveDefaultStatusPath,
@@ -61,6 +62,14 @@ export interface SessionRecordingActivityRow {
   writerPolicy?: OutputWriterPolicyProjection;
 }
 
+/** Present while the daemon cannot ingest this session's source transcript. */
+export interface SessionIngestionFailureView {
+  error: string;
+  firstFailedAt: string;
+  consecutiveFailures: number;
+  nextRetryAt: string;
+}
+
 export interface SessionActivityRow {
   sessionKey: string;
   provider: string;
@@ -76,6 +85,7 @@ export interface SessionActivityRow {
   updatedAt: string;
   lastEventAt?: string;
   twinSizeBytes?: number;
+  ingestionFailure?: SessionIngestionFailureView;
   stale: boolean;
   state: ActivityState;
   activeRecordingCount: number;
@@ -991,6 +1001,13 @@ export async function loadSessionActivityRows(
   const liveBySessionId = new Map(
     (snapshot.sessions ?? []).map((session) => [session.sessionId, session]),
   );
+  // The daemon reports failures by provider session id.
+  const ingestionFailuresByProviderSession = new Map(
+    readIngestionFailures(snapshot).map((failure) => [
+      providerSessionKey(failure.provider, failure.sessionId),
+      failure,
+    ]),
+  );
   const resolvedWorkspaceFilter = await resolveWorkspaceFilter(
     options.workspaceFilter,
     katoDir,
@@ -1013,6 +1030,9 @@ export async function loadSessionActivityRows(
     { metadata, twinSizeBytes },
   ): SessionActivityRow => {
     const live = liveBySessionId.get(metadata.sessionId);
+    const ingestionFailure = ingestionFailuresByProviderSession.get(
+      providerSessionKey(metadata.provider, metadata.providerSessionId),
+    );
     const recordings = buildRecordingRows(
       metadata,
       live,
@@ -1074,6 +1094,16 @@ export async function loadSessionActivityRows(
       updatedAt: live?.updatedAt ?? metadata.updatedAt,
       lastEventAt: live?.lastEventAt,
       ...(twinSizeBytes !== undefined ? { twinSizeBytes } : {}),
+      ...(ingestionFailure
+        ? {
+          ingestionFailure: {
+            error: ingestionFailure.error,
+            firstFailedAt: ingestionFailure.firstFailedAt,
+            consecutiveFailures: ingestionFailure.consecutiveFailures,
+            nextRetryAt: ingestionFailure.nextRetryAt,
+          },
+        }
+        : {}),
       stale: live?.stale ?? true,
       state,
       activeRecordingCount,

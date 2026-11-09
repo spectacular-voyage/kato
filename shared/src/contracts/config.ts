@@ -21,6 +21,11 @@ export interface ExportFeatureFlags {
 export interface RuntimeLoggingConfig {
   operationalLevel: RuntimeLogLevel;
   auditLevel: RuntimeLogLevel;
+  /**
+   * Days to keep rotated JSONL log files (operational and security-audit).
+   * Omitted means the runtime default (30).
+   */
+  retentionDays?: number;
 }
 
 export type SecretsPolicyMode = "off" | "detect" | "redact";

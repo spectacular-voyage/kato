@@ -129,6 +129,8 @@ Supporting web files worth knowing:
 - `~/.kato/web/logs/operational.jsonl`
 - `~/.kato/web/logs/security-audit.jsonl`
 
+Every JSONL log above is written by `JsonLineFileSink`, which rotates it on the first write of each UTC day to `<name>.<YYYY-MM-DD>[.<n>].jsonl` (named by last-write day) and prunes rotated siblings older than `logging.retentionDays` (default 30; daemon and CLI config, web uses the default). See `apps/runtime/src/observability/log_rotation.ts` and [[task.2026.2026-11-08-log-rotation]].
+
 The web config stores the preferred local host/port. `kato web start` selects
 the effective port at launch time, scanning upward when the preferred port is
 already in use; under WSL it also performs a best-effort Windows localhost
@@ -307,6 +309,16 @@ Ingestion runners:
   for the provider or the user explicitly requests `create twin` / `update twin`
 
 Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
+
+JSONL source parsing is incremental and never builds a transcript-sized string (see [[task.2026.2026-11-08-incremental-provider-parsing]]):
+
+- `apps/daemon/src/utils/jsonl_line_reader.ts` streams lines from a byte offset (chunked `indexOf`, byte offsets from bytes, skip-partial alignment for a mid-line start) and reports a checkpoint: the end of the last newline-terminated line plus a guard hash of the up-to-256 bytes before it. Reopening with `expectedGuard` refuses a file that was rewritten rather than appended.
+- Parsers accept `ctx.resumeFrom` / `ctx.onCheckpoint` (`apps/daemon/src/providers/parse_checkpoint.ts`). Claude lines are independent, so it seeks straight to `fromOffset` (or past it to a checkpoint). Codex carries `CodexParserState` in the checkpoint; without a usable checkpoint it does one linear pass from 0. Codex state evolution is independent of `fromOffset`, so a parse from F equals the full parse filtered to `lineEnd > F`.
+- `FileProviderIngestionRunner` keeps the latest checkpoint per session in memory and passes it back only when it lies at or before `fromOffset`, or `fromOffset` equals the cursor that parse persisted (so the skipped tail produced no events). The persisted `ingestCursor` keeps its meaning. The Codex compaction-marker scan is incremental the same way.
+- Parse failures back off per session (30 s doubling to 15 min), log on first failure, each doubling, or error change, and are published as `ingestionFailures` in the daemon status snapshot (rendered on Kato Web Summary/Sessions and in `kato status`) until the next successful ingest.
+- Periodic discovery (every 5 s) must stay cheap as session roots grow: Codex discovery memoizes each rollout's first-line `session_meta` by path and inode (`CodexSessionMetaCache`), re-reading only new, replaced, or shrunken files.
+- Per-poll daemon paths must not call `PersistentSessionStateStore.listSessionMetadata()`, which reads every `*.meta.json` from disk. The recording pass and merge-before-save use `listSessionMetadataForKeys()` (same fresh disk read, limited to the sessions involved); the full listing is reserved for heartbeats, the exit snapshot, and control requests.
+- After a restart, the runner only proactively ingests sessions modified since it started. Tracked sessions that gained content while it was not ingesting them (source mtime newer than `lastObservedMtimeMs` and, for byte-offset cursors, size ≠ cursor) go into a catch-up queue drained one session per poll, most recent first. Untracked sessions (no metadata) are never caught up, so startup does not replay provider history.
 
 Reconstructed session snippets (the fallback operator-facing session labels)
 reflect the conversation's first user message: when a snapshot is created from

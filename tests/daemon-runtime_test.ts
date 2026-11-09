@@ -6663,9 +6663,10 @@ Deno.test("runDaemonRuntimeLoop performs session twin cleanup at shutdown", asyn
     pollIntervalMs: 10,
   });
 
-  assert(callOrder.length > 0);
-  assertEquals(callOrder[0], "list");
+  // Cleanup runs at shutdown, and the exit snapshot still reads metadata.
+  // (Polls no longer list metadata before the first heartbeat is due.)
   assert(callOrder.includes("cleanup"));
+  assertEquals(callOrder[callOrder.length - 1], "list");
 });
 
 Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh intervals", async () => {
@@ -6724,7 +6725,9 @@ Deno.test("runDaemonRuntimeLoop caches session metadata lookups between refresh 
   });
 
   assert(controlPolls >= 5);
-  assertEquals(metadataReads, 3);
+  // Summary metadata is read only when a heartbeat is due (none elapses under
+  // the fixed clock) and once for the exit snapshot, never per poll.
+  assertEquals(metadataReads, 1);
 });
 
 Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs when saving stale session metadata", async () => {
@@ -6798,14 +6801,23 @@ Deno.test("runDaemonRuntimeLoop preserves newer web-written workspace outputs wh
 
     let storedMetadata = structuredClone(staleMetadata);
     let metadataReads = 0;
+    // The first read returns the stale copy; the web then writes, so the
+    // daemon's merge-before-save read sees the web-mutated metadata.
+    const readMetadata = (): Promise<SessionMetadataV1[]> => {
+      metadataReads += 1;
+      const result = [structuredClone(storedMetadata)];
+      if (metadataReads === 1) {
+        storedMetadata = structuredClone(webMutatedMetadata);
+      }
+      return Promise.resolve(result);
+    };
     const sessionStateStore = {
-      listSessionMetadata() {
-        metadataReads += 1;
-        const result = [structuredClone(storedMetadata)];
-        if (metadataReads === 1) {
-          storedMetadata = structuredClone(webMutatedMetadata);
-        }
-        return Promise.resolve(result);
+      listSessionMetadata: readMetadata,
+      async listSessionMetadataForKeys(keys: Iterable<string>) {
+        const wanted = new Set(keys);
+        return (await readMetadata()).filter((entry) =>
+          wanted.has(entry.sessionKey)
+        );
       },
       getOrCreateSessionMetadata() {
         return Promise.resolve(structuredClone(staleMetadata));
@@ -7003,14 +7015,23 @@ Deno.test("runDaemonRuntimeLoop merges daemon-updated fields into a newer web-wr
 
     let storedMetadata = structuredClone(staleMetadata);
     let metadataReads = 0;
+    // The first read returns the stale copy; the web then writes, so the
+    // daemon's merge-before-save read sees the web-mutated metadata.
+    const readMetadata = (): Promise<SessionMetadataV1[]> => {
+      metadataReads += 1;
+      const result = [structuredClone(storedMetadata)];
+      if (metadataReads === 1) {
+        storedMetadata = structuredClone(webMutatedMetadata);
+      }
+      return Promise.resolve(result);
+    };
     const sessionStateStore = {
-      listSessionMetadata() {
-        metadataReads += 1;
-        const result = [structuredClone(storedMetadata)];
-        if (metadataReads === 1) {
-          storedMetadata = structuredClone(webMutatedMetadata);
-        }
-        return Promise.resolve(result);
+      listSessionMetadata: readMetadata,
+      async listSessionMetadataForKeys(keys: Iterable<string>) {
+        const wanted = new Set(keys);
+        return (await readMetadata()).filter((entry) =>
+          wanted.has(entry.sessionKey)
+        );
       },
       getOrCreateSessionMetadata() {
         return Promise.resolve(structuredClone(staleMetadata));

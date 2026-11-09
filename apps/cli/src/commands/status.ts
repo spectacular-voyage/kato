@@ -14,6 +14,7 @@ import {
   isProcessAlive,
   isStatusSnapshotStale,
   PersistentSessionStateStore,
+  readIngestionFailures,
 } from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
 import {
@@ -1200,6 +1201,30 @@ export function renderStatusText(
     lines.push(
       ...renderWorkspaceSection(opts.workspaceStatus, width, colorize),
     );
+    lines.push(divider);
+  }
+
+  const ingestionFailures = readIngestionFailures(snapshot);
+  if (ingestionFailures.length > 0) {
+    lines.push(
+      colorizeText(
+        `Ingestion Failing (${ingestionFailures.length})`,
+        "red",
+        colorize,
+      ),
+    );
+    lines.push("");
+    for (const failure of ingestionFailures) {
+      const attempts = `${failure.consecutiveFailures} ${
+        failure.consecutiveFailures === 1 ? "attempt" : "attempts"
+      }`;
+      const detail = `${sanitizeInlineText(failure.provider)}:${
+        sanitizeInlineText(failure.sessionId)
+      } · since ${
+        formatLocalTimestamp(failure.firstFailedAt)
+      } · ${attempts} · ${sanitizeInlineText(failure.error)}`;
+      lines.push(formatPrefixedLine("  ", detail, width));
+    }
     lines.push(divider);
   }
 

@@ -24,7 +24,15 @@ kato start
 ```
 
 If startup fails, check the config paths mentioned in the error and the daemon
-logs under `~/.kato/daemon/logs/`.
+logs under `~/.kato/daemon/logs/`. Earlier days are in rotated files such as `operational.2026-11-07.jsonl`; see [[user-guide.configuration#logs]] for retention.
+
+## A Session Shows "Ingestion Failing"
+
+Kato could not read that conversation's provider transcript, so it is not capturing new content from it. The error text in Kato Web (Summary, Sessions) or `kato status` says why; details are in `~/.kato/daemon/logs/operational.jsonl` under `provider.ingestion.parse_error`. Retries continue automatically and capture resumes from where it stopped once the file is readable.
+
+## High CPU Right After `kato start`
+
+If conversations kept going while the daemon was stopped (or while it could not read them), Kato catches them up after it starts, one conversation at a time, and appends the missed content to any recordings that are on. A large backlog can keep the daemon busy for a minute or two. `provider.ingestion.catch_up.queued` in `~/.kato/daemon/logs/operational.jsonl` lists the conversations being caught up.
 
 ## Web Is Not Opening
 
@@ -85,5 +93,7 @@ kato clean --twins <days>
 kato clean --twins <days> --delete-metadata
 kato clean --dry-run --twins <days>
 ```
+
+`--logs` empties the active log files and deletes rotated ones. Rotated logs older than `logging.retentionDays` (default 30) are also deleted automatically.
 
 `--recordings` is accepted by the CLI but is currently a placeholder.
