@@ -1175,3 +1175,17 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 - Follow-up tasks:
   - Twin hydration still reads and maps the whole twin on a session's first update after start (or after eviction); a tail-window read would cut that one-time cost.
 
+
+### Session State Store Skips Unchanged Files
+
+- Decision:
+  - `daemon-control.json` entries hold only a session's identity and file paths (no per-entry `updatedAt`), so the index is rewritten only when a session is added or its files move. Readers accept and drop the `updatedAt` that v0.2.17 and earlier wrote.
+  - Status (heartbeat and exit snapshot) reads metadata only for the sessions in the snapshot store, through `listSessionMetadataForKeys()`. The summary cache, its dirty flag, and `sessionMetadataRefreshIntervalMs` are gone.
+  - `listSessionMetadata()` and `listSessionMetadataForKeys()` re-read a metadata file only when it changed since this store last read or wrote it, compared by inode, size, and mtime. Every writer replaces metadata by temp file and rename, so a write by another process (Kato Web) always gets a new inode and is still seen. On Windows, Deno reports the volume file index as `ino`, which the rename also replaces. If a platform reports no inode or mtime, files are always re-read.
+  - Atomic writes and twin appends loop until every byte is written; `FsFile.write` may write fewer bytes than given.
+- Owner: Kato engineering
+- Date: 2026-11-09
+- Why: On galactica, v0.2.17 read a steady 4.4 MB/s (from page cache) and wrote about 1 MB/s with little else happening. The reads were all session metadata: every heartbeat (about every 5.5 s) read all 2,316 metadata files (11.1 MB), and every poll re-read the 33 snapshot sessions' files (3.0 MB; active sessions' files average 93 KB, 97% of it `recentFingerprints`). The writes were mostly the 1.2 MB index, rewritten and fsynced about 0.6–0.8 times per second because twin appends change `updatedAt`, which nothing read from the index. On a copy of that state, the per-poll metadata read went from about 8 ms and 3.0 MB to 1.0 ms and nothing read, the heartbeat's from 90–130 ms and 11.4 MB to about 1 ms, and a touched save from 13–19 ms and 1.8 MB written to 2–10 ms and 100 KB.
+- Tradeoffs: Downgrading to v0.2.17 or earlier rebuilds the index once on start (those versions require the per-entry `updatedAt`). The stamp check trusts that nothing edits a metadata file in place while keeping its inode, size, and mtime; no Kato writer does.
+- Follow-up tasks:
+  - Active sessions' metadata is about 100 KB because `recentFingerprints` stores 512 full fingerprint strings, and each save writes and fsyncs all of it. Storing fixed-size hashes would cut that by about 10×, but changes persisted state and needs a migration.

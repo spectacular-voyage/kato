@@ -150,7 +150,7 @@ Writes must be atomic (temp + rename pattern).
 
 Current implementation note:
 
-- `~/.kato/shared/daemon-control.json` is a rebuildable cache index.
+- `~/.kato/shared/daemon-control.json` is a rebuildable cache index of each session's identity and file paths, rewritten only when a session is added or its files move.
 - `~/.kato/shared/sessions/*.meta.json` is authoritative session metadata.
 - `~/.kato/shared/sessions/*.twin.jsonl` is the durable canonical event log.
 
