@@ -1181,7 +1181,7 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 - Decision:
   - `daemon-control.json` entries hold only a session's identity and file paths (no per-entry `updatedAt`), so the index is rewritten only when a session is added or its files move. Readers accept and drop the `updatedAt` that v0.2.17 and earlier wrote.
   - Status (heartbeat and exit snapshot) reads metadata only for the sessions in the snapshot store, through `listSessionMetadataForKeys()`. The summary cache, its dirty flag, and `sessionMetadataRefreshIntervalMs` are gone.
-  - `listSessionMetadata()` and `listSessionMetadataForKeys()` re-read a metadata file only when it changed since this store last read or wrote it, compared by inode, size, and mtime. Every writer replaces metadata by temp file and rename, so a write by another process (Kato Web) always gets a new inode and is still seen. Without an inode or mtime (Windows inodes), files are always re-read.
+  - `listSessionMetadata()` and `listSessionMetadataForKeys()` re-read a metadata file only when it changed since this store last read or wrote it, compared by inode, size, and mtime. Every writer replaces metadata by temp file and rename, so a write by another process (Kato Web) always gets a new inode and is still seen. On Windows, Deno reports the volume file index as `ino`, which the rename also replaces. If a platform reports no inode or mtime, files are always re-read.
   - Atomic writes and twin appends loop until every byte is written; `FsFile.write` may write fewer bytes than given.
 - Owner: Kato engineering
 - Date: 2026-11-09

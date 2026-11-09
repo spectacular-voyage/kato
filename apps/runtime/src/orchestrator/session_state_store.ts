@@ -369,7 +369,8 @@ function toFileStamp(info: Deno.FileInfo): FileStamp {
   };
 }
 
-// Without an inode or mtime (e.g. Windows inodes), never treat as unchanged.
+// If the platform reports no inode (Windows: file index) or mtime, never
+// treat a file as unchanged.
 function sameFileStamp(a: FileStamp, b: FileStamp): boolean {
   return a.ino !== null && a.mtimeMs !== null && a.ino === b.ino &&
     a.size === b.size && a.mtimeMs === b.mtimeMs;
