@@ -1,5 +1,6 @@
 import { dirname, join } from "@std/path";
 import type { AuditLogger } from "../observability/audit_logger.ts";
+import { listRotatedLogFiles } from "../observability/log_rotation.ts";
 import type { StructuredLogger } from "../observability/logger.ts";
 import { resolveDefaultRuntimeDir } from "../orchestrator/control_plane.ts";
 import {
@@ -24,6 +25,9 @@ interface TwinCleanupCandidate {
 export interface MaintenanceCleanStats {
   logFilesFlushed: number;
   logFilesWouldFlush: number;
+  /** Rotated log files (`<stem>.<YYYY-MM-DD>.jsonl`) deleted. */
+  logFilesDeleted: number;
+  logFilesWouldDelete: number;
   missingFiles: number;
   deletionFailures: number;
   twinFilesDeleted: number;
@@ -132,6 +136,27 @@ async function flushFileIfExists(
   return "flushed";
 }
 
+async function deleteRotatedLogFiles(
+  activeLogPath: string,
+  dryRun: boolean,
+  stats: MaintenanceCleanStats,
+): Promise<void> {
+  for (const rotated of await listRotatedLogFiles(activeLogPath)) {
+    if (dryRun) {
+      stats.logFilesWouldDelete += 1;
+      continue;
+    }
+    try {
+      await Deno.remove(rotated.path);
+      stats.logFilesDeleted += 1;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        stats.deletionFailures += 1;
+      }
+    }
+  }
+}
+
 function applyMutationResult(
   result: PathMutationResult,
   stats: MaintenanceCleanStats,
@@ -151,6 +176,8 @@ function createEmptyStats(): MaintenanceCleanStats {
   return {
     logFilesFlushed: 0,
     logFilesWouldFlush: 0,
+    logFilesDeleted: 0,
+    logFilesWouldDelete: 0,
     missingFiles: 0,
     deletionFailures: 0,
     twinFilesDeleted: 0,
@@ -309,8 +336,14 @@ function buildSummary(
   }
   if (options.dryRun) {
     parts.push(`logsToFlush=${stats.logFilesWouldFlush}`);
+    if (stats.logFilesWouldDelete > 0) {
+      parts.push(`logsToDelete=${stats.logFilesWouldDelete}`);
+    }
   } else {
     parts.push(`logsFlushed=${stats.logFilesFlushed}`);
+    if (stats.logFilesDeleted > 0) {
+      parts.push(`logsDeleted=${stats.logFilesDeleted}`);
+    }
   }
   if (options.twinsDays !== undefined) {
     if (options.dryRun) {
@@ -360,6 +393,8 @@ async function recordAuditEvent(
     deleteTwinMetadata: options.deleteTwinMetadata,
     logFilesFlushed: stats.logFilesFlushed,
     logFilesWouldFlush: stats.logFilesWouldFlush,
+    logFilesDeleted: stats.logFilesDeleted,
+    logFilesWouldDelete: stats.logFilesWouldDelete,
     twinFilesDeleted: stats.twinFilesDeleted,
     twinFilesWouldDelete: stats.twinFilesWouldDelete,
     metadataFilesDeleted: stats.metadataFilesDeleted,
@@ -408,20 +443,26 @@ export async function runMaintenanceClean(
   const stats = createEmptyStats();
 
   if (options.all) {
-    for (
-      const path of [
-        join(runtimeDir, "logs", "operational.jsonl"),
-        join(runtimeDir, "logs", "security-audit.jsonl"),
-        join(katoDir, "web", "logs", "operational.jsonl"),
-        join(katoDir, "web", "logs", "security-audit.jsonl"),
-        resolveExportsLogPath(runtimeDir),
-      ]
-    ) {
+    const rotatingLogPaths = [
+      join(runtimeDir, "logs", "operational.jsonl"),
+      join(runtimeDir, "logs", "security-audit.jsonl"),
+      join(katoDir, "web", "logs", "operational.jsonl"),
+      join(katoDir, "web", "logs", "security-audit.jsonl"),
+    ];
+    for (const path of rotatingLogPaths) {
       applyMutationResult(
         await flushFileIfExists(path, options.dryRun),
         stats,
       );
+      await deleteRotatedLogFiles(path, options.dryRun, stats);
     }
+    applyMutationResult(
+      await flushFileIfExists(
+        resolveExportsLogPath(runtimeDir),
+        options.dryRun,
+      ),
+      stats,
+    );
   }
 
   await executeTwinCleanup({
@@ -461,6 +502,8 @@ export async function runMaintenanceClean(
       deleteTwinMetadata: options.deleteTwinMetadata,
       logFilesFlushed: stats.logFilesFlushed,
       logFilesWouldFlush: stats.logFilesWouldFlush,
+      logFilesDeleted: stats.logFilesDeleted,
+      logFilesWouldDelete: stats.logFilesWouldDelete,
       twinFilesDeleted: stats.twinFilesDeleted,
       twinFilesWouldDelete: stats.twinFilesWouldDelete,
       metadataFilesDeleted: stats.metadataFilesDeleted,

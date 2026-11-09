@@ -50,6 +50,16 @@ function buildLogHref(
   return `/logs?${params.toString()}`;
 }
 
+function formatUntil(value: string, nowMs: number): string {
+  const timestamp = parseTimestampMs(value);
+  if (timestamp === undefined) return value;
+  const seconds = Math.floor((timestamp - nowMs) / 1000);
+  if (seconds <= 0) return "due now";
+  if (seconds < 60) return `in ${seconds}s`;
+  if (seconds < 3600) return `in ${Math.floor(seconds / 60)}m`;
+  return `in ${Math.floor(seconds / 3600)}h`;
+}
+
 function metricPrimaryStateClass(
   state: "active" | "stale" | "inactive" | "neutral",
 ): string {
@@ -91,6 +101,51 @@ export default function SummaryLive(
 
   return (
     <section class="grid">
+      {data.ingestionFailures.length > 0
+        ? (
+          <article class="card span-12 ingestion-failures">
+            <h2 class="danger">Ingestion Failing</h2>
+            <p class="muted">
+              Kato cannot read these provider transcripts, so new conversation
+              content is not being captured. Retries continue with backoff.
+            </p>
+            <ul class="session-list">
+              {data.ingestionFailures.map((failure) => (
+                <li key={`${failure.provider}:${failure.providerSessionId}`}>
+                  <div class="mono">
+                    {failure.sessionId
+                      ? (
+                        <a
+                          href={buildSessionInventorySessionHref(
+                            failure.sessionId,
+                          )}
+                        >
+                          {failure.provider}:{" "}
+                          {failure.sessionShortId ?? failure.sessionId}
+                        </a>
+                      )
+                      : `${failure.provider}: ${failure.providerSessionId}`}
+                  </div>
+                  <div class="danger">{failure.error}</div>
+                  <div class="muted">
+                    Failing since{" "}
+                    <TimestampText
+                      value={failure.firstFailedAt}
+                      timeZone={timeZone}
+                    />{" "}
+                    ({formatRelativeTimestamp(failure.firstFailedAt, nowMs)})
+                    {" · "}
+                    {failure.consecutiveFailures}{" "}
+                    {failure.consecutiveFailures === 1 ? "attempt" : "attempts"}
+                    {" · next retry "}
+                    {formatUntil(failure.nextRetryAt, nowMs)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </article>
+        )
+        : null}
       <article class="card span-7">
         <h2>Activity</h2>
         <div class="metrics">

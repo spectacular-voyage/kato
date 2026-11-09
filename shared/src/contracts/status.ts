@@ -58,6 +58,22 @@ export interface DaemonSessionStatus {
   recordings?: DaemonRecordingStatus[];
 }
 
+/**
+ * A provider session whose source transcript currently fails to ingest.
+ * Listed independently of `sessions` (which filters for liveness) so a
+ * stalled session stays visible. Cleared by the next successful ingest.
+ */
+export interface DaemonIngestionFailureStatus {
+  provider: string;
+  /** Provider session id (the transcript's id). */
+  sessionId: string;
+  error: string;
+  firstFailedAt: string;
+  lastFailedAt: string;
+  consecutiveFailures: number;
+  nextRetryAt: string;
+}
+
 export interface DaemonStatusSnapshot {
   schemaVersion: number;
   generatedAt: string;
@@ -69,4 +85,5 @@ export interface DaemonStatusSnapshot {
   recordings: RecordingStatus;
   memory?: MemoryStatus;
   sessions?: DaemonSessionStatus[];
+  ingestionFailures?: DaemonIngestionFailureStatus[];
 }

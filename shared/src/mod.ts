@@ -1,4 +1,5 @@
 export type {
+  DaemonIngestionFailureStatus,
   DaemonRecordingStatus,
   DaemonSessionStatus,
   DaemonStatusSnapshot,
@@ -37,6 +38,7 @@ export type {
   WebAuthConfig,
   WebConfig,
 } from "./contracts/config.ts";
+export { DEFAULT_GLOBAL_AUTO_GENERATE_TWINS } from "./contracts/config.ts";
 export type { StatusAggregationRecord } from "./contracts/aggregation.ts";
 export {
   DEFAULT_KATO_WEB_HOSTNAME,
@@ -95,6 +97,7 @@ export type {
   SessionOutputMetadataV1,
   SessionWorkspaceAttachmentWriterFeatureFlagsV1,
   SessionWorkspaceOutputWriterFeatureFlagOverridesV1,
+  SessionWorkspaceOutputWriteSourceCursorV1,
 } from "./contracts/session_state.ts";
 export {
   hasWriterFeatureFlagOverrides,

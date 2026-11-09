@@ -1,4 +1,8 @@
-import type { SessionMetadataV1 } from "@kato/shared";
+import type {
+  ConversationEvent,
+  SessionMetadataV1,
+  SessionWorkspaceOutputWriteSourceCursorV1,
+} from "@kato/shared";
 import { isAbsolute, relative, resolve } from "@std/path";
 import type { ResolvedWorkspaceProfile } from "../workspace/mod.ts";
 
@@ -111,6 +115,106 @@ export function openWorkspaceOutputCycle(
   output.activeRecordingCycleId = recordingCycleId;
   output.desiredState = "on";
   return recordingCycleId;
+}
+
+function readPositionalSourceCursor(
+  event: ConversationEvent | undefined,
+): SessionWorkspaceOutputWriteSourceCursorV1 | undefined {
+  const cursor = event?.source.rawCursor;
+  if (
+    cursor && (cursor.kind === "byte-offset" || cursor.kind === "item-index") &&
+    Number.isSafeInteger(cursor.value) && cursor.value >= 0
+  ) {
+    return { kind: cursor.kind, value: cursor.value };
+  }
+  return undefined;
+}
+
+function readActiveCycleLastWriteMs(
+  output: WorkspaceOutputState,
+): number | undefined {
+  const cycleId = output.activeRecordingCycleId;
+  if (!cycleId) return undefined;
+  for (let i = output.recordingCycles.length - 1; i >= 0; i -= 1) {
+    const cycle = output.recordingCycles[i];
+    if (cycle?.recordingCycleId !== cycleId) continue;
+    const ms = cycle.lastWriteAt ? Date.parse(cycle.lastWriteAt) : NaN;
+    return Number.isFinite(ms) ? ms : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Records that `events[0, writeCursor)` have been written to `output`. The
+ * source cursor of the last written event is what later passes resume from;
+ * `writeCursor` is kept for older binaries.
+ */
+export function setWorkspaceOutputWritePosition(
+  output: WorkspaceOutputState,
+  events: readonly ConversationEvent[],
+  writeCursor: number,
+): void {
+  const end = Math.max(0, Math.min(events.length, Math.floor(writeCursor)));
+  output.writeCursor = end;
+  for (let i = end - 1; i >= 0; i -= 1) {
+    const cursor = readPositionalSourceCursor(events[i]);
+    if (cursor) {
+      output.writeSourceCursor = cursor;
+      return;
+    }
+  }
+  delete output.writeSourceCursor;
+}
+
+/**
+ * Index of the first snapshot event not yet written to `output`.
+ *
+ * The snapshot is rebuilt on every daemon start and keeps only its newest
+ * events, so a stored index cannot be trusted. Resolution order:
+ * 1. `writeSourceCursor`: everything after the last event at or before that
+ *    source position (all events when every comparable event is newer, i.e.
+ *    a snapshot rebuilt from content that arrived later).
+ * 2. Outputs already written by older versions (no source cursor,
+ *    `writeCursor > 0`, snapshot has positional cursors to migrate to):
+ *    events whose timestamp is after the active cycle's `lastWriteAt`. When
+ *    timestamped events exist but none is newer, everything counts as
+ *    written.
+ * 3. The stored index, clamped (no comparable cursors or timestamps).
+ */
+export function resolveWorkspaceOutputWriteStart(
+  output: WorkspaceOutputState,
+  events: readonly ConversationEvent[],
+): number {
+  const anchor = output.writeSourceCursor;
+  if (anchor) {
+    let sawComparable = false;
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const cursor = readPositionalSourceCursor(events[i]);
+      if (!cursor || cursor.kind !== anchor.kind) continue;
+      sawComparable = true;
+      if (cursor.value <= anchor.value) return i + 1;
+    }
+    if (sawComparable) return 0;
+  } else if (
+    output.writeCursor > 0 &&
+    events.some((event) => readPositionalSourceCursor(event) !== undefined)
+  ) {
+    // One-time migration: the write that follows records a source cursor.
+    // writeCursor 0 means nothing was written yet (e.g. auto-record), and
+    // without positional cursors there is nothing to migrate to.
+    const lastWriteMs = readActiveCycleLastWriteMs(output);
+    if (lastWriteMs !== undefined) {
+      let sawTimestamp = false;
+      for (let i = 0; i < events.length; i += 1) {
+        const eventMs = Date.parse(events[i]?.timestamp ?? "");
+        if (!Number.isFinite(eventMs)) continue;
+        sawTimestamp = true;
+        if (eventMs > lastWriteMs) return i;
+      }
+      if (sawTimestamp) return events.length;
+    }
+  }
+  return Math.max(0, Math.min(output.writeCursor, events.length));
 }
 
 export function updateWorkspaceOutputCycleLastWrite(

@@ -925,3 +925,113 @@ Deno.test("createDefaultSharedBehaviorConfig carries secretsPolicy overrides", (
     allowlist: [],
   });
 });
+
+Deno.test("RuntimeConfigFileStore accepts logging.retentionDays and rejects invalid values", async () => {
+  await withIsolatedEnvironment(async () => {
+    const root = makeSandboxRoot();
+    const homeDir = join(root, "home");
+    const configPath = join(root, "kato-daemon-config.yaml");
+    const store = new RuntimeConfigFileStore(configPath);
+    const snapshot = snapshotConfigEnv();
+    const writeConfig = (retentionDays: unknown) =>
+      Deno.writeTextFile(
+        configPath,
+        stringify({
+          schemaVersion: 1,
+          runtimeDir: "~/.kato/daemon",
+          providerSessionRoots: {},
+          logging: {
+            operationalLevel: "info",
+            auditLevel: "info",
+            retentionDays,
+          },
+        }),
+      );
+
+    try {
+      await Deno.mkdir(homeDir, { recursive: true });
+      setConfigEnv({ HOME: homeDir, USERPROFILE: undefined });
+
+      await writeConfig(7);
+      const loaded = await store.load();
+      assertEquals(loaded.logging, {
+        operationalLevel: "info",
+        auditLevel: "info",
+        retentionDays: 7,
+      });
+
+      for (const invalid of [0, -1, 1.5, "30"]) {
+        await writeConfig(invalid);
+        await assertRejects(() => store.load(), Error);
+      }
+    } finally {
+      restoreConfigEnv(snapshot);
+      await removePathIfPresent(root);
+    }
+  });
+});
+
+Deno.test("createDefaultRuntimeConfig carries logging.retentionDays and rejects invalid values", async () => {
+  await withIsolatedEnvironment(() => {
+    const snapshot = snapshotConfigEnv();
+    try {
+      setConfigEnv({
+        KATO_LOGGING_OPERATIONAL_LEVEL: undefined,
+        KATO_LOGGING_AUDIT_LEVEL: undefined,
+      });
+      const config = createDefaultRuntimeConfig({
+        runtimeDir: INVALID_RUNTIME_DIR,
+        logging: { retentionDays: 90 },
+      });
+      assertEquals(config.logging.retentionDays, 90);
+      assertEquals(
+        "retentionDays" in createDefaultRuntimeConfig({
+          runtimeDir: INVALID_RUNTIME_DIR,
+        }).logging,
+        false,
+      );
+      assertThrows(
+        () =>
+          createDefaultRuntimeConfig({
+            runtimeDir: INVALID_RUNTIME_DIR,
+            logging: { retentionDays: 0 },
+          }),
+        Error,
+        "retentionDays",
+      );
+    } finally {
+      restoreConfigEnv(snapshot);
+    }
+  });
+});
+
+Deno.test("CliConfigFileStore accepts logging.retentionDays and rejects invalid values", async () => {
+  const root = makeSandboxRoot();
+  const configPath = join(root, "cli", "kato-cli-config.yaml");
+  const store = new CliConfigFileStore(configPath);
+  const writeConfig = (retentionDays: unknown) =>
+    Deno.writeTextFile(
+      configPath,
+      stringify({
+        schemaVersion: 1,
+        logging: {
+          operationalLevel: "info",
+          auditLevel: "info",
+          retentionDays,
+        },
+      }),
+    );
+
+  try {
+    await Deno.mkdir(join(root, "cli"), { recursive: true });
+    await writeConfig(14);
+    assertEquals((await store.load()).logging.retentionDays, 14);
+
+    for (const invalid of [0, -3, 2.5, "14"]) {
+      await writeConfig(invalid);
+      await assertRejects(() => store.load(), Error, "unsupported schema");
+    }
+  } finally {
+    await removePathIfPresent(root);
+  }
+});

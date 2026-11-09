@@ -7,6 +7,7 @@ import {
   DaemonStatusSnapshotFileStore,
   type DaemonStatusSnapshotStoreLike,
   isStatusSnapshotStale,
+  readIngestionFailures,
   resolveDefaultStatusPath,
 } from "../../../runtime/src/orchestrator/control_plane.ts";
 import {
@@ -75,6 +76,20 @@ export interface SummarySessionRow {
   state: ActivityState;
 }
 
+/** A session the daemon currently cannot ingest (from the status snapshot). */
+export interface SummaryIngestionFailure {
+  provider: string;
+  providerSessionId: string;
+  /** Kato session id/short id when the session has persisted metadata. */
+  sessionId?: string;
+  sessionShortId?: string;
+  error: string;
+  firstFailedAt: string;
+  lastFailedAt: string;
+  consecutiveFailures: number;
+  nextRetryAt: string;
+}
+
 export interface SummaryPageData {
   generatedAt: string;
   heartbeatAt: string;
@@ -98,6 +113,7 @@ export interface SummaryPageData {
   stale: boolean;
   statusPath: string;
   workspaceSummary: WorkspaceSummary;
+  ingestionFailures: SummaryIngestionFailure[];
   recentErrors: SummaryRecentError[];
 }
 
@@ -227,6 +243,31 @@ export async function loadSummaryPageData(
     sessionActivityRows,
   );
   const recentErrors = await loadRecentErrors(statusPath);
+  const rowsByProviderSession = new Map(
+    sessionActivityRows.map((row) => [
+      `${row.provider}\u0000${row.providerSessionId}`,
+      row,
+    ]),
+  );
+  const ingestionFailures: SummaryIngestionFailure[] = readIngestionFailures(
+    snapshot,
+  ).map((failure) => {
+    const row = rowsByProviderSession.get(
+      `${failure.provider}\u0000${failure.sessionId}`,
+    );
+    return {
+      provider: failure.provider,
+      providerSessionId: failure.sessionId,
+      ...(row
+        ? { sessionId: row.sessionId, sessionShortId: row.sessionShortId }
+        : {}),
+      error: failure.error,
+      firstFailedAt: failure.firstFailedAt,
+      lastFailedAt: failure.lastFailedAt,
+      consecutiveFailures: failure.consecutiveFailures,
+      nextRetryAt: failure.nextRetryAt,
+    };
+  });
 
   return {
     generatedAt: viewModel.generatedAt,
@@ -251,6 +292,7 @@ export async function loadSummaryPageData(
     stale: isStatusSnapshotStale(snapshot, now()),
     statusPath,
     workspaceSummary,
+    ingestionFailures,
     recentErrors,
   };
 }

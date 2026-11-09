@@ -35,6 +35,7 @@ import {
   createWorkspaceOutputState,
   openWorkspaceOutputCycle,
   readWorkspaceOutputs,
+  setWorkspaceOutputWritePosition,
   stopAllWorkspaceOutputs,
   toWorkspaceDestinationBinding,
   updateWorkspaceOutputCycleLastWrite,
@@ -793,7 +794,7 @@ export async function runSessionRecordingRestartAction(
       }
 
       openWorkspaceOutputCycle(output, writeCursor, nowIso);
-      output.writeCursor = writeCursor;
+      setWorkspaceOutputWritePosition(output, history.events, writeCursor);
       await sessionStore.saveSessionMetadata(metadata, {
         touchUpdatedAt: true,
       });
@@ -1008,7 +1009,7 @@ export async function runSessionRecordingAction(
             recordingCycleId,
           );
         }
-        output.writeCursor = writeCursor;
+        setWorkspaceOutputWritePosition(output, history.events, writeCursor);
         outputs.push(output);
         await sessionStore.saveSessionMetadata(metadata, {
           touchUpdatedAt: true,
@@ -1078,7 +1079,7 @@ export async function runSessionRecordingAction(
           captureActivatedAtIso,
           captureCycleId,
         );
-        output.writeCursor = writeCursor;
+        setWorkspaceOutputWritePosition(output, history.events, writeCursor);
         outputs.push(output);
         await sessionStore.saveSessionMetadata(metadata, {
           touchUpdatedAt: true,

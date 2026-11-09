@@ -81,6 +81,10 @@ Twin size measures Kato's normalized JSONL history, not the provider transcript,
 
 The Sessions page keeps this indicator read-only and does not expose the twin path. Use Maintenance for twin paths, current/behind state, troubleshooting, and cleanup actions.
 
+## Ingestion Failures
+
+If the daemon cannot read a provider transcript, new content from that conversation is not being captured. Summary then shows an **Ingestion Failing** card listing each affected session with the error, when it started failing, the number of attempts, and the next retry; the matching Sessions row shows `Ingestion failing since …`. The daemon keeps retrying with increasing delays (up to 15 minutes) and the indicator clears on the next successful read. `kato status` lists the same sessions.
+
 ## Auth Expiry
 
 Kato Web fails closed when auth expires. If one tab detects an expired session,

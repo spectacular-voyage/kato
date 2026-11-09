@@ -232,6 +232,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
             ? { activeRecordingCycleId: entry.activeRecordingCycleId }
             : {}),
           writeCursor: entry.writeCursor,
+          ...(entry.writeSourceCursor
+            ? { writeSourceCursor: { ...entry.writeSourceCursor } }
+            : {}),
           ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
           recordingCycles: entry.recordingCycles.map((cycle) => ({ ...cycle })),
         })),
@@ -552,9 +555,34 @@ export class PersistentSessionStateStore {
   }
 
   async listSessionMetadata(): Promise<SessionMetadataV1[]> {
+    return await this.loadIndexedSessionMetadata();
+  }
+
+  /**
+   * Like {@link listSessionMetadata}, but reads only the metadata files of the
+   * given session keys. Reads stay fresh from disk (so writes from other
+   * processes, such as the web console, are seen); hot daemon paths use this
+   * to avoid re-reading every session on each poll.
+   */
+  async listSessionMetadataForKeys(
+    sessionKeys: Iterable<string>,
+  ): Promise<SessionMetadataV1[]> {
+    const wanted = new Set(sessionKeys);
+    if (wanted.size === 0) {
+      return [];
+    }
+    return await this.loadIndexedSessionMetadata(wanted);
+  }
+
+  private async loadIndexedSessionMetadata(
+    sessionKeys?: ReadonlySet<string>,
+  ): Promise<SessionMetadataV1[]> {
     const index = await this.loadDaemonControlIndex();
     const items: SessionMetadataV1[] = [];
     for (const entry of index.sessions) {
+      if (sessionKeys && !sessionKeys.has(entry.sessionKey)) {
+        continue;
+      }
       let metadata: SessionMetadataV1 | undefined;
       try {
         metadata = await this.loadMetadataFromDisk(entry.metadataPath);

@@ -7,14 +7,16 @@ import {
   isYamlConfigPath,
   writeTextAtomically,
 } from "./file_store_utils.ts";
+import { isValidLogRetentionDays } from "../observability/log_rotation.ts";
 import { createDefaultRuntimeLoggingConfig } from "./runtime_config.ts";
 
 const DEFAULT_SCHEMA_VERSION = 1;
 const CLI_CONFIG_FILENAME = "kato-cli-config.yaml";
 const LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
+const LOG_LEVEL_KEYS = ["operationalLevel", "auditLevel"] as const;
 const LOGGING_KEYS: Array<keyof RuntimeLoggingConfig> = [
-  "operationalLevel",
-  "auditLevel",
+  ...LOG_LEVEL_KEYS,
+  "retentionDays",
 ];
 
 export interface EnsureCliConfigResult {
@@ -42,7 +44,7 @@ function parseLoggingConfig(value: unknown): RuntimeLoggingConfig | undefined {
   }
 
   const resolved = createDefaultRuntimeLoggingConfig();
-  for (const key of LOGGING_KEYS) {
+  for (const key of LOG_LEVEL_KEYS) {
     const candidate = value[key];
     if (candidate === undefined) {
       continue;
@@ -55,6 +57,13 @@ function parseLoggingConfig(value: unknown): RuntimeLoggingConfig | undefined {
       return undefined;
     }
     resolved[key] = normalized as RuntimeLoggingConfig[typeof key];
+  }
+  const retentionDays = value["retentionDays"];
+  if (retentionDays !== undefined) {
+    if (!isValidLogRetentionDays(retentionDays)) {
+      return undefined;
+    }
+    resolved.retentionDays = retentionDays;
   }
   return resolved;
 }

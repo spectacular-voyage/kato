@@ -74,6 +74,7 @@ export {
   DaemonControlRequestFileStore,
   DaemonStatusSnapshotFileStore,
   isStatusSnapshotStale,
+  readIngestionFailures,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
@@ -126,12 +127,18 @@ export {
 
 export {
   AuditLogger,
+  buildRotatedLogFilePath,
+  DEFAULT_LOG_RETENTION_DAYS,
+  isValidLogRetentionDays,
   JsonLineFileSink,
+  type JsonLineFileSinkOptions,
   JsonLineWriterSink,
+  listRotatedLogFiles,
   type LogLevel,
   type LogRecord,
   type LogSink,
   NoopSink,
+  type RotatedLogFile,
   StructuredLogger,
 } from "./observability/mod.ts";
 

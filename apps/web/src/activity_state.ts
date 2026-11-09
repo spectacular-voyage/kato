@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "@kato/shared";
+import { DEFAULT_GLOBAL_AUTO_GENERATE_TWINS } from "@kato/shared";
 
 export type ActivityState = "active" | "stale" | "inactive";
 
@@ -60,5 +61,5 @@ export function providerAutoGeneratesTwins(
     boolean | undefined
   >;
   return perProvider[provider] ?? runtimeConfig.globalAutoGenerateTwins ??
-    false;
+    DEFAULT_GLOBAL_AUTO_GENERATE_TWINS;
 }

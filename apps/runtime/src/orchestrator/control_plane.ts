@@ -1,4 +1,7 @@
-import type { DaemonStatusSnapshot } from "@kato/shared";
+import type {
+  DaemonIngestionFailureStatus,
+  DaemonStatusSnapshot,
+} from "@kato/shared";
 import { dirname, isAbsolute, join } from "@std/path";
 import {
   expandHomePath,
@@ -100,6 +103,30 @@ function isRecordingStatus(value: unknown): boolean {
     return false;
   }
   return true;
+}
+
+function isIngestionFailureStatus(
+  value: unknown,
+): value is DaemonIngestionFailureStatus {
+  return isRecord(value) &&
+    typeof value["provider"] === "string" &&
+    typeof value["sessionId"] === "string" &&
+    typeof value["error"] === "string" &&
+    typeof value["firstFailedAt"] === "string" &&
+    typeof value["lastFailedAt"] === "string" &&
+    typeof value["consecutiveFailures"] === "number" &&
+    typeof value["nextRetryAt"] === "string";
+}
+
+/**
+ * Valid `ingestionFailures` entries from a loaded status snapshot. The field
+ * is optional and not part of snapshot validation, so readers filter it.
+ */
+export function readIngestionFailures(
+  snapshot: Pick<DaemonStatusSnapshot, "ingestionFailures">,
+): DaemonIngestionFailureStatus[] {
+  const value: unknown = snapshot.ingestionFailures;
+  return Array.isArray(value) ? value.filter(isIngestionFailureStatus) : [];
 }
 
 function isDaemonStatusSnapshot(value: unknown): value is DaemonStatusSnapshot {

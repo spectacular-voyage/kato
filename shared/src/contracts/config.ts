@@ -21,6 +21,11 @@ export interface ExportFeatureFlags {
 export interface RuntimeLoggingConfig {
   operationalLevel: RuntimeLogLevel;
   auditLevel: RuntimeLogLevel;
+  /**
+   * Days to keep rotated JSONL log files (operational and security-audit).
+   * Omitted means the runtime default (30).
+   */
+  retentionDays?: number;
 }
 
 export type SecretsPolicyMode = "off" | "detect" | "redact";
@@ -119,3 +124,9 @@ export interface RuntimeConfigMetadata {
   statusSchemaVersion: 2;
   conversationSchemaVersion: 2;
 }
+
+/**
+ * Twins are on by default: the daemon rebuilds in-memory snapshots from them
+ * after a restart, and recordings resume from persisted source positions.
+ */
+export const DEFAULT_GLOBAL_AUTO_GENERATE_TWINS = true;

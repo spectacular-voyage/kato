@@ -1,5 +1,6 @@
 import type {
   ConversationEvent,
+  DaemonIngestionFailureStatus,
   ProviderCursor,
   ProviderSessionTitleSource,
 } from "@kato/shared";
@@ -76,6 +77,8 @@ export interface ProviderIngestionRunner {
   start(): Promise<void>;
   poll(): Promise<ProviderIngestionPollResult>;
   stop(): Promise<void>;
+  /** Sessions whose source currently fails to ingest (with backoff state). */
+  getIngestionFailures?(): DaemonIngestionFailureStatus[];
 }
 
 export interface SessionSnapshotStoreRetentionPolicy {

@@ -1098,3 +1098,66 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
   - Add output tagging controls to the same creation popover ([[task.2026.2026-06-11-output-tagging]]).
   - Add persona/participant controls to the same creation popover ([[task.2026.2026-05-28-persona-support]]).
   - Design explicit existing-output rename/retarget separately if creation-time naming does not cover enough workflows.
+
+### Daily JSONL Log Rotation With Age-Based Retention
+
+- Decision:
+  - Rotate every `JsonLineFileSink` log (daemon, CLI, web; operational and security-audit) on the first write of each UTC day, renaming the active file to `<name>.<YYYY-MM-DD>[.<n>].jsonl` named by its last-write day, and prune rotated siblings older than the retention window.
+  - Retention is the optional `logging.retentionDays` key in the shared `RuntimeLoggingConfig` (daemon and CLI config), default 30, positive integers only, fail-closed on invalid values.
+  - Keep the active filename stable; rotation is lazy (no timers), mtime-guarded, serialized per path in-process, never overwrites, and best-effort (never blocks the write).
+- Owner: Kato engineering
+- Date: 2026-11-08
+- Why:
+  - `~/.kato/daemon/logs/security-audit.jsonl` reached 583 MB on an active host because nothing rotated or pruned it.
+  - Open-per-write appends make rename-aside rotation safe without coordinating writers, and a stable active name keeps the Kato Web log viewer, `kato status`, `kato clean`, and `tail -F` working unchanged.
+  - Naming by last-write day means a rotated file is only deleted once all of its records are past the window.
+- Tradeoffs:
+  - The Kato Web log viewer reads only the active file, so history shortly after UTC midnight is thin.
+  - Rotation uses the wall clock (file mtimes are wall-clock), not the injectable logical clock, so daemon/CLI test clocks do not trigger rotation.
+  - A pre-existing unrotated log is rotated whole at the first day change after upgrade and pruned as one file.
+  - Audit volume itself is unchanged; disk use is bounded at roughly retention × daily volume.
+- Follow-up tasks:
+  - Consider reading rotated files in the Kato Web log viewer.
+  - Decide separately whether routine `policy.decision` allow records should be reduced.
+
+### Incremental JSONL Provider Parsing With In-Memory Checkpoints
+
+- Decision:
+  - Parse Claude and Codex transcripts through a streaming, seekable line reader; never read a transcript into one string.
+  - Keep the persisted `ingestCursor` meaning (line end of the last yielded event/title). Resume from an in-memory checkpoint (end of the last terminated line, guard hash, provider state) that the runner uses only when it is provably equivalent: checkpoint at or before `fromOffset`, or `fromOffset` equal to the cursor the checkpointed parse persisted.
+  - Make Codex parser state independent of `fromOffset`: `task_started` resets `turnFinalized`, and pre-offset finalization updates state without emitting.
+  - Guard every resume with a hash of the bytes before the offset; on mismatch fall back to the non-resumed path.
+  - Back off failing sessions per session and publish them as `ingestionFailures` in the daemon status snapshot.
+- Owner: Kato engineering
+- Date: 2026-11-08
+- Why:
+  - Every append re-read and re-parsed the whole transcript (O(n²) per session); ~35 growing 30–973 MB seat transcripts kept the daemon's JS thread at 100%.
+  - `Deno.readTextFile` cannot produce strings above V8's ~512 MiB limit; a 1.02 GB Codex transcript silently stopped ingesting for six days, visible only as repeated log errors.
+  - The old Codex parser's full parse suppressed per-turn finals in sessions without `user_message` events; incremental parses only worked by accident of cursor boundaries.
+- Tradeoffs:
+  - Checkpoints are memory-only, so the first ingest of each session after a daemon start is one linear pass (the 973 MB transcript: 3.7 s, 128 MB RSS). Persisting checkpoint state next to the cursor is a possible follow-up.
+  - A duplicated final/commentary across an ingest boundary is no longer re-emitted, and full parses now emit a final per turn; both are intentional output changes.
+  - Pre-existing behavior kept: the first warm ingest after a from-0 ingest performs one compaction backtrack because the cold ingest never records `ingestAnchor`.
+- Follow-up tasks:
+  - Consider persisting parse checkpoints if restart cost matters.
+  - Investigate whether `extractMessageText` should read Codex `output_text` parts.
+
+### Recording Write Position By Source Cursor; Twins On By Default
+
+- Decision:
+  - Persist the source position (`rawCursor`) of the last event written to each workspace output as `writeSourceCursor`, and resume after the last snapshot event at or before it. Keep writing the snapshot index `writeCursor` for older binaries.
+  - Migrate outputs without a source position once, by the active cycle's `lastWriteAt` against event timestamps, only when `writeCursor > 0` (a zero index means nothing was written, e.g. auto-record).
+  - Log `recording.append.gap` when everything retained is newer than the write position but retention dropped events.
+  - Default `globalAutoGenerateTwins` to `true` for newly created configs.
+- Owner: Kato engineering
+- Date: 2026-11-08
+- Why:
+  - `writeCursor` indexed the in-memory snapshot, which is rebuilt per daemon process and truncated to the newest 10,000 events. After every restart the stale index was clamped to the rebuilt snapshot's length and the first batch was skipped; once a conversation exceeded 10,000 events the index stayed pinned at the cap and nothing was appended again. On one host three long conversations stopped recording with 47k–72k events unwritten, and caught-up content never reached recordings.
+  - `rawCursor` survives twin round trips (twin events keep `source.cursor`, while `eventId` is regenerated) and works for Codex, whose events have no reliable timestamps.
+- Tradeoffs:
+  - The `lastWriteAt` migration can only recover content newer than the last write; losses followed by later writes (mid-file) are not detectable and are not restored.
+  - Events without positional cursors fall back to the clamped index.
+  - Existing configs written with an explicit `globalAutoGenerateTwins: false` keep it; turning twins on costs one full transcript read per conversation and twin disk space.
+- Follow-up tasks:
+  - Decide whether to backfill the three long-session recordings found on galactica outside the daemon (their missing tails exceed the in-memory window).
+

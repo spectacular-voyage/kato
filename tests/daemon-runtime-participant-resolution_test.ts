@@ -198,6 +198,12 @@ async function runWorkspaceResolutionScenario(
     listSessionMetadata() {
       return Promise.resolve([metadata]);
     },
+    listSessionMetadataForKeys(keys: Iterable<string>) {
+      const wanted = new Set(keys);
+      return Promise.resolve(
+        [metadata].filter((entry) => wanted.has(entry.sessionKey)),
+      );
+    },
     getOrCreateSessionMetadata() {
       return Promise.resolve(metadata);
     },
