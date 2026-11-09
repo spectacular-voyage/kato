@@ -6,6 +6,7 @@ import type {
   RuntimeLoggingConfig,
   RuntimeLogLevel,
 } from "@kato/shared";
+import { DEFAULT_GLOBAL_AUTO_GENERATE_TWINS } from "@kato/shared";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import {
@@ -426,7 +427,7 @@ function parseRuntimeConfig(value: unknown): RuntimeConfig | undefined {
   }
   const globalAutoGenerateTwins = value["globalAutoGenerateTwins"] ===
       undefined
-    ? false
+    ? DEFAULT_GLOBAL_AUTO_GENERATE_TWINS
     : value["globalAutoGenerateTwins"];
   if (typeof globalAutoGenerateTwins !== "boolean") {
     return undefined;
@@ -470,7 +471,8 @@ function cloneConfig(config: RuntimeConfig): RuntimeConfig {
     providerSessionRoots: cloneProviderSessionRoots(
       config.providerSessionRoots,
     ),
-    globalAutoGenerateTwins: config.globalAutoGenerateTwins ?? false,
+    globalAutoGenerateTwins: config.globalAutoGenerateTwins ??
+      DEFAULT_GLOBAL_AUTO_GENERATE_TWINS,
     providerAutoGenerateTwins: {
       ...(config.providerAutoGenerateTwins ?? {}),
     },
@@ -573,7 +575,8 @@ export function createDefaultRuntimeConfig(options: {
       codex: providerSessionRoots.codex.map((root) => serializePath(root)),
       gemini: providerSessionRoots.gemini.map((root) => serializePath(root)),
     },
-    globalAutoGenerateTwins: options.globalAutoGenerateTwins ?? false,
+    globalAutoGenerateTwins: options.globalAutoGenerateTwins ??
+      DEFAULT_GLOBAL_AUTO_GENERATE_TWINS,
     providerAutoGenerateTwins: {
       ...DEFAULT_PROVIDER_AUTO_GENERATE_TWINS,
       ...(options.providerAutoGenerateTwins ?? {}),

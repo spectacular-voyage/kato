@@ -67,9 +67,24 @@ export interface SessionWorkspaceOutputStateV1 {
     SessionWorkspaceOutputWriterFeatureFlagOverridesV1;
   outputMetadata?: SessionOutputMetadataV1;
   activeRecordingCycleId?: string;
+  /**
+   * Index into the daemon's in-memory snapshot events. Kept for older
+   * binaries; it does not survive snapshot rebuilds or retention truncation,
+   * so the daemon prefers `writeSourceCursor`.
+   */
   writeCursor: number;
+  /**
+   * Provider source position of the last event written to this output. Stable
+   * across daemon restarts, twin rebuilds, and snapshot truncation.
+   */
+  writeSourceCursor?: SessionWorkspaceOutputWriteSourceCursorV1;
   createdAt?: string;
   recordingCycles: SessionWorkspaceRecordingCycleV1[];
+}
+
+export interface SessionWorkspaceOutputWriteSourceCursorV1 {
+  kind: "byte-offset" | "item-index";
+  value: number;
 }
 
 export interface SessionIngestAnchorV1 {
@@ -151,6 +166,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isWorkspaceOutputWriteSourceCursor(
+  value: unknown,
+): value is SessionWorkspaceOutputWriteSourceCursorV1 {
+  if (!isRecord(value)) return false;
+  return (value["kind"] === "byte-offset" || value["kind"] === "item-index") &&
+    typeof value["value"] === "number" &&
+    Number.isSafeInteger(value["value"]) &&
+    value["value"] >= 0;
 }
 
 function isProviderCursor(value: unknown): value is ProviderCursor {
@@ -353,6 +378,12 @@ function isWorkspaceOutputState(
     typeof value["writeCursor"] !== "number" ||
     !Number.isSafeInteger(value["writeCursor"]) ||
     value["writeCursor"] < 0
+  ) {
+    return false;
+  }
+  if (
+    value["writeSourceCursor"] !== undefined &&
+    !isWorkspaceOutputWriteSourceCursor(value["writeSourceCursor"])
   ) {
     return false;
   }

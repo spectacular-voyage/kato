@@ -84,6 +84,20 @@ Workspace settings win for workspace-scoped recordings. Existing output files
 are not renamed when config changes; future writes use the current effective
 settings.
 
+## Session Twins
+
+A session twin (`~/.kato/shared/sessions/*.twin.jsonl`) is Kato's normalized copy of a conversation. The daemon rebuilds a conversation's recent history from it after a restart, and Kato Web's session viewer reads it.
+
+Twins are on by default in newly created daemon configs. Older generated configs contain `globalAutoGenerateTwins: false`; change it to `true` in `~/.kato/daemon/kato-daemon-config.yaml` to turn them on. `providerAutoGenerateTwins` overrides the global setting per provider:
+
+```yaml
+globalAutoGenerateTwins: true
+providerAutoGenerateTwins:
+  codex: true
+```
+
+When twins are turned on, each conversation builds its twin from its transcript the next time it changes. That is a one-time full read per conversation, and twins use disk space roughly in proportion to the conversation text.
+
 ## Provider Session Roots
 
 Provider session roots live in daemon runtime config. They define where Kato

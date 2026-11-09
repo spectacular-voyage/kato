@@ -124,3 +124,9 @@ export interface RuntimeConfigMetadata {
   statusSchemaVersion: 2;
   conversationSchemaVersion: 2;
 }
+
+/**
+ * Twins are on by default: the daemon rebuilds in-memory snapshots from them
+ * after a restart, and recordings resume from persisted source positions.
+ */
+export const DEFAULT_GLOBAL_AUTO_GENERATE_TWINS = true;

@@ -232,6 +232,9 @@ function cloneSessionMetadata(metadata: SessionMetadataV1): SessionMetadataV1 {
             ? { activeRecordingCycleId: entry.activeRecordingCycleId }
             : {}),
           writeCursor: entry.writeCursor,
+          ...(entry.writeSourceCursor
+            ? { writeSourceCursor: { ...entry.writeSourceCursor } }
+            : {}),
           ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
           recordingCycles: entry.recordingCycles.map((cycle) => ({ ...cycle })),
         })),

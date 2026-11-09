@@ -77,6 +77,8 @@ import {
   openWorkspaceOutputCycle,
   readWorkspaceOutputs,
   resolveBindingForRetargetedWorkspacePath,
+  resolveWorkspaceOutputWriteStart,
+  setWorkspaceOutputWritePosition,
   stopAllWorkspaceOutputs,
   updateWorkspaceOutputCycleLastWrite,
 } from "./runtime_workspace_output_state.ts";
@@ -1218,7 +1220,7 @@ async function applyPersistentControlCommandsForEvent(
               );
               output.currentDestination = resolved.binding;
               output.currentResolvedPath = resolvedDestination;
-              output.writeCursor = writeCursor;
+              setWorkspaceOutputWritePosition(output, events, writeCursor);
               output.desiredState = "off";
               retargeted = true;
               metadataChanged = true;
@@ -1283,7 +1285,7 @@ async function applyPersistentControlCommandsForEvent(
                 );
               }
             }
-            output.writeCursor = writeCursor;
+            setWorkspaceOutputWritePosition(output, events, writeCursor);
             metadataChanged = true;
           }
         } else if (command.verb === "capture") {
@@ -1430,7 +1432,7 @@ async function applyPersistentControlCommandsForEvent(
               );
             }
           }
-          output.writeCursor = writeCursor;
+          setWorkspaceOutputWritePosition(output, events, writeCursor);
           stateChanged = true;
           metadataChanged = metadataChanged || stateChanged;
         } else if (command.verb === "export") {
@@ -2350,17 +2352,45 @@ async function processPersistentRecordingUpdates(
     );
     const activeOutputs = activeWorkspaceOutputs(metadata);
     for (const output of activeOutputs) {
-      const clampedCursor = Math.max(
-        0,
-        Math.min(output.writeCursor, snapshot.events.length),
+      const writeStart = resolveWorkspaceOutputWriteStart(
+        output,
+        snapshot.events,
       );
-      if (clampedCursor !== output.writeCursor) {
-        output.writeCursor = clampedCursor;
-        metadataChanged = true;
+      const pendingEvents = snapshot.events.slice(writeStart);
+      if (
+        writeStart === 0 &&
+        pendingEvents.length > 0 &&
+        (snapshot.metadata.truncatedEvents ?? 0) > 0 &&
+        (output.writeSourceCursor !== undefined || output.writeCursor > 0)
+      ) {
+        // Everything retained is newer than the last write, but retention
+        // dropped older events: content between them never reached the file.
+        await operationalLogger.warn(
+          "recording.append.gap",
+          "Recording resumes after events that are no longer in memory; the output has a gap",
+          {
+            provider,
+            sessionId: providerSessionId,
+            workspaceId: output.workspaceId,
+            destination: output.currentResolvedPath,
+            truncatedEvents: snapshot.metadata.truncatedEvents,
+            ...(output.writeSourceCursor
+              ? { writeSourceCursor: output.writeSourceCursor.value }
+              : {}),
+          },
+        );
       }
-
-      const pendingEvents = snapshot.events.slice(clampedCursor);
       if (pendingEvents.length === 0) {
+        // Outputs written by older versions have no source cursor yet: record
+        // the resolved position once so later passes stop guessing by time.
+        if (!output.writeSourceCursor) {
+          setWorkspaceOutputWritePosition(
+            output,
+            snapshot.events,
+            snapshot.events.length,
+          );
+          if (output.writeSourceCursor) metadataChanged = true;
+        }
         continue;
       }
 
@@ -2399,7 +2429,11 @@ async function processPersistentRecordingUpdates(
             now().toISOString(),
           );
         }
-        output.writeCursor = snapshot.events.length;
+        setWorkspaceOutputWritePosition(
+          output,
+          snapshot.events,
+          snapshot.events.length,
+        );
         metadataChanged = true;
       } catch (error) {
         await operationalLogger.error(
@@ -2612,6 +2646,16 @@ function mergeMatchingWorkspaceOutputPreferringLatest(
   }
 
   merged.writeCursor = Math.max(merged.writeCursor, current.writeCursor);
+  // Only the daemon advances write positions; keep the furthest one.
+  const latestSource = merged.writeSourceCursor;
+  const currentSource = current.writeSourceCursor;
+  if (
+    currentSource &&
+    (!latestSource || (latestSource.kind === currentSource.kind &&
+      currentSource.value > latestSource.value))
+  ) {
+    merged.writeSourceCursor = { ...currentSource };
+  }
   merged.recordingCycles = mergeWorkspaceRecordingCyclesPreferringLatest(
     merged.recordingCycles,
     current.recordingCycles,

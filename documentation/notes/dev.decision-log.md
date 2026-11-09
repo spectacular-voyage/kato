@@ -1141,3 +1141,23 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 - Follow-up tasks:
   - Consider persisting parse checkpoints if restart cost matters.
   - Investigate whether `extractMessageText` should read Codex `output_text` parts.
+
+### Recording Write Position By Source Cursor; Twins On By Default
+
+- Decision:
+  - Persist the source position (`rawCursor`) of the last event written to each workspace output as `writeSourceCursor`, and resume after the last snapshot event at or before it. Keep writing the snapshot index `writeCursor` for older binaries.
+  - Migrate outputs without a source position once, by the active cycle's `lastWriteAt` against event timestamps, only when `writeCursor > 0` (a zero index means nothing was written, e.g. auto-record).
+  - Log `recording.append.gap` when everything retained is newer than the write position but retention dropped events.
+  - Default `globalAutoGenerateTwins` to `true` for newly created configs.
+- Owner: Kato engineering
+- Date: 2026-11-08
+- Why:
+  - `writeCursor` indexed the in-memory snapshot, which is rebuilt per daemon process and truncated to the newest 10,000 events. After every restart the stale index was clamped to the rebuilt snapshot's length and the first batch was skipped; once a conversation exceeded 10,000 events the index stayed pinned at the cap and nothing was appended again. On one host three long conversations stopped recording with 47k–72k events unwritten, and caught-up content never reached recordings.
+  - `rawCursor` survives twin round trips (twin events keep `source.cursor`, while `eventId` is regenerated) and works for Codex, whose events have no reliable timestamps.
+- Tradeoffs:
+  - The `lastWriteAt` migration can only recover content newer than the last write; losses followed by later writes (mid-file) are not detectable and are not restored.
+  - Events without positional cursors fall back to the clamped index.
+  - Existing configs written with an explicit `globalAutoGenerateTwins: false` keep it; turning twins on costs one full transcript read per conversation and twin disk space.
+- Follow-up tasks:
+  - Decide whether to backfill the three long-session recordings found on galactica outside the daemon (their missing tails exceed the in-memory window).
+

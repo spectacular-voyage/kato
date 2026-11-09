@@ -8,7 +8,10 @@ import type {
   SessionIngestAnchorV1,
   SessionMetadataV1,
 } from "@kato/shared";
-import { extractSnippet } from "@kato/shared";
+import {
+  DEFAULT_GLOBAL_AUTO_GENERATE_TWINS,
+  extractSnippet,
+} from "@kato/shared";
 import {
   createSecretsRedactor,
   redactConversationEvents,
@@ -2577,7 +2580,7 @@ export function createDefaultProviderIngestionRunners(
   ) =>
     options.providerAutoGenerateTwins?.[provider] ??
       options.globalAutoGenerateTwins ??
-      false;
+      DEFAULT_GLOBAL_AUTO_GENERATE_TWINS;
 
   return [
     createClaudeIngestionRunner({

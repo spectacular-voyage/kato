@@ -30,6 +30,10 @@ logs under `~/.kato/daemon/logs/`. Earlier days are in rotated files such as `op
 
 Kato could not read that conversation's provider transcript, so it is not capturing new content from it. The error text in Kato Web (Summary, Sessions) or `kato status` says why; details are in `~/.kato/daemon/logs/operational.jsonl` under `provider.ingestion.parse_error`. Retries continue automatically and capture resumes from where it stopped once the file is readable.
 
+## A Recording Is Missing Content
+
+Look for `recording.append.gap` in `~/.kato/daemon/logs/operational.jsonl`. It means content arrived faster than Kato could write it and older events were no longer in memory (usually a very large backlog after downtime), so the recording continues after a gap. Export the conversation again if you need the complete text.
+
 ## High CPU Right After `kato start`
 
 If conversations kept going while the daemon was stopped (or while it could not read them), Kato catches them up after it starts, one conversation at a time, and appends the missed content to any recordings that are on. A large backlog can keep the daemon busy for a minute or two. `provider.ingestion.catch_up.queued` in `~/.kato/daemon/logs/operational.jsonl` lists the conversations being caught up.
