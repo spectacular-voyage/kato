@@ -513,7 +513,9 @@ export class PersistentSessionStateStore {
     });
     await writeJsonAtomically(location.metadataPath, cloned);
     this.metadataCache.set(cloned.sessionKey, cloned);
-    await this.upsertDaemonControlEntry({
+    // Most saves (cursor, twin sequence) leave the index entry unchanged; only
+    // rewrite the whole index when the entry itself differs.
+    await this.ensureDaemonControlEntry({
       sessionKey: cloned.sessionKey,
       provider: cloned.provider,
       providerSessionId: cloned.providerSessionId,

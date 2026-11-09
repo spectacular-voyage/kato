@@ -1,4 +1,5 @@
 import type { ConversationEvent, ProviderCursor } from "@kato/shared";
+import { memoizeForSealedEvent } from "./sealed_events.ts";
 
 export interface MergeEventsOptions {
   ignoreTimestamp?: boolean;
@@ -63,19 +64,46 @@ function eventSignature(
   }
 }
 
+/** Per option combination: sealed event → signature. */
+const sealedSignatureCaches = new Map<
+  string,
+  WeakMap<ConversationEvent, string>
+>();
+
+function cachedEventSignature(
+  event: ConversationEvent,
+  options: MergeEventsOptions,
+): string {
+  const variant = `${options.ignoreTimestamp ? 1 : 0}${
+    options.ignoreCursor ? 1 : 0
+  }`;
+  let cache = sealedSignatureCaches.get(variant);
+  if (!cache) {
+    cache = new WeakMap();
+    sealedSignatureCaches.set(variant, cache);
+  }
+  return memoizeForSealedEvent(
+    cache,
+    event,
+    (value) => eventSignature(value, options),
+  );
+}
+
 export function mergeEvents(
   existingEvents: ConversationEvent[],
   incomingEvents: ConversationEvent[],
   options: MergeEventsOptions = {},
 ): { mergedEvents: ConversationEvent[]; droppedEvents: number } {
+  // Existing events normally come from the snapshot store (sealed), so their
+  // signatures are computed once per event rather than on every merge.
   const signatures = new Set(
-    existingEvents.map((event) => eventSignature(event, options)),
+    existingEvents.map((event) => cachedEventSignature(event, options)),
   );
   const mergedEvents = [...existingEvents];
   let droppedEvents = 0;
 
   for (const event of incomingEvents) {
-    const signature = eventSignature(event, options);
+    const signature = cachedEventSignature(event, options);
     if (signatures.has(signature)) {
       droppedEvents += 1;
       continue;
