@@ -332,7 +332,6 @@ async function runWorkspaceResolutionScenario(
     now: () => new Date("2026-03-03T10:00:00.000Z"),
     heartbeatIntervalMs: 10,
     pollIntervalMs: 0,
-    sessionMetadataRefreshIntervalMs: 10,
     statusStore,
     controlStore,
     recordingPipeline,

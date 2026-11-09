@@ -44,6 +44,7 @@ import {
 import type {
   ProviderIngestionRunner,
   RuntimeSessionSnapshot,
+  SessionSnapshotMetadataEntry,
   SessionSnapshotStore,
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
@@ -141,7 +142,6 @@ export interface DaemonRuntimeLoopOptions {
   heartbeatIntervalMs?: number;
   pollIntervalMs?: number;
   providerStatusStaleAfterMs?: number;
-  sessionMetadataRefreshIntervalMs?: number;
   daemonMaxMemoryMb?: number;
   exportsLogPath?: string;
   clearControlQueueOnStartup?: boolean;
@@ -2814,10 +2814,6 @@ export async function runDaemonRuntimeLoop(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const providerStatusStaleAfterMs = options.providerStatusStaleAfterMs ??
     DEFAULT_PROVIDER_STATUS_STALE_AFTER_MS;
-  const sessionMetadataRefreshIntervalMs = Math.max(
-    options.sessionMetadataRefreshIntervalMs ?? heartbeatIntervalMs,
-    pollIntervalMs,
-  );
   const exportEnabled = options.exportEnabled ?? true;
   const exportsLogPath = options.exportsLogPath;
   const clearControlQueueOnStartup = options.clearControlQueueOnStartup ??
@@ -2992,33 +2988,20 @@ export async function runDaemonRuntimeLoop(
   let nextHeartbeatAt = now().getTime() + heartbeatIntervalMs;
   const sessionEventStates = new Map<string, SessionEventProcessingState>();
   let previousSnapshotMemory: SnapshotMemoryStats | undefined;
-  let cachedSummaryMetadata: SessionMetadataV1[] | undefined;
-  let cachedSummaryMetadataAtMs = 0;
-  let summaryMetadataDirty = true;
+  // Status needs metadata only for the sessions it reports (those in the
+  // snapshot store), so read just those files rather than every session's.
   const loadSummaryMetadata = async (
-    forceRefresh: boolean = false,
+    sessionList: SessionSnapshotMetadataEntry[],
   ): Promise<SessionMetadataV1[] | undefined> => {
     if (!sessionStateStore) {
       return undefined;
     }
-    const currentTimeMs = now().getTime();
-    const cacheStale = currentTimeMs - cachedSummaryMetadataAtMs >=
-      sessionMetadataRefreshIntervalMs;
-    if (
-      forceRefresh ||
-      summaryMetadataDirty ||
-      !cachedSummaryMetadata ||
-      cacheStale
-    ) {
-      cachedSummaryMetadata = await sessionStateStore.listSessionMetadata();
-      cachedSummaryMetadataAtMs = currentTimeMs;
-      summaryMetadataDirty = false;
-    }
-    return cachedSummaryMetadata;
+    return await sessionStateStore.listSessionMetadataForKeys(
+      sessionList.map((session) => `${session.provider}:${session.sessionId}`),
+    );
   };
 
   while (!shouldStop) {
-    let sessionMetadataMayHaveChanged = false;
     for (const runner of ingestionRunners) {
       try {
         const result = await runner.poll();
@@ -3033,9 +3016,6 @@ export async function runDaemonRuntimeLoop(
               polledAt: result.polledAt,
             },
           );
-          if (sessionStateStore) {
-            sessionMetadataMayHaveChanged = true;
-          }
         }
       } catch (error) {
         if (error instanceof SessionSnapshotMemoryBudgetExceededError) {
@@ -3083,25 +3063,22 @@ export async function runDaemonRuntimeLoop(
     if (sessionSnapshotStore) {
       try {
         if (sessionStateStore) {
-          const persistentUpdatesChanged =
-            await processPersistentRecordingUpdates({
-              sessionSnapshotStore,
-              sessionStateStore,
-              recordingPipeline,
-              operationalLogger,
-              auditLogger,
-              processEventsFromMs,
-              now,
-              captureIncludeSystemEvents:
-                daemonFeatureFlags.captureIncludeSystemEvents,
-              workspaceCatalog,
-              workspaceProfileResolver,
-              userConfig,
-              secretsPolicy: options.secretsPolicy,
-              autoRecordResolutionFailures,
-            });
-          sessionMetadataMayHaveChanged = sessionMetadataMayHaveChanged ||
-            persistentUpdatesChanged;
+          await processPersistentRecordingUpdates({
+            sessionSnapshotStore,
+            sessionStateStore,
+            recordingPipeline,
+            operationalLogger,
+            auditLogger,
+            processEventsFromMs,
+            now,
+            captureIncludeSystemEvents:
+              daemonFeatureFlags.captureIncludeSystemEvents,
+            workspaceCatalog,
+            workspaceProfileResolver,
+            userConfig,
+            secretsPolicy: options.secretsPolicy,
+            autoRecordResolutionFailures,
+          });
         } else {
           await processInChatRecordingUpdates({
             sessionSnapshotStore,
@@ -3133,9 +3110,6 @@ export async function runDaemonRuntimeLoop(
     }
 
     const requests = await controlStore.list();
-    if (sessionStateStore && requests.length > 0) {
-      sessionMetadataMayHaveChanged = true;
-    }
     for (const request of requests) {
       shouldStop = await handleControlRequest({
         request,
@@ -3154,22 +3128,13 @@ export async function runDaemonRuntimeLoop(
       if (shouldStop) break;
     }
 
-    if (sessionMetadataMayHaveChanged) {
-      summaryMetadataDirty = true;
-    }
-
     const currentTimeMs = now().getTime();
     if (currentTimeMs >= nextHeartbeatAt) {
       const currentIso = now().toISOString();
       const heartbeatNow = now();
       const sessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
         sessionSnapshotStore?.list() ?? [];
-      // The full metadata listing is only needed for the heartbeat; loading it
-      // here (not every poll) keeps busy sessions from re-reading every
-      // session's metadata once per second.
-      const heartbeatMetadata = sessionStateStore
-        ? await loadSummaryMetadata()
-        : undefined;
+      const heartbeatMetadata = await loadSummaryMetadata(sessionList);
       const heartbeatMetadataByKey = heartbeatMetadata
         ? new Map(heartbeatMetadata.map((entry) => [entry.sessionKey, entry]))
         : undefined;
@@ -3281,7 +3246,7 @@ export async function runDaemonRuntimeLoop(
   const exitNow = now();
   const exitSessionList = sessionSnapshotStore?.listMetadataOnly?.() ??
     sessionSnapshotStore?.list() ?? [];
-  const exitMetadata = await loadSummaryMetadata(true);
+  const exitMetadata = await loadSummaryMetadata(exitSessionList);
   const exitMetadataByKey = exitMetadata
     ? new Map(exitMetadata.map((entry) => [entry.sessionKey, entry]))
     : undefined;

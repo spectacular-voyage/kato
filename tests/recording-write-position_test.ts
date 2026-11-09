@@ -322,7 +322,6 @@ async function runRecordingPhases(
     now: () => new Date("2026-11-08T12:00:00.000Z"),
     heartbeatIntervalMs: 60_000,
     pollIntervalMs: 0,
-    sessionMetadataRefreshIntervalMs: 60_000,
     statusStore,
     controlStore,
     recordingPipeline,

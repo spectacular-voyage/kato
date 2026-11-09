@@ -299,21 +299,35 @@ async function ensureDir(path: string): Promise<void> {
   await Deno.mkdir(path, { recursive: true });
 }
 
+// FsFile.write may write fewer bytes than given; loop until all are out.
+async function writeAll(file: Deno.FsFile, bytes: Uint8Array): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    written += await file.write(bytes.subarray(written));
+  }
+}
+
+/**
+ * Writes via a temp file and rename, so every write replaces the inode.
+ * Returns the written file's info (rename keeps inode, size, and mtime).
+ */
 async function writeTextAtomically(
   path: string,
   content: string,
-): Promise<void> {
+): Promise<Deno.FileInfo> {
   await ensureDir(dirname(path));
   const tmpPath = `${path}.tmp-${crypto.randomUUID()}`;
   let file: Deno.FsFile | undefined;
+  let info: Deno.FileInfo;
   try {
     file = await Deno.open(tmpPath, {
       create: true,
       write: true,
       truncate: true,
     });
-    await file.write(UTF8_ENCODER.encode(content));
+    await writeAll(file, UTF8_ENCODER.encode(content));
     await file.sync();
+    info = await file.stat();
   } finally {
     file?.close();
   }
@@ -327,13 +341,38 @@ async function writeTextAtomically(
     }
     throw error;
   }
+  return info;
 }
 
 async function writeJsonAtomically(
   path: string,
   value: unknown,
-): Promise<void> {
-  await writeTextAtomically(path, `${JSON.stringify(value, null, 2)}\n`);
+): Promise<Deno.FileInfo> {
+  return await writeTextAtomically(
+    path,
+    `${JSON.stringify(value, null, 2)}\n`,
+  );
+}
+
+/** Identifies one version of a file written by {@link writeTextAtomically}. */
+interface FileStamp {
+  ino: number | null;
+  size: number;
+  mtimeMs: number | null;
+}
+
+function toFileStamp(info: Deno.FileInfo): FileStamp {
+  return {
+    ino: info.ino,
+    size: info.size,
+    mtimeMs: info.mtime?.getTime() ?? null,
+  };
+}
+
+// Without an inode or mtime (e.g. Windows inodes), never treat as unchanged.
+function sameFileStamp(a: FileStamp, b: FileStamp): boolean {
+  return a.ino !== null && a.mtimeMs !== null && a.ino === b.ino &&
+    a.size === b.size && a.mtimeMs === b.mtimeMs;
 }
 
 function asCursorForProvider(provider: string): ProviderCursor {
@@ -369,13 +408,42 @@ function cloneSessionTwinEvent(event: SessionTwinEventV1): SessionTwinEventV1 {
   return structuredClone(event);
 }
 
+// Copies only the entry's own fields, dropping the per-entry `updatedAt` that
+// indexes written by v0.2.17 and earlier carry.
+function toDaemonControlEntry(
+  entry: DaemonControlSessionIndexEntryV1,
+): DaemonControlSessionIndexEntryV1 {
+  return {
+    sessionKey: entry.sessionKey,
+    provider: entry.provider,
+    providerSessionId: entry.providerSessionId,
+    sessionId: entry.sessionId,
+    sessionShortId: entry.sessionShortId,
+    metadataPath: entry.metadataPath,
+    twinPath: entry.twinPath,
+  };
+}
+
+function sameDaemonControlEntry(
+  a: DaemonControlSessionIndexEntryV1,
+  b: DaemonControlSessionIndexEntryV1,
+): boolean {
+  return a.sessionKey === b.sessionKey &&
+    a.provider === b.provider &&
+    a.providerSessionId === b.providerSessionId &&
+    a.sessionId === b.sessionId &&
+    a.sessionShortId === b.sessionShortId &&
+    a.metadataPath === b.metadataPath &&
+    a.twinPath === b.twinPath;
+}
+
 function cloneDaemonControlIndex(
   index: DaemonControlIndexV1,
 ): DaemonControlIndexV1 {
   return {
     schemaVersion: index.schemaVersion,
     updatedAt: index.updatedAt,
-    sessions: index.sessions.map((entry) => ({ ...entry })),
+    sessions: index.sessions.map(toDaemonControlEntry),
   };
 }
 
@@ -396,6 +464,11 @@ export class PersistentSessionStateStore {
   private readonly makeSessionId: () => string;
   private readonly recentFingerprintLimit: number;
   private readonly metadataCache = new Map<string, SessionMetadataV1>();
+  /** Metadata files as last read or written by this store, by path. */
+  private readonly metadataFiles = new Map<
+    string,
+    { stamp: FileStamp; metadata: SessionMetadataV1 }
+  >();
   private daemonIndexCache: DaemonControlIndexV1 | undefined;
 
   constructor(options: PersistentSessionStateStoreOptions = {}) {
@@ -465,7 +538,11 @@ export class PersistentSessionStateStore {
     };
 
     await ensureDir(this.sessionsDir);
-    await writeJsonAtomically(metadataPath, created);
+    this.rememberMetadataFile(
+      metadataPath,
+      await writeJsonAtomically(metadataPath, created),
+      created,
+    );
     await this.upsertDaemonControlEntry({
       sessionKey: created.sessionKey,
       provider: created.provider,
@@ -474,7 +551,6 @@ export class PersistentSessionStateStore {
       sessionShortId: makeSessionShortId(created.sessionId),
       metadataPath,
       twinPath,
-      updatedAt: created.updatedAt,
     });
     this.metadataCache.set(sessionKey, created);
     return cloneSessionMetadata(created);
@@ -511,7 +587,11 @@ export class PersistentSessionStateStore {
       provider: cloned.provider,
       providerSessionId: cloned.providerSessionId,
     });
-    await writeJsonAtomically(location.metadataPath, cloned);
+    this.rememberMetadataFile(
+      location.metadataPath,
+      await writeJsonAtomically(location.metadataPath, cloned),
+      cloned,
+    );
     this.metadataCache.set(cloned.sessionKey, cloned);
     // Most saves (cursor, twin sequence) leave the index entry unchanged; only
     // rewrite the whole index when the entry itself differs.
@@ -523,7 +603,6 @@ export class PersistentSessionStateStore {
       sessionShortId: makeSessionShortId(cloned.sessionId),
       metadataPath: location.metadataPath,
       twinPath: cloned.twinPath,
-      updatedAt: cloned.updatedAt,
     });
   }
 
@@ -541,7 +620,11 @@ export class PersistentSessionStateStore {
     const next = cloneSessionMetadata(metadata);
     next.parentProviderSessionId = parentProviderSessionId;
     const location = this.resolveLocation(next);
-    await writeJsonAtomically(location.metadataPath, next);
+    this.rememberMetadataFile(
+      location.metadataPath,
+      await writeJsonAtomically(location.metadataPath, next),
+      next,
+    );
     this.metadataCache.set(next.sessionKey, next);
     await this.ensureDaemonControlEntry({
       sessionKey: next.sessionKey,
@@ -551,7 +634,6 @@ export class PersistentSessionStateStore {
       sessionShortId: makeSessionShortId(next.sessionId),
       metadataPath: location.metadataPath,
       twinPath: next.twinPath,
-      updatedAt: next.updatedAt,
     });
     return next;
   }
@@ -561,10 +643,10 @@ export class PersistentSessionStateStore {
   }
 
   /**
-   * Like {@link listSessionMetadata}, but reads only the metadata files of the
-   * given session keys. Reads stay fresh from disk (so writes from other
-   * processes, such as the web console, are seen); hot daemon paths use this
-   * to avoid re-reading every session on each poll.
+   * Like {@link listSessionMetadata}, but only for the given session keys; hot
+   * daemon paths use this instead of visiting every session. Like the full
+   * listing, it re-reads a metadata file only when it changed on disk, so
+   * writes from other processes (Kato Web) are seen.
    */
   async listSessionMetadataForKeys(
     sessionKeys: Iterable<string>,
@@ -579,7 +661,7 @@ export class PersistentSessionStateStore {
   private async loadIndexedSessionMetadata(
     sessionKeys?: ReadonlySet<string>,
   ): Promise<SessionMetadataV1[]> {
-    const index = await this.loadDaemonControlIndex();
+    const index = await this.readDaemonControlIndex();
     const items: SessionMetadataV1[] = [];
     for (const entry of index.sessions) {
       if (sessionKeys && !sessionKeys.has(entry.sessionKey)) {
@@ -587,7 +669,7 @@ export class PersistentSessionStateStore {
       }
       let metadata: SessionMetadataV1 | undefined;
       try {
-        metadata = await this.loadMetadataFromDisk(entry.metadataPath);
+        metadata = await this.loadMetadataFileIfChanged(entry.metadataPath);
       } catch (error) {
         if (error instanceof SessionStateLoadError) {
           continue;
@@ -651,7 +733,7 @@ export class PersistentSessionStateStore {
         write: true,
       });
       try {
-        await file.write(UTF8_ENCODER.encode(text));
+        await writeAll(file, UTF8_ENCODER.encode(text));
         await file.sync();
       } finally {
         file.close();
@@ -843,8 +925,13 @@ export class PersistentSessionStateStore {
   }
 
   async loadDaemonControlIndex(): Promise<DaemonControlIndexV1> {
+    return cloneDaemonControlIndex(await this.readDaemonControlIndex());
+  }
+
+  /** The cached index itself; callers must not mutate it. */
+  private async readDaemonControlIndex(): Promise<DaemonControlIndexV1> {
     if (this.daemonIndexCache) {
-      return cloneDaemonControlIndex(this.daemonIndexCache);
+      return this.daemonIndexCache;
     }
 
     let raw: string | undefined;
@@ -860,20 +947,24 @@ export class PersistentSessionStateStore {
       try {
         const parsed = JSON.parse(raw) as unknown;
         if (isDaemonControlIndexV1(parsed)) {
-          this.daemonIndexCache = parsed;
-          return cloneDaemonControlIndex(parsed);
+          this.daemonIndexCache = cloneDaemonControlIndex(parsed);
+          return this.daemonIndexCache;
         }
       } catch {
         // rebuild below
       }
     }
 
-    const rebuilt = await this.rebuildDaemonControlIndex();
-    this.daemonIndexCache = rebuilt;
-    return cloneDaemonControlIndex(rebuilt);
+    return await this.rebuildDaemonControlIndexCache();
   }
 
   async rebuildDaemonControlIndex(): Promise<DaemonControlIndexV1> {
+    return cloneDaemonControlIndex(await this.rebuildDaemonControlIndexCache());
+  }
+
+  private async rebuildDaemonControlIndexCache(): Promise<
+    DaemonControlIndexV1
+  > {
     const sessions: DaemonControlSessionIndexEntryV1[] = [];
     await ensureDir(this.sessionsDir);
     for await (const entry of Deno.readDir(this.sessionsDir)) {
@@ -902,7 +993,6 @@ export class PersistentSessionStateStore {
         sessionShortId: makeSessionShortId(metadata.sessionId),
         metadataPath,
         twinPath: metadata.twinPath,
-        updatedAt: metadata.updatedAt,
       });
     }
 
@@ -957,7 +1047,7 @@ export class PersistentSessionStateStore {
       );
     }
 
-    const daemonIndex = await this.loadDaemonControlIndex();
+    const daemonIndex = await this.readDaemonControlIndex();
     const indexEntry = daemonIndex.sessions.find((entry) =>
       entry.sessionKey === sessionKey
     );
@@ -1007,7 +1097,6 @@ export class PersistentSessionStateStore {
         sessionShortId: makeSessionShortId(metadata.sessionId),
         metadataPath: canonicalPaths.metadataPath,
         twinPath: metadata.twinPath,
-        updatedAt: metadata.updatedAt,
       });
       return metadata;
     }
@@ -1029,7 +1118,11 @@ export class PersistentSessionStateStore {
       nextMetadata.twinPath = canonicalPaths.twinPath;
     }
 
-    await writeJsonAtomically(canonicalPaths.metadataPath, nextMetadata);
+    this.rememberMetadataFile(
+      canonicalPaths.metadataPath,
+      await writeJsonAtomically(canonicalPaths.metadataPath, nextMetadata),
+      nextMetadata,
+    );
     if (!normalizedMetadataPath) {
       await this.removeFileIfExists(metadataPath);
     }
@@ -1044,7 +1137,6 @@ export class PersistentSessionStateStore {
       sessionShortId: makeSessionShortId(nextMetadata.sessionId),
       metadataPath: canonicalPaths.metadataPath,
       twinPath: nextMetadata.twinPath,
-      updatedAt: nextMetadata.updatedAt,
     });
 
     return nextMetadata;
@@ -1059,6 +1151,51 @@ export class PersistentSessionStateStore {
       }
       throw error;
     }
+  }
+
+  private rememberMetadataFile(
+    metadataPath: string,
+    info: Deno.FileInfo,
+    metadata: SessionMetadataV1,
+  ): void {
+    this.metadataFiles.set(metadataPath, {
+      stamp: toFileStamp(info),
+      metadata,
+    });
+  }
+
+  /**
+   * Reads a metadata file fresh from disk unless it is the same file this
+   * store last read or wrote. Every writer (the daemon, Kato Web) replaces
+   * metadata via temp file and rename, so an unchanged inode, size, and mtime
+   * mean unchanged content; a write by any other process is still seen.
+   */
+  private async loadMetadataFileIfChanged(
+    metadataPath: string,
+  ): Promise<SessionMetadataV1 | undefined> {
+    let stamp: FileStamp;
+    try {
+      stamp = toFileStamp(await Deno.stat(metadataPath));
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        this.metadataFiles.delete(metadataPath);
+        return undefined;
+      }
+      throw error;
+    }
+    const known = this.metadataFiles.get(metadataPath);
+    if (known && sameFileStamp(known.stamp, stamp)) {
+      return known.metadata;
+    }
+    // If the file is replaced between the stat and the read, the stale stamp
+    // only causes one extra read next time.
+    const metadata = await this.loadMetadataFromDisk(metadataPath);
+    if (metadata) {
+      this.metadataFiles.set(metadataPath, { stamp, metadata });
+    } else {
+      this.metadataFiles.delete(metadataPath);
+    }
+    return metadata;
   }
 
   private async loadMetadataFromDisk(
@@ -1096,20 +1233,11 @@ export class PersistentSessionStateStore {
   private async ensureDaemonControlEntry(
     entry: DaemonControlSessionIndexEntryV1,
   ): Promise<void> {
-    const index = await this.loadDaemonControlIndex();
+    const index = await this.readDaemonControlIndex();
     const existing = index.sessions.find((item) =>
       item.sessionKey === entry.sessionKey
     );
-    if (
-      existing &&
-      existing.provider === entry.provider &&
-      existing.providerSessionId === entry.providerSessionId &&
-      existing.sessionId === entry.sessionId &&
-      existing.sessionShortId === entry.sessionShortId &&
-      existing.metadataPath === entry.metadataPath &&
-      existing.twinPath === entry.twinPath &&
-      existing.updatedAt === entry.updatedAt
-    ) {
+    if (existing && sameDaemonControlEntry(existing, entry)) {
       return;
     }
 
@@ -1124,9 +1252,9 @@ export class PersistentSessionStateStore {
       item.sessionKey === entry.sessionKey
     );
     if (existingIdx >= 0) {
-      index.sessions[existingIdx] = { ...entry };
+      index.sessions[existingIdx] = toDaemonControlEntry(entry);
     } else {
-      index.sessions.push({ ...entry });
+      index.sessions.push(toDaemonControlEntry(entry));
     }
     index.sessions.sort((a, b) => a.sessionKey.localeCompare(b.sessionKey));
     index.updatedAt = this.now().toISOString();

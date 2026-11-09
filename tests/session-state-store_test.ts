@@ -4,6 +4,7 @@ import type { SessionTwinEventV1 } from "@kato/shared";
 import {
   makeDefaultSessionCursor,
   PersistentSessionStateStore,
+  resolveDefaultDaemonControlIndexPath,
 } from "../apps/daemon/src/mod.ts";
 import { resolveTestTempPath, withTestTempDir } from "./test_temp.ts";
 
@@ -100,7 +101,7 @@ Deno.test("PersistentSessionStateStore persists metadata and rebuilds daemon ind
       ["hello", "world"],
     );
 
-    const controlPath = join(katoDir, "daemon-control.json");
+    const controlPath = resolveDefaultDaemonControlIndexPath(katoDir);
     await Deno.writeTextFile(controlPath, "{ not-json");
 
     const coldStore = new PersistentSessionStateStore({
@@ -398,7 +399,7 @@ Deno.test(
       });
       const canonicalLocation = initialStore.resolveLocation(identity);
       const sessionsDir = dirname(canonicalLocation.metadataPath);
-      const daemonControlPath = join(katoDir, "daemon-control.json");
+      const daemonControlPath = resolveDefaultDaemonControlIndexPath(katoDir);
       await Deno.writeTextFile(
         daemonControlPath,
         `${
@@ -443,6 +444,149 @@ Deno.test(
       assertExists(healedEntry);
       assertEquals(healedEntry.metadataPath, canonicalLocation.metadataPath);
       assertEquals(healedEntry.twinPath, canonicalLocation.twinPath);
+      // The legacy per-entry updatedAt is accepted on read and dropped.
+      assertEquals("updatedAt" in healedEntry, false);
+      const healedOnDisk = JSON.parse(
+        await Deno.readTextFile(daemonControlPath),
+      ) as { sessions: Record<string, unknown>[] };
+      assertEquals(
+        healedOnDisk.sessions.map((entry) => "updatedAt" in entry),
+        [false],
+      );
+    });
+  },
+);
+
+Deno.test(
+  "PersistentSessionStateStore rewrites the daemon index only when a session is added or moves",
+  async () => {
+    await withTempDir("session-state-store-index-writes-", async (dir) => {
+      const katoDir = join(dir, ".kato");
+      const controlPath = resolveDefaultDaemonControlIndexPath(katoDir);
+      let nowIso = "2026-03-02T09:00:00.000Z";
+      let nextId = 0;
+      const store = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date(nowIso),
+        makeSessionId: () => `session-uuid-index-writes-${++nextId}`,
+      });
+
+      const first = await store.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "index-writes-1",
+        sourceFilePath: SESSION_STATE_SOURCE_PATH,
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const afterCreate = await Deno.readTextFile(controlPath);
+
+      nowIso = "2026-03-02T09:05:00.000Z";
+      const liveAppend = await store.appendTwinEvents(
+        first,
+        [makeTwinEvent(first.sessionId, 0, "live-event")],
+        { touchUpdatedAt: true },
+      );
+      assertEquals(liveAppend.appended.length, 1);
+      const [appended] = await store.listSessionMetadataForKeys([
+        first.sessionKey,
+      ]);
+      assertExists(appended);
+      assertEquals(appended.updatedAt, "2026-03-02T09:05:00.000Z");
+      nowIso = "2026-03-02T09:06:00.000Z";
+      await store.saveSessionMetadata(
+        {
+          ...appended,
+          ingestCursor: { kind: "byte-offset", value: 42 },
+        },
+        { touchUpdatedAt: true },
+      );
+      const [touched] = await store.listSessionMetadataForKeys([
+        first.sessionKey,
+      ]);
+      assertEquals(touched?.updatedAt, "2026-03-02T09:06:00.000Z");
+      assertEquals(await Deno.readTextFile(controlPath), afterCreate);
+
+      nowIso = "2026-03-02T09:10:00.000Z";
+      const second = await store.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "index-writes-2",
+        sourceFilePath: SESSION_STATE_SOURCE_PATH,
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const afterSecond = JSON.parse(
+        await Deno.readTextFile(controlPath),
+      ) as { updatedAt: string; sessions: Record<string, unknown>[] };
+      assertEquals(afterSecond.updatedAt, "2026-03-02T09:10:00.000Z");
+      assertEquals(
+        afterSecond.sessions.map((entry) => entry["sessionKey"]),
+        [first.sessionKey, second.sessionKey],
+      );
+      assertEquals(
+        afterSecond.sessions.map((entry) => "updatedAt" in entry),
+        [false, false],
+      );
+    });
+  },
+);
+
+Deno.test(
+  "PersistentSessionStateStore re-reads listed metadata only after the file is replaced",
+  async () => {
+    await withTempDir("session-state-store-metadata-stamps-", async (dir) => {
+      const katoDir = join(dir, ".kato");
+      const daemonStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-03T09:00:00.000Z"),
+        makeSessionId: () => "session-uuid-metadata-stamps-1",
+      });
+      const created = await daemonStore.getOrCreateSessionMetadata({
+        provider: "codex",
+        providerSessionId: "metadata-stamps-1",
+        sourceFilePath: SESSION_STATE_SOURCE_PATH,
+        initialCursor: makeDefaultSessionCursor("codex"),
+      });
+      const metadataPath = daemonStore.resolveLocation(created).metadataPath;
+
+      // An in-place edit that keeps inode, size, and mtime is not a write any
+      // store makes; it is served from what this store last wrote, which
+      // shows the file was not re-read.
+      const before = await Deno.stat(metadataPath);
+      const raw = await Deno.readTextFile(metadataPath);
+      const edited = raw.replace(
+        '"createdAt": "2026-03-03T09:00:00.000Z"',
+        '"createdAt": "2026-03-03T09:00:01.000Z"',
+      );
+      assertEquals(edited.length, raw.length);
+      await Deno.writeTextFile(metadataPath, edited);
+      assertExists(before.mtime);
+      await Deno.utime(metadataPath, before.mtime, before.mtime);
+      const [unchanged] = await daemonStore.listSessionMetadataForKeys([
+        created.sessionKey,
+      ]);
+      assertEquals(unchanged?.createdAt, "2026-03-03T09:00:00.000Z");
+
+      // Another process (Kato Web) saving through its own store replaces the
+      // file, and the change is seen.
+      const webStore = new PersistentSessionStateStore({
+        katoDir,
+        now: () => new Date("2026-03-03T09:05:00.000Z"),
+      });
+      const [fromWeb] = await webStore.listSessionMetadataForKeys([
+        created.sessionKey,
+      ]);
+      assertExists(fromWeb);
+      await webStore.saveSessionMetadata({
+        ...fromWeb,
+        providerTitle: "Renamed in web",
+        providerTitleSource: "custom",
+      });
+      const [refreshed] = await daemonStore.listSessionMetadataForKeys([
+        created.sessionKey,
+      ]);
+      assertEquals(refreshed?.providerTitle, "Renamed in web");
+      assertEquals(
+        (await daemonStore.listSessionMetadata())[0]?.providerTitle,
+        "Renamed in web",
+      );
     });
   },
 );

@@ -59,8 +59,8 @@ The first 30 s (63% CPU, 3.3 GB read) is the documented one-time full read of ea
 ## Open Issues
 
 - Twin hydration (`readTwinEvents(metadata, 1)`) still reads and maps the whole twin on a session's first update after start or after eviction. A tail-window read would need the snippet to come from metadata rather than the full event stream.
-- `daemon-control.json` is still rewritten about 0.6 times per second while conversations are active (down from about 0.9): twin appends save metadata with `touchUpdatedAt: true`, which changes the index entry's `updatedAt`. Each rewrite costs about 3 ms of CPU, but about 0.7 MB/s of writes. Nothing reads the index entry's `updatedAt`, so excluding it from the comparison (or from the entry) would stop these.
-- Steady reads stay at about 3.5 MB/s (100–120 MB per 30 s), as on v0.2.16; not yet attributed.
+- `daemon-control.json` is still rewritten about 0.6 times per second while conversations are active (down from about 0.9): twin appends save metadata with `touchUpdatedAt: true`, which changes the index entry's `updatedAt`. Each rewrite costs about 3 ms of CPU, but about 0.7 MB/s of writes. Nothing reads the index entry's `updatedAt`, so excluding it from the comparison (or from the entry) would stop these. Addressed in [[task.2026.2026-11-09-state-store-io]].
+- Steady reads stay at about 3.5 MB/s (100–120 MB per 30 s), as on v0.2.16; not yet attributed. Attributed to session metadata reads (heartbeat full listing and per-poll re-reads) in [[task.2026.2026-11-09-state-store-io]].
 
 ## Implementation Plan
 

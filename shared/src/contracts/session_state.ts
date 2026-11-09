@@ -143,6 +143,12 @@ export interface SessionMetadataV1 {
   workspaceOutputs?: SessionWorkspaceOutputStateV1[];
 }
 
+/**
+ * Locates one session's files. Entries hold only identity and paths, so the
+ * index is rewritten only when a session is added or moves; timestamps live
+ * in the session metadata. Indexes written by v0.2.17 and earlier also carry a
+ * per-entry `updatedAt`, which readers accept and drop.
+ */
 export interface DaemonControlSessionIndexEntryV1 {
   sessionKey: string;
   provider: string;
@@ -151,7 +157,6 @@ export interface DaemonControlSessionIndexEntryV1 {
   sessionShortId: string;
   metadataPath: string;
   twinPath: string;
-  updatedAt: string;
 }
 
 export interface DaemonControlIndexV1 {
@@ -617,8 +622,7 @@ function isDaemonControlSessionIndexEntry(
     isNonEmptyString(value["sessionId"]) &&
     isNonEmptyString(value["sessionShortId"]) &&
     isNonEmptyString(value["metadataPath"]) &&
-    isNonEmptyString(value["twinPath"]) &&
-    isNonEmptyString(value["updatedAt"])
+    isNonEmptyString(value["twinPath"])
   );
 }
 
