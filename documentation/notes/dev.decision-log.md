@@ -1159,5 +1159,19 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
   - Events without positional cursors fall back to the clamped index.
   - Existing configs written with an explicit `globalAutoGenerateTwins: false` keep it; turning twins on costs one full transcript read per conversation and twin disk space.
 - Follow-up tasks:
-  - Decide whether to backfill the three long-session recordings found on galactica outside the daemon (their missing tails exceed the in-memory window).
+  - Backfill of the three long-session recordings found on galactica: declined (2026-11-09).
+
+### Snapshot Store Shares Sealed Events
+
+- Decision:
+  - `InMemorySessionSnapshotStore` copies each incoming event once, deep-freezes it, and shares it across `get()`, `list()`, and `upsert()`; callers get their own events array, cursor, and metadata. Writing to a stored event throws.
+  - The snapshot size estimate memoizes each sealed event's JSON byte length and still equals `utf8ByteLength(JSON.stringify(snapshot))`.
+  - `mergeEvents` and the runtime's event signatures are memoized per sealed event (per merge option combination).
+  - `saveSessionMetadata` rewrites `daemon-control.json` only when the session's index entry changed.
+- Owner: Kato engineering
+- Date: 2026-11-09
+- Why: Every update to a session cost several full passes over its snapshot (deep clones in and out of the store, a full `JSON.stringify` for the size estimate, signatures for every existing event). With twins on by default, Claude snapshots are hydrated to the full 10,000 events, which made one update to a long conversation cost roughly 260 ms of CPU in ingestion alone (about 2 ms after the change). On galactica, 10–20 minutes after start, v0.2.16 used 35–48% of a core and rising as more sessions were hydrated (20 to 25 snapshots, 94k to 127k events), with the heap swinging between 0.2 and 1 GB and RSS at 1.0–1.5 GB. Each metadata save also rewrote the 1.2 MB control index, about once per second.
+- Tradeoffs: The snapshot contract changes from "deep copies" to "copies around immutable events"; code that mutated returned events now throws instead of silently working on a copy. Memoized values are keyed weakly, so they are reclaimed with their events.
+- Follow-up tasks:
+  - Twin hydration still reads and maps the whole twin on a session's first update after start (or after eviction); a tail-window read would cut that one-time cost.
 

@@ -6,6 +6,7 @@ import type {
 } from "@kato/shared";
 import { extractSnippet } from "@kato/shared";
 import { utf8ByteLength } from "../utils/text.ts";
+import { memoizeForSealedEvent, sealEvent } from "./sealed_events.ts";
 
 export interface SessionSnapshotStatusMetadata {
   updatedAt: string;
@@ -128,10 +129,31 @@ export class SessionSnapshotMemoryBudgetExceededError extends Error {
   }
 }
 
-function cloneSnapshot(
+/**
+ * Copy handed to callers: its own events array, cursor, and metadata around
+ * the shared sealed (deep-frozen) events, so a caller can reorder or extend
+ * the array but never alter stored events. Cost is O(events) pointer copies
+ * instead of a deep clone of every event.
+ */
+function copySnapshot(
   snapshot: RuntimeSessionSnapshot,
 ): RuntimeSessionSnapshot {
-  return structuredClone(snapshot);
+  return {
+    ...snapshot,
+    cursor: structuredClone(snapshot.cursor),
+    events: snapshot.events.slice(),
+    metadata: { ...snapshot.metadata },
+  };
+}
+
+const sealedEventByteSizes = new WeakMap<ConversationEvent, number>();
+
+function sealedEventByteSize(event: ConversationEvent): number {
+  return memoizeForSealedEvent(
+    sealedEventByteSizes,
+    event,
+    (value) => utf8ByteLength(JSON.stringify(value)),
+  );
 }
 
 function isPositiveSafeInteger(value: number): boolean {
@@ -214,8 +236,17 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     };
   }
 
+  /**
+   * Equals `utf8ByteLength(JSON.stringify(snapshot))`, but serializes only the
+   * envelope plus events not seen before: an array serializes as its items
+   * joined by commas, and each sealed event's size is memoized.
+   */
   private estimateSnapshotBytes(snapshot: RuntimeSessionSnapshot): number {
-    return utf8ByteLength(JSON.stringify(snapshot));
+    let bytes = utf8ByteLength(JSON.stringify({ ...snapshot, events: [] }));
+    for (const event of snapshot.events) {
+      bytes += sealedEventByteSize(event);
+    }
+    return bytes + Math.max(0, snapshot.events.length - 1);
   }
 
   private recordEviction(reason: string, bytes: number) {
@@ -260,7 +291,9 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
       provider,
       sessionId,
       cursor: structuredClone(input.cursor),
-      events: structuredClone(retainedEvents),
+      // Events already stored (from get()) are kept as-is; new ones are
+      // copied and sealed once.
+      events: retainedEvents.map(sealEvent),
       conversationSchemaVersion: 2,
       metadata: {
         updatedAt,
@@ -294,7 +327,7 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
 
     this.enforceBudget();
 
-    return cloneSnapshot(snapshot);
+    return copySnapshot(snapshot);
   }
 
   get(sessionId: string): RuntimeSessionSnapshot | undefined {
@@ -302,11 +335,11 @@ export class InMemorySessionSnapshotStore implements SessionSnapshotStore {
     if (!snapshot) {
       return undefined;
     }
-    return cloneSnapshot(snapshot);
+    return copySnapshot(snapshot);
   }
 
   list(): RuntimeSessionSnapshot[] {
-    const snapshots = Array.from(this.snapshots.values(), cloneSnapshot);
+    const snapshots = Array.from(this.snapshots.values(), copySnapshot);
     snapshots.reverse();
     return snapshots;
   }

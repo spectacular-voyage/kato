@@ -48,6 +48,7 @@ import type {
   SnapshotMemoryStats,
 } from "./ingestion_runtime.ts";
 import { SessionSnapshotMemoryBudgetExceededError } from "./ingestion_runtime.ts";
+import { memoizeForSealedEvent } from "./sealed_events.ts";
 import {
   makeDefaultSessionCursor,
   type PersistentSessionStateStore,
@@ -291,7 +292,18 @@ function makeSessionProcessingKey(provider: string, sessionId: string): string {
   return `${provider}\u0000${sessionId}`;
 }
 
+const sealedRuntimeEventSignatures = new WeakMap<ConversationEvent, string>();
+
+/** Memoized per sealed snapshot event, so unchanged events cost a lookup. */
 function makeRuntimeEventSignature(event: ConversationEvent): string {
+  return memoizeForSealedEvent(
+    sealedRuntimeEventSignatures,
+    event,
+    computeRuntimeEventSignature,
+  );
+}
+
+function computeRuntimeEventSignature(event: ConversationEvent): string {
   const stableCursorComponent = resolveRuntimeStableCursorComponent(event);
   const base = `${event.kind}\0${event.source.providerEventType}\0${
     event.source.providerEventId ?? ""

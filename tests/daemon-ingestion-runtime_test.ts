@@ -66,21 +66,107 @@ Deno.test("InMemorySessionSnapshotStore upserts and returns isolated snapshots",
   assertExists(loaded);
   assertEquals(loaded, stored);
 
-  // Mutation isolation: modifying the returned snapshot should not affect the store.
-  (loaded.events[0] as unknown as Record<string, unknown>)["content"] =
-    "mutated";
+  // Mutation isolation: stored events are sealed (deep-frozen, shared), so
+  // writing to one throws; the array, metadata, and cursor are per-call copies.
+  assertThrows(
+    () => {
+      (loaded.events[0] as unknown as Record<string, unknown>)["content"] =
+        "mutated";
+    },
+    TypeError,
+  );
+  loaded.events.pop();
   loaded.metadata.eventCount = 999;
+  (loaded.cursor as { value: number }).value = 1;
   const reloaded = store.get("session-a");
   assertExists(reloaded);
   assertEquals(
     (reloaded.events[0] as unknown as Record<string, unknown>)["content"],
     "m1-content",
   );
+  assertEquals(reloaded.events.length, 2);
   assertEquals(reloaded.metadata.eventCount, 2);
+  assertEquals(reloaded.cursor, { kind: "byte-offset", value: 128 });
 
   const listed = store.list();
   assertEquals(listed.length, 1);
   assertEquals(listed[0]?.sessionId, "session-a");
+});
+
+Deno.test("InMemorySessionSnapshotStore copies caller events once and shares stored ones", () => {
+  const store = new InMemorySessionSnapshotStore();
+  const input = makeEvent("m1", "2026-02-22T19:20:00.000Z");
+  store.upsert({
+    provider: "codex",
+    sessionId: "session-share",
+    cursor: { kind: "byte-offset", value: 1 },
+    events: [input],
+  });
+
+  // The caller's object is neither frozen nor aliased.
+  assertEquals(Object.isFrozen(input), false);
+  (input as unknown as Record<string, unknown>)["content"] = "caller-edit";
+  const first = store.get("session-share");
+  assertExists(first);
+  assertEquals(
+    (first.events[0] as unknown as Record<string, unknown>)["content"],
+    "m1-content",
+  );
+
+  // Stored events pass through get()/upsert() by reference.
+  store.upsert({
+    provider: "codex",
+    sessionId: "session-share",
+    cursor: { kind: "byte-offset", value: 2 },
+    events: [...first.events, makeEvent("m2", "2026-02-22T19:21:00.000Z")],
+  });
+  const second = store.get("session-share");
+  assertExists(second);
+  assertEquals(second.events.length, 2);
+  assertEquals(second.events[0] === first.events[0], true);
+  assertEquals(
+    Object.isFrozen((second.events[1] as unknown as { source: object }).source),
+    true,
+  );
+});
+
+Deno.test("InMemorySessionSnapshotStore size estimate equals the snapshot's JSON size", () => {
+  const store = new InMemorySessionSnapshotStore({
+    now: () => new Date("2026-02-22T19:22:00.000Z"),
+  });
+  const upsert = (events: ConversationEvent[]) =>
+    store.upsert({
+      provider: "claude",
+      sessionId: "session-size",
+      cursor: { kind: "byte-offset", value: events.length },
+      events,
+    });
+  const jsonBytes = (sessionId: string) =>
+    new TextEncoder().encode(JSON.stringify(store.get(sessionId))).length;
+
+  upsert([]);
+  assertEquals(
+    store.getMemoryStats().estimatedBytes,
+    jsonBytes("session-size"),
+  );
+
+  const one = upsert([
+    makeUserEvent("u1", "2026-02-22T19:20:00.000Z", "héllo ✓"),
+  ]);
+  assertEquals(
+    store.getMemoryStats().estimatedBytes,
+    jsonBytes("session-size"),
+  );
+
+  upsert([
+    ...one.events,
+    makeEvent("m2", "2026-02-22T19:21:00.000Z"),
+    makeEvent("m3", "2026-02-22T19:21:30.000Z"),
+  ]);
+  assertEquals(
+    store.getMemoryStats().estimatedBytes,
+    jsonBytes("session-size"),
+  );
 });
 
 Deno.test("InMemorySessionSnapshotStore enforces bounded event windows", () => {

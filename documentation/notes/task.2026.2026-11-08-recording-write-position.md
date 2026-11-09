@@ -49,7 +49,7 @@ Each workspace output stored `writeCursor`, an index into the daemon's in-memory
 
 ## Open Issues
 
-- Backfill for `60702df5`, `d6313f21`, `0d14f9bb` would need an offline append through the real recording pipeline (tens of thousands of events, ~20 MB of markdown each, into a git-tracked notes repo) and, for the two multi-copy sessions, a choice of source copy.
+- Backfill for `60702df5`, `d6313f21`, `0d14f9bb` would need an offline append through the real recording pipeline (tens of thousands of events, ~20 MB of markdown each, into a git-tracked notes repo) and, for the two multi-copy sessions, a choice of source copy. Declined 2026-11-09.
 - Discovery picks the newest of several same-id copies; catch-up skips sessions whose metadata source path differs. Whether to follow the newest copy (replay from 0 with dedupe) is undecided.
 
 ## Implementation Plan

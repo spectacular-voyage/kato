@@ -308,7 +308,9 @@ Ingestion runners:
 - append SessionTwin with bounded dedupe only when twin persistence is enabled
   for the provider or the user explicitly requests `create twin` / `update twin`
 
-Hot paths use `listMetadataOnly()` to avoid deep-cloning event arrays.
+Hot paths use `listMetadataOnly()` to avoid copying event arrays.
+
+The snapshot store holds sealed events (`apps/daemon/src/orchestrator/sealed_events.ts`): each incoming event is copied once and deep-frozen, then shared by reference across `get()` / `list()` / `upsert()`, which hand out their own events array, cursor, and metadata. Event byte sizes (for the memory estimate) and merge/runtime signatures are memoized per sealed event, so an update costs roughly the size of its new events. Never mutate an event obtained from the store; build a new object instead (see [[task.2026.2026-11-09-snapshot-sharing]]).
 
 JSONL source parsing is incremental and never builds a transcript-sized string (see [[task.2026.2026-11-08-incremental-provider-parsing]]):
 
