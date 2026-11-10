@@ -74,8 +74,17 @@ Reads are down about 30× and writes about 4×. CPU fell only about 20%, so pars
 
 ## Open Issues
 
-- Each save of an active session's metadata writes and fsyncs about 100 KB, almost all `recentFingerprints`. Fixed-size hashes would cut that about 10× but change persisted state (needs a migration). The remaining ~0.4 MB/s of writes on galactica is not yet attributed among these saves, twin appends, `status.json`, and logs.
-- The daemon still uses about 12% of a core on galactica with I/O near zero. Next step is a CPU profile of the daemon run from source against a copy of the state, since ptrace is unavailable there.
+- **Writes are metadata saves.** Measured on galactica on 2026-11-10 (`v0.2.19`, 2,356 sessions): the daemon wrote 0.23–0.33 MB/s.
+  - Polling the active sessions' metadata at 20 Hz found 152 replacements a minute, about 178 KB/s.
+  - Each file is 60–97 KB, almost all `recentFingerprints`. A session whose transcript is growing gets saved up to every 2 seconds.
+  - Twin appends were under 1 KB/s and `status.json` about 3 KB/s. Recording outputs were not written in the window.
+  - Fixed-size fingerprint hashes would cut the saves about 10× but change persisted state, which needs a migration. Saving less often trades that cost for crash-recovery work.
+- **CPU is discovery polling.** Measured the same day, with a V8 CPU profile over 180 seconds.
+  - **Setup:** the daemon ran from source with `--inspect`, against a copy of the state in a temp `HOME`, with `--allow-write` limited to that copy. It used 10–14% of a core, like the installed one.
+  - **Main thread:** JavaScript was busy only 4.4% of the time. About 40% of that was session discovery: `walkJsonlFiles`, `discoverCodexSessions`, `discoverClaudeSessions` and per-file stats. Another 12% was `ingestSession` with event merging.
+  - **The rest** of the process CPU is the filesystem calls themselves, on Deno's worker threads, plus the waits that hand each one back. That is about 1,800 write and 2,900 read syscalls a second at under 200 bytes each.
+  - **Cause:** discovery rewalks every provider root every 5 seconds (`DEFAULT_DISCOVERY_INTERVAL_MS`). The daemon also watches those roots, so most of the walk only confirms what the watcher already reported. On galactica that is 21 roots, about 4,100 directories and 2,600 transcripts, so each walk issues roughly 6,700 directory reads and stats.
+  - **Options:** walk less often while the watcher is healthy; re-read only directories whose mtime changed, since that catches new files; or both, plus a periodic full walk for missed events. Any of these needs per-platform watcher checks (inotify, FSEvents, ReadDirectoryChangesW) before discovery can rely on the watcher.
 - `listSessionMetadata()` still stats and clones every session's metadata (about 70 ms for 2,316 sessions) for Kato Web and CLI callers.
 - Twin hydration still reads the whole twin once per session after start (see [[task.2026.2026-11-09-snapshot-sharing]]).
 
