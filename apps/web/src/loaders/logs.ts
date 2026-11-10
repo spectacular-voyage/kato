@@ -1,16 +1,20 @@
 import type { LogLevel, LogRecord } from "@kato/runtime";
 import { resolveDefaultKatoDir, resolveDefaultStatusPath } from "@kato/runtime";
 import { dirname, join } from "@std/path";
+import {
+  DEFAULT_LOG_LEVEL_FILTER,
+  type LogLevelFilter,
+} from "../log_filters.ts";
+
+export { DEFAULT_LOG_LEVEL_FILTER, type LogLevelFilter };
 
 const DEFAULT_LOG_TAIL_BYTES = 4 * 1024 * 1024;
 const DEFAULT_LOG_PAGE_LIMIT = 200;
-export const DEFAULT_LOG_LEVEL_FILTER: LogLevelFilter = "warn";
 
 export type LogScope = "daemon" | "web";
 export type LogChannel = LogRecord["channel"];
 export type LogChannelFilter = LogChannel | "all";
 export type LogScopeFilter = LogScope | "all";
-export type LogLevelFilter = LogLevel | "all";
 
 export interface LogEntry extends LogRecord {
   scope: LogScope;

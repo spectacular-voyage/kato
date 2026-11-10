@@ -1,4 +1,4 @@
-import { DEFAULT_LOG_LEVEL_FILTER } from "./loaders/logs.ts";
+import { DEFAULT_LOG_LEVEL_FILTER } from "./log_filters.ts";
 import type {
   LogChannelFilter,
   LogLevelFilter,

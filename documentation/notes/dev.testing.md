@@ -67,6 +67,8 @@ Smoke validation on 2026-03-18 confirmed:
 
 `deno task test:web` runs the Kato Web component tests in `apps/web/tests` with the web config (`--config apps/web/deno.json`, which carries the JSX settings) and scoped permissions. `deno task ci` runs it after the root suite.
 
+`apps/web/tests/client_graph_test.ts` guards the browser bundle. It walks each island's and `client.ts`'s runtime import graph with `deno info --json` (hence `--allow-run=deno` in `test:web`). Only `apps/web/islands`, `apps/web/src` outside `loaders/`, `shared/src`, and npm `preact` are allowed, and reachable modules may not use `Deno.*`. A value import from a loader or from `@kato/runtime` in browser code fails it. Import such values from a browser-safe module instead (for example `apps/web/src/log_filters.ts`, or `@kato/shared` for the hash helpers).
+
 GitHub CI uses a split gate:
 
 - `deno task ci:quality` for the frozen Kato Web dependency install plus `fmt` + `lint` + `check`
