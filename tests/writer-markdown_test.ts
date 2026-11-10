@@ -38,6 +38,27 @@ Deno.test("makeCompactFrontmatterId creates slug-plus-suffix ids", () => {
   assertMatch(id, /^my-session-hello-world-[a-z0-9]{6}$/);
 });
 
+Deno.test(
+  "renderEventsToMarkdown escapes backslashes that would break italic user lines",
+  () => {
+    const cases: Array<[input: string, expected: string]> = [
+      ["plain text", "*plain text*"],
+      ["a *starred* word", "*a \\*starred\\* word*"],
+      ["C:\\Users\\dave\\notes", "*C:\\Users\\dave\\notes*"],
+      ["ends with C:\\temp\\", "*ends with C:\\temp\\\\*"],
+      ["literal \\* star", "*literal \\\\\\* star*"],
+      ["snake\\_case and \\n", "*snake\\\\_case and \\n*"],
+    ];
+    for (const [input, expected] of cases) {
+      const rendered = renderEventsToMarkdown(
+        [makeEvent("e1", "message.user", input, "2026-02-22T10:00:00.000Z")],
+        { includeFrontmatter: false, italicizeUserMessages: true },
+      );
+      assertEquals(rendered.trimEnd().split("\n").at(-1), expected, input);
+    }
+  },
+);
+
 Deno.test("MarkdownConversationWriter dedupes append tail writes", async () => {
   const root = makeSandboxRoot();
   const outputPath = join(root, "conversation.md");

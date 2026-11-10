@@ -51,6 +51,11 @@ With pnpm:
 pnpm update -g @spectacular-voyage/kato --latest
 ```
 
+pnpm 11 and later skip package versions published less than 24 hours ago
+(`minimumReleaseAge`), so on the first day after a release `@latest` installs
+the previous version. Ask for the release by its exact version to get it right
+away, for example `pnpm add -g @spectacular-voyage/kato@0.2.19`.
+
 Then confirm the active `kato` on your `PATH`:
 
 ```bash
