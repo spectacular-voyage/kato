@@ -75,9 +75,11 @@ The test ignored on Windows is "PersistentSessionStateStore migrates legacy colo
 
 ### Stage 1: leave Fresh (Deno 2.9.x)
 
+Design and detailed plan: [[task.2026.2026-11-10-leave-fresh]].
+
 - [ ] Hono routing and middleware with Preact SSR and the island hydrator, still on Preact 10; route tests move to `app.request()`.
 - [ ] Standard automatic JSX runtime (`jsxImportSource: "preact"`) instead of Deno's `precompile`.
-- [ ] Embed the Vite client build as a generated asset module instead of `--include _fresh`.
+- [ ] Serve the Vite client build through an `AssetSource` seam, embedded with `--include dist` on Deno. (A generated asset module moves to stage 3, where Bun or Node binaries need it.)
 - [ ] Remove `@fresh/*` from every lockfile.
 - [ ] Upgrade to Preact 11 as its own change.
 
