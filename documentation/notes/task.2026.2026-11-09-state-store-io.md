@@ -56,9 +56,26 @@ Offline on a copy of galactica's state (2,316 metadata files, 33 snapshot sessio
 | `saveSessionMetadata` with `touchUpdatedAt` | 13–19 ms, 1.8 MB written | 2–10 ms, 100 KB written |
 | Index rewrites in 21 touched saves | 21 | 0 |
 
+## Verification
+
+Released as `v0.2.18` and installed on galactica with `npm install -g` (2,322 sessions; about 21 active after start). Both versions were sampled with `/proc/PID/io`, `/proc/PID/stat`, and the index file's inode polled every 50 ms. The `v0.2.17` daemon had been running for hours. The `v0.2.18` windows start 8 and 11 minutes after a restart; the first window after the restart (5 minutes in) was still catching up, at 6.9 MB/s of real disk reads.
+
+| Measure | v0.2.17 (120 s) | v0.2.18 (two 180 s windows) |
+|---|---|---|
+| Reads (`rchar`) | 4.58 MB/s | 0.10–0.18 MB/s |
+| Writes (`wchar`) | 1.51 MB/s | 0.35–0.42 MB/s |
+| Control index replaced | 109 times (54.5/min) | 0 |
+| CPU | 15.1% | 11.4–12.8% |
+| RSS | 0.67 GB | 0.62–0.68 GB |
+
+The index on disk keeps its `updatedAt` fields until a session is added or moves, as designed.
+
+Reads are down about 30× and writes about 4×. CPU fell only about 20%, so parsing metadata was a small part of the daemon's CPU; the remaining ~12% is not file I/O and is not yet attributed.
+
 ## Open Issues
 
-- Each save of an active session's metadata writes and fsyncs about 100 KB, almost all `recentFingerprints`. Fixed-size hashes would cut that about 10× but change persisted state (needs a migration).
+- Each save of an active session's metadata writes and fsyncs about 100 KB, almost all `recentFingerprints`. Fixed-size hashes would cut that about 10× but change persisted state (needs a migration). The remaining ~0.4 MB/s of writes on galactica is not yet attributed among these saves, twin appends, `status.json`, and logs.
+- The daemon still uses about 12% of a core on galactica with I/O near zero. Next step is a CPU profile of the daemon run from source against a copy of the state, since ptrace is unavailable there.
 - `listSessionMetadata()` still stats and clones every session's metadata (about 70 ms for 2,316 sessions) for Kato Web and CLI callers.
 - Twin hydration still reads the whole twin once per session after start (see [[task.2026.2026-11-09-snapshot-sharing]]).
 
@@ -71,4 +88,4 @@ Offline on a copy of galactica's state (2,316 metadata files, 33 snapshot sessio
 - [x] Loop writes until complete (`writeAll`) for atomic writes and twin appends.
 - [x] Tests (index writes, legacy index, stamp check, status keyed reads); fix the two tests that wrote the index to the wrong path.
 - [x] `deno task ci`: 978 tests passed.
-- [ ] Release and verify on galactica (read and write rates, index rewrites).
+- [x] Release and verify on galactica (read and write rates, index rewrites): `v0.2.18`, see Verification.
