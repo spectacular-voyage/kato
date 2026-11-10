@@ -30,6 +30,9 @@ jobs:
       - name: Run tests with coverage
         run: deno task test:coverage --frozen
 
+      - name: Run Kato Web tests
+        run: deno task test:web
+
       - name: Generate lcov report
         run: deno task coverage:lcov
 
@@ -46,3 +49,29 @@ jobs:
           files: coverage.lcov
           fail_ci_if_error: true
           use_oidc: true
+
+  # Same tests on the other release platforms. Coverage, audit, lint, and
+  # format stay in the Ubuntu job above.
+  tests:
+    name: tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.x
+
+      - name: Run tests
+        run: deno task test --frozen
+
+      - name: Run Kato Web tests
+        run: deno task test:web

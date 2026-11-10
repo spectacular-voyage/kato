@@ -1,6 +1,6 @@
 import { assert, assertMatch, assertStringIncludes } from "jsr:@std/assert@1";
 import { h } from "preact";
-import { renderToString } from "npm:preact-render-to-string@6.6.6";
+import { renderToString } from "npm:preact-render-to-string@^6.6.3";
 import RecordingsLive from "../islands/RecordingsLive.tsx";
 import type { RecordingsPageData } from "../src/loaders/recordings.ts";
 

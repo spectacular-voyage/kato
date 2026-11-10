@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { h } from "preact";
-import { renderToString } from "npm:preact-render-to-string@6.6.6";
+import { renderToString } from "npm:preact-render-to-string@^6.6.3";
 import AppHeader from "../src/app_header.tsx";
 import { HeaderStatusStack } from "../src/header_status.tsx";
 import { WEB_APP_VERSION } from "../src/version.ts";

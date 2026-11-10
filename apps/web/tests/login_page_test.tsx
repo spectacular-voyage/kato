@@ -1,5 +1,5 @@
 import { assertStringIncludes } from "jsr:@std/assert@1";
-import { renderToString } from "npm:preact-render-to-string@6.6.6";
+import { renderToString } from "npm:preact-render-to-string@^6.6.3";
 import { LoginForm } from "../routes/login.tsx";
 
 Deno.test("login page autofocuses the username input", () => {
