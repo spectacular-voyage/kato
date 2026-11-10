@@ -44,7 +44,9 @@ async function loadGraph(entry: URL): Promise<DenoInfoGraph> {
       "--json",
       "--config",
       fromFileUrl(new URL("deno.json", webRoot)),
-      fromFileUrl(entry),
+      // A file URL, so `roots` comes back as a URL on every platform
+      // (given a Windows path, deno info echoes the path instead).
+      entry.href,
     ],
     stdout: "piped",
     stderr: "piped",
@@ -57,6 +59,14 @@ async function loadGraph(entry: URL): Promise<DenoInfoGraph> {
     );
   }
   return JSON.parse(new TextDecoder().decode(output.stdout));
+}
+
+// Drive-letter case can differ between import.meta.url and deno info on
+// Windows, so file URLs compare case-insensitively there.
+function hasPrefix(specifier: string, prefix: string): boolean {
+  return Deno.build.os === "windows"
+    ? specifier.toLowerCase().startsWith(prefix.toLowerCase())
+    : specifier.startsWith(prefix);
 }
 
 function resolveRedirect(graph: DenoInfoGraph, specifier: string): string {
@@ -105,8 +115,8 @@ async function findViolations(entry: URL): Promise<string[]> {
     const { specifier } = module;
     const isLocal = specifier.startsWith("file:");
     const isAllowedLocal = isLocal &&
-      ALLOWED_LOCAL_PREFIXES.some((prefix) => specifier.startsWith(prefix)) &&
-      !FORBIDDEN_LOCAL_PREFIXES.some((prefix) => specifier.startsWith(prefix));
+      ALLOWED_LOCAL_PREFIXES.some((prefix) => hasPrefix(specifier, prefix)) &&
+      !FORBIDDEN_LOCAL_PREFIXES.some((prefix) => hasPrefix(specifier, prefix));
     if (isAllowedLocal && specifier.endsWith(".css")) {
       // Stylesheets are bundled by Vite; deno info reports them as errors.
       continue;
