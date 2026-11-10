@@ -1,7 +1,7 @@
 ---
 id: 5rbmfysnpl285dpkzrflnnx
 title: Leave Fresh
-desc: Replace Fresh 2 in Kato Web with Hono routing, server-rendered Preact pages, a small in-repo island hydrator, and a plain Vite client build, without changing what users see.
+desc: Replace Fresh 2 in Kato Web with Hono routing, server-rendered Preact pages, a small in-repo island mounter, and a plain Vite client build, without changing what users see.
 updated: 1794334438105
 created: 1794334438105
 ---
@@ -14,49 +14,78 @@ Kato Web runs without Fresh, on Deno 2.9, with the same pages, forms, live polli
 
 How Kato Web uses Fresh today (2026-11-10):
 
-- **App wiring** (`apps/web/web_app.ts`): one Fresh `App` with four middlewares in order: error logging, `staticFiles()`, state init (`appName`, `authenticated`, `csrfToken`, `pathname`), and auth (session cookie, same-origin check, CSRF on authenticated non-GET requests, 401 JSON for `/api/*`, 302 to `/login` for pages, 503 when unconfigured). Then `app.fsRoutes()`.
-- **Routes** (`apps/web/routes/`): 20 files.
+- **App wiring** (`apps/web/web_app.ts`): one Fresh `App` with four middlewares, in order:
+  1. Error logging.
+  2. `staticFiles()`: serves files that exist in the build output, before auth. A missing file falls through to the next middleware.
+  3. State init: `appName`, `authenticated`, `csrfToken`, `pathname`.
+  4. Auth:
+     - `/login` and `/_fresh/*` skip session enforcement.
+     - Non-GET/HEAD requests to them must be same-origin.
+     - Login is exempt from CSRF even when a session exists.
+     - Everything else returns 503 when unconfigured.
+     - An unauthenticated `/api/*` request gets a 401 JSON response, and an unauthenticated page request gets a 302 to `/login`. Both happen before any origin check.
+     - Authenticated non-GET/HEAD requests must be same-origin and carry a valid CSRF token.
+     - `createWebApp` also starts the web status heartbeat.
+
+  Then `app.fsRoutes()`.
+- **Routes** (`apps/web/routes/`): 21 files, made up of `_app.tsx` plus 20 endpoints.
   - 10 pages, 7 of them with a `POST` handler.
   - 8 `/api/*` JSON endpoints.
-  - `logout` (POST only) and a legacy `/brand/:asset` redirect.
-  - The layout is `_app.tsx`.
-- **Route API surface is narrow:** routes use only `ctx.req`, `ctx.url`, `ctx.params` (3 dynamic routes) and `ctx.state.csrfToken`. Pages are `async` components that load their own data; each sets its title with Fresh's `<Head>`. POST handlers already delegate to framework-free functions in `apps/web/src` that take a `Request`.
+  - `logout`, which answers GET with 405 and handles POST.
+  - A legacy `/brand/:asset` redirect, which runs after auth.
+  - Three dynamic route patterns.
+- **Route API surface is narrow:** routes use only `ctx.req`, `ctx.url`, `ctx.params` and `ctx.state.csrfToken`.
+  - **Pages** are `async` components that load their own data. Most set their title with Fresh's `<Head>`; login has no `<Head>` and inherits the layout's "Kato Web" title.
+  - **POST handlers** differ:
+    - Recordings and workspace-config edit delegate to framework-free functions that take the `Request`; logout's logic sits in a small helper in its route file.
+    - Login, Sessions, Settings, Workspaces and Maintenance parse forms, dispatch, log and build redirects inline (for example `routes/sessions.tsx:95`).
 - **Islands:** seven components cross the server/client boundary:
-  - `SummaryLive`, `SessionsLive`, `RecordingsLive`, `WorkspacesLive`, `MaintenanceTwinsLive` (one per page);
-  - `HeaderStatusLive` (inside `AppHeader`, on every page);
-  - `LogsResultsLive` (inside `LogPageView`).
+  - `SummaryLive`, `SessionsLive`, `RecordingsLive`, `WorkspacesLive` and `MaintenanceTwinsLive`, one per page;
+  - `HeaderStatusLive`, inside `AppHeader`;
+  - `LogsResultsLive`, inside `LogPageView`.
 
-  Their props are JSON data, endpoint strings, an optional CSRF token, and numbers/booleans. No island receives JSX children or functions. The other modules in `islands/` (`SessionSnippet`, hooks, `auth_expiry.ts`) are only ever used inside islands.
-- **Build:** `vite build` with `@fresh/plugin-vite` produces `_fresh/server.js` plus `_fresh/client/` (CSS, island chunks, and `static/brand/*`).
-  - **Source mode:** `kato web start` runs that build when anything under `apps/web`, `apps/runtime/src` or `shared/src` is newer than `_fresh/server.js`, then `deno serve -A _fresh/server.js`.
-  - **Binary:** `kato-web` is compiled from `src/compiled_main.ts` with `--include _fresh`.
+  Their props are JSON-compatible data, endpoint strings, an optional CSRF token, and numbers or booleans. No island receives JSX children or functions. Optional fields can be `undefined` and disappear in JSON, which the islands already tolerate because their polling endpoints return the same types through `Response.json`.
+  The other modules in `islands/` (`SessionSnippet`, hooks, `auth_expiry.ts`) are used only inside islands.
+- **Island mounting:** Fresh 2.3.3's reviver mounts each island with `render()`, not `hydrate()`, scheduled through `scheduler.postTask` or `setTimeout(…, 0)`. It also emits module-preload links for the runtime and the islands a page uses.
+- **Build:** `vite build` with `@fresh/plugin-vite` produces `_fresh/server.js` and `_fresh/client/`. The client output holds the CSS, the island chunks under `/assets/*`, and `static/brand/*`.
+  - **Source mode:** `kato web start` rebuilds when anything under `apps/web` (except `_fresh` and `node_modules`), `apps/runtime/src` or `shared/src` is newer than `_fresh/server.js`. It then runs `deno serve -A _fresh/server.js`.
+  - **Binary:** `kato-web` is compiled from `src/compiled_main.ts` with `--include _fresh`, and calls `Deno.serve(options, fetch)` with the parsed host and port.
+- **Routes need the build:** an unbuilt `createWebApp().handler()` has no routes. An in-process probe returned 404 for `POST /login` and 500 for authenticated pages. The built `_fresh/server.js` serves everything.
+  - **Default paths:** login, logout and the page loaders resolve the default `~/.kato` locations, not the `katoDir` passed to `createWebApp`, so tests must isolate `HOME`.
+  - **Error responses:** Fresh's production 404 and 500 are plain text.
 - **The client graph leaks server code:**
   - `src/log_results.tsx` and `src/log_page.tsx` import `DEFAULT_LOG_LEVEL_FILTER` from the server loader `src/loaders/logs.ts`, which imports `@kato/runtime` and `jsr:@std/path`.
   - `src/session_routes.ts` imports `hashStringFNV1a` from `@kato/runtime`.
 
   Fresh's Vite plugin resolves Deno specifiers and tree-shakes the leak away; plain Vite cannot resolve them.
-- **Tests:** only `apps/web/tests/auth_redirect_test.ts` exercises the assembled app; `login_page_test.tsx` renders one route component. Route wiring, middleware order, and static serving are otherwise untested.
+- **Tests:** only `apps/web/tests/auth_redirect_test.ts` exercises the assembled app, and it never gets past middleware. `login_page_test.tsx` renders one route component. `tests/web-launcher_test.ts` asserts the generated launch commands. Nothing else checks route wiring, method handling, static serving or successful mutations.
+- **Tooling references:** root `fmt`, `lint`, `check` and `exclude` name Fresh-era paths (`apps/web/main.ts`, `utils.ts`, `routes`, `_fresh`), and the web `check` task checks `main.ts` and `routes/**/*.tsx`.
 
 ## Design
 
 ### Server
 
-- **Hono 4** via `npm:hono@^4` (v5 is a release candidate since 2026-10-08; upgrade after it ships).
+- **Hono 4:** `npm:hono@^4`, kept on 4 for this whole migration. v5 has been a release candidate since 2026-10-08 and changes `onError` among other things, so it is a separate upgrade.
   - Kato uses only the core: routing, middleware, `c.req`, and `app.request()` in tests.
-  - It uses no runtime adapters (`hono/deno`, `serveStatic`), so v5's adapter split and a later runtime switch don't touch it.
-- **Entry:** `apps/web/server.ts` exports `createWebApp(options)`, returning the Hono app. `apps/web/src/server_main.ts` (renamed from `compiled_main.ts`) parses `--host` and `--port` as today and calls `Deno.serve(app.fetch)`. Source mode and the compiled binary use the same entry, so the `deno serve _fresh/server.js` path disappears.
-- **Middleware order is unchanged:**
-  1. error logging (`app.onError`, which logs and returns a plain 500);
-  2. static assets;
-  3. state init;
-  4. auth.
-
-  Public, pre-auth paths are the built assets (`/assets/*`), `/brand/*`, and `/login`, as today. The auth middleware's `/_fresh/` exemption (Fresh's internal paths) goes away.
-- **Routing is an explicit table,** `apps/web/app_routes.ts`, one line per route (`/sessions/:sessionId`, `/workspaces/:workspaceId/edit`, …), instead of file-based routing.
+  - It uses no runtime adapters (`hono/deno`, `serveStatic`).
+- **Entry:** `apps/web/server.ts` exports `createWebApp(options)`. It starts the status heartbeat, as today, and returns the Hono app.
+- **Server main:** `apps/web/src/server_main.ts` replaces `compiled_main.ts`. It keeps the same startup error handling and exit code 2, parses `--host` and `--port`, and calls `Deno.serve(options, app.fetch)`. Source mode and the compiled binary share this entry.
+- **Middleware:** the same four, in the same order and with the same rules as listed under Summary.
+  - The static middleware answers only for keys in the asset allowlist (see Assets) and passes everything else on.
+  - The `/_fresh/*` exemption goes away.
+  - The legacy `/brand/:asset` redirect stays a route behind auth.
+  - Errors are logged in `app.onError`, which returns a plain-text 500.
+- **Routing:** an explicit table in `apps/web/app_routes.ts` replaces file-based routing.
+  - Behaviour where Fresh and Hono differ is matched to what the characterization suite records for Fresh:
+    - trailing and repeated slashes;
+    - `HEAD` and `OPTIONS`;
+    - methods a route does not define;
+    - percent-encoded params.
+  - This uses Hono's `strict: false` plus explicit handling where that is not enough.
 
 ### Routes
 
-- A Kato-owned context, `apps/web/src/route_context.ts`:
+- **Context:** a Kato-owned context in `apps/web/src/route_context.ts`.
 
   ```ts
   interface RouteContext {
@@ -67,25 +96,31 @@ How Kato Web uses Fresh today (2026-11-10):
   }
   ```
 
-  The Hono adapter builds it from `c`. Route modules depend on this type, not on Hono or Fresh.
-- Route modules move from `routes/` to `apps/web/pages/` and export plain functions:
+  An adapter builds it from Hono's `c`, and another from Fresh's `ctx` while both exist. Route modules depend on this type, not on Hono or Fresh.
+- **Route modules** move from `routes/` to `apps/web/pages/` and export plain functions:
   - `GET`/`POST` handlers: `(ctx: RouteContext) => Response | Promise<Response>`.
-  - `page`: `(ctx: RouteContext) => Promise<PageResult | Response>`, where `PageResult` is `{ title: string; body: VNode }`. The page loads its data, then returns a synchronously renderable tree. This replaces both async components (which synchronous `preact-render-to-string` cannot await) and `<Head>`.
-  - Returning a `Response` covers the pages that redirect.
+  - `page`: `(ctx: RouteContext) => Promise<PageResult | Response>`, where `PageResult` is `{ title?: string; body: VNode; islands: string[] }`.
+
+  A page loads its data, then returns a tree that renders synchronously. This replaces both async components, which synchronous `preact-render-to-string` cannot await, and `<Head>`. Without a title, the layout's "Kato Web" is used, as login does today.
+- **Inline POST logic** moves into those functions unchanged: form parsing, dispatch, logging and redirect construction. Only the context type changes.
 - **Rendering:** `renderPage(ctx, result)` returns `"<!DOCTYPE html>" + renderToString(<Layout …>{body}</Layout>)` as `text/html; charset=utf-8`.
-  - `Layout` is today's `_app.tsx` markup, with the page title in `<title>`.
-  - It also adds the client stylesheet and entry script, both resolved from the Vite manifest.
+  - The layout keeps today's `_app.tsx` markup.
+  - It adds the client stylesheet, the client entry, and module-preload links for the runtime and the page's islands. These are resolved from the Vite manifest by following each entry's `imports` and `css`, as Vite's backend-integration guide describes, with root-relative URLs so nested routes resolve them.
+  - `preact-render-to-string` is declared directly in the web import map.
 
 ### Islands
 
 - **Server side:** `island(name, Component)` in `apps/web/src/island.tsx` wraps a boundary component. It renders:
-  - `<kato-island data-island="Name" data-props="n">…server markup…</kato-island>`;
-  - followed by `<script type="application/json" id="kato-island-props-n">…</script>`.
+  - a `<kato-island data-island="Name" data-props="n">` element holding the server markup;
+  - followed by a `<script type="application/json" id="kato-island-props-n">` element.
 
-  `kato-island { display: contents }` keeps layout identical. The CSS has no child combinators that target island roots; its structural selectors all sit inside island markup.
-- **Props:** serialized with `JSON.stringify`, then `<` escaped as `<` so no prop can close the script tag. Island props already round-trip as JSON today, because each island's `initialData` has the same type its polling endpoint returns via `Response.json`.
-- **Wrapped boundaries:** routes and `AppHeader`/`LogPageView` import the wrapped versions from one module, `apps/web/src/island_boundaries.tsx`. Island files themselves don't change.
-- **Client side:** `client.ts` imports the stylesheet and a registry of `name → () => import("./islands/Name.tsx")`. On load it finds each `kato-island`, reads its props script, and calls `hydrate(h(Component, props), element)`. Dynamic imports keep one chunk per island, as now.
+  The ids come from a counter scoped to one render, not a module-level counter, so concurrent requests can't interleave. `kato-island { display: contents }` keeps layout identical; the CSS has no child combinators that target island roots.
+- **Props:** `JSON.stringify(props)`, with every `<` replaced by its JSON Unicode escape (a backslash followed by `u003c`). The result is written with `dangerouslySetInnerHTML`. Rendering it as ordinary children would HTML-escape quotes and ampersands, which then break `JSON.parse`, because script content is not entity-decoded.
+- **Boundaries:** routes, `AppHeader` and `LogPageView` import the wrapped versions from one module, `apps/web/src/island_boundaries.tsx`. Island files themselves don't change.
+- **Client side:** `client.ts` imports the stylesheet and a registry of `name → () => import("./islands/Name.tsx")`. For each `kato-island`, it reads the props script and mounts with `render(h(Component, props), element)`, deferred through `scheduler.postTask` or `setTimeout(…, 0)`, exactly as Fresh does today.
+  - **Duplicate mounts:** a mounted element is marked so a second pass cannot mount it twice.
+  - **Chunk failures:** a chunk that fails to load leaves the server markup in place and logs to the console.
+  - **`hydrate()`:** switching to it is not part of this stage. Evaluate it with Preact 11, where hydration changed.
 
 ### Client build
 
@@ -97,40 +132,66 @@ How Kato Web uses Fresh today (2026-11-10):
   - `outDir: "dist"`;
   - input `client.ts`.
 
-  `dist/` holds `assets/*` (hashed) and `brand/*`. `preact` and `preact/hooks` resolve from `apps/web/node_modules` (`nodeModulesDir: "auto"`).
+  `dist/` holds `assets/*` (hashed) and `brand/*`. `preact` and `preact/hooks` resolve from `apps/web/node_modules` (`nodeModulesDir: "auto"`). An in-memory, plugin-free Vite build of the seven island entries, with the fixes below substituted, succeeded in review.
 - **The client graph must stay server-free:**
   - Move `DEFAULT_LOG_LEVEL_FILTER` to a client-safe module.
-  - Move `apps/runtime/src/utils/hash.ts` (no imports) to `shared/src`, re-exported from `@kato/runtime` so its five existing importers keep working.
-  - A guard test walks value imports from `islands/` and fails on `@kato/runtime`, `jsr:`, `npm:` other than `preact`, and `Deno.`.
-- **Server-side JSX:** `apps/web/deno.json` moves from `"jsx": "precompile"` (Deno-only) to `"jsx": "react-jsx"` with `"jsxImportSource": "preact"`, and drops `jsxPrecompileSkipElements`.
+  - Move the body of `apps/runtime/src/utils/hash.ts` (no imports) to `shared/src`. Keep `apps/runtime/src/utils/hash.ts` as a forwarding module, because `session_state_store.ts` and `apps/daemon/src/utils/hash.ts` import it directly.
+- **Guard test:** walks value imports, re-exports and dynamic imports from `client.ts` and `islands/`. It fails on:
+  - `@kato/runtime`;
+  - relative imports into `apps/runtime`;
+  - `jsr:` and `node:` specifiers;
+  - `npm:` specifiers other than `preact`;
+  - any use of `Deno.`.
+- **Server-side JSX:** stays `"jsx": "precompile"` until cutover. Preact's runtime and `preact-render-to-string` both handle Deno's precompile output, so the new server can run alongside Fresh. At cutover, `apps/web/deno.json` moves to `"jsx": "react-jsx"` with `"jsxImportSource": "preact"` and drops `jsxPrecompileSkipElements`.
+- **Keep JSX out of the root check:** server wiring that imports `.tsx` lives in `apps/web` outside `src/`, or the root `check` task stops covering it. The root config has no Preact JSX settings, and the web `check` task covers it instead.
 
 ### Assets
 
-- **Lookup interface:** an `AssetSource` (`get(path) → { body, contentType, immutable } | undefined`) backs both the static middleware and the manifest lookup. Its stage 1 implementation reads `dist/` relative to the module, which works from source and inside `deno compile --include dist`.
-- **Caching:** hashed `/assets/*` files get `cache-control: public, max-age=31536000, immutable`. `brand/*` gets a short max-age.
+- **Allowlist:** at startup, an `AssetSource` builds a fixed allowlist of URL keys, from the files the manifest references plus the files copied from `static/`. Requests outside the allowlist fall through to auth. No path from the request is ever joined to a filesystem path, which matters because the binary has broad read permission and these files are served before auth.
+- **Lookup:** `AssetSource.get(key)` returns `{ body, contentType, etag, cacheControl }`. The stage 1 implementation reads `dist/` through a module-relative `file:` URL, which works from source and inside `deno compile --include dist`.
+- **Headers:** match what the characterization suite records for Fresh:
+  - ETag with `304` on `If-None-Match`;
+  - `Vary`;
+  - `content-length`;
+  - `HEAD`;
+  - rejection of other methods;
+  - per-class `cache-control` for hashed assets versus `brand/*`.
 - **Later runtimes:** an embedded implementation (a generated path-to-bytes module) is a stage 3 concern for Bun or Node binaries. The interface is what keeps it swappable.
 
 ### Launcher and binary
 
 - **Source mode** (`apps/runtime/src/web/mod.ts`):
-  - **Staleness:** only the client inputs need a build check now: `islands/`, `src/`, `assets/`, `client.ts`, `vite.config.ts` and `shared/src`, compared against `dist/.vite/manifest.json`.
+  - **Staleness:** keeps today's broad scan of `apps/web` (excluding `dist` and `node_modules`), `apps/runtime/src` and `shared/src`. That covers `static/`, `deno.json` and `deno.lock`.
+    - The scan compares against `dist/.vite/manifest.json`.
+    - The build also counts as stale when any file the manifest references is missing.
   - **Serve:** both the shell and PowerShell paths run `deno run --node-modules-dir=auto -A src/server_main.ts --host … --port …`.
   - **Build-latency reporting:** stays.
 - **`scripts/build-binaries.ts`:** `kato-web` compiles `src/server_main.ts` with `--include dist`. Permissions are unchanged (`--allow-read --allow-write --allow-env --allow-net`).
 - **Tasks and config:**
-  - `apps/web/deno.json`: `build` = `vite build`; `dev` runs `vite build --watch` and `deno run --watch` on the server entry together; `start` and `update` are removed.
-  - Lint drops the `fresh` rule tag; excludes move from `_fresh` to `dist`.
+  - `apps/web/deno.json`:
+    - `build` = `vite build`;
+    - `dev` runs one initial build, then `vite build --watch` and `deno run --watch` on the server entry, and stops both on exit;
+    - `start` and `update` are removed.
+  - Lint drops the `fresh` rule tag.
+  - The root `fmt`, `lint`, `check` and `exclude` lists and the web `check` task replace the Fresh-era paths.
   - `.gitignore` gains `apps/web/dist`.
-- **CI:** `ci:quality` gains `deno task --cwd apps/web build`, so a client build that cannot resolve an import fails CI. Today it only fails at release or at first `kato web start`.
+- **CI:**
+  - `ci:quality` gains `deno task --cwd apps/web build`.
+  - The Windows and macOS test jobs build the client before tests that need `dist/`.
 
 ## Decisions
 
 - Keep Kato Web server-rendered with post/redirect/get forms; do not convert it into a single-page app.
-- Hono rather than a hand-written router: about 20 routes, three params, and four middlewares would fit in under 100 lines over `URLPattern`, but Hono is zero-dependency, runtime-neutral, and provides `app.request()` for tests. The route modules don't import it, so replacing it later stays cheap.
-- Island markers are wrapper elements with `display: contents`, not Fresh-style comment markers. Comment-marker hydration needs a fake-parent trick; wrapper elements hydrate with plain `hydrate(vnode, element)`.
-- Embed `dist/` with `--include` on Deno now; defer a generated asset module to stage 3 behind `AssetSource`. (The platform migration note originally put the generated module in stage 1.)
-- Stay on Preact 10 for the swap; upgrade to Preact 11 as a separate change afterwards.
-- Out of this stage: replacing `@std/http/cookie` and other `@std/*` imports (stage 2), and Node portability of the server (stage 2).
+- **Hono rather than a hand-written router.** About 20 routes, three params and four middlewares would fit in under 100 lines over `URLPattern`. But Hono is zero-dependency, runtime-neutral, and provides `app.request()` for tests. Route modules don't import it, so replacing it later stays cheap.
+- **Island markers are wrapper elements** with `display: contents`, not Fresh-style comment markers, and they mount with `render()` like Fresh. Same mounting semantics, simpler marker handling.
+- **The new stack is built alongside Fresh and switched in one cutover.** Fresh keeps owning production until the new app passes the same characterization suite. The cutover commit then switches the Vite config, JSX, client entry, launcher, binary spec, tasks and CI together. Each intermediate commit leaves the shipped app on Fresh and green.
+- **Characterization runs against built output.** For Fresh that's `_fresh/server.js`; for the new app it's its own build. `HOME` is isolated in the serial env slice, because the route code resolves default paths.
+- **No browser-automation suite in this stage.** Hydrator mechanics get DOM-level tests. Behaviour that needs a real browser goes on an explicit manual smoke checklist (under Testing). A headless-browser dependency for seven islands in a local console costs more than it saves; revisit if a mount regression slips through.
+- **Embed `dist/` with `--include` on Deno now,** and defer a generated asset module to stage 3 behind `AssetSource`. The platform migration note originally put the generated module in stage 1.
+- **Stay on Preact 10 for the swap;** upgrade to Preact 11 afterwards as its own change.
+- **Out of this stage:**
+  - replacing `@std/http/cookie` and the other `@std/*` imports (stage 2);
+  - Node portability of the server (stage 2).
 
 ## Contract Changes
 
@@ -138,65 +199,123 @@ No persisted-data, config, CLI, or API-response changes. Observable differences:
 
 | Area | Fresh today | After |
 |---|---|---|
-| Built asset URLs | `/assets/*` with Fresh's chunk names (`client-entry-*`, `fresh-island__*`) | `/assets/*` with Vite's default names; hashes change every build either way. `/brand/*` unchanged |
-| Unknown path | Fresh's 404 page | 404 with a plain-text body |
-| Unhandled error | Fresh's 500 page, after logging | 500 with a plain-text body, after logging |
-| Source-mode start | Builds server and client bundles; `deno serve _fresh/server.js` | Builds the client only when stale; `deno run src/server_main.ts` |
+| Built asset URLs | `/assets/*` with Fresh's chunk names (`client-entry-*`, `fresh-island__*`) | `/assets/*` with Vite's default names (hashes change every build either way); `/brand/*` unchanged |
+| Island mount markup | Comment markers | `<kato-island>` wrappers with `display: contents`, plus a JSON props script per island |
+| Source-mode start | Builds server and client bundles; `deno serve _fresh/server.js` | Builds the client when stale; `deno run src/server_main.ts` |
 | Developer `dev` task | Vite dev server with HMR | Client rebuild on change plus server restart; reload the browser |
+
+Everything else is meant to stay identical: status codes, redirects, headers, cache policy, and method and slash handling. Any difference the characterization suite finds is either fixed or added to this table with a reason.
 
 ## Testing
 
-Characterization tests come first, written against the current Fresh app (`createWebApp().handler()`) and kept framework-neutral: each takes a `(Request) => Promise<Response>`. The same suite then runs against the Hono app. Fixture: a temp `katoDir` with an initialized web config, and a session cookie from a real `POST /login`.
+**Characterization suite** (written first, against built Fresh):
 
-- **Auth:**
-  - unauthenticated page → 302 `/login`;
-  - unauthenticated `/api/*` → 401 JSON;
-  - unconfigured → 503;
-  - `/login` reachable without a session.
-- **Mutation guards:**
-  - cross-origin POST → 403 `same-origin request required`;
-  - authenticated POST without a CSRF token → 403 `csrf token required`;
-  - `GET /logout` → 405;
-  - `POST /logout` → 302 and a cleared cookie.
-- **Pages:** every page route returns 200 `text/html` when authenticated, with the expected `<title>`, a single `<!DOCTYPE html>`, and the island marker and props script for its island(s). This covers the two dynamic routes with an unknown id, which render the in-page "not found" state.
-- **API:** every `/api/*` route returns 200 JSON with the live cache-control header.
-- **Static:**
-  - `/brand/logo.png` returns 200 without a session;
-  - legacy `/brand/logo` → 307;
-  - built CSS and JS resolve from the page's own links.
-- **Other:** unknown path → 404, and HEAD on a page → 200 with no body.
-- **Hydrator unit tests:**
-  - props round-trip;
-  - `</script>` inside a string prop stays inert;
-  - multiple instances of the same island get distinct ids.
-- **Client-graph guard test:** described under Client build.
+- **Harness:** `(Request) => Promise<Response>`, with an isolated `HOME` holding an initialized web config, and a session cookie from a real `POST /login`.
+- **Placement:** it runs in the serial env slice, after the client build.
+- **Assertions:** framework-neutral ones (status, headers, `Location`, `<title>`, key text) are separate from implementation-specific ones (island markers), which run only against the new app.
+- **Matrix:** one row per route, method and auth state.
+  - **Auth states:**
+    - unconfigured;
+    - unauthenticated;
+    - authenticated;
+    - authenticated without CSRF;
+    - cross-origin.
 
-Manual smoke test before release, from source and from the compiled binary on galactica:
-- each page renders and polls;
-- a recording start/stop round trip;
-- a settings change;
-- a workspace config edit;
-- login/logout;
-- an expired-session redirect from a polling island;
-- `kato web start`, `status` and `stop`.
+    This includes unauthenticated mutations (expected 401 or 302 before the origin check), `HEAD` skipping the mutation guards, and login skipping CSRF.
+  - **Pages and APIs:**
+    - every page with its expected title;
+    - the two dynamic routes with unknown ids, which show the in-page "not found" state;
+    - every API route with its expected status (`/api/session-snippet` without `sessionId` returns 400) and `cache-control`.
+  - **Mutations:** a valid and an invalid submission for each of the seven POST pages, covering redirect status, `Location` with query and hash, and `Set-Cookie`, plus `GET /logout` → 405 and `POST /logout` → 302 with a cleared cookie.
+  - **Routing:**
+    - trailing and repeated slashes;
+    - `HEAD`, `OPTIONS` and an undefined method on a page;
+    - an API route and a POST-only route;
+    - a percent-encoded dynamic param;
+    - an unknown path.
+  - **Static:**
+    - an existing asset and brand file with no session (200, ETag, `cache-control`);
+    - the same with `If-None-Match` (304);
+    - `HEAD` and `POST` against an asset;
+    - a missing asset, which falls through to auth;
+    - traversal and encoded separators;
+    - legacy `/brand/logo` with no session (redirects to login) and with a session (307).
+
+**Unit and DOM tests:**
+
+- Props serialization: render with `preact-render-to-string`, parse the HTML with a DOM parser, `JSON.parse` the script, and compare. The fixtures include quotes, ampersands, `</script>`, `<!--`, non-ASCII text, and populated `initialData` from real loaders.
+- Mounter (DOM-level):
+  - finds markers and reads props;
+  - mounts each island once, including on a repeated pass;
+  - attaches event handlers;
+  - leaves server markup in place when a chunk fails to load;
+  - render-scoped ids are unique across instances.
+- Client-graph guard test.
+- Launcher: updated command assertions in `tests/web-launcher_test.ts`, plus staleness cases for a changed static file, a changed `deno.lock`, and a missing referenced chunk.
+- Startup: `server_main.ts` serves `/login` on a non-default port, on all three CI platforms.
+- `login_page_test.tsx` moves to the new page module.
+
+**Manual smoke checklist** (before release, from source and from the compiled binary run outside the checkout, on galactica):
+
+- Each page renders populated and polls.
+- Interaction before mount (click or type during load) does not break the island.
+- Session deep links expand the right tree node.
+- The remembered workspace selection is restored.
+- Log timestamps update.
+- A recording start/stop round trip.
+- A settings change.
+- A workspace config edit.
+- Login and logout.
+- A session expired in another tab redirects every open tab.
+- `kato web start`, `status` and `stop`, including a detached start that survives the terminal closing.
+- On Windows: a path containing spaces and the startup logs.
+
+## Review
+
+An independent review on 2026-11-10 (Codex CLI) found 15 issues in the first draft. All are folded in above:
+
+- unsafe props escaping;
+- a harness that could not reach Fresh's routes, with a `katoDir` that did not isolate state;
+- a non-shippable cutover order;
+- missing task, CI and test updates;
+- the hash-module importers;
+- imprecise auth and public-path rules;
+- routing differences beyond `HEAD`;
+- understated POST extraction;
+- a too-narrow staleness scan;
+- the server entry dropping host and port;
+- `hydrate()` instead of Fresh's `render()`;
+- static-serving contracts and the pre-auth filesystem boundary;
+- several inventory errors;
+- module preloads and Hono 5's `onError` change.
+
+The suggestion of browser tests was taken as a manual checklist plus DOM-level tests (see Decisions).
 
 ## Open Issues
 
-- **`HEAD` handling:** Fresh's exact behavior for `HEAD` and for methods a route doesn't define (405 or 404) is to be pinned down by the characterization tests, then matched or deliberately changed.
-- **Hydration mismatches:** islands whose first client render differs from the server render (for example, the browser time zone) currently re-render after hydration under Fresh; confirm the same under plain `hydrate()`.
 - **Security headers:** Kato Web sets none (no CSP or frame options). It's out of scope here; noted because the new layout makes adding them easy.
 
 ## Implementation Plan
 
-- [ ] Characterization suite against the Fresh app (framework-neutral handler), green on Fresh.
-- [ ] Client-graph hygiene: move `DEFAULT_LOG_LEVEL_FILTER`; move `hash.ts` to `shared/src` with a runtime re-export; add the guard test.
-- [ ] Extract page and handler logic from `routes/` into `apps/web/pages/` against `RouteContext` and `PageResult`; leave `routes/` as thin Fresh adapters; characterization still green.
-- [ ] Island helper, boundary wrappers, client registry, and hydrator unit tests.
-- [ ] Hono app with the four middlewares, the route table, `renderPage`, and `AssetSource`; characterization suite green against Hono.
-- [ ] Vite config without the Fresh plugin; server JSX to `react-jsx`; `dist/` output; `.gitignore`.
-- [ ] Source-mode launcher (staleness, serve command) and `build-binaries.ts` (`server_main.ts`, `--include dist`).
-- [ ] Remove `routes/`, `utils.ts`, `main.ts`, `_fresh` handling, `@fresh/*`, and the `fresh` lint tag; regenerate the web lockfile with Deno 2.9.8 and confirm the frozen install.
-- [ ] Add the web client build to `ci:quality`; update [[dev.codebase-overview]], [[dev.testing]], and [[dev.decision-log]].
-- [ ] `deno task ci`; cross-platform CI; release rehearsal; manual smoke test on galactica from source and from the binary.
+- [ ] Characterization harness and suite against the built Fresh server, green on Fresh, in the serial env slice after a client build.
+- [ ] Client-graph hygiene: move `DEFAULT_LOG_LEVEL_FILTER`; move `hash.ts` to `shared/src`, keeping the runtime forwarding module; add the guard test.
+- [ ] Extract page and handler logic (including the inline POST logic) from `routes/` into `apps/web/pages/` against `RouteContext` and `PageResult`. `routes/` becomes thin Fresh adapters; characterization stays green.
+- [ ] Build the new stack alongside Fresh, unused by production:
+  - island helper, boundaries, registry and mounter;
+  - Hono app with the four middlewares and the route table;
+  - `renderPage` with manifest preloads;
+  - `AssetSource` with the allowlist;
+  - a separate Vite config building to `dist/`;
+  - the DOM-level tests.
+
+  Characterization then has to go green against the new app.
+- [ ] Cutover commit:
+  - switch the Vite config, server JSX, client entry, source-mode launcher (broad staleness plus manifest validation, serve command) and binary spec (`server_main.ts`, `--include dist`);
+  - update the root and web tasks, CI (client build on all platforms), and the login and launcher tests;
+  - remove `routes/`, `utils.ts`, `main.ts`, `web_app.ts`, `compiled_main.ts`, `@fresh/*` and the `fresh` lint tag;
+  - regenerate the web lockfile with Deno 2.9.8 and confirm the frozen install.
+- [ ] Startup test on all CI platforms.
+- [ ] Update [[dev.codebase-overview]], [[dev.testing]] and [[dev.decision-log]].
+- [ ] Run `deno task ci`, cross-platform CI, a release rehearsal, and the manual smoke checklist.
 - [ ] Release.
-- [ ] Preact 11, as its own change.
+- [ ] Preact 11, as its own change, including an evaluation of `hydrate()`.
