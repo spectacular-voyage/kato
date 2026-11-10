@@ -254,7 +254,7 @@ Current coverage-report caveat:
 
 CI now has an initial advisory-only security automation slice:
 
-- `CodeQL` scans the TypeScript codebase with a local-threat-model emphasis.
+- `CodeQL` runs through the repository's code scanning default setup (Settings → Code security), not a workflow file. It covers JavaScript/TypeScript and GitHub Actions on pushes, pull requests, and weekly, with the `remote_and_local` threat model so local inputs (files, environment, CLI arguments) count as untrusted. An advanced-setup `codeql.yml` cannot coexist with default setup: its SARIF upload is rejected.
 - `OSV-Scanner` runs with `fail-on-vuln: false`, so findings should surface
   without failing the workflow solely because vulnerabilities were detected.
 
