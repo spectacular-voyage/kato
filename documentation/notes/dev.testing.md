@@ -65,12 +65,18 @@ Smoke validation on 2026-03-18 confirmed:
 - `deno task test --frozen --filter 'resolveWebInitPassword reads KATO_WEB_PASSWORD from process env when no override is injected'`
 - `deno task test:coverage --filter 'loadSummaryPageData reads the default shared status snapshot'`
 
+`deno task test:web` runs the Kato Web component tests in `apps/web/tests` with the web config (`--config apps/web/deno.json`, which carries the JSX settings) and scoped permissions. `deno task ci` runs it after the root suite.
+
 GitHub CI uses a split gate:
 
 - `deno task ci:quality` for the frozen Kato Web dependency install plus `fmt` + `lint` + `check`
 - `deno task test:coverage --frozen` for the test suite and coverage artifact
+- `deno task test:web` for the Kato Web tests
+- a `tests` job that runs `deno task test --frozen` and `deno task test:web` on `windows-latest` and `macos-latest` (no coverage, audit, lint, or format there)
 
 The frozen install matches the first dependency step in release binary generation, so an incomplete Kato Web lock graph fails in ordinary CI instead of after release starts. This keeps local `deno task ci` as the full pre-PR gate while avoiding running the full test suite twice in GitHub Actions.
+
+Test imports resolve against the same lockfile as production code, so a test that pins an exact npm version can pull a shared dependency down for everyone. Use the same range the production graph uses (for example `npm:preact-render-to-string@^6.6.3`).
 
 ## Contract-First Test Strategy
 

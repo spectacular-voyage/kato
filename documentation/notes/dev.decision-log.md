@@ -512,6 +512,7 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 
 ### File Watching
 
+- Status: Revisit when `Deno.*` use moves behind the platform module ("Platform Direction After Deno and Fresh", 2026-11-10); `node:fs` `watch` is the likely replacement.
 - Decision: Use native `Deno.watchFs` with an in-repo debounce/settle utility.
   Do not use `chokidar`.
 - Owner: Kato engineering
@@ -943,6 +944,7 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 
 ### Kato Web as a Local Fresh Operator Console
 
+- Status: The framework choice is superseded by "Platform Direction After Deno and Fresh" (2026-11-10). The operator-console scope, separate web lifecycle, and auth decisions still stand.
 - Decision:
   - Build `apps/web` as a local Fresh-based operator console, not as a
     read-only placeholder or a generic JSON API shell.
@@ -1189,3 +1191,24 @@ Fully superseded by “Sessions Sub-Conversations Are Provider-Declared And Alwa
 - Tradeoffs: Downgrading to v0.2.17 or earlier rebuilds the index once on start (those versions require the per-entry `updatedAt`). The stamp check trusts that nothing edits a metadata file in place while keeping its inode, size, and mtime; no Kato writer does.
 - Follow-up tasks:
   - Active sessions' metadata is about 100 KB because `recentFingerprints` stores 512 full fingerprint strings, and each save writes and fsyncs all of it. Storing fixed-size hashes would cut that by about 10×, but changes persisted state and needs a migration.
+
+### Platform Direction After Deno and Fresh
+
+- Decision:
+  - Leave Fresh first, while still on Deno. Replace it with Hono routing and middleware, server-side Preact rendering (`preact-render-to-string`), a small in-repo island hydrator, and Vite for the client bundle only; then upgrade to Preact 11.
+  - Make the code runtime-portable while Deno still runs it: move `Deno.*` use behind one platform module built on `node:*` APIs, replace `jsr:@std/*` imports, and replace the per-app import maps with a `package.json` workspace.
+  - Plan to switch to Node as the reference runtime before October 2027: bundled plain JavaScript on npm, one merged single-executable binary per platform on GitHub Releases, and Bun `--compile` as the fallback compiler. Confirm the destination at a checkpoint around April 2027 (Deno foundation news, a multi-day Windows soak test of the daemon, release-binary download counts).
+  - Until the switch, build and test on the Deno 2.9 LTS line: CI on `v2.9.x`, releases pinned to an exact 2.9 patch.
+- Owner: Kato engineering
+- Date: 2026-11-10
+- Why:
+  - Fresh 2 has had no release since 2.3.3 (2026-04-28) and no merge to `main` since 2026-06-03; its remaining maintainer is building Fresh 3 (an npm alpha) instead, and Fresh 2 pins Preact 10 (freshframework/fresh#3911). Fresh's generated server bundle calls Deno APIs, so Kato cannot leave Deno while on Fresh.
+  - The Deno team joined Cloudflare on 2026-10-09. The runtime gets monthly 2.9.x fix releases until about October 2027 and no new features (denoland/deno#37030); no foundation has been announced.
+  - Kato uses Fresh thinly (12 import sites; `apps/web/src` has no Fresh imports), so replacing it is bounded. `Deno.*` use is wide (about 480 production references, about 1,965 in tests) but each API has a `node:*` equivalent.
+  - Node has foundation governance, the longest record for long-running servers, and a permission model that could scope the released daemon (today only source-mode launches are scoped). Bun gives smaller binaries and cross-compiles every target, so it stays the fallback compiler.
+- Tradeoffs:
+  - Two migrations in sequence, each ending in a shippable release. Tests are as large as production code, so porting the test harness (959 `Deno.test` registrations) is likely the largest single cost.
+  - Node single-executable binaries are reported to crash on macos-x64; that target may need the npm package or a Bun-built binary.
+  - Deno's per-binary permission flags go away; the replacement is Node's `--permission` flags plus Kato's own path policy.
+- Follow-up tasks:
+  - [[task.2026.2026-11-10-platform-migration]]
