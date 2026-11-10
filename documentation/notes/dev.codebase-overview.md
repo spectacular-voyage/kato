@@ -86,6 +86,7 @@ Current top-level web routes are:
 
 Supporting web files worth knowing:
 
+- `apps/web/pages/*`: the page modules, free of Fresh. Each exports `page(ctx)`, which loads data and returns a `PageResult` (`{ title?, body }`, `pages/page.ts`), and `POST(ctx)` where the page has forms. Both take a `RouteContext` (`apps/web/src/route_context.ts`). The files under `apps/web/routes/` are thin Fresh entry points that adapt Fresh's context through `apps/web/fresh_adapter.tsx`; both go away when Fresh is replaced ([[task.2026.2026-11-10-leave-fresh]]).
 - `apps/web/src/loaders/*`: filesystem-backed read models used by routes and API
   handlers.
 - `apps/web/src/session_recording_actions.ts`: shared web mutation flows for Sessions and Recordings recording/capture start-stop-`Re-start` actions, including creation-time output metadata (`displayTitle`/`filenameSlug`/`tags`) and same-file exclusivity guards.

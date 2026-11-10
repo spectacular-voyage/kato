@@ -118,9 +118,12 @@ How Kato Web uses Fresh today (2026-11-10):
   ```
 
   An adapter builds it from Hono's `c`, and another from Fresh's `ctx` while both exist. Route modules depend on this type, not on Hono or Fresh.
-- **Route modules** move from `routes/` to `apps/web/pages/` and export plain functions:
+- **Route modules** move from `routes/` to `apps/web/pages/` and export plain functions (done in step 3):
   - `GET`/`POST` handlers: `(ctx: RouteContext) => Response | Promise<Response>`.
-  - `page`: `(ctx: RouteContext) => Promise<PageResult | Response>`, where `PageResult` is `{ title?: string; body: VNode; islands: string[] }`.
+  - `page`: `(ctx: RouteContext) => Promise<PageResult>`, where `PageResult` is `{ title?: string; body: VNode }` (`pages/page.ts`).
+    - `PageResult` lives in `pages/` rather than `src/route_context.ts`. That keeps `src/` free of Preact imports, because the root config type-checks `src/**/*.ts`.
+  - The API and legacy brand routes already delegate to `src/live_routes.ts` and `src/brand_assets.ts`, so the route table will call those directly instead of going through `pages/`.
+  - **No `islands` list on `PageResult`:** the renderer will record which islands a render actually used (render-scoped, like the props ids) and emit preloads from that. A hand-kept list would go stale, since `HeaderStatusLive` comes in through `AppHeader` on every page.
 
   A page loads its data, then returns a tree that renders synchronously. This replaces both async components, which synchronous `preact-render-to-string` cannot await, and `<Head>`. Without a title, the layout's "Kato Web" is used, as login does today.
 - **Inline POST logic** moves into those functions unchanged: form parsing, dispatch, logging and redirect construction. Only the context type changes.
@@ -335,7 +338,7 @@ Two suggestions were not taken as given:
 
 - [x] Characterization harness and suite against the built Fresh server, green on Fresh, in `test:web` after a client build (138 steps).
 - [x] Client-graph hygiene: move `DEFAULT_LOG_LEVEL_FILTER`; move `hash.ts` to `shared/src`, keeping the runtime forwarding module; add the guard test.
-- [ ] Extract page and handler logic (including the inline POST logic) from `routes/` into `apps/web/pages/` against `RouteContext` and `PageResult`. `routes/` becomes thin Fresh adapters; characterization stays green.
+- [x] Extract page and handler logic (including the inline POST logic) from `routes/` into `apps/web/pages/` against `RouteContext` and `PageResult`. `routes/` becomes thin Fresh adapters (`fresh_adapter.tsx`). Characterization stays green, and every page's normalized HTML matched a pre-refactor snapshot byte for byte (18 pages and states).
 - [ ] Build the new stack alongside Fresh, unused by production:
   - island helper, boundaries, registry and mounter;
   - Hono app (`5.0.0-rc.1`, exact pin) with the four middlewares and the route table;
