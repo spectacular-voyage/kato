@@ -65,23 +65,31 @@ How Kato Web uses Fresh today (2026-11-10):
 
 ### Server
 
-- **Hono 4:** `npm:hono@^4`, kept on 4 for this whole migration. v5 has been a release candidate since 2026-10-08 and changes `onError` among other things, so it is a separate upgrade.
+- **Hono 5:** pinned exactly to `npm:hono@5.0.0-rc.1` during development, then to `5.0.0` once it ships (see Decisions).
   - Kato uses only the core: routing, middleware, `c.req`, and `app.request()` in tests.
-  - It uses no runtime adapters (`hono/deno`, `serveStatic`).
+  - It uses no runtime adapters, which v5 moves into separate packages such as `@hono/deno`, and no `serveStatic`.
+  - The v5 changes this design touches:
+    - `onError((c) => …)` takes only the context and reads the error from `c.error`. A thrown non-`Error` arrives wrapped in an `Error`, with the original value in `c.error.cause`.
+    - `c.req.query()` values are typed `string | undefined`. Route modules read the query from `RouteContext.url` instead.
+    - `c.json(undefined)` throws, as `Response.json()` does. API handlers always return an object.
 - **Entry:** `apps/web/server.ts` exports `createWebApp(options)`. It starts the status heartbeat, as today, and returns the Hono app.
 - **Server main:** `apps/web/src/server_main.ts` replaces `compiled_main.ts`. It keeps the same startup error handling and exit code 2, parses `--host` and `--port`, and calls `Deno.serve(options, app.fetch)`. Source mode and the compiled binary share this entry.
 - **Middleware:** the same four, in the same order and with the same rules as listed under Summary.
   - The static middleware answers only for keys in the asset allowlist (see Assets) and passes everything else on.
   - The `/_fresh/*` exemption goes away.
   - The legacy `/brand/:asset` redirect stays a route behind auth.
-  - Errors are logged in `app.onError`, which returns a plain-text 500.
+  - Errors are logged in `app.onError((c) => …)` from `c.error`, and the handler returns a plain-text 500 like Fresh's.
 - **Routing:** an explicit table in `apps/web/app_routes.ts` replaces file-based routing.
   - Behaviour where Fresh and Hono differ is matched to what the characterization suite records for Fresh:
     - trailing and repeated slashes;
     - `HEAD` and `OPTIONS`;
     - methods a route does not define;
     - percent-encoded params.
-  - This uses Hono's `strict: false` plus explicit handling where that is not enough.
+  - This uses Hono's `strict: false` plus explicit handling where that is not enough. A probe of `5.0.0-rc.1` on Deno 2.9.2 with `strict: false`:
+    - serves `/sessions/` the same as `/sessions`;
+    - returns 404, not Fresh's behaviour, for `//sessions`, `OPTIONS /sessions` and `PUT /sessions`;
+    - decodes `%2F` in a param to `/`;
+    - answers `HEAD` from the `GET` handler with an empty body.
 
 ### Routes
 
@@ -183,6 +191,15 @@ How Kato Web uses Fresh today (2026-11-10):
 
 - Keep Kato Web server-rendered with post/redirect/get forms; do not convert it into a single-page app.
 - **Hono rather than a hand-written router.** About 20 routes, three params and four middlewares would fit in under 100 lines over `URLPattern`. But Hono is zero-dependency, runtime-neutral, and provides `app.request()` for tests. Route modules don't import it, so replacing it later stays cheap.
+- **Hono 5 from the start, not Hono 4.** Starting on 4 would mean migrating the same code again within months.
+  - The Hono-facing code is `server.ts` and `app_routes.ts`. The v5 changes it meets are listed under Server.
+  - The risk is building on a release candidate:
+    - `5.0.0-rc.1` was published 2026-10-10.
+    - As of 2026-11-10, Hono's `v5` branch was last updated 2026-10-22 and is 41 commits behind `main`. v4 is still being patched (4.13.17 on 2026-11-07), and those fixes are not in the RC.
+    - The v5 tracking issue ([honojs/hono#5106](https://github.com/honojs/hono/issues/5106)) has its code items done; what's left is tooling, the website and an adapter.
+  - **Release gate:** Kato does not ship on the RC by default.
+    - If `5.0.0` is out, pin it and rerun characterization.
+    - If it isn't, review the fixes on Hono `main` that the pinned RC lacks, in the code Kato uses (router, context, request, compose). Then decide either to ship on the RC or to wait.
 - **Island markers are wrapper elements** with `display: contents`, not Fresh-style comment markers, and they mount with `render()` like Fresh. Same mounting semantics, simpler marker handling.
 - **The new stack is built alongside Fresh and switched in one cutover.** Fresh keeps owning production until the new app passes the same characterization suite. The cutover commit then switches the Vite config, JSX, client entry, launcher, binary spec, tasks and CI together. Each intermediate commit leaves the shipped app on Fresh and green.
 - **Characterization runs against built output.** For Fresh that's `_fresh/server.js`; for the new app it's its own build. `HOME` is isolated in the serial env slice, because the route code resolves default paths.
@@ -289,7 +306,10 @@ An independent review on 2026-11-10 (Codex CLI) found 15 issues in the first dra
 - several inventory errors;
 - module preloads and Hono 5's `onError` change.
 
-The suggestion of browser tests was taken as a manual checklist plus DOM-level tests (see Decisions).
+Two suggestions were not taken as given:
+
+- **Browser tests** became a manual checklist plus DOM-level tests (see Decisions).
+- **Staying on Hono 4 through the migration:** the design starts on Hono 5 instead, with a release gate (see Decisions).
 
 ## Open Issues
 
@@ -302,7 +322,7 @@ The suggestion of browser tests was taken as a manual checklist plus DOM-level t
 - [ ] Extract page and handler logic (including the inline POST logic) from `routes/` into `apps/web/pages/` against `RouteContext` and `PageResult`. `routes/` becomes thin Fresh adapters; characterization stays green.
 - [ ] Build the new stack alongside Fresh, unused by production:
   - island helper, boundaries, registry and mounter;
-  - Hono app with the four middlewares and the route table;
+  - Hono app (`5.0.0-rc.1`, exact pin) with the four middlewares and the route table;
   - `renderPage` with manifest preloads;
   - `AssetSource` with the allowlist;
   - a separate Vite config building to `dist/`;
@@ -316,6 +336,7 @@ The suggestion of browser tests was taken as a manual checklist plus DOM-level t
   - regenerate the web lockfile with Deno 2.9.8 and confirm the frozen install.
 - [ ] Startup test on all CI platforms.
 - [ ] Update [[dev.codebase-overview]], [[dev.testing]] and [[dev.decision-log]].
+- [ ] Hono release gate: pin `5.0.0` and rerun characterization, or review the v4 fixes the RC lacks and decide (see Decisions).
 - [ ] Run `deno task ci`, cross-platform CI, a release rehearsal, and the manual smoke checklist.
 - [ ] Release.
 - [ ] Preact 11, as its own change, including an evaluation of `hydrate()`.
