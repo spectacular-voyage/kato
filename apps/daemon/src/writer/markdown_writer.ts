@@ -187,13 +187,20 @@ function resolveInitialAssistantSpeaker(
   return speakerNames?.assistant ?? "Assistant";
 }
 
+// A backslash that Markdown would read as an escape: one before ASCII
+// punctuation, or at the end of the line, where the closing `*` follows.
+// Other backslashes (Windows paths, `\n`) are literal and left as typed.
+const ITALIC_LINE_ESCAPE_PATTERN = /\\(?=[!-/:-@[-`{-~]|$)|\*/g;
+
 function formatUserMessageContent(content: string): string {
   return content.split("\n").map((line) => {
     const trimmed = line.trim();
     if (trimmed.length === 0) {
       return "";
     }
-    return `*${trimmed.replace(/\*/g, "\\*")}*`;
+    return `*${
+      trimmed.replace(ITALIC_LINE_ESCAPE_PATTERN, (match) => `\\${match}`)
+    }*`;
   }).join("\n");
 }
 
