@@ -1,5 +1,5 @@
 {
-  "version": "0.2.18",
+  "version": "0.2.19",
   "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts routes/**/*.tsx src/**/*.ts",
@@ -32,7 +32,6 @@
     "@/": "./",
     "fresh": "jsr:@fresh/core@^2.3.3",
     "preact": "npm:preact@^10.29.8",
-    "@preact/signals": "npm:@preact/signals@^2.11.4",
     "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@^1.1.2",
     "vite": "npm:vite@^7.3.8"
   },

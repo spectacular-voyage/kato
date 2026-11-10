@@ -10,7 +10,11 @@ created: 1771724621833
 
 This note defines day-to-day development guidance for Kato.
 
-IMPORTANT: This project must use modern Deno best practices and, whenever possible, Deno-native or Deno-first libraries. LLMs often try to use Node libraries and conventions, so watch out for that.
+IMPORTANT: Kato is moving off Fresh and, by about October 2027, off Deno; see [[dev.decision-log]] "Platform Direction After Deno and Fresh" and [[task.2026.2026-11-10-platform-migration]]. Deno 2.9 is still the toolchain and runtime until the switch, but new code must not deepen the dependency on it:
+
+- Prefer Web-standard APIs and `node:*` modules (which Deno runs) over `Deno.*` APIs, and runtime-neutral npm packages over `jsr:@std/*` or Deno-only libraries.
+- Do not add new uses of Fresh-specific APIs in `apps/web`; keep page logic in framework-free modules under `apps/web/src`.
+- Where a `Deno.*` call is still needed, keep it in one place that a later platform module can absorb, not scattered through business logic.
 
 ## Testing
 

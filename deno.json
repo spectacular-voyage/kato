@@ -22,9 +22,10 @@
     "test:coverage": "deno run -A scripts/run-root-test-slices.ts coverage",
     "test:coverage:parallel-safe": "deno run -A scripts/run-root-test-slices.ts coverage:parallel-safe",
     "test:coverage:env": "deno run -A scripts/run-root-test-slices.ts coverage:env",
+    "test:web": "deno test --frozen --config apps/web/deno.json --allow-read --allow-write=.test-tmp --allow-env apps/web/tests/",
     "coverage:lcov": "deno coverage --lcov --output=coverage.lcov .test-tmp/coverage/root/parallel-safe .test-tmp/coverage/root/env",
     "ci:quality": "deno task --cwd apps/web install:check && deno task fmt --check && deno task lint && deno task check --frozen",
-    "ci": "deno task audit && deno task ci:quality && deno task test --frozen"
+    "ci": "deno task audit && deno task ci:quality && deno task test --frozen && deno task test:web"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.19",
