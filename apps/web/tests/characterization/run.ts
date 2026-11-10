@@ -25,8 +25,8 @@ function normalizeContentType(value: string | undefined): string | undefined {
 /** Visible page text: scripts and tags removed, entities decoded. */
 export function textOf(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/g, " ")
-    .replace(/<style[\s\S]*?<\/style>/g, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replaceAll("&quot;", '"')
     .replaceAll("&#39;", "'")

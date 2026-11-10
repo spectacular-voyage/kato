@@ -18,11 +18,21 @@ async function pruneTestTempRootIfEmpty(): Promise<void> {
 }
 
 export async function makeTestTempDir(prefix: string): Promise<string> {
-  ensureTestTempRoot();
-  return await Deno.makeTempDir({
-    dir: TEST_TEMP_ROOT,
-    prefix,
-  });
+  for (let attempt = 0;; attempt++) {
+    ensureTestTempRoot();
+    try {
+      return await Deno.makeTempDir({
+        dir: TEST_TEMP_ROOT,
+        prefix,
+      });
+    } catch (error) {
+      // A parallel test's pruneTestTempRootIfEmpty() can remove the shared
+      // root between ensureTestTempRoot() and makeTempDir(); recreate it.
+      if (!(error instanceof Deno.errors.NotFound) || attempt >= 4) {
+        throw error;
+      }
+    }
+  }
 }
 
 export function makeTestTempPath(prefix: string): string {

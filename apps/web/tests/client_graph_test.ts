@@ -3,6 +3,7 @@
 // `shared/src`, and Preact. Fresh's Vite plugin currently tree-shakes server-only
 // imports away; a plain Vite build cannot, so leaks must not exist at all.
 import { assert, assertEquals } from "@std/assert";
+import { fromFileUrl } from "@std/path";
 
 const webRoot = new URL("../", import.meta.url);
 const repoRoot = new URL("../../../", import.meta.url);
@@ -42,8 +43,8 @@ async function loadGraph(entry: URL): Promise<DenoInfoGraph> {
       "info",
       "--json",
       "--config",
-      new URL("deno.json", webRoot).pathname,
-      entry.pathname,
+      fromFileUrl(new URL("deno.json", webRoot)),
+      fromFileUrl(entry),
     ],
     stdout: "piped",
     stderr: "piped",
