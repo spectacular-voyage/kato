@@ -10,6 +10,8 @@ created: 1794334438105
 
 Kato Web runs without Fresh, on Deno 2.9, with the same pages, forms, live polling, auth, and URLs. No `@fresh/*` package remains in any lockfile. The server code no longer needs a build step, and the client build is plain Vite. This is stage 1 of [[task.2026.2026-11-10-platform-migration]].
 
+**Status (2026-11-10):** steps 1–3 are done (characterization, client-graph hygiene, page modules; PR #57). Step 4 onward waits for Hono `5.0.0` final, by decision on 2026-11-10, rather than building on the release candidate.
+
 ## Summary
 
 How Kato Web uses Fresh today (2026-11-10):
