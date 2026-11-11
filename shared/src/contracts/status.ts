@@ -74,6 +74,24 @@ export interface DaemonIngestionFailureStatus {
   nextRetryAt: string;
 }
 
+/**
+ * A provider whose file watcher is not trusted for some session roots, so
+ * those roots are rescanned every few seconds instead of every few minutes.
+ * Listed only while degraded; absent when every root is watched normally.
+ */
+export interface DaemonWatchDegradedStatus {
+  provider: string;
+  /**
+   * `watcher-down`: the watcher failed and is being restarted.
+   * `missed-changes`: rescans found changes the watcher never reported.
+   */
+  reason: "watcher-down" | "missed-changes";
+  roots: string[];
+  since: string;
+  /** Changes the watcher missed before the roots were degraded. */
+  missedChanges?: number;
+}
+
 export interface DaemonStatusSnapshot {
   schemaVersion: number;
   generatedAt: string;
@@ -86,4 +104,5 @@ export interface DaemonStatusSnapshot {
   memory?: MemoryStatus;
   sessions?: DaemonSessionStatus[];
   ingestionFailures?: DaemonIngestionFailureStatus[];
+  watchDegraded?: DaemonWatchDegradedStatus[];
 }

@@ -1,6 +1,7 @@
 import type {
   ConversationEvent,
   DaemonIngestionFailureStatus,
+  DaemonWatchDegradedStatus,
   ProviderCursor,
   ProviderSessionTitleSource,
 } from "@kato/shared";
@@ -80,6 +81,8 @@ export interface ProviderIngestionRunner {
   stop(): Promise<void>;
   /** Sessions whose source currently fails to ingest (with backoff state). */
   getIngestionFailures?(): DaemonIngestionFailureStatus[];
+  /** Session roots whose watcher is not trusted right now. */
+  getWatchDegraded?(): DaemonWatchDegradedStatus[];
 }
 
 export interface SessionSnapshotStoreRetentionPolicy {

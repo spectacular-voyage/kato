@@ -1,6 +1,7 @@
 import type {
   ConversationEvent,
   DaemonIngestionFailureStatus,
+  DaemonWatchDegradedStatus,
   ProviderAutoGenerateTwins,
   ProviderCursor,
   ProviderSessionTitleSource,
@@ -17,7 +18,7 @@ import {
   redactConversationEvents,
   type SecretsRedactor,
 } from "../policy/mod.ts";
-import { basename, join, relative } from "@std/path";
+import { basename, join, normalize, relative } from "@std/path";
 import {
   type DebouncedWatchBatch,
   type WatchDebounceOptions,
@@ -67,7 +68,10 @@ import {
   resolveHomeDir,
 } from "../utils/env.ts";
 import { hashStringFNV1a } from "../utils/hash.ts";
-import { dedupeDiscoveredSessions } from "./provider_session_discovery.ts";
+import {
+  compareDiscoveredSessionCandidates,
+  dedupeDiscoveredSessions,
+} from "./provider_session_discovery.ts";
 import {
   cursorsEqual,
   makeByteOffsetCursor,
@@ -112,10 +116,46 @@ export type ProviderParseContext =
   & { provider: string; sessionId: string }
   & ProviderParseResumeOptions;
 
+/**
+ * Timing for watcher-led discovery. Every field has a default; tests shorten
+ * them. See task.2026.2026-11-10-watcher-led-discovery.
+ */
+export interface DiscoveryTimingOptions {
+  /** Walk interval for roots the watcher does not cover (default 5 s). */
+  degradedDiscoveryIntervalMs?: number;
+  /** How often recently changed sessions are stat-checked (default 5 s). */
+  hotPollIntervalMs?: number;
+  /** A session changed within this window is stat-checked (default 10 min). */
+  hotWindowMs?: number;
+  /** A change younger than this may still have its event in flight (3 s). */
+  watchMissGraceMs?: number;
+  /** Unreported changes within the window that degrade a root (default 3). */
+  watchMissThreshold?: number;
+  watchMissWindowMs?: number;
+  /** Delays before restarting a failed watcher; the last one repeats. */
+  watchRestartDelaysMs?: number[];
+}
+
 export interface FileProviderIngestionRunnerOptions {
   provider: string;
   watchRoots: string[];
-  discoverSessions: () => Promise<ProviderSessionFile[]>;
+  /**
+   * Walks `roots` (all of `watchRoots`, or some of them) and returns every
+   * session file found under them. Fakes may ignore the argument.
+   */
+  discoverSessions: (roots: string[]) => Promise<ProviderSessionFile[]>;
+  /**
+   * Describes one file the watcher reported, given the root it is under;
+   * `undefined` when it is not a trackable session. Without it, a reported
+   * path Kato does not track makes its root be walked instead.
+   */
+  describeSessionFile?: (
+    filePath: string,
+    root: string,
+  ) => Promise<ProviderSessionFile | undefined>;
+  /** Whether a path's name can be a session file (default: any path). */
+  isSessionFilePath?: (filePath: string) => boolean;
+  discoveryTiming?: DiscoveryTimingOptions;
   parseEvents: (
     filePath: string,
     fromOffset: number,
@@ -128,6 +168,7 @@ export interface FileProviderIngestionRunnerOptions {
   sessionSnapshotStore: SessionSnapshotStore;
   sessionStateStore?: PersistentSessionStateStore;
   autoGenerateTwins?: boolean;
+  /** Walk interval for roots the watcher covers (default 5 minutes). */
   discoveryIntervalMs?: number;
   watchDebounceMs?: number;
   now?: () => Date;
@@ -150,6 +191,7 @@ export interface ProviderIngestionFactoryOptions {
   now?: () => Date;
   watchDebounceMs?: number;
   discoveryIntervalMs?: number;
+  discoveryTiming?: DiscoveryTimingOptions;
   claudeSessionRoots?: string[];
   codexSessionRoots?: string[];
   geminiSessionRoots?: string[];
@@ -172,6 +214,7 @@ export interface CreateProviderIngestionRunnerOptions {
   now?: () => Date;
   watchDebounceMs?: number;
   discoveryIntervalMs?: number;
+  discoveryTiming?: DiscoveryTimingOptions;
   watchFs?: (
     watchPaths: string[],
     onBatch: (batch: DebouncedWatchBatch) => Promise<void> | void,
@@ -194,13 +237,91 @@ interface GeminiSessionDiscovery {
   layoutType: "hash" | "slug" | "unknown";
 }
 
-const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000;
+const DEFAULT_DISCOVERY_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_DEGRADED_DISCOVERY_INTERVAL_MS = 5_000;
+const DEFAULT_HOT_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_HOT_WINDOW_MS = 10 * 60_000;
+const DEFAULT_WATCH_MISS_GRACE_MS = 3_000;
+const DEFAULT_WATCH_MISS_THRESHOLD = 3;
+const DEFAULT_WATCH_MISS_WINDOW_MS = 10 * 60_000;
+const DEFAULT_WATCH_RESTART_DELAYS_MS = [5_000, 30_000, 5 * 60_000];
 const DEFAULT_WATCH_DEBOUNCE_MS = 250;
 /** Upper bound on events scanned from the source head for a stable snippet. */
 const HEAD_SNIPPET_MAX_EVENTS = 200;
 const CODEX_COMPACTION_BACKTRACK_BYTES = 4 * 1024;
 const PARSE_FAILURE_INITIAL_BACKOFF_MS = 30_000;
 const PARSE_FAILURE_MAX_BACKOFF_MS = 15 * 60_000;
+
+/** Discovery schedule and watcher trust for one session root. */
+interface RootDiscoveryState {
+  /** The root as configured; passed to walks and the watcher. */
+  root: string;
+  /** `toPathKey(root)`, or `""` for a runner with no roots. */
+  key: string;
+  nextWalkAtMs: number;
+  walkRequested: boolean;
+  /** Start of the last completed walk; unset before the first. */
+  lastWalkAtMs?: number;
+  /** Times of recent unreported changes, oldest first. */
+  missTimesMs: number[];
+  missedChanges: number;
+  /** Set once unreported changes reach the threshold; never cleared. */
+  degradedAtMs?: number;
+}
+
+/**
+ * Maps watcher paths under a root's real path back to the configured root,
+ * for watchers that report resolved paths (macOS FSEvents: /private/var).
+ */
+interface WatchPathAlias {
+  fromKey: string;
+  fromPrefix: string;
+  toPrefix: string;
+}
+
+function trimTrailingSeparators(path: string): string {
+  let trimmed = path;
+  while (
+    trimmed.length > 1 && /[\\/]$/.test(trimmed) &&
+    !/^[A-Za-z]:[\\/]$/.test(trimmed)
+  ) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
+async function resolveWatchPathAliases(
+  roots: string[],
+): Promise<WatchPathAlias[]> {
+  const aliases: WatchPathAlias[] = [];
+  for (const root of roots) {
+    let real: string;
+    try {
+      real = await Deno.realPath(root);
+    } catch {
+      continue;
+    }
+    const fromKey = toPathKey(real);
+    if (fromKey === toPathKey(root)) continue;
+    aliases.push({
+      fromKey,
+      fromPrefix: trimTrailingSeparators(normalize(real)),
+      toPrefix: trimTrailingSeparators(normalize(root)),
+    });
+  }
+  return aliases;
+}
+
+/** A remedy to log with a watcher failure, when the cause is recognizable. */
+function describeWatchFailureHint(message: string): string | undefined {
+  if (/os error 28\b|no space left on device/i.test(message)) {
+    return "The inotify watch limit was reached; raise fs.inotify.max_user_watches with sysctl";
+  }
+  if (/os error 24\b|too many open files/i.test(message)) {
+    return "Too many open files or inotify instances; raise fs.inotify.max_user_instances or the open-file limit";
+  }
+  return undefined;
+}
 
 /** Latest parse checkpoint for a session, kept in memory only. */
 interface SessionParseCheckpoint {
@@ -310,6 +431,24 @@ function normalizeRoots(paths: string[]): string[] {
   return Array.from(deduped);
 }
 
+/** Windows paths compare case-insensitively; others exactly. */
+const PATH_KEYS_FOLD_CASE = Deno.build.os === "windows";
+
+/** A path normalized for prefix comparison (no trailing separator). */
+function toPathKey(path: string): string {
+  const key = trimTrailingSeparators(normalize(path));
+  return PATH_KEYS_FOLD_CASE ? key.toLowerCase() : key;
+}
+
+/** Whether `pathKey` is `rootKey` or beneath it; `""` contains everything. */
+function isPathKeyWithin(pathKey: string, rootKey: string): boolean {
+  if (rootKey === "" || pathKey === rootKey) return true;
+  if (!pathKey.startsWith(rootKey)) return false;
+  if (/[\\/]$/.test(rootKey)) return true;
+  const next = pathKey.charAt(rootKey.length);
+  return next === "/" || next === "\\";
+}
+
 function parseRootsFromEnv(name: string): string[] | undefined {
   const raw = readOptionalEnv(name);
   if (!raw) return undefined;
@@ -366,7 +505,14 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
+/**
+ * Yields every regular file under `root` whose name matches. Symlinks are
+ * skipped, so a walk and `describe*SessionFile` agree on what is a file.
+ */
+async function* walkMatchingFiles(
+  root: string,
+  matchesName: (name: string) => boolean,
+): AsyncGenerator<string> {
   const stack: string[] = [root];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -383,56 +529,61 @@ async function* walkJsonlFiles(root: string): AsyncGenerator<string> {
       }
       throw error;
     }
-    for await (const entry of entries) {
-      const fullPath = join(current, entry.name);
-      if (entry.isDirectory) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile && entry.name.endsWith(".jsonl")) {
-        yield fullPath;
-      }
-    }
-  }
-}
-
-async function* walkJsonFiles(root: string): AsyncGenerator<string> {
-  const stack: string[] = [root];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) continue;
-    let entries: AsyncIterable<Deno.DirEntry>;
     try {
-      entries = Deno.readDir(current);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        continue;
+      for await (const entry of entries) {
+        const fullPath = join(current, entry.name);
+        if (entry.isDirectory) {
+          stack.push(fullPath);
+          continue;
+        }
+        if (entry.isFile && matchesName(entry.name)) {
+          yield fullPath;
+        }
       }
+    } catch (error) {
+      // A directory removed mid-walk; the rest of the walk still counts.
+      if (error instanceof Deno.errors.NotFound) continue;
       if (error instanceof Deno.errors.PermissionDenied) {
         throw new ProviderIngestionReadDeniedError("readDir", current, error);
       }
       throw error;
     }
-    for await (const entry of entries) {
-      const fullPath = join(current, entry.name);
-      if (entry.isDirectory) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile && entry.name.endsWith(".json")) {
-        yield fullPath;
-      }
-    }
   }
 }
 
-async function statModifiedAtMs(path: string): Promise<number> {
+function isJsonlName(name: string): boolean {
+  return name.endsWith(".jsonl");
+}
+
+function isGeminiSessionName(name: string): boolean {
+  return name.startsWith("session-") && name.endsWith(".json");
+}
+
+/** Whether a path's name can be a Claude or Codex session transcript. */
+export function isJsonlSessionPath(path: string): boolean {
+  return isJsonlName(basename(path));
+}
+
+/** Whether a path's name can be a Gemini session file. */
+export function isGeminiSessionPath(path: string): boolean {
+  return isGeminiSessionName(basename(path));
+}
+
+/**
+ * `lstat` that maps a vanished path to `undefined`. `lstat` (not `stat`)
+ * matches the walk, which skips symlinks.
+ */
+async function lstatSessionFile(
+  path: string,
+): Promise<Deno.FileInfo | undefined> {
   try {
-    const stat = await Deno.stat(path);
-    return stat.mtime?.getTime() ?? 0;
+    return await Deno.lstat(path);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return 0;
+    if (
+      error instanceof Deno.errors.NotFound ||
+      error instanceof Deno.errors.NotADirectory
+    ) {
+      return undefined;
     }
     if (error instanceof Deno.errors.PermissionDenied) {
       throw new ProviderIngestionReadDeniedError("stat", path, error);
@@ -441,20 +592,27 @@ async function statModifiedAtMs(path: string): Promise<number> {
   }
 }
 
-async function discoverClaudeSessions(
+/** Describes one Claude transcript, or `undefined` if it is not one. */
+export async function describeClaudeSessionFile(
+  filePath: string,
+): Promise<ProviderSessionFile | undefined> {
+  if (!isJsonlSessionPath(filePath)) return undefined;
+  const sessionId = basename(filePath, ".jsonl");
+  if (!isNonEmptyString(sessionId)) return undefined;
+  const info = await lstatSessionFile(filePath);
+  if (!info?.isFile) return undefined;
+  return { sessionId, filePath, modifiedAtMs: info.mtime?.getTime() ?? 0 };
+}
+
+export async function discoverClaudeSessions(
   roots: string[],
 ): Promise<ProviderSessionFile[]> {
   const sessions: ProviderSessionFile[] = [];
   for (const root of roots) {
     if (!(await pathExists(root))) continue;
-    for await (const filePath of walkJsonlFiles(root)) {
-      const sessionId = basename(filePath, ".jsonl");
-      if (!isNonEmptyString(sessionId)) continue;
-      sessions.push({
-        sessionId,
-        filePath,
-        modifiedAtMs: await statModifiedAtMs(filePath),
-      });
+    for await (const filePath of walkMatchingFiles(root, isJsonlName)) {
+      const session = await describeClaudeSessionFile(filePath);
+      if (session) sessions.push(session);
     }
   }
   return sessions;
@@ -560,6 +718,56 @@ interface CodexSessionMetaCacheEntry {
  */
 export type CodexSessionMetaCache = Map<string, CodexSessionMetaCacheEntry>;
 
+/**
+ * Describes one Codex rollout, or `undefined` if it is not a trackable
+ * session (not a rollout, `exec` source, or no complete first line yet).
+ */
+export async function describeCodexSessionFile(
+  filePath: string,
+  metaCache?: CodexSessionMetaCache,
+): Promise<ProviderSessionFile | undefined> {
+  if (!isJsonlSessionPath(filePath)) return undefined;
+  const info = await lstatSessionFile(filePath);
+  if (!info?.isFile) {
+    metaCache?.delete(filePath);
+    return undefined;
+  }
+  const cached = metaCache?.get(filePath);
+  let meta: CodexSessionMeta | undefined;
+  if (cached && cached.ino === info.ino && info.size >= cached.size) {
+    cached.size = info.size;
+    meta = cached.meta;
+  } else {
+    try {
+      meta = await readCodexSessionMeta(filePath);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        metaCache?.delete(filePath);
+        return undefined;
+      }
+      if (error instanceof Deno.errors.PermissionDenied) {
+        throw new ProviderIngestionReadDeniedError("open", filePath, error);
+      }
+      throw error;
+    }
+    if (meta) {
+      metaCache?.set(filePath, { ino: info.ino, size: info.size, meta });
+    } else {
+      // No complete first line yet: retry on the next look at this file.
+      metaCache?.delete(filePath);
+    }
+  }
+  if (!meta || meta.source === "exec") return undefined;
+  return {
+    sessionId: meta.id,
+    ...(meta.parentProviderSessionId
+      ? { parentProviderSessionId: meta.parentProviderSessionId }
+      : {}),
+    filePath,
+    modifiedAtMs: info.mtime?.getTime() ?? 0,
+  };
+}
+
 export async function discoverCodexSessions(
   roots: string[],
   metaCache?: CodexSessionMetaCache,
@@ -568,57 +776,32 @@ export async function discoverCodexSessions(
   const seenPaths = new Set<string>();
   for (const root of roots) {
     if (!(await pathExists(root))) continue;
-    for await (const filePath of walkJsonlFiles(root)) {
-      let stat: Deno.FileInfo;
-      try {
-        stat = await Deno.stat(filePath);
-      } catch (error) {
-        if (error instanceof Deno.errors.NotFound) continue;
-        if (error instanceof Deno.errors.PermissionDenied) {
-          throw new ProviderIngestionReadDeniedError("stat", filePath, error);
-        }
-        throw error;
-      }
+    for await (const filePath of walkMatchingFiles(root, isJsonlName)) {
       seenPaths.add(filePath);
-      const cached = metaCache?.get(filePath);
-      let meta: CodexSessionMeta | undefined;
-      if (cached && cached.ino === stat.ino && stat.size >= cached.size) {
-        cached.size = stat.size;
-        meta = cached.meta;
-      } else {
-        try {
-          meta = await readCodexSessionMeta(filePath);
-        } catch (error) {
-          if (error instanceof Deno.errors.NotFound) continue;
-          if (error instanceof Deno.errors.PermissionDenied) {
-            throw new ProviderIngestionReadDeniedError("open", filePath, error);
-          }
-          throw error;
-        }
-        if (meta) {
-          metaCache?.set(filePath, { ino: stat.ino, size: stat.size, meta });
-        } else {
-          // No complete first line yet: retry on the next discovery pass.
-          metaCache?.delete(filePath);
-        }
-      }
-      if (!meta || meta.source === "exec") continue;
-      sessions.push({
-        sessionId: meta.id,
-        ...(meta.parentProviderSessionId
-          ? { parentProviderSessionId: meta.parentProviderSessionId }
-          : {}),
-        filePath,
-        modifiedAtMs: stat.mtime?.getTime() ?? 0,
-      });
+      const session = await describeCodexSessionFile(filePath, metaCache);
+      if (session) sessions.push(session);
     }
   }
   if (metaCache) {
-    for (const path of metaCache.keys()) {
-      if (!seenPaths.has(path)) metaCache.delete(path);
-    }
+    pruneCacheUnderRoots(metaCache, roots, seenPaths);
   }
   return sessions;
+}
+
+/** Drops cache entries under the walked roots that the walk did not see. */
+function pruneCacheUnderRoots<V>(
+  cache: Map<string, V>,
+  roots: string[],
+  seenPaths: Set<string>,
+): void {
+  const rootKeys = roots.map(toPathKey);
+  for (const path of cache.keys()) {
+    if (seenPaths.has(path)) continue;
+    const key = toPathKey(path);
+    if (rootKeys.some((rootKey) => isPathKeyWithin(key, rootKey))) {
+      cache.delete(path);
+    }
+  }
 }
 
 function readTimeMs(value: unknown): number | undefined {
@@ -692,27 +875,68 @@ async function readGeminiSessionDiscovery(
   };
 }
 
-async function discoverGeminiSessions(
+interface GeminiDiscoveryCacheEntry {
+  mtimeMs: number;
+  size: number;
+  discovery: GeminiSessionDiscovery | undefined;
+}
+
+/**
+ * Per-runner memo of each Gemini session file's discovery fields, keyed by
+ * path. Gemini rewrites the whole file, so an unchanged mtime and size mean
+ * the file need not be read and parsed again.
+ */
+export type GeminiDiscoveryCache = Map<string, GeminiDiscoveryCacheEntry>;
+
+/** Describes one Gemini session file, or `undefined` if it is not one. */
+export async function describeGeminiSessionFile(
+  filePath: string,
+  discoveryRoot: string,
+  cache?: GeminiDiscoveryCache,
+): Promise<ProviderSessionFile | undefined> {
+  if (!isGeminiSessionPath(filePath)) return undefined;
+  const info = await lstatSessionFile(filePath);
+  if (!info?.isFile) {
+    cache?.delete(filePath);
+    return undefined;
+  }
+  const mtimeMs = info.mtime?.getTime() ?? 0;
+  const cached = cache?.get(filePath);
+  let discovery: GeminiSessionDiscovery | undefined;
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === info.size) {
+    discovery = cached.discovery;
+  } else {
+    discovery = await readGeminiSessionDiscovery(filePath, discoveryRoot);
+    cache?.set(filePath, { mtimeMs, size: info.size, discovery });
+  }
+  if (!discovery) return undefined;
+  return {
+    sessionId: discovery.sessionId,
+    filePath,
+    modifiedAtMs: mtimeMs,
+    ...(discovery.contentUpdatedAtMs !== undefined
+      ? { contentUpdatedAtMs: discovery.contentUpdatedAtMs }
+      : {}),
+    layoutType: discovery.layoutType,
+  };
+}
+
+export async function discoverGeminiSessions(
   roots: string[],
+  cache?: GeminiDiscoveryCache,
 ): Promise<ProviderSessionFile[]> {
   const sessions: ProviderSessionFile[] = [];
+  const seenPaths = new Set<string>();
   for (const root of roots) {
     if (!(await pathExists(root))) continue;
-    for await (const filePath of walkJsonFiles(root)) {
-      const filename = basename(filePath);
-      if (!filename.startsWith("session-")) continue;
-      const discovery = await readGeminiSessionDiscovery(filePath, root);
-      if (!discovery) continue;
-      sessions.push({
-        sessionId: discovery.sessionId,
-        filePath,
-        modifiedAtMs: await statModifiedAtMs(filePath),
-        ...(discovery.contentUpdatedAtMs !== undefined
-          ? { contentUpdatedAtMs: discovery.contentUpdatedAtMs }
-          : {}),
-        layoutType: discovery.layoutType,
-      });
+    for await (const filePath of walkMatchingFiles(root, isGeminiSessionName)) {
+      seenPaths.add(filePath);
+      const session = await describeGeminiSessionFile(filePath, root, cache);
+      if (session) sessions.push(session);
     }
+  }
+  if (cache) {
+    pruneCacheUnderRoots(cache, roots, seenPaths);
   }
   return sessions;
 }
@@ -753,6 +977,13 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   readonly provider: string;
   private readonly now: () => Date;
   private readonly discoveryIntervalMs: number;
+  private readonly degradedDiscoveryIntervalMs: number;
+  private readonly hotPollIntervalMs: number;
+  private readonly hotWindowMs: number;
+  private readonly watchMissGraceMs: number;
+  private readonly watchMissThreshold: number;
+  private readonly watchMissWindowMs: number;
+  private readonly watchRestartDelaysMs: number[];
   private readonly watchDebounceMs: number;
   private readonly watchFs: (
     watchPaths: string[],
@@ -764,7 +995,16 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly sessionSnapshotStore: SessionSnapshotStore;
   private readonly sessionStateStore: PersistentSessionStateStore | undefined;
   private readonly autoGenerateTwins: boolean;
-  private readonly discoverSessions: () => Promise<ProviderSessionFile[]>;
+  private readonly discoverSessions: (
+    roots: string[],
+  ) => Promise<ProviderSessionFile[]>;
+  private readonly describeSessionFile:
+    | ((
+      filePath: string,
+      root: string,
+    ) => Promise<ProviderSessionFile | undefined>)
+    | undefined;
+  private readonly isSessionFilePath: (filePath: string) => boolean;
   private readonly parseEvents: (
     filePath: string,
     fromOffset: number,
@@ -788,13 +1028,29 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   private readonly cursors = new Map<string, ProviderCursor>();
   private readonly cursorSourcePaths = new Map<string, string>();
   private readonly pendingBatchPaths = new Set<string>();
-  private nextDiscoveryAtMs = 0;
-  private needsDiscovery = true;
+  private readonly rootStates: RootDiscoveryState[];
+  /**
+   * Session-file paths the watcher reported since a stat last looked at
+   * them. A change a stat finds for a path not in here was missed.
+   */
+  private readonly eventSeenPaths = new Set<string>();
+  private nextHotPollAtMs = 0;
   private started = false;
   private startedAtMs = 0;
   private lastDuplicateDiscoveryWarningKey: string | undefined;
   private watchAbortController: AbortController | undefined;
   private watchTask: Promise<void> | undefined;
+  /** Bumped on every watcher (re)start, so stale callbacks are ignored. */
+  private watchGeneration = 0;
+  private watcherState: "off" | "watching" | "down" = "off";
+  private watchedRoots: string[] = [];
+  private watchedRootKeys = new Set<string>();
+  private watchPathAliases: WatchPathAlias[] = [];
+  private watcherDownSinceMs = 0;
+  private watchFailures = 0;
+  private watchRestartAtMs: number | undefined;
+  private watchRestartRequested = false;
+  private rescanRequested = false;
   private readonly failedClosedSessions = new Set<string>();
   private readonly secretsRedactor: SecretsRedactor;
   /**
@@ -819,6 +1075,8 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.provider = options.provider;
     this.watchRoots = normalizeRoots(options.watchRoots);
     this.discoverSessions = options.discoverSessions;
+    this.describeSessionFile = options.describeSessionFile;
+    this.isSessionFilePath = options.isSessionFilePath ?? (() => true);
     this.parseEvents = options.parseEvents;
     this.sessionSnapshotStore = options.sessionSnapshotStore;
     this.sessionStateStore = options.sessionStateStore;
@@ -826,6 +1084,38 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     this.now = options.now ?? (() => new Date());
     this.discoveryIntervalMs = options.discoveryIntervalMs ??
       DEFAULT_DISCOVERY_INTERVAL_MS;
+    const timing = options.discoveryTiming ?? {};
+    this.degradedDiscoveryIntervalMs = Math.min(
+      timing.degradedDiscoveryIntervalMs ??
+        DEFAULT_DEGRADED_DISCOVERY_INTERVAL_MS,
+      this.discoveryIntervalMs,
+    );
+    this.hotPollIntervalMs = timing.hotPollIntervalMs ??
+      DEFAULT_HOT_POLL_INTERVAL_MS;
+    this.hotWindowMs = timing.hotWindowMs ?? DEFAULT_HOT_WINDOW_MS;
+    this.watchMissGraceMs = timing.watchMissGraceMs ??
+      DEFAULT_WATCH_MISS_GRACE_MS;
+    this.watchMissThreshold = Math.max(
+      1,
+      timing.watchMissThreshold ?? DEFAULT_WATCH_MISS_THRESHOLD,
+    );
+    this.watchMissWindowMs = timing.watchMissWindowMs ??
+      DEFAULT_WATCH_MISS_WINDOW_MS;
+    this.watchRestartDelaysMs = timing.watchRestartDelaysMs &&
+        timing.watchRestartDelaysMs.length > 0
+      ? [...timing.watchRestartDelaysMs]
+      : DEFAULT_WATCH_RESTART_DELAYS_MS;
+    this.rootStates =
+      (this.watchRoots.length > 0
+        ? this.watchRoots.map((root) => ({ root, key: toPathKey(root) }))
+        : [{ root: "", key: "" }]).map(({ root, key }) => ({
+          root,
+          key,
+          nextWalkAtMs: 0,
+          walkRequested: true,
+          missTimesMs: [],
+          missedChanges: 0,
+        }));
     this.watchDebounceMs = options.watchDebounceMs ?? DEFAULT_WATCH_DEBOUNCE_MS;
     this.watchFs = options.watchFs ?? watchFsDebounced;
     this.operationalLogger = options.operationalLogger ??
@@ -1064,7 +1354,10 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     if (this.started) return;
     this.started = true;
     this.startedAtMs = this.now().getTime();
-    this.needsDiscovery = true;
+    this.nextHotPollAtMs = this.startedAtMs + this.hotPollIntervalMs;
+    for (const state of this.rootStates) {
+      state.walkRequested = true;
+    }
 
     await this.operationalLogger.info(
       "provider.ingestion.started",
@@ -1072,41 +1365,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       { provider: this.provider, watchRoots: this.watchRoots },
     );
 
-    const existingWatchRoots: string[] = [];
-    for (const root of this.watchRoots) {
-      try {
-        if (await pathExists(root)) {
-          existingWatchRoots.push(root);
-        }
-      } catch (error) {
-        if (!(await this.handleReadDenied(error, "stat", root))) {
-          throw error;
-        }
-      }
-    }
-
-    if (existingWatchRoots.length > 0) {
-      this.watchAbortController = new AbortController();
-      this.watchTask = this.watchFs(
-        existingWatchRoots,
-        (batch) => this.onWatchBatch(batch),
-        {
-          debounceMs: this.watchDebounceMs,
-          recursive: true,
-          signal: this.watchAbortController.signal,
-          now: this.now,
-        },
-      ).catch(async (error) => {
-        await this.operationalLogger.error(
-          "provider.ingestion.watch.failed",
-          "Provider ingestion watch loop failed",
-          {
-            provider: this.provider,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        );
-      });
-    }
+    await this.launchWatcher();
   }
 
   async poll(): Promise<ProviderIngestionPollResult> {
@@ -1116,22 +1375,26 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       );
     }
 
-    if (this.needsDiscovery || this.now().getTime() >= this.nextDiscoveryAtMs) {
-      await this.discoverAndTrackSessions();
-    }
-
-    for (const path of this.pendingBatchPaths) {
-      const sessionId = this.sessionByFilePath.get(path);
-      if (sessionId) {
-        this.dirtySessions.add(sessionId);
-      } else {
-        this.needsDiscovery = true;
+    await this.maintainWatcher(this.now().getTime());
+    if (this.rescanRequested) {
+      this.rescanRequested = false;
+      for (const state of this.rootStates) {
+        state.walkRequested = true;
       }
+      await this.operationalLogger.info(
+        "provider.ingestion.watch.rescan",
+        "Watcher reported dropped events; rescanning all roots",
+        { provider: this.provider },
+      );
     }
-    this.pendingBatchPaths.clear();
 
-    if (this.needsDiscovery) {
-      await this.discoverAndTrackSessions();
+    await this.walkDueRoots(this.now().getTime());
+    await this.processPendingWatchPaths();
+    // Reported paths that could not be resolved on their own ask for a walk.
+    await this.walkDueRoots(this.now().getTime());
+    const hotPollNowMs = this.now().getTime();
+    if (hotPollNowMs >= this.nextHotPollAtMs) {
+      await this.hotPoll(hotPollNowMs);
     }
 
     this.scheduleNextCatchUp();
@@ -1165,6 +1428,7 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    this.watchGeneration += 1;
 
     if (this.watchAbortController) {
       this.watchAbortController.abort();
@@ -1182,17 +1446,250 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     );
   }
 
-  private async onWatchBatch(batch: DebouncedWatchBatch): Promise<void> {
-    for (const path of batch.paths) {
-      this.pendingBatchPaths.add(path);
-      if (!this.sessionByFilePath.has(path)) {
-        this.needsDiscovery = true;
+  /** The session files this runner tracks, by session id (diagnostics). */
+  listTrackedSessions(): ProviderSessionFile[] {
+    return [...this.sessions.values()]
+      .map((session) => ({ ...session }))
+      .sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+  }
+
+  /** Roots whose watcher is not trusted right now, grouped by reason. */
+  getWatchDegraded(): DaemonWatchDegradedStatus[] {
+    const entries: DaemonWatchDegradedStatus[] = [];
+    if (this.watcherState === "down") {
+      entries.push({
+        provider: this.provider,
+        reason: "watcher-down",
+        roots: [...this.watchedRoots],
+        since: new Date(this.watcherDownSinceMs).toISOString(),
+      });
+    }
+    const degraded = this.rootStates.filter((state) =>
+      state.degradedAtMs !== undefined
+    );
+    if (degraded.length > 0) {
+      entries.push({
+        provider: this.provider,
+        reason: "missed-changes",
+        roots: degraded.map((state) => state.root),
+        since: new Date(
+          Math.min(...degraded.map((state) => state.degradedAtMs!)),
+        ).toISOString(),
+        missedChanges: degraded.reduce(
+          (total, state) => total + state.missedChanges,
+          0,
+        ),
+      });
+    }
+    return entries;
+  }
+
+  /** Starts the watcher over the roots that exist now. */
+  private async launchWatcher(): Promise<void> {
+    this.watchRestartAtMs = undefined;
+    this.watchRestartRequested = false;
+    const existingRoots: string[] = [];
+    for (const state of this.rootStates) {
+      if (state.key === "") continue;
+      try {
+        if (await pathExists(state.root)) {
+          existingRoots.push(state.root);
+        }
+      } catch (error) {
+        if (!(await this.handleReadDenied(error, "stat", state.root))) {
+          throw error;
+        }
       }
+    }
+
+    const generation = ++this.watchGeneration;
+    this.watchedRoots = existingRoots;
+    this.watchedRootKeys = new Set(existingRoots.map(toPathKey));
+    if (existingRoots.length === 0) {
+      this.watcherState = "off";
+      return;
+    }
+    this.watchPathAliases = await resolveWatchPathAliases(existingRoots);
+
+    const controller = new AbortController();
+    this.watchAbortController = controller;
+    this.watcherState = "watching";
+    this.watchTask = this.watchFs(
+      existingRoots,
+      (batch) => this.onWatchBatch(batch, generation),
+      {
+        debounceMs: this.watchDebounceMs,
+        recursive: true,
+        signal: controller.signal,
+        now: this.now,
+      },
+    ).then(
+      () => this.onWatcherEnded(generation, controller, undefined),
+      (error) => this.onWatcherEnded(generation, controller, error),
+    );
+  }
+
+  /** Stops the current watcher, if any, and starts a new one. */
+  private async relaunchWatcher(): Promise<void> {
+    const controller = this.watchAbortController;
+    const task = this.watchTask;
+    this.watchAbortController = undefined;
+    this.watchTask = undefined;
+    controller?.abort();
+    if (task) await task;
+    await this.launchWatcher();
+  }
+
+  /**
+   * A watcher ended without being asked to: every root loses its trust and
+   * is walked on the fast interval until a restart, with backoff.
+   */
+  private async onWatcherEnded(
+    generation: number,
+    controller: AbortController,
+    error: unknown,
+  ): Promise<void> {
+    if (
+      controller.signal.aborted || generation !== this.watchGeneration ||
+      !this.started
+    ) {
+      return;
+    }
+    const nowMs = this.now().getTime();
+    const delayMs = this.watchRestartDelaysMs[
+      Math.min(this.watchFailures, this.watchRestartDelaysMs.length - 1)
+    ];
+    this.watchFailures += 1;
+    this.watcherState = "down";
+    this.watcherDownSinceMs = nowMs;
+    this.watchedRootKeys = new Set();
+    this.watchAbortController = undefined;
+    this.watchRestartAtMs = nowMs + delayMs;
+    this.tightenWalkSchedules(nowMs);
+
+    const message = error === undefined
+      ? "watcher stopped unexpectedly"
+      : error instanceof Error
+      ? error.message
+      : String(error);
+    const hint = describeWatchFailureHint(message);
+    await this.operationalLogger.error(
+      "provider.ingestion.watch.failed",
+      "Provider ingestion watch loop failed; rescanning roots until it restarts",
+      {
+        provider: this.provider,
+        error: message,
+        retryInMs: delayMs,
+        ...(hint ? { hint } : {}),
+      },
+    );
+  }
+
+  /** Restarts a failed watcher when due, or one asked for by a new root. */
+  private async maintainWatcher(nowMs: number): Promise<void> {
+    const restartDue = this.watcherState === "down" &&
+      this.watchRestartAtMs !== undefined && nowMs >= this.watchRestartAtMs;
+    if (!restartDue && !this.watchRestartRequested) return;
+    const wasDown = this.watcherState === "down";
+    await this.relaunchWatcher();
+    if (this.watcherState !== "watching") return;
+    // Whatever changed while a root was unwatched is found by walking it.
+    for (const state of this.rootStates) {
+      state.walkRequested = true;
+    }
+    if (wasDown) {
+      await this.operationalLogger.info(
+        "provider.ingestion.watch.restarted",
+        "Provider ingestion watcher restarted",
+        {
+          provider: this.provider,
+          attempt: this.watchFailures,
+          watchRoots: this.watchedRoots,
+        },
+      );
+    }
+  }
+
+  private isRootTrusted(state: RootDiscoveryState): boolean {
+    return this.watcherState === "watching" &&
+      this.watchedRootKeys.has(state.key) &&
+      state.degradedAtMs === undefined;
+  }
+
+  private walkIntervalFor(state: RootDiscoveryState): number {
+    return this.isRootTrusted(state)
+      ? this.discoveryIntervalMs
+      : this.degradedDiscoveryIntervalMs;
+  }
+
+  /** Brings untrusted roots' next walk forward to the fast interval. */
+  private tightenWalkSchedules(nowMs: number): void {
+    for (const state of this.rootStates) {
+      if (this.isRootTrusted(state)) continue;
+      state.nextWalkAtMs = Math.min(
+        state.nextWalkAtMs,
+        nowMs + this.degradedDiscoveryIntervalMs,
+      );
+    }
+  }
+
+  private rootStateFor(path: string): RootDiscoveryState | undefined {
+    const key = toPathKey(path);
+    let best: RootDiscoveryState | undefined;
+    for (const state of this.rootStates) {
+      if (
+        isPathKeyWithin(key, state.key) &&
+        (!best || state.key.length > best.key.length)
+      ) {
+        best = state;
+      }
+    }
+    return best;
+  }
+
+  private requestWalk(state: RootDiscoveryState | undefined): void {
+    for (const candidate of state ? [state] : this.rootStates) {
+      candidate.walkRequested = true;
+    }
+  }
+
+  /** Rewrites a watcher path into the form walks produce. */
+  private normalizeEventPath(rawPath: string): string {
+    const path = normalize(rawPath);
+    const key = toPathKey(path);
+    for (const alias of this.watchPathAliases) {
+      if (isPathKeyWithin(key, alias.fromKey)) {
+        return alias.toPrefix + path.slice(alias.fromPrefix.length);
+      }
+    }
+    return path;
+  }
+
+  private async onWatchBatch(
+    batch: DebouncedWatchBatch,
+    generation: number,
+  ): Promise<void> {
+    if (generation !== this.watchGeneration) return;
+    this.watchFailures = 0;
+    for (const rawPath of batch.paths) {
+      const path = this.normalizeEventPath(rawPath);
+      this.pendingBatchPaths.add(path);
+      if (this.isSessionFilePath(path)) {
+        this.eventSeenPaths.add(path);
+      }
+    }
+    if (batch.rescan) {
+      this.rescanRequested = true;
     }
     await this.operationalLogger.debug(
       "provider.ingestion.watch.batch",
       "Provider ingestion watch batch received",
-      { provider: this.provider, paths: batch.paths, kinds: batch.kinds },
+      {
+        provider: this.provider,
+        paths: batch.paths,
+        kinds: batch.kinds,
+        ...(batch.rescan ? { rescan: true } : {}),
+      },
     );
   }
 
@@ -1240,86 +1737,425 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
     return false;
   }
 
-  private async discoverAndTrackSessions(): Promise<void> {
+  private async walkDueRoots(nowMs: number): Promise<void> {
+    const due = this.rootStates.filter((state) =>
+      state.walkRequested || nowMs >= state.nextWalkAtMs
+    );
+    if (due.length === 0) return;
+    await this.walkRoots(due, nowMs);
+  }
+
+  /**
+   * Walks some roots and reconciles what they hold. A walk of every root
+   * behaves as discovery always did; a walk of some roots drops only
+   * sessions under those roots.
+   */
+  private async walkRoots(
+    states: RootDiscoveryState[],
+    walkStartMs: number,
+  ): Promise<void> {
+    const full = states.length === this.rootStates.length;
+    for (const state of states) {
+      state.walkRequested = false;
+      state.nextWalkAtMs = walkStartMs + this.walkIntervalFor(state);
+    }
+    await this.noticeAppearedRoots(states);
+
     let discovered: ProviderSessionFile[];
     try {
-      discovered = await this.discoverSessions();
+      discovered = await this.discoverSessions(
+        full ? this.watchRoots : states.map((state) => state.root),
+      );
     } catch (error) {
       if (
         await this.handleReadDenied(
           error,
           "readDir",
-          this.watchRoots[0] ?? "unknown",
+          states[0]?.root || this.watchRoots[0] || "unknown",
         )
       ) {
-        this.needsDiscovery = false;
-        this.nextDiscoveryAtMs = this.now().getTime() +
-          this.discoveryIntervalMs;
         return;
       }
       throw error;
     }
+
+    const stateKeys = states.map((state) => state.key);
+    const inScope = full ? () => true : (path: string) => {
+      const key = toPathKey(path);
+      return stateKeys.some((stateKey) => isPathKeyWithin(key, stateKey));
+    };
     const deduped = await this.dedupeDiscoveredSessions(discovered);
     const activeSessionIds = new Set<string>();
     const catchUpCandidates: ProviderSessionFile[] = [];
 
     for (const session of deduped) {
-      activeSessionIds.add(session.sessionId);
+      if (!inScope(session.filePath)) continue;
       const current = this.sessions.get(session.sessionId);
-      const isNewSession = !current;
-      const filePathChanged = current
-        ? current.filePath !== session.filePath
-        : false;
-      const modifiedAtChanged = current
-        ? current.modifiedAtMs !== session.modifiedAtMs
-        : false;
-      const parentChanged = current
-        ? current.parentProviderSessionId !== session.parentProviderSessionId
-        : session.parentProviderSessionId !== undefined;
       if (
-        isNewSession || filePathChanged || modifiedAtChanged || parentChanged
+        !full && current && current.filePath !== session.filePath &&
+        !inScope(current.filePath) &&
+        !(await this.candidateWins(session, current))
       ) {
-        if (
-          (isNewSession || parentChanged) && session.parentProviderSessionId
-        ) {
-          await this.reconcileDiscoveredSessionParent(session);
-        }
-        this.sessions.set(session.sessionId, session);
-        this.sessionByFilePath.set(session.filePath, session.sessionId);
-        if (current && current.filePath !== session.filePath) {
-          this.sessionByFilePath.delete(current.filePath);
-          this.cursors.delete(session.sessionId);
-          this.cursorSourcePaths.delete(session.sessionId);
-          this.forgetSessionParseCaches(session.sessionId);
-        }
-        if (
-          filePathChanged ||
-          modifiedAtChanged ||
-          this.shouldProactivelyIngestDiscoveredSession(session)
-        ) {
-          this.dirtySessions.add(session.sessionId);
-        } else if (isNewSession) {
-          catchUpCandidates.push(session);
-        }
+        continue;
+      }
+      activeSessionIds.add(session.sessionId);
+      await this.checkWalkObservation(session, current, walkStartMs);
+      if (await this.trackDiscoveredSession(session)) {
+        catchUpCandidates.push(session);
       }
     }
 
-    for (const [sessionId, existing] of this.sessions) {
-      if (!activeSessionIds.has(sessionId)) {
-        this.sessions.delete(sessionId);
-        this.sessionByFilePath.delete(existing.filePath);
-        this.cursors.delete(sessionId);
-        this.cursorSourcePaths.delete(sessionId);
-        this.forgetSessionParseCaches(sessionId);
-        this.ingestionFailures.delete(sessionId);
-        this.catchUpPending.delete(sessionId);
+    for (const [sessionId, existing] of [...this.sessions]) {
+      if (activeSessionIds.has(sessionId) || !inScope(existing.filePath)) {
+        continue;
       }
+      this.untrackSession(sessionId);
+    }
+    for (const path of [...this.eventSeenPaths]) {
+      if (inScope(path)) this.eventSeenPaths.delete(path);
+    }
+    for (const state of states) {
+      state.lastWalkAtMs = walkStartMs;
     }
 
     await this.queueStaleSessionCatchUp(catchUpCandidates);
+    await this.operationalLogger.debug(
+      "provider.ingestion.discovery.walked",
+      "Walked provider session roots",
+      {
+        provider: this.provider,
+        roots: full ? this.watchRoots.length : states.length,
+        full,
+        sessionsFound: deduped.length,
+      },
+    );
+  }
 
-    this.needsDiscovery = false;
-    this.nextDiscoveryAtMs = this.now().getTime() + this.discoveryIntervalMs;
+  /** Asks for a watcher restart when an unwatched root now exists. */
+  private async noticeAppearedRoots(
+    states: RootDiscoveryState[],
+  ): Promise<void> {
+    if (this.watcherState === "down" || this.watchRestartRequested) return;
+    for (const state of states) {
+      if (state.key === "" || this.watchedRootKeys.has(state.key)) continue;
+      let exists = false;
+      try {
+        exists = await pathExists(state.root);
+      } catch {
+        // Unreadable roots are reported by the walk itself.
+      }
+      if (exists) {
+        this.watchRestartRequested = true;
+        return;
+      }
+    }
+  }
+
+  /** Counts a walk's finding as missed when the watcher never reported it. */
+  private async checkWalkObservation(
+    session: ProviderSessionFile,
+    current: ProviderSessionFile | undefined,
+    nowMs: number,
+  ): Promise<void> {
+    if (current) {
+      if (
+        current.filePath === session.filePath &&
+        current.modifiedAtMs !== session.modifiedAtMs
+      ) {
+        await this.noteObservedChange(
+          session.filePath,
+          session.modifiedAtMs,
+          nowMs,
+        );
+      }
+      return;
+    }
+    const state = this.rootStateFor(session.filePath);
+    if (
+      state?.lastWalkAtMs !== undefined &&
+      session.modifiedAtMs > state.lastWalkAtMs
+    ) {
+      await this.noteObservedChange(
+        session.filePath,
+        session.modifiedAtMs,
+        nowMs,
+      );
+    }
+  }
+
+  /**
+   * A stat found a change (new mtime, or a new file) for `path`. If the
+   * watcher had not reported it and it is old enough that its event cannot
+   * still be in flight, it counts against the root's watcher.
+   */
+  private async noteObservedChange(
+    path: string,
+    mtimeMs: number,
+    nowMs: number,
+  ): Promise<void> {
+    if (this.eventSeenPaths.has(path)) return;
+    if (nowMs - mtimeMs < this.watchMissGraceMs) return;
+    const state = this.rootStateFor(path);
+    if (
+      !state || state.degradedAtMs !== undefined || !this.isRootTrusted(state)
+    ) {
+      return;
+    }
+    state.missTimesMs = state.missTimesMs.filter((time) =>
+      nowMs - time < this.watchMissWindowMs
+    );
+    state.missTimesMs.push(nowMs);
+    state.missedChanges += 1;
+    await this.operationalLogger.debug(
+      "provider.ingestion.watch.missed",
+      "A rescan found a change the watcher did not report",
+      {
+        provider: this.provider,
+        root: state.root,
+        path,
+        missesInWindow: state.missTimesMs.length,
+      },
+    );
+    if (state.missTimesMs.length < this.watchMissThreshold) return;
+    state.degradedAtMs = nowMs;
+    state.nextWalkAtMs = Math.min(
+      state.nextWalkAtMs,
+      nowMs + this.degradedDiscoveryIntervalMs,
+    );
+    await this.operationalLogger.warn(
+      "provider.ingestion.watch.degraded",
+      "Watcher missed changes under a session root; rescanning it every few seconds",
+      {
+        provider: this.provider,
+        root: state.root,
+        missedChanges: state.missedChanges,
+        windowMs: this.watchMissWindowMs,
+        rescanIntervalMs: this.degradedDiscoveryIntervalMs,
+        lastMissedPath: path,
+      },
+    );
+  }
+
+  /** Resolves the paths the watcher reported since the last poll. */
+  private async processPendingWatchPaths(): Promise<void> {
+    if (this.pendingBatchPaths.size === 0) return;
+    const paths = [...this.pendingBatchPaths];
+    this.pendingBatchPaths.clear();
+    const catchUpCandidates: ProviderSessionFile[] = [];
+    for (const path of paths) {
+      const sessionId = this.sessionByFilePath.get(path);
+      if (sessionId) {
+        this.dirtySessions.add(sessionId);
+        continue;
+      }
+      const state = this.rootStateFor(path);
+      if (!this.describeSessionFile) {
+        this.requestWalk(state);
+        continue;
+      }
+      if (!state) continue;
+      if (this.isSessionFilePath(path)) {
+        await this.resolveReportedFile(path, state, catchUpCandidates);
+      } else {
+        await this.resolveReportedOtherPath(path, state, catchUpCandidates);
+      }
+    }
+    await this.queueStaleSessionCatchUp(catchUpCandidates);
+  }
+
+  /** Tracks one reported file, as a walk that found it would. */
+  private async resolveReportedFile(
+    path: string,
+    state: RootDiscoveryState,
+    catchUpCandidates: ProviderSessionFile[],
+  ): Promise<void> {
+    let session: ProviderSessionFile | undefined;
+    try {
+      session = await this.describeSessionFile!(path, state.root);
+    } catch (error) {
+      if (await this.handleReadDenied(error, "stat", path)) return;
+      throw error;
+    }
+    if (!session) return;
+    const current = this.sessions.get(session.sessionId);
+    if (
+      current && current.filePath !== session.filePath &&
+      !(await this.candidateWins(session, current))
+    ) {
+      return;
+    }
+    if (await this.trackDiscoveredSession(session)) {
+      catchUpCandidates.push(session);
+    }
+  }
+
+  /**
+   * A reported path that cannot be a session file: a new directory is read
+   * (files made before its watch existed would be missed otherwise), and a
+   * vanished one takes its sessions with it.
+   */
+  private async resolveReportedOtherPath(
+    path: string,
+    state: RootDiscoveryState,
+    catchUpCandidates: ProviderSessionFile[],
+  ): Promise<void> {
+    let info: Deno.FileInfo | undefined;
+    try {
+      info = await lstatSessionFile(path);
+    } catch (error) {
+      if (await this.handleReadDenied(error, "stat", path)) return;
+      throw error;
+    }
+    if (info?.isDirectory) {
+      try {
+        for await (
+          const filePath of walkMatchingFiles(
+            path,
+            (name) => this.isSessionFilePath(name),
+          )
+        ) {
+          if (!this.sessionByFilePath.has(filePath)) {
+            await this.resolveReportedFile(filePath, state, catchUpCandidates);
+          }
+        }
+      } catch (error) {
+        if (await this.handleReadDenied(error, "readDir", path)) return;
+        throw error;
+      }
+      return;
+    }
+    if (info) return;
+    const key = toPathKey(path);
+    for (const [sessionId, session] of [...this.sessions]) {
+      if (!isPathKeyWithin(toPathKey(session.filePath), key)) continue;
+      try {
+        if (!(await lstatSessionFile(session.filePath))) {
+          this.untrackSession(sessionId);
+        }
+      } catch (error) {
+        if (!(await this.handleReadDenied(error, "stat", session.filePath))) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /**
+   * Stat-checks sessions that changed recently, so active sessions never
+   * depend on the watcher alone.
+   */
+  private async hotPoll(nowMs: number): Promise<void> {
+    this.nextHotPollAtMs = nowMs + this.hotPollIntervalMs;
+    const cutoffMs = nowMs - this.hotWindowMs;
+    for (const [sessionId, session] of [...this.sessions]) {
+      if (session.modifiedAtMs < cutoffMs) continue;
+      let info: Deno.FileInfo | undefined;
+      try {
+        info = await lstatSessionFile(session.filePath);
+      } catch (error) {
+        if (await this.handleReadDenied(error, "stat", session.filePath)) {
+          continue;
+        }
+        throw error;
+      }
+      if (!info) {
+        this.untrackSession(sessionId);
+        continue;
+      }
+      const mtimeMs = info.mtime?.getTime() ?? 0;
+      if (mtimeMs !== session.modifiedAtMs) {
+        await this.noteObservedChange(session.filePath, mtimeMs, nowMs);
+        this.sessions.set(sessionId, { ...session, modifiedAtMs: mtimeMs });
+        this.dirtySessions.add(sessionId);
+      }
+      this.eventSeenPaths.delete(session.filePath);
+    }
+  }
+
+  /**
+   * Whether `candidate` should replace the tracked file for the same
+   * session id: when that file is gone (a rename) or loses the same
+   * comparison a walk's dedupe uses.
+   */
+  private async candidateWins(
+    candidate: ProviderSessionFile,
+    current: ProviderSessionFile,
+  ): Promise<boolean> {
+    let fresh: ProviderSessionFile | undefined = current;
+    if (this.describeSessionFile) {
+      try {
+        fresh = await this.describeSessionFile(
+          current.filePath,
+          this.rootStateFor(current.filePath)?.root ?? "",
+        );
+      } catch (error) {
+        if (!(await this.handleReadDenied(error, "stat", current.filePath))) {
+          throw error;
+        }
+      }
+    }
+    if (!fresh || fresh.sessionId !== current.sessionId) return true;
+    return compareDiscoveredSessionCandidates(candidate, fresh) < 0;
+  }
+
+  /**
+   * Records a discovered session file. Returns true for a new session that
+   * was not marked for ingestion, so its caller can queue a catch-up check.
+   */
+  private async trackDiscoveredSession(
+    session: ProviderSessionFile,
+  ): Promise<boolean> {
+    const current = this.sessions.get(session.sessionId);
+    const isNewSession = !current;
+    const filePathChanged = current
+      ? current.filePath !== session.filePath
+      : false;
+    const modifiedAtChanged = current
+      ? current.modifiedAtMs !== session.modifiedAtMs
+      : false;
+    const parentChanged = current
+      ? current.parentProviderSessionId !== session.parentProviderSessionId
+      : session.parentProviderSessionId !== undefined;
+    if (
+      !isNewSession && !filePathChanged && !modifiedAtChanged && !parentChanged
+    ) {
+      return false;
+    }
+    if ((isNewSession || parentChanged) && session.parentProviderSessionId) {
+      await this.reconcileDiscoveredSessionParent(session);
+    }
+    this.sessions.set(session.sessionId, session);
+    this.sessionByFilePath.set(session.filePath, session.sessionId);
+    if (current && current.filePath !== session.filePath) {
+      this.sessionByFilePath.delete(current.filePath);
+      this.cursors.delete(session.sessionId);
+      this.cursorSourcePaths.delete(session.sessionId);
+      this.forgetSessionParseCaches(session.sessionId);
+    }
+    if (
+      filePathChanged ||
+      modifiedAtChanged ||
+      this.shouldProactivelyIngestDiscoveredSession(session)
+    ) {
+      this.dirtySessions.add(session.sessionId);
+      return false;
+    }
+    return isNewSession;
+  }
+
+  private untrackSession(sessionId: string): void {
+    const existing = this.sessions.get(sessionId);
+    if (!existing) return;
+    this.sessions.delete(sessionId);
+    if (this.sessionByFilePath.get(existing.filePath) === sessionId) {
+      this.sessionByFilePath.delete(existing.filePath);
+    }
+    this.cursors.delete(sessionId);
+    this.cursorSourcePaths.delete(sessionId);
+    this.forgetSessionParseCaches(sessionId);
+    this.ingestionFailures.delete(sessionId);
+    this.catchUpPending.delete(sessionId);
+    this.dirtySessions.delete(sessionId);
   }
 
   private async reconcileDiscoveredSessionParent(
@@ -1720,12 +2556,23 @@ export class FileProviderIngestionRunner implements ProviderIngestionRunner {
       fileStat = await Deno.stat(session.filePath);
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
+        this.untrackSession(sessionId);
         return { updated: false, eventsObserved: 0 };
       }
       if (await this.handleReadDenied(error, "stat", session.filePath)) {
         return { updated: false, eventsObserved: 0 };
       }
       throw error;
+    }
+
+    // Keep the tracked mtime current, so later stats and walks see only
+    // changes made after this read.
+    const statMtimeMs = fileStat.mtime?.getTime();
+    if (
+      statMtimeMs !== undefined && statMtimeMs !== session.modifiedAtMs &&
+      this.sessions.get(sessionId) === session
+    ) {
+      this.sessions.set(sessionId, { ...session, modifiedAtMs: statMtimeMs });
     }
 
     const truncatedResume = resolveByteOffsetResume({
@@ -2506,7 +3353,9 @@ export function createClaudeIngestionRunner(
   return new FileProviderIngestionRunner({
     provider: "claude",
     watchRoots: roots,
-    discoverSessions: () => discoverClaudeSessions(roots),
+    discoverSessions: (walkRoots) => discoverClaudeSessions(walkRoots),
+    describeSessionFile: (filePath) => describeClaudeSessionFile(filePath),
+    isSessionFilePath: isJsonlSessionPath,
     parseEvents: (filePath, fromOffset, ctx) =>
       parseClaudeEvents(filePath, fromOffset, {
         ...ctx,
@@ -2517,6 +3366,7 @@ export function createClaudeIngestionRunner(
     autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
+    discoveryTiming: options.discoveryTiming,
     watchDebounceMs: options.watchDebounceMs,
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
@@ -2533,7 +3383,11 @@ export function createCodexIngestionRunner(
   return new FileProviderIngestionRunner({
     provider: "codex",
     watchRoots: roots,
-    discoverSessions: () => discoverCodexSessions(roots, metaCache),
+    discoverSessions: (walkRoots) =>
+      discoverCodexSessions(walkRoots, metaCache),
+    describeSessionFile: (filePath) =>
+      describeCodexSessionFile(filePath, metaCache),
+    isSessionFilePath: isJsonlSessionPath,
     parseEvents: (filePath, fromOffset, ctx) =>
       parseCodexEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
@@ -2541,6 +3395,7 @@ export function createCodexIngestionRunner(
     autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
+    discoveryTiming: options.discoveryTiming,
     watchDebounceMs: options.watchDebounceMs,
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
@@ -2553,10 +3408,15 @@ export function createGeminiIngestionRunner(
   options: CreateProviderIngestionRunnerOptions,
 ): ProviderIngestionRunner {
   const roots = resolveGeminiSessionRoots(options.sessionRoots);
+  const discoveryCache: GeminiDiscoveryCache = new Map();
   return new FileProviderIngestionRunner({
     provider: "gemini",
     watchRoots: roots,
-    discoverSessions: () => discoverGeminiSessions(roots),
+    discoverSessions: (walkRoots) =>
+      discoverGeminiSessions(walkRoots, discoveryCache),
+    describeSessionFile: (filePath, root) =>
+      describeGeminiSessionFile(filePath, root, discoveryCache),
+    isSessionFilePath: isGeminiSessionPath,
     parseEvents: (filePath, fromOffset, ctx) =>
       parseGeminiEvents(filePath, fromOffset, ctx),
     sessionSnapshotStore: options.sessionSnapshotStore,
@@ -2564,6 +3424,7 @@ export function createGeminiIngestionRunner(
     autoGenerateTwins: options.autoGenerateTwins,
     now: options.now,
     discoveryIntervalMs: options.discoveryIntervalMs,
+    discoveryTiming: options.discoveryTiming,
     watchDebounceMs: options.watchDebounceMs,
     watchFs: options.watchFs,
     operationalLogger: options.operationalLogger,
@@ -2591,6 +3452,7 @@ export function createDefaultProviderIngestionRunners(
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
       discoveryIntervalMs: options.discoveryIntervalMs,
+      discoveryTiming: options.discoveryTiming,
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,
@@ -2604,6 +3466,7 @@ export function createDefaultProviderIngestionRunners(
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
       discoveryIntervalMs: options.discoveryIntervalMs,
+      discoveryTiming: options.discoveryTiming,
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,
@@ -2617,6 +3480,7 @@ export function createDefaultProviderIngestionRunners(
       now: options.now,
       watchDebounceMs: options.watchDebounceMs,
       discoveryIntervalMs: options.discoveryIntervalMs,
+      discoveryTiming: options.discoveryTiming,
       watchFs: options.watchFs,
       operationalLogger: options.operationalLogger,
       auditLogger: options.auditLogger,

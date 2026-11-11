@@ -3177,13 +3177,20 @@ export async function runDaemonRuntimeLoop(
       const ingestionFailures = ingestionRunners.flatMap((runner) =>
         runner.getIngestionFailures?.() ?? []
       );
-      const { ingestionFailures: _previousFailures, ...snapshotBase } =
-        snapshot;
+      const watchDegraded = ingestionRunners.flatMap((runner) =>
+        runner.getWatchDegraded?.() ?? []
+      );
+      const {
+        ingestionFailures: _previousFailures,
+        watchDegraded: _previousWatchDegraded,
+        ...snapshotBase
+      } = snapshot;
       snapshot = {
         ...snapshotBase,
         providers,
         sessions,
         ...(ingestionFailures.length > 0 ? { ingestionFailures } : {}),
+        ...(watchDegraded.length > 0 ? { watchDegraded } : {}),
         recordings: {
           activeRecordings: recordingSummary.activeRecordings,
           destinations: recordingSummary.destinations,
@@ -3311,6 +3318,7 @@ export async function runDaemonRuntimeLoop(
   };
   delete snapshot.daemonPid;
   delete snapshot.ingestionFailures;
+  delete snapshot.watchDegraded;
   await statusStore.save(snapshot);
 
   await operationalLogger.info(

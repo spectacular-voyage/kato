@@ -75,6 +75,7 @@ export {
   DaemonStatusSnapshotFileStore,
   isStatusSnapshotStale,
   readIngestionFailures,
+  readWatchDegraded,
   resolveDefaultControlPath,
   resolveDefaultRuntimeDir,
   resolveDefaultStatusPath,
