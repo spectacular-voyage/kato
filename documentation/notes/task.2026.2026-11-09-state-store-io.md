@@ -85,6 +85,7 @@ Reads are down about 30× and writes about 4×. CPU fell only about 20%, so pars
   - **The rest** of the process CPU is the filesystem calls themselves, on Deno's worker threads, plus the waits that hand each one back. That is about 1,800 write and 2,900 read syscalls a second at under 200 bytes each.
   - **Cause:** discovery rewalks every provider root every 5 seconds (`DEFAULT_DISCOVERY_INTERVAL_MS`). The daemon also watches those roots, so most of the walk only confirms what the watcher already reported. On galactica that is 21 roots, about 4,100 directories and 2,600 transcripts, so each walk issues roughly 6,700 directory reads and stats.
   - **Options:** walk less often while the watcher is healthy; re-read only directories whose mtime changed, since that catches new files; or both, plus a periodic full walk for missed events. Any of these needs per-platform watcher checks (inotify, FSEvents, ReadDirectoryChangesW) before discovery can rely on the watcher.
+  - **Planned** in [[task.2026.2026-11-10-watcher-led-discovery]].
 - `listSessionMetadata()` still stats and clones every session's metadata (about 70 ms for 2,316 sessions) for Kato Web and CLI callers.
 - Twin hydration still reads the whole twin once per session after start (see [[task.2026.2026-11-09-snapshot-sharing]]).
 
