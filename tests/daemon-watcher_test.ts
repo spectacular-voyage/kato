@@ -95,3 +95,50 @@ Deno.test("watchFsDebounced exits promptly when aborted without filesystem event
     await removePathIfPresent(dir);
   }
 });
+
+Deno.test("DebouncedPathAccumulator carries a rescan flag even without paths", () => {
+  const accumulator = new DebouncedPathAccumulator(100);
+  accumulator.add({ kind: "other", paths: [], flag: "rescan" }, 10);
+  assertEquals(accumulator.hasPending(), true);
+
+  const batch = accumulator.flush(new Date("2026-02-22T10:20:00.000Z"));
+  assertExists(batch);
+  assertEquals(batch.paths, []);
+  assertEquals(batch.rescan, true);
+
+  accumulator.add(createFsEvent("modify", [WATCHER_PATH_A]), 20);
+  assertEquals(
+    accumulator.flush(new Date("2026-02-22T10:20:01.000Z"))?.rescan,
+    undefined,
+  );
+});
+
+Deno.test("watchFsDebounced delivers a batch during steady writes", async () => {
+  const dir = await makeTestTempDir("watch-max-wait-");
+  const abortController = new AbortController();
+  const batchTimes: number[] = [];
+  const startedAtMs = Date.now();
+  try {
+    const watchTask = watchFsDebounced(
+      [dir],
+      () => {
+        batchTimes.push(Date.now() - startedAtMs);
+      },
+      { signal: abortController.signal, debounceMs: 250, maxWaitMs: 500 },
+    );
+    // Writes every 50 ms never leave the 250 ms quiet a plain debounce needs.
+    const file = `${dir}/steady.jsonl`;
+    const writeUntilMs = startedAtMs + 3_000;
+    while (Date.now() < writeUntilMs && batchTimes.length === 0) {
+      await Deno.writeTextFile(file, "x\n", { append: true });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    abortController.abort();
+    await watchTask;
+    assertEquals(batchTimes.length > 0, true);
+    assertEquals(batchTimes[0] < 3_000, true);
+  } finally {
+    abortController.abort();
+    await removePathIfPresent(dir);
+  }
+});

@@ -2,10 +2,21 @@ export interface DebouncedWatchBatch {
   paths: string[];
   kinds: Deno.FsEvent["kind"][];
   emittedAt: string;
+  /**
+   * The OS dropped events in this window (queue or buffer overflow), so
+   * `paths` is incomplete and anything under the watched roots may have
+   * changed. Set only when true.
+   */
+  rescan?: boolean;
 }
 
 export interface WatchDebounceOptions {
   debounceMs?: number;
+  /**
+   * Longest a batch waits after its first event. Without it, steady writes
+   * anywhere under the roots would keep postponing every batch.
+   */
+  maxWaitMs?: number;
   recursive?: boolean;
   signal?: AbortSignal;
   now?: () => Date;
@@ -14,6 +25,7 @@ export interface WatchDebounceOptions {
 export class DebouncedPathAccumulator {
   private readonly pendingPaths = new Set<string>();
   private readonly pendingKinds = new Set<Deno.FsEvent["kind"]>();
+  private pendingRescan = false;
   private lastEventAtMs: number | null = null;
 
   constructor(private readonly debounceMs: number) {}
@@ -23,11 +35,14 @@ export class DebouncedPathAccumulator {
       this.pendingPaths.add(path);
     }
     this.pendingKinds.add(event.kind);
+    if (event.flag === "rescan") {
+      this.pendingRescan = true;
+    }
     this.lastEventAtMs = nowMs;
   }
 
   hasPending(): boolean {
-    return this.pendingPaths.size > 0;
+    return this.pendingPaths.size > 0 || this.pendingRescan;
   }
 
   shouldFlush(nowMs = Date.now()): boolean {
@@ -51,10 +66,12 @@ export class DebouncedPathAccumulator {
       paths: [...this.pendingPaths],
       kinds: [...this.pendingKinds],
       emittedAt: now.toISOString(),
+      ...(this.pendingRescan ? { rescan: true } : {}),
     };
 
     this.pendingPaths.clear();
     this.pendingKinds.clear();
+    this.pendingRescan = false;
     this.lastEventAtMs = null;
 
     return batch;
@@ -72,6 +89,7 @@ export async function watchFsDebounced(
   options: WatchDebounceOptions = {},
 ): Promise<void> {
   const debounceMs = options.debounceMs ?? 250;
+  const maxWaitMs = Math.max(debounceMs, options.maxWaitMs ?? 1_000);
   const now = options.now ?? (() => new Date());
 
   const watcher = Deno.watchFs(watchPaths, {
@@ -94,6 +112,7 @@ export async function watchFsDebounced(
 
   const accumulator = new DebouncedPathAccumulator(debounceMs);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let firstPendingAtMs: number | null = null;
 
   const flush = async () => {
     const batch = accumulator.flush(now());
@@ -103,14 +122,21 @@ export async function watchFsDebounced(
   };
 
   const scheduleFlush = () => {
+    const nowMs = Date.now();
+    firstPendingAtMs ??= nowMs;
     if (timer !== null) {
       clearTimeout(timer);
     }
 
+    const waitMs = Math.max(
+      0,
+      Math.min(debounceMs, firstPendingAtMs + maxWaitMs - nowMs),
+    );
     timer = setTimeout(() => {
       timer = null;
+      firstPendingAtMs = null;
       void flush();
-    }, debounceMs);
+    }, waitMs);
   };
 
   try {
