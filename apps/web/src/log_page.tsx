@@ -1,6 +1,6 @@
 import LogsResultsLive from "../islands/LogsResultsLive.tsx";
 import AppHeader from "./app_header.tsx";
-import { DEFAULT_LOG_LEVEL_FILTER } from "./loaders/logs.ts";
+import { DEFAULT_LOG_LEVEL_FILTER } from "./log_filters.ts";
 import type { AppChromeStatus } from "./loaders/status.ts";
 import type {
   LogChannel,

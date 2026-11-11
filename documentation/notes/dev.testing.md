@@ -65,7 +65,17 @@ Smoke validation on 2026-03-18 confirmed:
 - `deno task test --frozen --filter 'resolveWebInitPassword reads KATO_WEB_PASSWORD from process env when no override is injected'`
 - `deno task test:coverage --filter 'loadSummaryPageData reads the default shared status snapshot'`
 
-`deno task test:web` runs the Kato Web component tests in `apps/web/tests` with the web config (`--config apps/web/deno.json`, which carries the JSX settings) and scoped permissions. `deno task ci` runs it after the root suite.
+`deno task test:web` builds Kato Web (`deno task --cwd apps/web build`) and then runs the tests in `apps/web/tests` with the web config (`--config apps/web/deno.json`, which carries the JSX settings) and scoped permissions. `deno task ci` runs it after the root suite.
+
+`apps/web/tests/characterization_test.ts` drives the built server (`_fresh/server.js`) in-process through `apps/web/tests/characterization/`:
+
+- **Isolation:** the harness points `HOME` and `USERPROFILE` at a temp directory under `.test-tmp`, because route code resolves the default `~/.kato` paths. It initializes a web config there and signs in for real.
+- **Heartbeat:** the harness pre-sets the status heartbeat's global guard, so importing the server starts no timer.
+- **Cases:** `cases.ts` holds one row per route, method and auth state, covering pages, APIs, login, logout, unconfigured state, mutation guards, undefined methods, slash and encoding variants, and static and brand files. Built assets are checked for ETag/304, `Vary` and cache policy.
+- **Replacement:** the rows record what Fresh does today; the server replacing Fresh ([[task.2026.2026-11-10-leave-fresh]]) must pass the same rows. A deliberate difference sets `divergence` and `expectReplacement` on its row and goes in the task note's Contract Changes.
+- **Running it alone:** `test:web` runs its files one at a time, which the `HOME` switch relies on. To run the suite by itself, build first, then run `deno test --config apps/web/deno.json --allow-read --allow-write=.test-tmp --allow-env apps/web/tests/characterization_test.ts`.
+
+`apps/web/tests/client_graph_test.ts` guards the browser bundle. It walks each island's and `client.ts`'s runtime import graph with `deno info --json` (hence `--allow-run=deno` in `test:web`). Only `apps/web/islands`, `apps/web/src` outside `loaders/`, `shared/src`, and npm `preact` are allowed, and reachable modules may not use `Deno.*`. A value import from a loader or from `@kato/runtime` in browser code fails it. Import such values from a browser-safe module instead (for example `apps/web/src/log_filters.ts`, or `@kato/shared` for the hash helpers).
 
 GitHub CI uses a split gate:
 

@@ -1,23 +1,9 @@
-import { clearSessionCookie, loadWebConfigState } from "../src/auth.ts";
+// Fresh entry point; the handlers live in apps/web/pages (see fresh_adapter.tsx).
+import { freshHandler } from "../fresh_adapter.tsx";
 import { define } from "../utils.ts";
-
-async function clearSessionAndRedirectToLogin(
-  request: Request,
-): Promise<Response> {
-  const { config } = await loadWebConfigState();
-  const headers = new Headers();
-  if (config) {
-    clearSessionCookie(headers, request, config);
-  }
-  headers.set("location", "/login");
-  return new Response(null, { status: 302, headers });
-}
+import * as route from "../pages/logout.ts";
 
 export const handler = define.handlers({
-  GET() {
-    return new Response("logout requires POST", { status: 405 });
-  },
-  async POST(ctx) {
-    return await clearSessionAndRedirectToLogin(ctx.req);
-  },
+  GET: () => route.GET(),
+  POST: freshHandler(route.POST),
 });

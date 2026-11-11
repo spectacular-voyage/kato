@@ -113,3 +113,4 @@ export {
   formatWorkspaceLabel,
   normalizeWorkspaceDisplayName,
 } from "./workspace_labels.ts";
+export { hashStringFNV1a, stableStringify } from "./hash.ts";

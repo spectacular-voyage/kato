@@ -2,7 +2,7 @@
   "version": "0.2.19",
   "nodeModulesDir": "auto",
   "tasks": {
-    "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts routes/**/*.tsx src/**/*.ts",
+    "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts fresh_adapter.tsx routes/**/*.tsx pages/**/*.ts pages/**/*.tsx src/**/*.ts",
     "install:check": "deno install --frozen",
     "dev": "vite",
     "build": "vite build",

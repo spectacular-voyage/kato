@@ -1,5 +1,5 @@
 import type { RecordingStateFilter } from "./loaders/recordings.ts";
-import { hashStringFNV1a } from "@kato/runtime";
+import { hashStringFNV1a } from "@kato/shared";
 
 export interface SessionRouteOptions {
   includeStale?: boolean;
