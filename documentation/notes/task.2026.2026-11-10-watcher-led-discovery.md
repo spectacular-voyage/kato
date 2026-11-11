@@ -239,7 +239,7 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
   - the new log events;
   - the inotify-limit hint.
 - [x] Integration tests pass on Linux.
-- [ ] Integration tests pass in macOS and Windows CI.
+- [x] Integration tests pass in macOS and Windows CI (PR #58). The watcher alone delivers each change on both, and the symlinked-root test passes on macOS. It is skipped on Windows.
 - [x] Docs: discovery and the watcher in [[dev.codebase-overview]].
 - [ ] Release notes, written at release.
 - [x] `deno task ci`: 998 root tests and 12 web tests passed.
