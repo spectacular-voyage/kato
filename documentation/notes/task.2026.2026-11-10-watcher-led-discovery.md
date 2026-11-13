@@ -196,11 +196,26 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 | branch, with ingestion | 5.4% | 1,545 | 37 |
 
 - **Discovery:** about 90% less CPU. Write syscalls, which track the async filesystem calls, fell 99%. The `main` rows match the installed daemon's profile in [[task.2026.2026-11-09-state-store-io]]: about 2,900 reads and 1,800 writes a second.
-- **Remaining reads:** about 1,400 a second in both builds come from the watcher reading events while dozens of agents write under the roots.
+- **Remaining reads:** about 1,400 a second in both builds. I attributed these to the watcher, but the installed daemon makes only 46–94 reads a second (below), so they were not the watcher's. Their source in the script was not investigated.
 - **The ingestion rows overstate ingestion.** The script keeps no session state, so a session's first change after start parses its transcript from the beginning: 88,903 events in 120 seconds. The daemon resumes from saved cursors.
 - **Branch debug counts:** over 120 seconds the Claude and Codex runners did not walk at all, and nothing degraded. Only the missing Gemini root was walked every 5 seconds, which costs one stat.
 
-**After release:** measure the installed daemon the same way and record the numbers here.
+**After release (2026-11-12, galactica):** the same sampler on the installed daemon. `v0.2.19` had been running for 2 days 10 hours with 22 active sessions. I sampled it for 180 seconds, installed `v0.2.20` with `npm install -g`, ran `kato restart`, and sampled two 180-second windows starting 10 and 13 minutes after the restart, with 26 active sessions.
+
+| Measure | `v0.2.19` | `v0.2.20` |
+|---|---|---|
+| CPU | 10.3% | 3.0–3.6% |
+| Read syscalls/s | 1,282 | 46–94 |
+| Write syscalls/s | 1,883 | 103–123 |
+| Writes (`wchar`) | 0.26 MB/s | 0.29–0.43 MB/s |
+| RSS | 887 MB | 490–516 MB |
+
+- **CPU** fell by about two thirds and filesystem syscalls by about 95%. The remaining 3% is not attributed.
+- **Writes** did not change. They are metadata saves, a separate task (see [[task.2026.2026-11-09-state-store-io]] Open Issues).
+- **RSS** fell mostly because of the restart, not this change.
+- **New sessions:** three transcripts (Claude subagents) were created in the 16 minutes after the restart. Kato created each one's metadata 0.75–1.46 seconds after the file was created, measured from the file's birth time to the metadata's `createdAt`. A walk of the 26 roots found no transcript created since the restart that Kato had missed.
+- **Watcher health:** `kato status` showed no Watcher Degraded section. The operational log had no `watch.failed`, `watch.restarted`, `watch.rescan` or `watch.degraded` entries.
+- **Walk counts** were not recorded. The daemon logs at `info`, and `provider.ingestion.discovery.walked` is a debug event.
 
 ## Non-Goals
 
@@ -244,4 +259,4 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 - [x] Release notes, written at release ([[release-notes.v0.2.20]]).
 - [x] `deno task ci`: 998 root tests and 12 web tests passed.
 - [x] Measure discovery before and after on galactica, in a script (see Verification).
-- [ ] Measure the installed daemon on galactica after release.
+- [x] Measure the installed daemon on galactica after release: CPU 10.3% to 3.0–3.6%, and new sessions appear within 1.5 seconds (see Verification).

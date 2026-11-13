@@ -34,6 +34,7 @@ This note is the working board for developer-facing project state. Keep product 
 - [ ] Harden provider-aware lookup paths where CLI/runtime reads can still be ambiguous by provider session id alone.
 - [ ] Decide whether to redesign mid-turn cursor advancement so polling cannot split one logical assistant turn into separate snapshot entries.
 - [ ] Optimize `resolveConversationTitle` dedup/memoization in daemon runtime if profiling shows it matters.
+- [ ] Stop the detached daemon inheriting the CLI's stderr (`stderr: "inherit"` in `apps/runtime/src/orchestrator/launcher.ts`). `kato start` or `kato restart` piped into another command (`kato restart 2>&1 | tail`) never returns, because the daemon holds the pipe open; ending the reader would leave the daemon writing to a broken pipe. Kato Web already redirects to `~/.kato/web/logs/startup.*.log`; the daemon could do the same.
 
 ## Config And Compatibility Nits
 
