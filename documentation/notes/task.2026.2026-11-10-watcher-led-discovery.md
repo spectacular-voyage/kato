@@ -241,7 +241,7 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 - [x] Integration tests pass on Linux.
 - [x] Integration tests pass in macOS and Windows CI (PR #58). The watcher alone delivers each change on both, and the symlinked-root test passes on macOS. It is skipped on Windows.
 - [x] Docs: discovery and the watcher in [[dev.codebase-overview]].
-- [ ] Release notes, written at release.
+- [x] Release notes, written at release ([[release-notes.v0.2.20]]).
 - [x] `deno task ci`: 998 root tests and 12 web tests passed.
 - [x] Measure discovery before and after on galactica, in a script (see Verification).
 - [ ] Measure the installed daemon on galactica after release.
