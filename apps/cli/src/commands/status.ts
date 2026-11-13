@@ -15,6 +15,7 @@ import {
   isStatusSnapshotStale,
   PersistentSessionStateStore,
   readIngestionFailures,
+  readWatchDegraded,
 } from "@kato/runtime";
 import { CLI_APP_VERSION } from "../version.ts";
 import {
@@ -1224,6 +1225,38 @@ export function renderStatusText(
         formatLocalTimestamp(failure.firstFailedAt)
       } · ${attempts} · ${sanitizeInlineText(failure.error)}`;
       lines.push(formatPrefixedLine("  ", detail, width));
+    }
+    lines.push(divider);
+  }
+
+  const watchDegraded = readWatchDegraded(snapshot);
+  if (watchDegraded.length > 0) {
+    lines.push(
+      colorizeText(
+        `Watcher Degraded (${watchDegraded.length})`,
+        "amber",
+        colorize,
+      ),
+    );
+    lines.push("");
+    for (const entry of watchDegraded) {
+      const reason = entry.reason === "watcher-down"
+        ? "watcher down, restarting"
+        : `missed ${entry.missedChanges ?? 0} ${
+          entry.missedChanges === 1 ? "change" : "changes"
+        }`;
+      const rootCount = `${entry.roots.length} ${
+        entry.roots.length === 1 ? "root" : "roots"
+      }`;
+      const detail = `${
+        sanitizeInlineText(entry.provider)
+      } · ${reason} · ${rootCount} rescanned every few seconds · since ${
+        formatLocalTimestamp(entry.since)
+      }`;
+      lines.push(formatPrefixedLine("  ", detail, width));
+      for (const root of entry.roots) {
+        lines.push(formatPrefixedLine("    ", sanitizeInlineText(root), width));
+      }
     }
     lines.push(divider);
   }

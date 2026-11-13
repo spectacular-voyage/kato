@@ -1,6 +1,7 @@
 import type {
   DaemonIngestionFailureStatus,
   DaemonStatusSnapshot,
+  DaemonWatchDegradedStatus,
 } from "@kato/shared";
 import { dirname, isAbsolute, join } from "@std/path";
 import {
@@ -116,6 +117,31 @@ function isIngestionFailureStatus(
     typeof value["lastFailedAt"] === "string" &&
     typeof value["consecutiveFailures"] === "number" &&
     typeof value["nextRetryAt"] === "string";
+}
+
+function isWatchDegradedStatus(
+  value: unknown,
+): value is DaemonWatchDegradedStatus {
+  return isRecord(value) &&
+    typeof value["provider"] === "string" &&
+    (value["reason"] === "watcher-down" ||
+      value["reason"] === "missed-changes") &&
+    Array.isArray(value["roots"]) &&
+    value["roots"].every((root) => typeof root === "string") &&
+    typeof value["since"] === "string" &&
+    (value["missedChanges"] === undefined ||
+      typeof value["missedChanges"] === "number");
+}
+
+/**
+ * Valid `watchDegraded` entries from a loaded status snapshot. Optional and
+ * not part of snapshot validation, like `ingestionFailures`.
+ */
+export function readWatchDegraded(
+  snapshot: Pick<DaemonStatusSnapshot, "watchDegraded">,
+): DaemonWatchDegradedStatus[] {
+  const value: unknown = snapshot.watchDegraded;
+  return Array.isArray(value) ? value.filter(isWatchDegradedStatus) : [];
 }
 
 /**

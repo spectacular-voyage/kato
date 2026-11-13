@@ -105,11 +105,10 @@ Deno's watcher is the Rust `notify` crate.
 - **The thresholds are first guesses.** Tune them from the logs after release:
   - a 10-minute hot window;
   - a full walk every 5 minutes;
-  - a 2-second grace period;
+  - a 3-second grace period (a batch waits at most 1 second, and the daemon polls every second);
   - degrade a root after 3 misses within 10 minutes.
 - **A degraded root stays degraded until the daemon restarts.** Promoting it back after a long run of fully reported changes is possible, but out of scope.
-- **Windows appends through a long-held handle.** Does Claude Code or Codex write that way? The hot poll covers active sessions either way, and the integration test records what the watcher actually reports.
-- **The `max_user_watches` error.** When the watcher throws because of it, log the sysctl to raise, not just the raw error.
+- **Windows appends through a long-held handle.** Does Claude Code or Codex write that way? The hot poll covers active sessions either way, and the held-open-handle integration test asserts ingestion, not which mechanism delivered it.
 
 ## Decisions
 
@@ -117,26 +116,42 @@ Deno's watcher is the Rust `notify` crate.
 - **Active sessions are stat-polled every 5 seconds regardless.** It costs a few dozen stats, and it keeps the delay people notice independent of the watcher.
 - **Degradation is per root.** One root on a network share should not put 19 local roots back on a 5-second walk. Walks take a list of roots, and a walk removes only sessions under the roots it walked.
 - **A path the watcher reports is resolved on its own, by code shared with the walk.** Each provider gets one function that describes a single file, and both the walk and watch events call it, so the two can't drift. When two files claim the same session id, `compareDiscoveredSessionCandidates` picks the winner, as the walk's dedupe does.
-- **Ignored paths are remembered with their file stamp.** That covers:
-  - non-transcript names;
-  - Codex `exec` rollouts;
-  - dedupe losers;
-  - files whose first line is incomplete. These are retried when the stamp changes.
-- **`Deno.watchFs` stays in `core/watcher.ts`.** The batch gains a runtime-neutral `rescan: boolean`. The reliability logic lives in the runner and uses no `Deno.*` API, per [[dev.general-guidance]].
+- **Ignored paths are not remembered (changed during implementation).** Names that can't be transcripts are dropped without any I/O. Every other reported path costs one `lstat`; a Codex rollout also costs its first-line read, but only when the meta cache has no entry for it. Codex `exec` rollouts, dedupe losers, and files with an incomplete first line are therefore re-described on each event rather than walked. A stamp map would save one stat per event and add state that can go stale.
+- **A batch waits at most 1 second (added during implementation).** `watchFsDebounced` restarted its 250 ms debounce on every event under any root, so steady writes anywhere would postpone every batch. Postponed batches would then look like misses.
+- **Watcher paths are mapped back to the configured root (added during implementation).** FSEvents reports resolved paths, for example `/private/var/...` for `/var/...`. Without the mapping, a symlinked root on macOS would never match a tracked path and would degrade itself.
+- **Ingestion untracks a session whose file is gone.** A remove event then drops the session at once instead of waiting for the next walk. A file that reappears is picked up again by its create event.
+- **`Deno.watchFs` stays in `core/watcher.ts`.** The batch gains a runtime-neutral, optional `rescan` flag. The miss-detection and scheduling logic doesn't depend on which watcher reports the events, per [[dev.general-guidance]]. The runner still calls `Deno.lstat` and `Deno.realPath` alongside its existing `Deno.stat` calls, all in this one file.
 - **No persisted-state or configuration change.** The intervals are constants that tests can inject.
 
 ## Contract Changes
 
 - **Internal:**
-  - `DebouncedWatchBatch` gains `rescan: boolean`.
-  - The `discoverSessions` runner option takes the roots to walk.
-  - Each provider adds a function that describes a single file.
-- **Status snapshot:** it gains an optional per-provider watch state: `watching`, `restarting`, or a list of degraded roots with their miss counts. Readers that don't know the field ignore it. `kato status` shows degraded roots; Kato Web can follow later.
-- **Log events:** `provider.ingestion.watch.rescan`, `provider.ingestion.watch.restarted` and `provider.ingestion.watch.degraded` are new.
+  - `DebouncedWatchBatch` gains `rescan?: true`, and `WatchDebounceOptions` gains `maxWaitMs` (default 1 second).
+  - The `discoverSessions` runner option takes the roots to walk. Existing fakes that ignore the argument still type-check.
+  - New runner options: `describeSessionFile`, `isSessionFilePath`, and `discoveryTiming`. Without `describeSessionFile`, a reported unknown path walks its root, as before.
+  - Each provider exports `describe*SessionFile`. Gemini also gets a `GeminiDiscoveryCache`.
+  - `discoveryIntervalMs` now means the walk interval for trusted roots, with a new default of 5 minutes.
+  - `FileProviderIngestionRunner.listTrackedSessions()` is new, for diagnostics and tests.
+- **Status snapshot:** `watchDegraded?: DaemonWatchDegradedStatus[]`, present only while something is degraded. Each entry has:
+  - `provider`;
+  - `reason`, either `watcher-down` or `missed-changes`;
+  - `roots`;
+  - `since`;
+  - `missedChanges`, optional.
+
+  `readWatchDegraded()` filters out malformed entries, as `readIngestionFailures()` does. `kato status` shows a "Watcher Degraded" section; Kato Web can follow later.
+- **Log events:**
+  - `provider.ingestion.watch.rescan` (info);
+  - `provider.ingestion.watch.restarted` (info);
+  - `provider.ingestion.watch.degraded` (warn);
+  - `provider.ingestion.watch.missed` (debug);
+  - `provider.ingestion.discovery.walked` (debug, one per walk).
+
+  `provider.ingestion.watch.failed` now carries `retryInMs`, and a `hint` when the inotify watch or instance limit is the cause.
 
 ## Testing
 
-Unit tests drive the runner with an injected clock, a fake `watchFs`, and spies on walks and stats. The runner already accepts the clock and the watcher as options; the stat spy needs a new seam.
+Unit tests (`tests/provider-ingestion-discovery_test.ts`) drive the runner with an injected clock, a fake `watchFs`, and a spy on walks. They use real temp files whose mtimes are set with `Deno.utime`, so no stat seam was needed.
 
 - **Healthy watcher:** over 11 simulated minutes, walks happen only at start and at 5 and 10 minutes. New and changed transcripts are ingested from events alone.
 - **Unknown paths:**
@@ -156,14 +171,12 @@ Unit tests drive the runner with an injected clock, a fake `watchFs`, and spies 
 - **Equivalence:** after a scripted sequence of creates, appends, renames, deletes, duplicates and `exec` rollouts, the tracked set built from events equals what a fresh full walk produces.
 - **Gemini:** an unchanged session file is not read again on the next walk.
 
-Integration tests use the real `watchFsDebounced` on a temp root and run in CI on Linux, macOS and Windows. Each test does one change:
-- append to a transcript;
-- create a nested directory and immediately a file in it;
-- rename a transcript;
-- delete one;
-- append through a handle kept open.
+Integration tests (`tests/provider-ingestion-watch-integration_test.ts`) use the real watcher on a temp root and run in CI on Linux, macOS and Windows:
+- **Watcher alone:** walks and the hot poll are pushed out to an hour, so only the watcher can deliver changes. The test checks a nested directory created together with its file, an append, a rename, and a delete, each within 10 seconds, with exactly one walk.
+- **Held-open handle:** an append through a handle kept open is ingested, with the hot poll on.
+- **Symlinked root:** a root reached through a symlink (made with `ln -s`, since `Deno.symlink` needs unscoped write permission) is watched under its configured path. Skipped on Windows.
 
-Each asserts ingestion within 10 seconds, counts the walks, and records whether the change arrived through the watcher or the hot poll.
+`tests/daemon-watcher_test.ts` covers the `rescan` flag and the batch's 1-second wait cap. With the cap removed, the steady-writes test fails, which shows it can catch a regression. `tests/watch-degraded-status_test.ts` covers the heartbeat, `readWatchDegraded()` and `kato status`.
 
 ## Verification
 
@@ -172,6 +185,22 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 - read and write syscall rates;
 - walk counts from the debug log;
 - the time from starting a new Claude session to its appearing in `kato status`.
+
+**Before release (2026-11-10, galactica):** I ran `main` and this branch side by side in a script, not as the daemon. Each run used the 26 configured roots, the real watcher, and an in-memory store, wrote nothing, and polled every second as the daemon does. A parent process sampled each run's `/proc/PID/stat` and `/proc/PID/io` over 150 seconds, after a 60-second warmup.
+
+| Run | CPU | Read syscalls/s | Write syscalls/s |
+|---|---|---|---|
+| `main`, discovery and watching only | 9.4% | 2,607 | 1,468 |
+| branch, discovery and watching only | 0.9% | 1,435 | 17 |
+| `main`, with ingestion | 12.6% | 2,886 | 1,747 |
+| branch, with ingestion | 5.4% | 1,545 | 37 |
+
+- **Discovery:** about 90% less CPU. Write syscalls, which track the async filesystem calls, fell 99%. The `main` rows match the installed daemon's profile in [[task.2026.2026-11-09-state-store-io]]: about 2,900 reads and 1,800 writes a second.
+- **Remaining reads:** about 1,400 a second in both builds come from the watcher reading events while dozens of agents write under the roots.
+- **The ingestion rows overstate ingestion.** The script keeps no session state, so a session's first change after start parses its transcript from the beginning: 88,903 events in 120 seconds. The daemon resumes from saved cursors.
+- **Branch debug counts:** over 120 seconds the Claude and Codex runners did not walk at all, and nothing degraded. Only the missing Gemini root was walked every 5 seconds, which costs one stat.
+
+**After release:** measure the installed daemon the same way and record the numbers here.
 
 ## Non-Goals
 
@@ -183,31 +212,36 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 
 ## Implementation Plan
 
-- [ ] Contracts:
+- [x] Contracts:
   - `rescan` on `DebouncedWatchBatch`;
   - a `discoverSessions` that takes the roots to walk;
   - a per-provider single-file describe function, shared with the walks;
-  - a Gemini discovery cache keyed by inode, size, and mtime.
-- [ ] Key tests before the rewrite: equivalence, healthy-watcher walk counts, and the blind watcher's hot poll and degrade.
-- [ ] Watch events:
+  - a Gemini discovery cache, keyed by mtime and size.
+- [x] Key tests: equivalence, healthy-watcher walk counts, and the blind watcher's hot poll and degrade.
+- [x] Watch events:
   - classify paths per provider;
   - resolve unknown transcripts and directories on their own;
-  - remember ignored paths with their stamp;
-  - stop setting `needsDiscovery` for everything else.
-- [ ] Watcher lifecycle:
+  - stop walking everything for other paths.
+- [x] Remember ignored paths with their stamp. Cancelled; see Decisions.
+- [x] Watcher lifecycle:
   - handle `rescan`;
   - restart after a failure with backoff (5 seconds, 30 seconds, then every 5 minutes);
   - treat roots as degraded while the watcher is down;
-  - do a full walk after a restart.
-- [ ] Hot poll: stat sessions changed in the last 10 minutes every 5 seconds, and keep the tracked mtime current after ingestion.
-- [ ] Miss detection and per-root degradation:
+  - do a full walk after a restart;
+  - start watching a root that appears after start.
+- [x] Watcher batches wait at most 1 second; watcher paths are mapped back to symlinked roots.
+- [x] Hot poll: stat sessions changed in the last 10 minutes every 5 seconds, and keep the tracked mtime current after ingestion.
+- [x] Miss detection and per-root degradation:
   - full walks every 5 minutes for healthy roots and every 5 seconds for degraded ones;
   - a walk of some roots drops only those roots' sessions.
-- [ ] Status and logs:
-  - watch state in the status snapshot and `kato status`;
-  - the three new log events;
-  - the `max_user_watches` hint.
-- [ ] Integration tests on Linux, macOS and Windows CI.
-- [ ] Docs: discovery and the watcher in [[dev.codebase-overview]]; release notes.
-- [ ] `deno task ci`.
-- [ ] Verify on galactica and record the before and after numbers here.
+- [x] Status and logs:
+  - `watchDegraded` in the status snapshot and `kato status`;
+  - the new log events;
+  - the inotify-limit hint.
+- [x] Integration tests pass on Linux.
+- [x] Integration tests pass in macOS and Windows CI (PR #58). The watcher alone delivers each change on both, and the symlinked-root test passes on macOS. It is skipped on Windows.
+- [x] Docs: discovery and the watcher in [[dev.codebase-overview]].
+- [ ] Release notes, written at release.
+- [x] `deno task ci`: 998 root tests and 12 web tests passed.
+- [x] Measure discovery before and after on galactica, in a script (see Verification).
+- [ ] Measure the installed daemon on galactica after release.

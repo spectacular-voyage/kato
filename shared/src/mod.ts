@@ -3,6 +3,7 @@ export type {
   DaemonRecordingStatus,
   DaemonSessionStatus,
   DaemonStatusSnapshot,
+  DaemonWatchDegradedStatus,
   MemoryProcessStats,
   MemorySnapshotStats,
   MemoryStatus,
