@@ -200,7 +200,7 @@ Measure on galactica before and after, using the method in [[task.2026.2026-11-0
 - **The ingestion rows overstate ingestion.** The script keeps no session state, so a session's first change after start parses its transcript from the beginning: 88,903 events in 120 seconds. The daemon resumes from saved cursors.
 - **Branch debug counts:** over 120 seconds the Claude and Codex runners did not walk at all, and nothing degraded. Only the missing Gemini root was walked every 5 seconds, which costs one stat.
 
-**After release (2026-11-12, galactica):** the same sampler on the installed daemon. `v0.2.19` had been running for 2 days 10 hours with 22 active sessions. I sampled it for 180 seconds, installed `v0.2.20` with `npm install -g`, ran `kato restart`, and sampled two 180-second windows starting 10 and 13 minutes after the restart, with 26 active sessions.
+**After release (2026-11-12, galactica):** the same sampler on the installed daemon. `v0.2.19` had been running for 2 days 10 hours with 22 active sessions. I sampled it for 180 seconds, installed `v0.2.20` with `npm install -g`, ran `kato restart`, and sampled two 180-second windows starting 10 and 13 minutes after the restart, with 26 active sessions. `v0.2.19` ran under galactica's `kato.service` systemd unit (`Nice=10`, `CPUQuota=200%`, `MemoryMax=4G`). `kato restart` started `v0.2.20` outside the unit, without those limits; neither quota binds at these levels, and the daemon was moved back under the unit afterwards.
 
 | Measure | `v0.2.19` | `v0.2.20` |
 |---|---|---|
