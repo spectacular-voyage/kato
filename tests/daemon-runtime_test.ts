@@ -1028,7 +1028,7 @@ Deno.test(
 );
 
 Deno.test(
-  "runDaemonRuntimeLoop does not auto-record non-Claude sessions",
+  "runDaemonRuntimeLoop auto-records Codex sessions with a working directory inside the workspace root",
   async () => {
     await withStateDirCleanup(async (setStateDir) => {
       const appended: ConversationEvent[][] = [];
@@ -1076,8 +1076,12 @@ Deno.test(
         entry.providerSessionId === "session-codex"
       );
       assertExists(metadata);
-      assertEquals(metadata.workspaceOutputs ?? [], []);
-      assertEquals(appended.length, 0);
+      const output = metadata.workspaceOutputs?.[0];
+      assertExists(output);
+      assertEquals(output.workspaceId, TEST_WORKSPACE_ID);
+      assertEquals(output.desiredState, "on");
+      assertEquals(appended.length, 1);
+      assertEquals(appended[0]?.length, 1);
     });
   },
 );

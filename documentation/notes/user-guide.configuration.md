@@ -78,7 +78,7 @@ Writer flags can control whether markdown output includes commentary,
 thinking, tool calls/results, decision prompts/options/selections, italicized
 user messages, relative local links, and Dendron wikilinks.
 
-Kato Web can edit registered workspace overrides from the Workspaces page, including auto-recording for Claude conversations, output directory, filename template, workspace timezone, shared default tags, shared tag suggestions, markdown frontmatter toggles, and writer flags. The editor is for shared `.kato-workspace-config.yaml` values; personal username mappings and personal tag suggestions still live in user config.
+Kato Web can edit registered workspace overrides from the Workspaces page, including auto-recording for Claude and Codex conversations, output directory, filename template, workspace timezone, shared default tags, shared tag suggestions, markdown frontmatter toggles, and writer flags. The editor is for shared `.kato-workspace-config.yaml` values; personal username mappings and personal tag suggestions still live in user config.
 
 Workspace settings win for workspace-scoped recordings. Existing output files
 are not renamed when config changes; future writes use the current effective

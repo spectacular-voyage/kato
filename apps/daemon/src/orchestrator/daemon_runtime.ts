@@ -780,7 +780,7 @@ export async function resolvePersistedWorkspaceOutputOverrides(options: {
 async function applyWorkspaceAutoRecording(
   options: ApplyWorkspaceAutoRecordingOptions,
 ): Promise<boolean> {
-  if (options.provider !== "claude") {
+  if (options.provider !== "claude" && options.provider !== "codex") {
     return false;
   }
   const workingDirectory = options.metadata.workingDirectory?.trim();

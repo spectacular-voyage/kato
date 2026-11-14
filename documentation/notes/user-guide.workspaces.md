@@ -84,7 +84,7 @@ timestamps. When no event timestamps are available, the command time is used.
 
 On the Kato Web Workspaces page, use `Edit` on a registered workspace to update the shared `.kato-workspace-config.yaml` fields for output directory, filename template, workspace timezone, shared default tags, shared tag suggestions, markdown frontmatter toggles, and writer flags including relative local links and Dendron wikilinks.
 
-`autoRecordConversations` can also be edited there. When enabled, Kato automatically records matching Claude conversations. By default a conversation matches when its working directory is inside the workspace root; `autoRecordRoots` (one directory per line in the edit form) extends matching to conversations whose working directory is inside any listed root — typically the project repos whose conversations belong in this workspace.
+`autoRecordConversations` can also be edited there. When enabled, Kato automatically records matching Claude and Codex conversations. By default a conversation matches when its working directory is inside the workspace root; `autoRecordRoots` (one directory per line in the edit form) extends matching to conversations whose working directory is inside any listed root — typically the project repos whose conversations belong in this workspace.
 
 Each workspace row on the Workspaces page also shows the resolved auto-record state without opening the edit form: `auto-record on`, `auto-record off`, or `auto-record unavailable` when the workspace config cannot be resolved.
 

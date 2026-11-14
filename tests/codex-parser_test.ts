@@ -924,3 +924,83 @@ Deno.test("codex parser uses task_complete last_agent_message when no final answ
     }
   });
 });
+
+const FIXTURE_APPSERVER_USER = join(
+  THIS_DIR,
+  "fixtures",
+  "codex-session-appserver-user.jsonl",
+);
+
+Deno.test("codex parser emits user turns recorded only as response_item messages with role user", async () => {
+  const items = await collectEvents(FIXTURE_APPSERVER_USER);
+  const users = items.filter((item) => item.event.kind === "message.user");
+  // Three genuine turns: "check your inbox", "::capture-notes", and the
+  // TUI-style pair at the end, which must be emitted once.
+  assertEquals(
+    users.map((item) => (item.event as { content: string }).content),
+    ["check your inbox", "::capture-notes", "check your inbox"],
+  );
+  const providerTypes = users.map((item) =>
+    item.event.source.providerEventType
+  );
+  assertEquals(providerTypes, [
+    "response_item.message.user",
+    "response_item.message.user",
+    "event_msg.user_message",
+  ]);
+  const assistants = items.filter((item) =>
+    item.event.kind === "message.assistant"
+  );
+  assertEquals(assistants.length, 3);
+});
+
+Deno.test("codex parser skips Codex-injected context written with role user", async () => {
+  const items = await collectEvents(FIXTURE_APPSERVER_USER);
+  const contents = items
+    .filter((item) => item.event.kind === "message.user")
+    .map((item) => (item.event as { content: string }).content);
+  for (const content of contents) {
+    assert(!content.startsWith("<environment_context>"), content);
+    assert(!content.startsWith("<codex_internal_context"), content);
+    assert(!content.startsWith("# AGENTS.md instructions"), content);
+  }
+});
+
+Deno.test("codex parser attaches the session working directory from session_meta and turn_context", async () => {
+  const items = await collectEvents(FIXTURE_APPSERVER_USER);
+  assert(items.length > 0);
+  for (const item of items) {
+    assertEquals(
+      item.event.source.workingDirectory,
+      "/home/djradon/hub/spectacular-voyage/.scratch/phoenix-product-01/esme-shop",
+      item.event.kind,
+    );
+  }
+});
+
+Deno.test("codex parser resumed from a checkpoint keeps the working directory and emits the same user turns", async () => {
+  const full = await collectEvents(FIXTURE_APPSERVER_USER);
+  // Resume after the first assistant answer: the checkpoint carries cwd and
+  // the de-duplication state, so the tail parses identically.
+  const firstAssistant = full.find((item) =>
+    item.event.kind === "message.assistant"
+  );
+  assert(firstAssistant);
+  const resumeOffset = firstAssistant.cursor.value;
+  const tail = await collectEvents(FIXTURE_APPSERVER_USER, resumeOffset);
+  const expected = full.filter((item) => item.cursor.value > resumeOffset);
+  assertEquals(
+    tail.map((
+      item,
+    ) => [item.event.kind, (item.event as { content?: string }).content]),
+    expected.map((
+      item,
+    ) => [item.event.kind, (item.event as { content?: string }).content]),
+  );
+  for (const item of tail) {
+    assertEquals(
+      item.event.source.workingDirectory,
+      "/home/djradon/hub/spectacular-voyage/.scratch/phoenix-product-01/esme-shop",
+    );
+  }
+});
