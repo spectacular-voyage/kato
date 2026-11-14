@@ -1,5 +1,5 @@
 {
-  "version": "0.2.20",
+  "version": "0.2.21",
   "nodeModulesDir": "auto",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check main.ts client.ts fresh_adapter.tsx routes/**/*.tsx pages/**/*.ts pages/**/*.tsx src/**/*.ts",
