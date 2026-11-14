@@ -410,7 +410,9 @@ function inferSessionWorkingDirectory(
   events: ConversationEvent[],
   current?: string,
 ): string | undefined {
-  if (provider !== "claude") {
+  // Only providers whose parsers attach a working directory (Claude: entry
+  // cwd; Codex: session_meta / turn_context cwd) can infer one.
+  if (provider !== "claude" && provider !== "codex") {
     return current;
   }
   for (const event of events) {

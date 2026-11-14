@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import type { ConversationEvent } from "@kato/shared";
+import type { ProviderParseCheckpoint } from "../apps/daemon/src/providers/parse_checkpoint.ts";
 import { parseCodexEvents } from "../apps/daemon/src/providers/codex/mod.ts";
 import { withTestTempDir } from "./test_temp.ts";
 
@@ -921,6 +922,149 @@ Deno.test("codex parser uses task_complete last_agent_message when no final answ
         finalAssistant.event.source.providerEventType,
         "event_msg.task_complete",
       );
+    }
+  });
+});
+
+const FIXTURE_APPSERVER_USER = join(
+  THIS_DIR,
+  "fixtures",
+  "codex-session-appserver-user.jsonl",
+);
+const APPSERVER_CWD =
+  "/home/djradon/hub/spectacular-voyage/.scratch/phoenix-product-01/esme-shop";
+
+function userContents(items: ParseItem[]): string[] {
+  return items
+    .filter((item) => item.event.kind === "message.user")
+    .map((item) => (item.event as { content: string }).content);
+}
+
+Deno.test("codex parser emits user turns recorded only as response_item messages with role user", async () => {
+  const items = await collectEvents(FIXTURE_APPSERVER_USER);
+  // turn-1, turn-2, turn-3 (a genuine user turn that begins with a tag),
+  // turn-4 (carried twice, emitted once), turn-5 (the same prompt resent in a
+  // new turn after an interrupted one, kept).
+  assertEquals(userContents(items), [
+    "check your inbox",
+    "::capture-notes",
+    "<div>Fix this layout</div>",
+    "check your inbox",
+    "check your inbox",
+  ]);
+  const providerTypes = items
+    .filter((item) => item.event.kind === "message.user")
+    .map((item) => item.event.source.providerEventType);
+  assertEquals(providerTypes, [
+    "response_item.message.user",
+    "response_item.message.user",
+    "response_item.message.user",
+    "response_item.message.user",
+    "response_item.message.user",
+  ]);
+  const assistants = items.filter((item) =>
+    item.event.kind === "message.assistant"
+  );
+  assertEquals(assistants.length, 4);
+});
+
+Deno.test("codex parser skips only the known Codex-injected context written with role user", async () => {
+  const contents = userContents(await collectEvents(FIXTURE_APPSERVER_USER));
+  for (const content of contents) {
+    assert(!content.startsWith("<environment_context>"), content);
+    assert(!content.startsWith("<codex_internal_context"), content);
+    assert(!content.startsWith("<external_codex_apps>"), content);
+    assert(!content.startsWith("# AGENTS.md instructions"), content);
+  }
+  assert(contents.includes("<div>Fix this layout</div>"));
+});
+
+Deno.test("codex parser attaches the session working directory from session_meta and turn_context", async () => {
+  const items = await collectEvents(FIXTURE_APPSERVER_USER);
+  assert(items.length > 0);
+  for (const item of items) {
+    assertEquals(
+      item.event.source.workingDirectory,
+      APPSERVER_CWD,
+      item.event.kind,
+    );
+  }
+});
+
+Deno.test("codex parser replayed from any offset emits exactly the full parse's events after that offset", async () => {
+  const full = await collectEvents(FIXTURE_APPSERVER_USER);
+  const bytes = await Deno.readFile(FIXTURE_APPSERVER_USER);
+  const offsets: number[] = [];
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] === 0x0a) offsets.push(index + 1);
+  }
+  for (const offset of offsets) {
+    const tail = await collectEvents(FIXTURE_APPSERVER_USER, offset);
+    const expected = full.filter((item) => item.cursor.value > offset);
+    assertEquals(
+      tail.map((
+        item,
+      ) => [item.event.kind, (item.event as { content?: string }).content]),
+      expected.map((
+        item,
+      ) => [item.event.kind, (item.event as { content?: string }).content]),
+      `replay from offset ${offset}`,
+    );
+  }
+});
+
+Deno.test("codex parser resumed from a real checkpoint keeps the de-duplication state and the working directory", async () => {
+  await withTestTempDir("codex-parser-resume-", async (dir) => {
+    const text = await Deno.readTextFile(FIXTURE_APPSERVER_USER);
+    const lines = text.split("\n").filter((line) => line.length > 0);
+    // Split between the two representations of turn-4: the response_item is
+    // in the prefix, the event_msg user_message with the same text in the tail.
+    const split = lines.findIndex((line) =>
+      line.includes('"type": "user_message"') ||
+      line.includes('"type":"user_message"')
+    );
+    assert(split > 0);
+    const path = join(dir, "resume.jsonl");
+    const prefix = lines.slice(0, split).join("\n") + "\n";
+    await Deno.writeTextFile(path, prefix);
+    let checkpoint: ProviderParseCheckpoint | undefined;
+    const prefixItems: ParseItem[] = [];
+    for await (
+      const item of parseCodexEvents(path, undefined, {
+        ...TEST_CTX,
+        onCheckpoint: (value: ProviderParseCheckpoint) => {
+          checkpoint = value;
+        },
+      })
+    ) {
+      prefixItems.push(item as unknown as ParseItem);
+    }
+    assert(checkpoint, "a complete prefix parse yields a checkpoint");
+    const prefixBytes = new TextEncoder().encode(prefix).length;
+    await Deno.writeTextFile(path, text);
+    const tail: ParseItem[] = [];
+    for await (
+      const item of parseCodexEvents(path, prefixBytes, {
+        ...TEST_CTX,
+        resumeFrom: checkpoint,
+      })
+    ) {
+      tail.push(item as unknown as ParseItem);
+    }
+    // The duplicate user_message in the tail is not re-emitted; the later
+    // resend in turn-5 is, and every tail event still carries the cwd.
+    assertEquals(userContents(tail), ["check your inbox"]);
+    const full = await collectEvents(FIXTURE_APPSERVER_USER);
+    assertEquals(
+      [...prefixItems, ...tail].map((
+        item,
+      ) => [item.event.kind, (item.event as { content?: string }).content]),
+      full.map((
+        item,
+      ) => [item.event.kind, (item.event as { content?: string }).content]),
+    );
+    for (const item of tail) {
+      assertEquals(item.event.source.workingDirectory, APPSERVER_CWD);
     }
   });
 });
