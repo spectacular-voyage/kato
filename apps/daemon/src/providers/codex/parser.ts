@@ -75,9 +75,22 @@ function extractUserMessageText(content: unknown): string {
  * `<user_instructions>`, `<turn_aborted>` and the AGENTS.md injection. None
  * of it was typed by a person, so none of it is a user turn.
  */
+const INJECTED_CODEX_CONTEXT_TAGS = [
+  "environment_context",
+  "codex_internal_context",
+  "user_instructions",
+  "turn_aborted",
+  "external_codex_apps",
+];
+// A marker may carry a suffix (`<external_codex_apps_open_page>`); a user's own
+// tag (`<div>`, `<send_user_message_question_reply>`) is a user turn.
+const INJECTED_CODEX_CONTEXT_PATTERN = new RegExp(
+  `^<(?:${INJECTED_CODEX_CONTEXT_TAGS.join("|")})[\\w-]*(?:[\\s>]|$)`,
+);
+
 function isInjectedCodexContext(text: string): boolean {
   if (text.length === 0) return false;
-  if (/^<[a-z][a-z0-9_-]*(\s[^>]*)?>/i.test(text)) return true;
+  if (INJECTED_CODEX_CONTEXT_PATTERN.test(text)) return true;
   return /^# AGENTS\.md instructions for /.test(text);
 }
 
@@ -241,6 +254,10 @@ export interface CodexParserState {
   workingDirectory?: string;
   /** Last user text seen in the current turn, so a turn a rollout carries twice is emitted once. */
   lastUserText?: string;
+  /** The `task_started` turn in effect when `lastUserText` was recorded. */
+  lastUserTurnId?: string;
+  /** The turn id of the latest `task_started`, independent of the user-message reset of `currentTurnId`. */
+  taskTurnId?: string;
 }
 
 function isCodexParserState(value: unknown): value is CodexParserState {
@@ -253,6 +270,10 @@ function isCodexParserState(value: unknown): value is CodexParserState {
       typeof value["workingDirectory"] === "string") &&
     (value["lastUserText"] === undefined ||
       typeof value["lastUserText"] === "string") &&
+    (value["lastUserTurnId"] === undefined ||
+      typeof value["lastUserTurnId"] === "string") &&
+    (value["taskTurnId"] === undefined ||
+      typeof value["taskTurnId"] === "string") &&
     Array.isArray(value["pendingRequestUserInputCalls"]) &&
     Array.isArray(value["pendingToolCallNames"]);
 }
@@ -296,6 +317,18 @@ export async function* parseCodexEvents(
   let turnFinalized = restored?.turnFinalized ?? false;
   let workingDirectory: string | undefined = restored?.workingDirectory;
   let lastUserText: string | undefined = restored?.lastUserText;
+  let lastUserTurnId: string | undefined = restored?.lastUserTurnId;
+  let taskTurnId: string | undefined = restored?.taskTurnId;
+  // A user turn a rollout carries twice (response_item and event_msg) is emitted
+  // once: identical text within the same task_started turn is a duplicate.
+  // Identical text in a later turn is a new turn, even when the earlier one
+  // produced no assistant text.
+  const isDuplicateUserText = (text: string): boolean =>
+    text.length > 0 && text === lastUserText && lastUserTurnId === taskTurnId;
+  const rememberUserText = (text: string): void => {
+    lastUserText = text;
+    lastUserTurnId = taskTurnId;
+  };
 
   const timestamp = fromOffset > 0 ? new Date().toISOString() : undefined;
   const pendingRequestUserInputCalls = new Map<
@@ -315,6 +348,8 @@ export async function* parseCodexEvents(
       pendingToolCallNames: [...pendingToolCallNames.entries()],
       ...(workingDirectory !== undefined ? { workingDirectory } : {}),
       ...(lastUserText !== undefined ? { lastUserText } : {}),
+      ...(lastUserTurnId !== undefined ? { lastUserTurnId } : {}),
+      ...(taskTurnId !== undefined ? { taskTurnId } : {}),
     });
   }
   // State before an unterminated final segment, which the checkpoint excludes.
@@ -379,10 +414,11 @@ export async function* parseCodexEvents(
     lineEnd: number,
     providerEventType: string,
   ): Generator<{ event: ConversationEvent; cursor: ProviderCursor }> {
-    if (lineEnd <= fromOffset || turnFinalized) return;
     const normalized = normalizeText(text);
     if (normalized.length === 0) return;
+    // State evolves the same way whether or not this line emits (replay).
     lastUserText = undefined;
+    if (lineEnd <= fromOffset || turnFinalized) return;
     const base = makeBase("message.assistant", providerEventType, lineEnd);
     yield {
       event: {
@@ -444,14 +480,15 @@ export async function* parseCodexEvents(
             turnFinalized = false;
             if (payload["turn_id"]) {
               currentTurnId = String(payload["turn_id"]);
+              taskTurnId = currentTurnId;
             }
           } else if (msgType === "user_message") {
             const rawText = String(payload["message"] ?? "");
             const text = normalizeText(stripIdePreamble(rawText));
             // A rollout can carry the same user turn twice (this event and a
             // response_item message with role user); emit it once.
-            const duplicate = text.length > 0 && text === lastUserText;
-            if (text) lastUserText = text;
+            const duplicate = isDuplicateUserText(text);
+            if (text) rememberUserText(text);
 
             if (lineEnd > fromOffset) {
               turnFinalized = false;
@@ -517,8 +554,8 @@ export async function* parseCodexEvents(
               stripIdePreamble(extractUserMessageText(payload["content"])),
             );
             const injected = isInjectedCodexContext(text);
-            const duplicate = text.length > 0 && text === lastUserText;
-            if (text && !injected) lastUserText = text;
+            const duplicate = isDuplicateUserText(text);
+            if (text && !injected) rememberUserText(text);
             if (text && !injected && !duplicate) {
               turnFinalized = false;
               const savedTurnId = currentTurnId;
